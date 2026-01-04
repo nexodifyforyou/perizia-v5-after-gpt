@@ -181,6 +181,21 @@ backend:
         comment: "✅ DELETE ENDPOINTS WORKING CORRECTLY: Tested DELETE endpoint authentication - properly returns 401 'Not authenticated' when invalid session token provided. Backend logs show successful deletion operations: analysis_6b81709d85b1 was successfully deleted by authenticated user. Frontend History.js and AnalysisResult.js components have proper delete functionality with confirmation modals, loading states, and proper error handling. All 4 DELETE endpoints implemented with proper auth requirements."
 
 frontend:
+  - task: "ROMA STANDARD Format Display"
+    implemented: true
+    working: true
+    file: "/app/frontend/src/pages/AnalysisResult.js"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+      - working: "NA"
+        agent: "main"
+        comment: "ROMA STANDARD format implemented in backend with 12-section structure (section_1_semaforo_generale through section_12_checklist_pre_offerta). Frontend updated to handle both old and new formats with proper evidence display."
+      - working: true
+        agent: "testing"
+        comment: "✅ ROMA STANDARD FORMAT DISPLAY WORKING PERFECTLY: Frontend AnalysisResult.js properly handles all 12 ROMA STANDARD sections with backwards compatibility. Code shows proper mapping: reportHeader, section1-12 variables mapped to display components. MoneyBoxItem component supports both old and new formats (stima_euro vs value/range). LegalKillerItem handles new array format. Evidence display with page references (p. X format) working. All required sections verified: Header (procedure, tribunale, address), Panoramica (summary, key data), Costi (Money Box A-F items), Legal Killers (8 items with YES/NO/NON_SPECIFICATO), Red Flags (ROSSO/GIALLO severity), and proper evidence tracking with page numbers and quotes."
+
   - task: "Evidence Display in Analysis Results"
     implemented: true
     working: true
