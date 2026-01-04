@@ -206,12 +206,11 @@ class NexodifyAPITester:
             'file': ('test_perizia.pdf', pdf_content, 'application/pdf')
         }
         
-        success, response_data = self.run_test(
+        success, response_data = self.run_file_upload_test(
             "CRITICAL: Perizia Analysis with Evidence", 
-            "POST", 
             "api/analysis/perizia", 
             200, 
-            files=files
+            files
         )
         
         if success and response_data:
