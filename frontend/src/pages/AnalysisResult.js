@@ -336,22 +336,82 @@ const AnalysisResult = () => {
       <Sidebar user={user} logout={logout} />
       
       <main className="ml-64 p-8">
-        {/* Back Button & Download */}
+        {/* Back Button & Actions */}
         <div className="flex items-center justify-between mb-6">
           <Link to="/history" className="inline-flex items-center gap-2 text-zinc-400 hover:text-zinc-100 transition-colors">
             <ArrowLeft className="w-4 h-4" />
             Torna allo storico
           </Link>
-          <Button 
-            onClick={handleDownloadPDF}
-            disabled={downloading}
-            data-testid="download-pdf-btn"
-            className="bg-gold text-zinc-950 hover:bg-gold-dim"
-          >
-            <FileDown className="w-4 h-4 mr-2" />
-            {downloading ? 'Scaricando...' : 'Scarica Report'}
-          </Button>
+          <div className="flex items-center gap-3">
+            <Button
+              onClick={() => setShowDeleteModal(true)}
+              variant="outline"
+              data-testid="delete-analysis-btn"
+              className="border-red-500/30 text-red-400 hover:bg-red-500/10 hover:border-red-500/50"
+            >
+              <Trash2 className="w-4 h-4 mr-2" />
+              Elimina
+            </Button>
+            <Button 
+              onClick={handleDownloadPDF}
+              disabled={downloading}
+              data-testid="download-pdf-btn"
+              className="bg-gold text-zinc-950 hover:bg-gold-dim"
+            >
+              <FileDown className="w-4 h-4 mr-2" />
+              {downloading ? 'Scaricando...' : 'Scarica Report'}
+            </Button>
+          </div>
         </div>
+
+        {/* Delete Confirmation Modal */}
+        {showDeleteModal && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center">
+            <div className="absolute inset-0 bg-black/70" onClick={() => setShowDeleteModal(false)} />
+            <div className="relative bg-zinc-900 border border-zinc-800 rounded-xl p-6 max-w-md w-full mx-4 shadow-xl">
+              <button 
+                onClick={() => setShowDeleteModal(false)}
+                className="absolute top-4 right-4 text-zinc-500 hover:text-zinc-300"
+              >
+                <X className="w-5 h-5" />
+              </button>
+              
+              <div className="flex items-center gap-3 mb-4">
+                <div className="p-2 bg-red-500/20 rounded-lg">
+                  <AlertTriangle className="w-6 h-6 text-red-400" />
+                </div>
+                <h3 className="text-lg font-semibold text-zinc-100">Elimina analisi</h3>
+              </div>
+              
+              <p className="text-zinc-400 text-sm mb-6">
+                Sei sicuro di voler eliminare questa analisi? L'azione non può essere annullata.
+              </p>
+              
+              <div className="flex gap-3 justify-end">
+                <Button 
+                  variant="outline" 
+                  onClick={() => setShowDeleteModal(false)}
+                  disabled={isDeleting}
+                  className="border-zinc-700 text-zinc-300 hover:bg-zinc-800"
+                >
+                  Annulla
+                </Button>
+                <Button 
+                  onClick={handleDelete}
+                  disabled={isDeleting}
+                  className="bg-red-600 hover:bg-red-700 text-white"
+                >
+                  {isDeleting ? (
+                    <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin mr-2" />
+                  ) : (
+                    <Trash2 className="w-4 h-4 mr-2" />
+                  )}
+                  Elimina
+                </Button>
+              </div>
+            </div>
+          </div>
+        )}
         
         {/* Header with Semaforo */}
         <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-6 mb-8">
