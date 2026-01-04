@@ -18,8 +18,8 @@ GOOGLE_CLOUD_PROJECT = os.environ.get('GOOGLE_CLOUD_PROJECT', 'emergent-perizia'
 GOOGLE_CLOUD_LOCATION = os.environ.get('GOOGLE_CLOUD_LOCATION', 'eu')
 DOCUMENT_AI_PROCESSOR_ID = os.environ.get('DOCUMENT_AI_PROCESSOR_ID', '675530c0dde80224')
 
-# Page limit for Document AI (30 pages per request)
-MAX_PAGES_PER_REQUEST = 30
+# Page limit for Document AI (15 pages per request for non-imageless mode)
+MAX_PAGES_PER_REQUEST = 15
 
 class GoogleDocumentAIExtractor:
     """
