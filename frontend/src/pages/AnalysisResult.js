@@ -162,7 +162,6 @@ const LegalKillerItem = ({ name, data }) => {
   
   // Get the display name - use 'killer' from new format or formatted name
   const displayName = data?.killer || formatName(name);
-  };
 
   return (
     <div className={`p-4 rounded-lg border ${getStatusBg(status)}`}>
@@ -170,7 +169,7 @@ const LegalKillerItem = ({ name, data }) => {
         {getStatusIcon(status)}
         <div className="flex-1">
           <div className="flex items-center gap-2">
-            <p className="text-sm font-medium text-zinc-100">{formatName(name)}</p>
+            <p className="text-sm font-medium text-zinc-100">{displayName}</p>
             {hasEvidence && (
               <span className="text-xs font-mono text-gold flex items-center gap-1">
                 <FileText className="w-3 h-3" />
@@ -178,8 +177,8 @@ const LegalKillerItem = ({ name, data }) => {
               </span>
             )}
           </div>
-          {data?.action_required_it && (
-            <p className="text-xs text-zinc-500 mt-1">{safeRender(data.action_required_it)}</p>
+          {actionText && (
+            <p className="text-xs text-zinc-500 mt-1">{safeRender(actionText)}</p>
           )}
           {hasEvidence && evidence[0]?.quote && (
             <p className="text-xs text-zinc-400 mt-2 italic border-l-2 border-gold/20 pl-2">
