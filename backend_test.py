@@ -64,8 +64,67 @@ class NexodifyAPITester:
         buffer.seek(0)
         return buffer.getvalue()
 
-    def run_test(self, name, method, endpoint, expected_status, data=None, headers=None, files=None):
+    def run_test(self, name, method, endpoint, expected_status, data=None, headers=None):
         """Run a single API test"""
+        url = f"{self.base_url}/{endpoint}"
+        test_headers = {'Content-Type': 'application/json'}
+        if headers:
+            test_headers.update(headers)
+        if self.token:
+            test_headers['Authorization'] = f'Bearer {self.token}'
+
+        self.tests_run += 1
+        print(f"\n🔍 Testing {name}...")
+        
+        try:
+            if method == 'GET':
+                response = requests.get(url, headers=test_headers, timeout=30)
+            elif method == 'POST':
+                response = requests.post(url, json=data, headers=test_headers, timeout=30)
+
+            success = response.status_code == expected_status
+            if success:
+                self.tests_passed += 1
+                print(f"✅ Passed - Status: {response.status_code}")
+                try:
+                    response_data = response.json()
+                except:
+                    response_data = {}
+            else:
+                print(f"❌ Failed - Expected {expected_status}, got {response.status_code}")
+                try:
+                    response_data = response.json()
+                    print(f"   Response: {response_data}")
+                except:
+                    response_data = {"error": response.text}
+
+            self.test_results.append({
+                "test": name,
+                "method": method,
+                "endpoint": endpoint,
+                "expected_status": expected_status,
+                "actual_status": response.status_code,
+                "success": success,
+                "response": response_data
+            })
+
+            return success, response_data
+
+        except Exception as e:
+            print(f"❌ Failed - Error: {str(e)}")
+            self.test_results.append({
+                "test": name,
+                "method": method,
+                "endpoint": endpoint,
+                "expected_status": expected_status,
+                "actual_status": "ERROR",
+                "success": False,
+                "error": str(e)
+            })
+            return False, {}
+
+    def run_file_upload_test(self, name, endpoint, expected_status, files, headers=None):
+        """Run a file upload test"""
         url = f"{self.base_url}/{endpoint}"
         test_headers = {}
         if headers:
@@ -73,21 +132,11 @@ class NexodifyAPITester:
         if self.token:
             test_headers['Authorization'] = f'Bearer {self.token}'
 
-        # Don't set Content-Type for file uploads
-        if not files and method == 'POST':
-            test_headers['Content-Type'] = 'application/json'
-
         self.tests_run += 1
         print(f"\n🔍 Testing {name}...")
         
         try:
-            if method == 'GET':
-                response = requests.get(url, headers=test_headers, timeout=60)
-            elif method == 'POST':
-                if files:
-                    response = requests.post(url, files=files, headers=test_headers, timeout=120)
-                else:
-                    response = requests.post(url, json=data, headers=test_headers, timeout=60)
+            response = requests.post(url, files=files, headers=test_headers, timeout=120)
 
             success = response.status_code == expected_status
             if success:
@@ -116,7 +165,7 @@ class NexodifyAPITester:
 
             self.test_results.append({
                 "test": name,
-                "method": method,
+                "method": "POST",
                 "endpoint": endpoint,
                 "expected_status": expected_status,
                 "actual_status": response.status_code,
@@ -130,7 +179,7 @@ class NexodifyAPITester:
             print(f"❌ Failed - Error: {str(e)}")
             error_result = {
                 "test": name,
-                "method": method,
+                "method": "POST",
                 "endpoint": endpoint,
                 "expected_status": expected_status,
                 "actual_status": "ERROR",
