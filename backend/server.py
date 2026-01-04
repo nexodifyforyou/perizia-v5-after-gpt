@@ -227,20 +227,29 @@ async def create_session(request: Request, response: Response):
     
     # Check if user exists or create new one
     existing_user = await db.users.find_one({"email": email}, {"_id": 0})
+    is_master = email.lower() == MASTER_ADMIN_EMAIL.lower()  # Case-insensitive comparison
     
     if existing_user:
         user_id = existing_user["user_id"]
-        # Update user data
+        # Update user data - also update master admin status and plan if they're the admin
+        update_data = {"name": name, "picture": picture}
+        
+        # If this is the master admin, ensure they have enterprise access
+        if is_master:
+            update_data["is_master_admin"] = True
+            update_data["plan"] = "enterprise"
+            update_data["quota"] = SUBSCRIPTION_PLANS["enterprise"].quota.copy()
+        
         await db.users.update_one(
             {"user_id": user_id},
-            {"$set": {"name": name, "picture": picture}}
+            {"$set": update_data}
         )
-        user = User(**existing_user)
-        user.name = name
-        user.picture = picture
+        
+        # Refresh user data after update
+        updated_user = await db.users.find_one({"user_id": user_id}, {"_id": 0})
+        user = User(**updated_user)
     else:
         user_id = f"user_{uuid.uuid4().hex[:12]}"
-        is_master = email == MASTER_ADMIN_EMAIL
         
         new_user = User(
             user_id=user_id,
