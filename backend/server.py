@@ -722,7 +722,7 @@ IMPORTANT EXTRACTION GUIDELINES
 Remember: The professional using this analysis needs to verify every claim against the source.
 ALWAYS include page numbers. NEVER invent data."""
 async def analyze_perizia_with_llm(pdf_text: str, pages: List[Dict], file_name: str, user: User, case_id: str, run_id: str, input_sha256: str) -> Dict:
-    """Analyze perizia using LLM with comprehensive prompt"""
+    """Analyze perizia using LLM with comprehensive ROMA STANDARD prompt"""
     from emergentintegrations.llm.chat import LlmChat, UserMessage
     
     chat = LlmChat(
@@ -731,30 +731,57 @@ async def analyze_perizia_with_llm(pdf_text: str, pages: List[Dict], file_name: 
         system_message=PERIZIA_SYSTEM_PROMPT
     ).with_model("openai", "gpt-4o")
     
-    # Build page-by-page content for the prompt
+    # Build page-by-page content for the prompt with clear page markers
     page_content = ""
     for p in pages[:100]:  # Limit to first 100 pages
-        page_content += f"\n=== PAGE {p['page_number']} ===\n{p['text']}\n"
+        page_content += f"\n\n{'='*60}\nPAGINA {p['page_number']}\n{'='*60}\n{p['text']}\n"
     
-    prompt = f"""Analyze this Italian Perizia/CTU document. Extract ALL available data with evidence.
+    prompt = f"""ANALIZZA questa Perizia CTU italiana per asta immobiliare.
 
+═══════════════════════════════════════════════════════════════════════════════
+DOCUMENTO
+═══════════════════════════════════════════════════════════════════════════════
 FILE: {file_name}
-PAGES: {len(pages)}
+PAGINE TOTALI: {len(pages)}
 RUN_ID: {run_id}
 CASE_ID: {case_id}
 
-DOCUMENT CONTENT:
-{page_content[:80000]}
+═══════════════════════════════════════════════════════════════════════════════
+CONTENUTO DOCUMENTO (pagina per pagina)
+═══════════════════════════════════════════════════════════════════════════════
+{page_content[:100000]}
 
-IMPORTANT:
-1. Search EVERY page for relevant data
-2. Extract ALL prices, surfaces, dates, addresses found
-3. Include page numbers and quotes as evidence
-4. For money_box, provide NEXODIFY_ESTIMATE where perizia doesn't specify costs
-5. Compute total_extra_costs and all_in_light values
-6. Determine semaforo (GREEN/AMBER/RED) based on risk factors found
+═══════════════════════════════════════════════════════════════════════════════
+ISTRUZIONI
+═══════════════════════════════════════════════════════════════════════════════
 
-Return the complete JSON analysis."""
+1. LEGGI ATTENTAMENTE ogni pagina del documento
+2. CERCA questi dati specifici:
+   - Numero procedura (R.G.E., E.I.)
+   - Tribunale
+   - Indirizzo completo
+   - PREZZO BASE D'ASTA (€) - CRITICO
+   - Valore di stima e deprezzamenti
+   - Stato conformità urbanistica/catastale
+   - Stato condono/sanatoria
+   - Agibilità/Abitabilità
+   - Stato occupativo
+   - Ipoteche e pignoramenti
+   - Costi regolarizzazione stimati dalla CTU
+
+3. Per OGNI valore estratto:
+   - Indica il numero di PAGINA esatto
+   - Cita il TESTO esatto dal documento (max 200 caratteri)
+
+4. CALCOLA:
+   - Money Box: somma costi regolarizzazione + stime prudenziali
+   - All-in Light: prezzo base + extra budget stimato
+   - Semaforo: ROSSO/GIALLO/VERDE basato su criticità trovate
+
+5. OUTPUT: Restituisci SOLO il JSON valido nel formato ROMA STANDARD specificato.
+   NON aggiungere markdown, commenti o testo extra.
+
+INIZIA L'ANALISI:"""
 
     try:
         response = await chat.send_message(UserMessage(text=prompt))
@@ -767,18 +794,28 @@ Return the complete JSON analysis."""
             response_text = response_text[3:]
         if response_text.endswith("```"):
             response_text = response_text[:-3]
+        response_text = response_text.strip()
         
         try:
             result = json.loads(response_text)
             # Ensure required fields exist
             if "schema_version" not in result:
                 result["schema_version"] = "nexodify_perizia_scan_v1"
-            if "run" not in result:
-                result["run"] = {"run_id": run_id, "generated_at_utc": datetime.now(timezone.utc).isoformat()}
+            
+            # Add run info if missing
+            if "run" not in result and "report_header" not in result:
+                result["run"] = {
+                    "run_id": run_id, 
+                    "generated_at_utc": datetime.now(timezone.utc).isoformat(),
+                    "input": {"source_type": "perizia_pdf", "file_name": file_name, "pages_total": len(pages)}
+                }
+            
+            logger.info(f"Successfully analyzed perizia {file_name} - {len(pages)} pages")
             return result
+            
         except json.JSONDecodeError as e:
             logger.error(f"JSON parse error: {e}")
-            logger.error(f"Response was: {response_text[:1000]}")
+            logger.error(f"Response was: {response_text[:2000]}")
             return create_fallback_analysis(file_name, case_id, run_id, pages, pdf_text)
         
     except Exception as e:
