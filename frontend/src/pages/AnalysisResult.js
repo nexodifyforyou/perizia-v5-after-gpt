@@ -56,13 +56,21 @@ const getEvidence = (obj) => {
   return [];
 };
 
-// Money Box Item Component with Evidence
+// Money Box Item Component with Evidence - supports both old and ROMA STANDARD formats
 const MoneyBoxItem = ({ item }) => {
-  const evidence = getEvidence(item);
+  // Get evidence from either new format (fonte_perizia.evidence) or old format (item.evidence)
+  const evidence = getEvidence(item.fonte_perizia || item);
   const hasEvidence = evidence.length > 0;
   const pages = hasEvidence ? [...new Set(evidence.map(e => e.page).filter(Boolean))] : [];
 
+  // Format value - handle new format (stima_euro) and old format (value/range)
   const formatValue = () => {
+    // New ROMA STANDARD format
+    if (item.stima_euro !== undefined && item.stima_euro !== null) {
+      const val = typeof item.stima_euro === 'number' ? item.stima_euro : parseFloat(item.stima_euro);
+      return isNaN(val) || val === 0 ? item.stima_nota || 'Da verificare' : `€${val.toLocaleString()}`;
+    }
+    // Old format
     const type = safeRender(item.type, 'UNKNOWN');
     if ((type === 'NEXODIFY_ESTIMATE' || type === 'RANGE') && item.range) {
       return `€${(item.range.min || 0).toLocaleString()} - €${(item.range.max || 0).toLocaleString()}`;
@@ -73,14 +81,19 @@ const MoneyBoxItem = ({ item }) => {
     }
     return type;
   };
+  
+  // Get label - new format uses 'voce', old format uses 'label_it'
+  const label = item.voce || item.label_it || item.label || 'Item';
+  const code = item.code || label.charAt(0);
+  const source = item.fonte_perizia?.value || item.source || '';
 
   return (
     <div className="p-4 bg-zinc-950/50 rounded-lg border border-zinc-800">
       <div className="flex items-start justify-between mb-2">
         <div className="flex-1">
           <div className="flex items-center gap-2 mb-1">
-            <span className="font-mono text-xs text-gold">{safeRender(item.code, item.key || '?')}</span>
-            <span className="text-sm font-medium text-zinc-100">{safeRender(item.label_it, item.label || 'Item')}</span>
+            <span className="font-mono text-xs text-gold">{code}</span>
+            <span className="text-sm font-medium text-zinc-100">{label}</span>
             {hasEvidence && (
               <span className="text-xs font-mono text-gold flex items-center gap-1">
                 <FileText className="w-3 h-3" />
@@ -88,20 +101,20 @@ const MoneyBoxItem = ({ item }) => {
               </span>
             )}
           </div>
-          <p className="text-xs text-zinc-500">{safeRender(item.label_en, '')}</p>
+          {source && <p className="text-xs text-zinc-500">{source}</p>}
         </div>
         <div className="text-right">
           <span className={`font-mono text-sm font-bold ${
-            item.source === 'PERIZIA' ? 'text-emerald-400' : 
-            item.type === 'NEXODIFY_ESTIMATE' ? 'text-gold' : 'text-zinc-400'
+            source.toLowerCase().includes('perizia') ? 'text-emerald-400' : 
+            item.type === 'NEXODIFY_ESTIMATE' || item.stima_nota ? 'text-gold' : 'text-zinc-400'
           }`}>
             {formatValue()}
           </span>
-          {item.source && (
-            <p className="text-xs text-zinc-600">{item.source}</p>
-          )}
         </div>
       </div>
+      {item.stima_nota && item.stima_euro > 0 && (
+        <p className="text-xs text-amber-400 mt-1">{item.stima_nota}</p>
+      )}
       {item.action_required_it && (
         <p className="text-xs text-amber-400 mt-1">{safeRender(item.action_required_it)}</p>
       )}
