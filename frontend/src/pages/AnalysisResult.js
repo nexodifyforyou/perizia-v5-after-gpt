@@ -747,17 +747,17 @@ const AnalysisResult = () => {
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <DataValueWithEvidence 
                   label="Procedura" 
-                  value={caseHeader.procedure_id}
-                  evidence={getEvidence(caseHeader.procedure_id)}
+                  value={caseHeader.procedure?.value || caseHeader.procedure_id}
+                  evidence={getEvidence(caseHeader.procedure || caseHeader.procedure_id)}
                 />
                 <DataValueWithEvidence 
                   label="Lotto" 
-                  value={caseHeader.lotto}
+                  value={caseHeader.lotto?.value || caseHeader.lotto}
                   evidence={getEvidence(caseHeader.lotto)}
                 />
                 <DataValueWithEvidence 
                   label="Tribunale" 
-                  value={caseHeader.tribunale}
+                  value={caseHeader.tribunale?.value || caseHeader.tribunale}
                   evidence={getEvidence(caseHeader.tribunale)}
                 />
                 <DataValueWithEvidence 
@@ -774,7 +774,7 @@ const AnalysisResult = () => {
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <DataValueWithEvidence 
                   label="Condono Presente" 
-                  value={abusi.condono?.present}
+                  value={abusi.condono?.presente || abusi.condono?.present}
                   evidence={getEvidence(abusi.condono)}
                 />
                 <DataValueWithEvidence 
