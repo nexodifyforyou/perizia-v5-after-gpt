@@ -712,12 +712,25 @@ OUTPUT JSON STRUCTURE (12 SECTIONS)
 IMPORTANT EXTRACTION GUIDELINES
 ═══════════════════════════════════════════════════════════════════════════════
 
-1. Search for prices in sections like "STIMA", "VALUTAZIONE", "PREZZO BASE"
-2. Look for conformity in sections "REGOLARITA EDILIZIA", "CONFORMITA"
-3. Find occupation status in "STATO OCCUPATIVO", "OCCUPAZIONE"
+1. Search for prices in sections like "STIMA", "VALUTAZIONE", "PREZZO BASE", "SCHEMA RIASSUNTIVO"
+2. Look for conformity in sections "REGOLARITA EDILIZIA", "CONFORMITA", "L. 47/85", "L. 47/1985"
+3. Find occupation status in "STATO OCCUPATIVO", "OCCUPAZIONE", "Occupato da"
 4. Check formalities in "FORMALITA", "IPOTECHE", "ISCRIZIONI", "TRASCRIZIONI"
 5. Extract condono info from "CONDONO", "SANATORIA", "L. 47/85"
-6. Find agibilità in "AGIBILITA", "ABITABILITA", "CERTIFICATO"
+6. Find agibilità in "AGIBILITA", "ABITABILITA", "CERTIFICATO", "Non risulta agibile", "non è presente l'abitabilità"
+
+CRITICAL - MONEY BOX EXTRACTION:
+7. Search for "Deprezzamenti" section - this contains the MONEY BOX values:
+   - "Oneri di regolarizzazione urbanistica" = Item A (usually €15,000-€30,000)
+   - "Rischio assunto per mancata garanzia" / "Vizi occulti" = Item B (usually €3,000-€10,000)
+   - "Completamento finiture" = Item B if different
+   - Extract the EXACT EUR values from this table (e.g., "23000,00 €" = 23000)
+
+8. Search for "Certificazioni energetiche e dichiarazioni di conformità":
+   - "Non esiste il certificato energetico" → APE = ASSENTE
+   - "Non esiste la dichiarazione di conformità dell'impianto elettrico" → elettrico = NO
+   - "Non esiste la dichiarazione di conformità dell'impianto termico" → termico = NO
+   - "Non esiste la dichiarazione di conformità dell'impianto idrico" → idrico = NO
 
 Remember: The professional using this analysis needs to verify every claim against the source.
 ALWAYS include page numbers. NEVER invent data."""
