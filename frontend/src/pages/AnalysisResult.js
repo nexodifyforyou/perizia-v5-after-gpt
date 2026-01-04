@@ -843,30 +843,41 @@ const AnalysisResult = () => {
             </div>
             
             {/* Checklist Pre-Offerta */}
-            {checklist.length > 0 && (
-              <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-6">
-                <h2 className="text-xl font-serif font-bold text-zinc-100 mb-4">Checklist Pre-Offerta</h2>
+            <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-6">
+              <h2 className="text-xl font-serif font-bold text-zinc-100 mb-4">Checklist Pre-Offerta</h2>
+              {checklist.length > 0 ? (
                 <div className="space-y-2">
-                  {checklist.map((item, i) => (
-                    <div key={i} className="flex items-center gap-3 p-3 bg-zinc-950 rounded-lg">
-                      {safeRender(item.status) === 'DONE' ? (
-                        <CheckCircle className="w-5 h-5 text-emerald-400" />
-                      ) : (
-                        <div className="w-5 h-5 rounded-full border-2 border-zinc-600" />
-                      )}
-                      <span className="text-zinc-300 text-sm flex-1">{safeRender(item.item_it, item.task_it || '')}</span>
-                      {item.priority && (
-                        <span className={`text-xs px-2 py-1 rounded ${
-                          item.priority === 'P0' ? 'bg-red-500/20 text-red-400' :
-                          item.priority === 'P1' ? 'bg-amber-500/20 text-amber-400' :
-                          'bg-zinc-700 text-zinc-400'
-                        }`}>{item.priority}</span>
-                      )}
-                    </div>
-                  ))}
+                  {checklist.map((item, i) => {
+                    // Handle both string array (new format) and object array (old format)
+                    const itemText = typeof item === 'string' ? item : (item.item_it || item.task_it || item.text || JSON.stringify(item));
+                    const priority = typeof item === 'object' ? item.priority : null;
+                    const status = typeof item === 'object' ? item.status : null;
+                    
+                    return (
+                      <div key={i} className="flex items-center gap-3 p-3 bg-zinc-950 rounded-lg">
+                        {status === 'DONE' ? (
+                          <CheckCircle className="w-5 h-5 text-emerald-400" />
+                        ) : (
+                          <div className="w-5 h-5 rounded-full border-2 border-gold/50 flex items-center justify-center">
+                            <span className="text-xs text-gold font-bold">{i + 1}</span>
+                          </div>
+                        )}
+                        <span className="text-zinc-300 text-sm flex-1">{itemText}</span>
+                        {priority && (
+                          <span className={`text-xs px-2 py-1 rounded ${
+                            priority === 'P0' ? 'bg-red-500/20 text-red-400' :
+                            priority === 'P1' ? 'bg-amber-500/20 text-amber-400' :
+                            'bg-zinc-700 text-zinc-400'
+                          }`}>{priority}</span>
+                        )}
+                      </div>
+                    );
+                  })}
                 </div>
-              </div>
-            )}
+              ) : (
+                <p className="text-zinc-500">Nessuna checklist disponibile</p>
+              )}
+            </div>
           </TabsContent>
           
           {/* Red Flags Tab */}
