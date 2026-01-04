@@ -897,26 +897,63 @@ const AnalysisResult = () => {
               )}
             </div>
             
-            {/* Formalità */}
+            {/* Formalità - Section 8 */}
             <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-6">
               <h2 className="text-xl font-serif font-bold text-zinc-100 mb-4">Formalità</h2>
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              
+              {/* Ipoteche */}
+              {Array.isArray(formalita.ipoteche) && formalita.ipoteche.length > 0 ? (
+                <div className="mb-4">
+                  <p className="text-xs text-zinc-500 mb-2">Ipoteche registrate:</p>
+                  <div className="space-y-2">
+                    {formalita.ipoteche.map((ip, i) => (
+                      <div key={i} className="p-3 bg-zinc-950 rounded flex items-center justify-between">
+                        <div>
+                          <span className="text-zinc-300 text-sm">{ip.tipo || 'Ipoteca'}</span>
+                          {ip.data && <span className="text-xs text-zinc-500 ml-2">({ip.data})</span>}
+                        </div>
+                        <span className="font-mono text-gold">€{(ip.importo || 0).toLocaleString()}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ) : (
                 <DataValueWithEvidence 
                   label="Ipoteca" 
-                  value={formalita.ipoteca?.status}
+                  value={formalita.ipoteca?.status || 'Non specificato'}
                   evidence={getEvidence(formalita.ipoteca)}
                 />
-                <DataValueWithEvidence 
-                  label="Pignoramento" 
-                  value={formalita.pignoramento?.status}
-                  evidence={getEvidence(formalita.pignoramento)}
-                />
-                <DataValueWithEvidence 
-                  label="Cancellazione con Decreto" 
-                  value={formalita.cancellazione_decreto?.status}
-                  evidence={getEvidence(formalita.cancellazione_decreto)}
-                />
-              </div>
+              )}
+              
+              {/* Pignoramenti */}
+              {Array.isArray(formalita.pignoramenti) && formalita.pignoramenti.length > 0 && (
+                <div className="mb-4">
+                  <p className="text-xs text-zinc-500 mb-2">Pignoramenti:</p>
+                  <div className="space-y-2">
+                    {formalita.pignoramenti.map((pig, i) => (
+                      <div key={i} className="p-3 bg-zinc-950 rounded">
+                        <span className="text-zinc-300 text-sm">Pignoramento {pig.data || ''}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+              
+              {/* Cancellazione */}
+              {formalita.cancellazione && (
+                <div className="p-3 bg-emerald-500/10 rounded border border-emerald-500/30">
+                  <p className="text-xs text-emerald-400 mb-1">Cancellazione:</p>
+                  <p className="text-sm text-zinc-300">{formalita.cancellazione}</p>
+                </div>
+              )}
+              
+              {/* Evidence */}
+              {getEvidence(formalita).length > 0 && (
+                <p className="text-xs text-gold mt-2 flex items-center gap-1">
+                  <FileText className="w-3 h-3" />
+                  Riferimento: p. {[...new Set(getEvidence(formalita).map(e => e.page))].join(', ')}
+                </p>
+              )}
             </div>
             
             {/* Checklist Pre-Offerta */}
