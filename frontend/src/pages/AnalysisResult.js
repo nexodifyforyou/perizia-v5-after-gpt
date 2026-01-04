@@ -384,10 +384,12 @@ const AnalysisResult = () => {
     : (typeof legalKillers === 'object' ? legalKillers : {});
 
   // Debug logging for troubleshooting
-  console.log('MoneyBox items:', moneyBoxItems.length, moneyBoxItems);
-  console.log('LegalKillers:', Object.keys(legalKillersObj).length, legalKillersObj);
-  console.log('Dati certi:', dati);
-  console.log('Semaforo:', semaforo);
+  if (process.env.NODE_ENV === 'development') {
+    console.log('MoneyBox items:', moneyBoxItems.length, moneyBoxItems);
+    console.log('LegalKillers:', Object.keys(legalKillersObj).length, legalKillersObj);
+    console.log('Dati certi:', dati);
+    console.log('Semaforo:', semaforo);
+  }
 
   return (
     <div className="min-h-screen bg-[#09090b]">
