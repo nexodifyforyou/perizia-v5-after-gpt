@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { useParams, Link } from 'react-router-dom';
+import { useParams, Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { Sidebar, SemaforoBadge } from './Dashboard';
 import { Button } from '../components/ui/button';
@@ -18,7 +18,9 @@ import {
   FileCheck,
   ArrowLeft,
   FileDown,
-  Quote
+  Quote,
+  Trash2,
+  X
 } from 'lucide-react';
 import axios from 'axios';
 import { toast } from 'sonner';
