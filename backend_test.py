@@ -941,8 +941,12 @@ def main():
         tester.test_auth_me_with_token(session_token)
         tester.test_dashboard_stats()
         
-        # MAIN FOCUS: DELETE ENDPOINTS TESTING
-        print("\n🎯 MAIN FOCUS: DELETE ENDPOINTS TESTING...")
+        # MAIN FOCUS: Google Document AI OCR Integration Test
+        print("\n🎯 MAIN FOCUS: Google Document AI OCR Integration Test...")
+        tester.test_google_docai_perizia_extraction()
+        
+        # DELETE ENDPOINTS TESTING
+        print("\n🗑️ DELETE ENDPOINTS TESTING...")
         tester.test_delete_endpoints_comprehensive()
         
         # Previous critical tests for regression
