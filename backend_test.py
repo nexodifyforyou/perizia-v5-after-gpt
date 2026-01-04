@@ -918,7 +918,7 @@ def create_test_user_and_session():
 
 def main():
     print("🚀 Starting Nexodify Forensic Engine API Tests")
-    print("🎯 FOCUS: DELETE Endpoints Testing")
+    print("🎯 FOCUS: Google Document AI OCR Integration Testing")
     print("=" * 60)
     
     # Create test user and session
