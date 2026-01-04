@@ -694,16 +694,23 @@ const AnalysisResult = () => {
                 <p className="text-zinc-500 text-center py-8">Nessun dato sui costi disponibile</p>
               )}
               
-              {/* Total */}
-              {moneyBox.total_extra_costs && (
+              {/* Total - support both old and new format */}
+              {(moneyBoxTotal || moneyBox.total_extra_costs) && (
                 <div className="mt-6 p-4 bg-gold/10 border border-gold/30 rounded-lg">
                   <div className="flex items-center justify-between">
                     <span className="text-lg font-semibold text-zinc-100">Totale Costi Extra Stimati</span>
                     <span className="text-2xl font-mono font-bold text-gold">
-                      €{(moneyBox.total_extra_costs?.range?.min || moneyBox.total_extra_costs?.amount?.min || 0).toLocaleString()} - €{(moneyBox.total_extra_costs?.range?.max || moneyBox.total_extra_costs?.amount?.max || 0).toLocaleString()}
-                      {moneyBox.total_extra_costs?.max_is_open && '+'}
+                      {moneyBoxTotal?.nota || moneyBoxTotal?.min !== undefined ? (
+                        `€${(moneyBoxTotal?.min || 0).toLocaleString()} - €${(moneyBoxTotal?.max || 0).toLocaleString()}`
+                      ) : (
+                        `€${(moneyBox.total_extra_costs?.range?.min || 0).toLocaleString()} - €${(moneyBox.total_extra_costs?.range?.max || 0).toLocaleString()}`
+                      )}
+                      {(moneyBoxTotal?.nota?.includes('+') || moneyBox.total_extra_costs?.max_is_open) && '+'}
                     </span>
                   </div>
+                  {moneyBoxTotal?.nota && (
+                    <p className="text-xs text-zinc-400 mt-2">{moneyBoxTotal.nota}</p>
+                  )}
                 </div>
               )}
             </div>
