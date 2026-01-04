@@ -292,65 +292,6 @@ class NexodifyAPITester:
             data=assistant_data
         )
 
-    def run_test(self, name, method, endpoint, expected_status, data=None, headers=None):
-        """Run a single API test"""
-        url = f"{self.base_url}/{endpoint}"
-        test_headers = {'Content-Type': 'application/json'}
-        if headers:
-            test_headers.update(headers)
-        if self.token:
-            test_headers['Authorization'] = f'Bearer {self.token}'
-
-        self.tests_run += 1
-        print(f"\n🔍 Testing {name}...")
-        
-        try:
-            if method == 'GET':
-                response = requests.get(url, headers=test_headers, timeout=30)
-            elif method == 'POST':
-                response = requests.post(url, json=data, headers=test_headers, timeout=30)
-
-            success = response.status_code == expected_status
-            if success:
-                self.tests_passed += 1
-                print(f"✅ Passed - Status: {response.status_code}")
-                try:
-                    response_data = response.json()
-                except:
-                    response_data = {}
-            else:
-                print(f"❌ Failed - Expected {expected_status}, got {response.status_code}")
-                try:
-                    response_data = response.json()
-                    print(f"   Response: {response_data}")
-                except:
-                    response_data = {"error": response.text}
-
-            self.test_results.append({
-                "test": name,
-                "method": method,
-                "endpoint": endpoint,
-                "expected_status": expected_status,
-                "actual_status": response.status_code,
-                "success": success,
-                "response": response_data
-            })
-
-            return success, response_data
-
-        except Exception as e:
-            print(f"❌ Failed - Error: {str(e)}")
-            self.test_results.append({
-                "test": name,
-                "method": method,
-                "endpoint": endpoint,
-                "expected_status": expected_status,
-                "actual_status": "ERROR",
-                "success": False,
-                "error": str(e)
-            })
-            return False, {}
-
     def test_health_check(self):
         """Test health endpoint"""
         return self.run_test("Health Check", "GET", "api/health", 200)
