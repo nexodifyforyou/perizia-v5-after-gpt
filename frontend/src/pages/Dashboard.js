@@ -287,6 +287,16 @@ const Dashboard = () => {
             </Button>
           </div>
         )}
+        
+        {/* Disclaimer */}
+        <div className="mt-8 p-4 bg-zinc-900/50 border border-zinc-800 rounded-lg text-center">
+          <p className="text-xs text-zinc-500">
+            Nexodify è una piattaforma di supporto all'analisi documentale. Non costituisce consulenza legale, fiscale o professionale.
+          </p>
+          <p className="text-xs text-zinc-600 mt-1">
+            Nexodify is a document analysis support platform. It does not constitute legal, tax, or professional advice.
+          </p>
+        </div>
       </main>
     </div>
   );

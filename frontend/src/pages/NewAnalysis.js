@@ -248,6 +248,16 @@ const NewAnalysis = () => {
               </span>
             </div>
           </div>
+          
+          {/* Disclaimer */}
+          <div className="mt-6 p-4 bg-zinc-900/50 border border-zinc-800 rounded-lg text-center">
+            <p className="text-xs text-zinc-500">
+              L'analisi automatica è uno strumento di supporto. Consultare sempre un professionista qualificato prima di procedere.
+            </p>
+            <p className="text-xs text-zinc-600 mt-1">
+              Automatic analysis is a support tool. Always consult a qualified professional before proceeding.
+            </p>
+          </div>
         </div>
       </main>
     </div>

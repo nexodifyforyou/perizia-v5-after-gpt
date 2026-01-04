@@ -222,9 +222,12 @@ const Assistant = () => {
               </Button>
             </form>
             
-            <div className="mt-4 text-center">
+            <div className="mt-4 text-center space-y-2">
               <p className="text-xs text-zinc-600">
                 Messaggi rimanenti: <span className="font-mono text-emerald-400">{user?.quota?.assistant_messages_remaining || 0}</span>
+              </p>
+              <p className="text-xs text-zinc-500">
+                Le informazioni fornite hanno carattere informativo e non costituiscono consulenza legale.
               </p>
             </div>
           </div>
