@@ -1,5 +1,5 @@
 from fastapi import FastAPI, APIRouter, HTTPException, Request, UploadFile, File, Depends, Response
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 from dotenv import load_dotenv
 from starlette.middleware.cors import CORSMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
@@ -14,6 +14,7 @@ import json
 import httpx
 from PyPDF2 import PdfReader
 import io
+import hashlib
 
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
@@ -96,6 +97,8 @@ class PeriziaAnalysis(BaseModel):
     revision: int = 0
     case_title: Optional[str] = None
     file_name: str
+    input_sha256: str
+    pages_count: int
     result: Dict[str, Any]
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
@@ -443,73 +446,227 @@ async def stripe_webhook(request: Request):
         return {"received": True}
 
 # ===================
-# PERIZIA ANALYSIS ENDPOINT
+# COMPREHENSIVE PERIZIA SYSTEM PROMPT
 # ===================
 
-PERIZIA_SYSTEM_PROMPT = """You are "Nexodify Forensic Engine": a deterministic, audit-grade analyzer for Italian real-estate perizie/CTU documents.
+PERIZIA_SYSTEM_PROMPT = """YOU ARE: Nexodify Auction Scan Engine (Perizia → Evidence-First JSON → Roma-Style Report).
+GOAL: Given a Perizia/CTU PDF text (page-by-page), produce a complete forensic "Auction Scan" output.
 
-ABSOLUTE RULES:
-1) NO HALLUCINATION: Never invent facts, values, laws, dates, addresses, costs, or outcomes.
-2) EVIDENCE-FIRST: Every factual claim MUST include evidence[] with page, anchor, quote.
-3) ZERO EMPTY FIELDS: Use "NOT_SPECIFIED_IN_PERIZIA" or "UNKNOWN" instead of empty values.
-4) OUTPUT ONLY VALID JSON - no markdown, no commentary.
+ABSOLUTE RULES (NON-NEGOTIABLE)
+1) Evidence-first: Every factual claim MUST have evidence[] with {page, anchor, quote<=200 chars}. If you cannot cite evidence from the perizia text, use:
+   - "NOT_SPECIFIED_IN_PERIZIA" (the perizia does not provide it)
+   - "UNKNOWN" (concept exists but unclear/ambiguous)
+2) No hallucinations, no "common practice", no invented laws, no invented numbers.
+3) Zero empty fields: Never output empty strings, empty arrays, or null. Use the statuses above.
+4) Output must be ONE VALID JSON object only. No markdown. No extra text.
 
-You must analyze the perizia document and extract:
-- case_header: procedure_id, lotto, tribunale, address, deposit_date
-- semaforo_generale: GREEN/AMBER/RED based on risk assessment
-- decision_rapida_client: risk level, driver rosso reasons
-- money_box: costs A-H with evidence or NEXODIFY_ESTIMATE
-- dati_certi_del_lotto: prezzo_base, superficie, catasto, diritto_reale
-- abusi_edilizi_conformita: urbanistica, catastale, condono status
-- stato_occupativo: libero/occupato, title_opponible
-- stato_conservativo: condition issues found
-- formalita: ipoteca, pignoramento, cancellation status
-- legal_killers_checklist: 8 killer checks (YES/NO/NOT_SPECIFIED)
-- indice_di_convenienza: all_in cost calculation
-- red_flags_operativi: list of warnings
-- checklist_pre_offerta: due diligence items
-- summary_for_client: bilingual summary
-- qa: PASS/WARN/FAIL with reasons
+DETERMINISTIC EXTRACTION TARGETS
+You MUST locate and extract (if present) with evidence:
+- procedure_id (E.I./R.G.E./N. procedimento)
+- lotto (Lotto Unico / Lotto 1 etc.)
+- tribunal (Tribunale di …)
+- address (street, scala, interno, piani, city, quartiere)
+- deposit date (deposito / data perizia)
+- prezzo base d'asta (look for "prezzo base", "valore base", "€" amounts)
+- valore tecnico lordo pre-deprezzamenti
+- valore finale di stima
+- deprezzamenti CTU percent
+- superficie catastale + superficie convenzionale (look for "mq", "metri quadri")
+- catasto: categoria, classe, vani, sup catastale
+- diritto reale (piena proprietà, nuda proprietà, etc.)
+- PRG / destinazione urbanistica
+- conformità urbanistica (conforme/difforme)
+- conformità catastale
+- condono/sanatoria: IDs, status, criticità
+- agibilità (present/missing)
+- occupazione: libero/terzi/debitore + titolo opponibile
+- stato conservativo: issues (muffa, condensa, ponti termici, serramenti, impianti)
+- formalità: ipoteca, pignoramento, cancellazione con decreto
+- servitù, atti d'obbligo, vincoli, prelazione, usi civici
 
-Output must be valid JSON matching the schema."""
+MONEY BOX ITEMS (A-H) - ALWAYS OUTPUT ALL 8
+A) Regolarizzazione urbanistica / condono - from perizia or NOT_SPECIFIED
+B) Oneri tecnici / istruttoria - NEXODIFY_ESTIMATE if missing: min=5000 max=25000
+C) Rischio ripristini se condono negativo - NEXODIFY_ESTIMATE if missing: min=10000 max=40000
+D) Allineamento catastale / DOCFA - NEXODIFY_ESTIMATE if missing: min=1000 max=2000
+E) Spese condominiali arretrate - from perizia or NOT_SPECIFIED
+F) Costi procedura / delegato - from perizia or NOT_SPECIFIED
+G) Cancellazione formalità - INFO_ONLY if cancellazione con decreto
+H) Costo liberazione - NEXODIFY_ESTIMATE: value=1500
 
-async def analyze_perizia_with_llm(pdf_text: str, pages: List[Dict], file_name: str, user: User, case_id: str, run_id: str) -> Dict:
-    """Analyze perizia using LLM"""
+LEGAL KILLERS CHECKLIST (ALWAYS ALL 8 KEYS)
+- PEEP_superficie
+- donazione_catena_20anni
+- prelazione_stato_beni_culturali
+- usi_civici_diritti_demaniali
+- fondo_patrimoniale
+- servitu_atti_obbligo
+- formalita_non_cancellabili
+- amianto
+
+SEMAFORO RULES
+- RED if: condono present but status undefined, occupied with no title proof, non-cancellable formalities, non-marketable
+- AMBER if: any criticalities in condono, ipoteca/pignoramento present, missing agibilità
+- GREEN if: no red/amber issues found
+
+OUTPUT JSON SCHEMA (EXACT):
+{
+  "schema_version": "nexodify_perizia_scan_v1",
+  "run": {
+    "run_id": "string",
+    "generated_at_utc": "ISO_DATE",
+    "input": {"source_type": "perizia_pdf", "file_name": "string", "pages_total": 0}
+  },
+  "case_header": {
+    "procedure_id": "string_or_NOT_SPECIFIED",
+    "lotto": "string_or_NOT_SPECIFIED",
+    "tribunale": "string_or_NOT_SPECIFIED",
+    "address": {"street": "string", "city": "string", "full": "string"},
+    "deposit_date": "string_or_NOT_SPECIFIED"
+  },
+  "semaforo_generale": {
+    "status": "GREEN_or_AMBER_or_RED",
+    "status_it": "BASSO RISCHIO / ATTENZIONE / ALTO RISCHIO",
+    "status_en": "LOW RISK / CAUTION / HIGH RISK",
+    "reason_it": "string",
+    "reason_en": "string",
+    "evidence": [{"page": 1, "anchor": "string", "quote": "string"}]
+  },
+  "decision_rapida_client": {
+    "risk_level": "LOW_RISK / MEDIUM_RISK / HIGH_RISK",
+    "risk_level_it": "string",
+    "risk_level_en": "string",
+    "summary_it": "string",
+    "summary_en": "string",
+    "driver_rosso": [{"code": "string", "headline_it": "string", "headline_en": "string", "severity": "RED/AMBER", "evidence": []}]
+  },
+  "money_box": {
+    "items": [
+      {"code": "A", "label_it": "string", "label_en": "string", "type": "FIXED/RANGE/NOT_SPECIFIED/INFO_ONLY/NEXODIFY_ESTIMATE", "value": 0, "range": {"min": 0, "max": 0}, "source": "PERIZIA/NEXODIFY_ESTIMATE", "evidence": [], "action_required_it": "string", "action_required_en": "string"}
+    ],
+    "total_extra_costs": {"range": {"min": 0, "max": 0}, "max_is_open": false}
+  },
+  "dati_certi_del_lotto": {
+    "prezzo_base_asta": {"value": 0, "formatted": "€X", "evidence": []},
+    "valore_tecnico_lordo": {"value": 0, "evidence": []},
+    "deprezzamento_ctu_percent": {"value": 0, "evidence": []},
+    "superficie_catastale": {"value": "string", "evidence": []},
+    "superficie_convenzionale": {"value": "string", "evidence": []},
+    "catasto": {"categoria": "string", "classe": "string", "vani": "string", "evidence": []},
+    "diritto_reale": {"value": "string", "evidence": []},
+    "prg_destinazione": {"value": "string", "evidence": []}
+  },
+  "abusi_edilizi_conformita": {
+    "conformita_urbanistica": {"status": "CONFORME/DIFFORME/UNKNOWN", "detail_it": "string", "evidence": []},
+    "conformita_catastale": {"status": "CONFORME/DIFFORME/UNKNOWN", "detail_it": "string", "evidence": []},
+    "condono": {"present": "YES/NO/UNKNOWN", "practice_ids": [], "status": "DEFINED/NOT_DEFINED/UNKNOWN", "criticalities_it": [], "evidence": []},
+    "agibilita": {"status": "PRESENT/MISSING/UNKNOWN", "evidence": []},
+    "commerciabilita": {"status": "OK/NOT_MARKETABLE/UNKNOWN", "evidence": []}
+  },
+  "stato_occupativo": {
+    "status": "LIBERO/OCCUPATO_DEBITORE/OCCUPATO_TERZI/UNKNOWN",
+    "status_it": "string",
+    "status_en": "string",
+    "title_opponible": "YES/NO/UNKNOWN/NOT_SPECIFIED",
+    "contract_produced": "YES/NO/UNKNOWN",
+    "notes_it": "string",
+    "evidence": []
+  },
+  "stato_conservativo": {
+    "general_condition_it": "string",
+    "general_condition_en": "string",
+    "issues_found": [{"issue_it": "string", "issue_en": "string", "evidence": []}],
+    "evidence": []
+  },
+  "formalita": {
+    "ipoteca": {"status": "PRESENT/ABSENT/UNKNOWN", "amount": 0, "evidence": []},
+    "pignoramento": {"status": "PRESENT/ABSENT/UNKNOWN", "evidence": []},
+    "altre_formalita": [{"type": "string", "evidence": []}],
+    "cancellazione_decreto": {"status": "YES/NO/UNKNOWN", "evidence": []}
+  },
+  "legal_killers_checklist": {
+    "PEEP_superficie": {"status": "YES/NO/NOT_SPECIFIED", "action_required_it": "string", "evidence": []},
+    "donazione_catena_20anni": {"status": "YES/NO/NOT_SPECIFIED", "action_required_it": "string", "evidence": []},
+    "prelazione_stato_beni_culturali": {"status": "YES/NO/NOT_SPECIFIED", "action_required_it": "string", "evidence": []},
+    "usi_civici_diritti_demaniali": {"status": "YES/NO/NOT_SPECIFIED", "action_required_it": "string", "evidence": []},
+    "fondo_patrimoniale": {"status": "YES/NO/NOT_SPECIFIED", "action_required_it": "string", "evidence": []},
+    "servitu_atti_obbligo": {"status": "YES/NO/NOT_SPECIFIED", "action_required_it": "string", "evidence": []},
+    "formalita_non_cancellabili": {"status": "YES/NO/NOT_SPECIFIED", "action_required_it": "string", "evidence": []},
+    "amianto": {"status": "YES/NO/NOT_SPECIFIED", "action_required_it": "string", "evidence": []}
+  },
+  "indice_di_convenienza": {
+    "prezzo_base_asta": 0,
+    "extra_costs_min": 0,
+    "extra_costs_max": 0,
+    "all_in_light_min": 0,
+    "all_in_light_max": 0,
+    "dry_read_it": "string",
+    "dry_read_en": "string"
+  },
+  "red_flags_operativi": [
+    {"code": "string", "severity": "RED/AMBER", "flag_it": "string", "flag_en": "string", "action_it": "string", "evidence": []}
+  ],
+  "checklist_pre_offerta": [
+    {"item_it": "string", "item_en": "string", "priority": "P0/P1/P2", "status": "TO_CHECK/DONE"}
+  ],
+  "summary_for_client": {
+    "summary_it": "string - comprehensive buyer-focused summary",
+    "summary_en": "string - comprehensive buyer-focused summary",
+    "disclaimer_it": "Documento informativo. Non costituisce consulenza legale.",
+    "disclaimer_en": "Informational document. Not legal advice."
+  },
+  "qa": {
+    "status": "PASS/WARN/FAIL",
+    "reasons": [{"code": "string", "severity": "RED/AMBER", "reason_it": "string", "reason_en": "string"}]
+  }
+}
+
+SEARCH THE DOCUMENT THOROUGHLY. Look for:
+- Currency amounts (€, euro, EUR)
+- Square meters (mq, m², metri quadri, metri quadrati)
+- Legal references (art., legge, L., D.L., D.P.R.)
+- Dates (data, del, anno)
+- Property terms (immobile, appartamento, unità, fabbricato, terreno)
+- Compliance terms (conforme, difforme, regolare, irregolare, abuso, condono, sanatoria)
+- Occupation (occupato, libero, locato, detenuto, conduttore)
+
+Return ONLY the JSON object."""
+
+async def analyze_perizia_with_llm(pdf_text: str, pages: List[Dict], file_name: str, user: User, case_id: str, run_id: str, input_sha256: str) -> Dict:
+    """Analyze perizia using LLM with comprehensive prompt"""
     from emergentintegrations.llm.chat import LlmChat, UserMessage
     
     chat = LlmChat(
         api_key=EMERGENT_LLM_KEY,
         session_id=f"perizia_{run_id}",
         system_message=PERIZIA_SYSTEM_PROMPT
-    ).with_model("gemini", "gemini-2.5-flash")
+    ).with_model("openai", "gpt-4o")
     
-    # Prepare the analysis request
-    analysis_request = {
-        "mode": "PERIZIA_ANALYZE",
-        "user_context": {
-            "user_id": user.user_id,
-            "plan": user.plan,
-            "is_paid": user.plan != "free" or user.is_master_admin
-        },
-        "request": {
-            "request_id": run_id,
-            "case_id": case_id,
-            "file_name": file_name
-        },
-        "perizia_text": pdf_text[:50000],  # Limit text size
-        "page_count": len(pages)
-    }
+    # Build page-by-page content for the prompt
+    page_content = ""
+    for p in pages[:100]:  # Limit to first 100 pages
+        page_content += f"\n=== PAGE {p['page_number']} ===\n{p['text']}\n"
     
-    prompt = f"""Analyze this Italian perizia/CTU document and produce a complete forensic analysis JSON.
+    prompt = f"""Analyze this Italian Perizia/CTU document. Extract ALL available data with evidence.
 
-Document: {file_name}
-Pages: {len(pages)}
+FILE: {file_name}
+PAGES: {len(pages)}
+RUN_ID: {run_id}
+CASE_ID: {case_id}
 
-TEXT CONTENT:
-{pdf_text[:40000]}
+DOCUMENT CONTENT:
+{page_content[:80000]}
 
-Produce a complete JSON analysis following the schema. Include evidence with page numbers and quotes for every finding."""
-    
+IMPORTANT:
+1. Search EVERY page for relevant data
+2. Extract ALL prices, surfaces, dates, addresses found
+3. Include page numbers and quotes as evidence
+4. For money_box, provide NEXODIFY_ESTIMATE where perizia doesn't specify costs
+5. Compute total_extra_costs and all_in_light values
+6. Determine semaforo (GREEN/AMBER/RED) based on risk factors found
+
+Return the complete JSON analysis."""
+
     try:
         response = await chat.send_message(UserMessage(text=prompt))
         
@@ -524,137 +681,172 @@ Produce a complete JSON analysis following the schema. Include evidence with pag
         
         try:
             result = json.loads(response_text)
-        except json.JSONDecodeError:
-            # Create structured response if parsing fails
-            result = create_default_analysis_result(file_name, case_id, run_id, pdf_text)
+            # Ensure required fields exist
+            if "schema_version" not in result:
+                result["schema_version"] = "nexodify_perizia_scan_v1"
+            if "run" not in result:
+                result["run"] = {"run_id": run_id, "generated_at_utc": datetime.now(timezone.utc).isoformat()}
+            return result
+        except json.JSONDecodeError as e:
+            logger.error(f"JSON parse error: {e}")
+            logger.error(f"Response was: {response_text[:1000]}")
+            return create_fallback_analysis(file_name, case_id, run_id, pages, pdf_text)
         
-        return result
     except Exception as e:
         logger.error(f"LLM analysis error: {e}")
-        return create_default_analysis_result(file_name, case_id, run_id, pdf_text)
+        return create_fallback_analysis(file_name, case_id, run_id, pages, pdf_text)
 
-def create_default_analysis_result(file_name: str, case_id: str, run_id: str, pdf_text: str) -> Dict:
-    """Create default analysis structure when LLM fails"""
+def create_fallback_analysis(file_name: str, case_id: str, run_id: str, pages: List[Dict], pdf_text: str) -> Dict:
+    """Create fallback analysis when LLM fails - extract what we can deterministically"""
+    import re
+    
+    # Try to extract basic info from text
+    text_lower = pdf_text.lower()
+    
+    # Find procedure ID
+    procedure_id = "NOT_SPECIFIED_IN_PERIZIA"
+    proc_match = re.search(r'(r\.?g\.?e\.?|e\.?i\.?|esecuzione\s+immobiliare|procedura)\s*n?\.?\s*(\d+[/\-]?\d*)', text_lower)
+    if proc_match:
+        procedure_id = proc_match.group(0).upper()
+    
+    # Find tribunal
+    tribunale = "NOT_SPECIFIED_IN_PERIZIA"
+    trib_match = re.search(r'tribunale\s+(di\s+)?([a-z\s]+)', text_lower)
+    if trib_match:
+        tribunale = "TRIBUNALE DI " + trib_match.group(2).strip().upper()
+    
+    # Find prezzo base
+    prezzo_base = 0
+    prezzo_match = re.search(r'prezzo\s+base[^\d]*(\d[\d\.,]+)', text_lower)
+    if not prezzo_match:
+        prezzo_match = re.search(r'€\s*(\d[\d\.,]+)', text_lower)
+    if prezzo_match:
+        try:
+            prezzo_str = prezzo_match.group(1).replace('.', '').replace(',', '.')
+            prezzo_base = float(prezzo_str)
+        except:
+            pass
+    
+    # Find superficie
+    superficie = "NOT_SPECIFIED_IN_PERIZIA"
+    sup_match = re.search(r'(\d+[\.,]?\d*)\s*(mq|m²|metri\s*quadr)', text_lower)
+    if sup_match:
+        superficie = sup_match.group(1) + " mq"
+    
     return {
-        "ok": True,
-        "mode": "PERIZIA_ANALYZE",
-        "result": {
-            "schema_version": "nexodify_perizia_scan_v1",
-            "run": {
-                "run_id": run_id,
-                "case_id": case_id,
-                "generated_at_utc": datetime.now(timezone.utc).isoformat(),
-                "revision": 0
-            },
-            "case_header": {
-                "procedure_id": "NOT_SPECIFIED_IN_PERIZIA",
-                "lotto": "NOT_SPECIFIED_IN_PERIZIA",
-                "tribunale": "NOT_SPECIFIED_IN_PERIZIA",
-                "address": "NOT_SPECIFIED_IN_PERIZIA",
-                "deposit_date": "NOT_SPECIFIED_IN_PERIZIA"
-            },
-            "semaforo_generale": {
-                "status": "AMBER",
-                "status_it": "ATTENZIONE",
-                "status_en": "CAUTION",
-                "reason_it": "Analisi richiede revisione manuale",
-                "reason_en": "Analysis requires manual review"
-            },
-            "decision_rapida_client": {
-                "risk_level": "MEDIUM_RISK",
-                "risk_level_it": "RISCHIO MEDIO",
-                "risk_level_en": "MEDIUM RISK",
-                "driver_rosso": [],
-                "summary_it": "Documento richiede analisi approfondita",
-                "summary_en": "Document requires detailed analysis"
-            },
-            "money_box": {
-                "items": [
-                    {"code": "A", "label_it": "Regolarizzazione urbanistica", "label_en": "Urban regularization", "type": "NOT_SPECIFIED", "action_required_it": "Verificare con tecnico", "action_required_en": "Verify with technician"},
-                    {"code": "B", "label_it": "Oneri tecnici", "label_en": "Technical fees", "type": "NEXODIFY_ESTIMATE", "range": {"min": 5000, "max": 25000}},
-                    {"code": "C", "label_it": "Rischio ripristini", "label_en": "Restoration risk", "type": "NEXODIFY_ESTIMATE", "range": {"min": 10000, "max": 40000}},
-                    {"code": "D", "label_it": "Allineamento catastale", "label_en": "Cadastral alignment", "type": "NEXODIFY_ESTIMATE", "range": {"min": 1000, "max": 2000}},
-                    {"code": "E", "label_it": "Spese condominiali", "label_en": "Condo fees", "type": "NOT_SPECIFIED", "action_required_it": "Verificare con amministratore", "action_required_en": "Verify with administrator"},
-                    {"code": "F", "label_it": "Costi procedura", "label_en": "Procedure costs", "type": "NOT_SPECIFIED", "action_required_it": "Verificare con delegato", "action_required_en": "Verify with delegate"},
-                    {"code": "G", "label_it": "Cancellazione formalità", "label_en": "Formality cancellation", "type": "INFO_ONLY", "note_it": "Verificare decreto", "note_en": "Verify decree"},
-                    {"code": "H", "label_it": "Costo liberazione", "label_en": "Liberation cost", "type": "NEXODIFY_ESTIMATE", "value": 1500}
-                ],
-                "total_extra_costs": {
-                    "range": {"min": 17500, "max": 68500},
-                    "max_is_open": True
-                }
-            },
-            "dati_certi_del_lotto": {
-                "prezzo_base_asta": "NOT_SPECIFIED_IN_PERIZIA",
-                "superficie_catastale": "NOT_SPECIFIED_IN_PERIZIA",
-                "catasto": {
-                    "categoria": "NOT_SPECIFIED_IN_PERIZIA",
-                    "classe": "NOT_SPECIFIED_IN_PERIZIA",
-                    "vani": "NOT_SPECIFIED_IN_PERIZIA"
-                },
-                "diritto_reale": "NOT_SPECIFIED_IN_PERIZIA"
-            },
-            "abusi_edilizi_conformita": {
-                "conformita_urbanistica": "UNKNOWN",
-                "conformita_catastale": "UNKNOWN",
-                "condono": {
-                    "present": "UNKNOWN",
-                    "status": "NOT_SPECIFIED_IN_PERIZIA"
-                }
-            },
-            "stato_occupativo": {
-                "status": "UNKNOWN",
-                "title_opponible": "NOT_SPECIFIED_IN_PERIZIA"
-            },
-            "stato_conservativo": {
-                "issues_found": [],
-                "note_it": "Verificare stato immobile",
-                "note_en": "Verify property condition"
-            },
-            "formalita": {
-                "ipoteca": "NOT_SPECIFIED_IN_PERIZIA",
-                "pignoramento": "NOT_SPECIFIED_IN_PERIZIA",
-                "cancellazione_decreto": "NOT_SPECIFIED_IN_PERIZIA"
-            },
-            "legal_killers_checklist": {
-                "PEEP_superficie": {"status": "NOT_SPECIFIED_IN_PERIZIA", "action_required_it": "Verificare", "action_required_en": "Verify"},
-                "donazione_catena_20anni": {"status": "NOT_SPECIFIED_IN_PERIZIA", "action_required_it": "Verificare", "action_required_en": "Verify"},
-                "prelazione_stato_beni_culturali": {"status": "NOT_SPECIFIED_IN_PERIZIA", "action_required_it": "Verificare", "action_required_en": "Verify"},
-                "usi_civici_diritti_demaniali": {"status": "NOT_SPECIFIED_IN_PERIZIA", "action_required_it": "Verificare", "action_required_en": "Verify"},
-                "fondo_patrimoniale": {"status": "NOT_SPECIFIED_IN_PERIZIA", "action_required_it": "Verificare", "action_required_en": "Verify"},
-                "servitu_atti_obbligo": {"status": "NOT_SPECIFIED_IN_PERIZIA", "action_required_it": "Verificare", "action_required_en": "Verify"},
-                "formalita_non_cancellabili": {"status": "NOT_SPECIFIED_IN_PERIZIA", "action_required_it": "Verificare", "action_required_en": "Verify"},
-                "amianto": {"status": "NOT_SPECIFIED_IN_PERIZIA", "action_required_it": "Verificare", "action_required_en": "Verify"}
-            },
-            "indice_di_convenienza": {
-                "note_it": "Calcolo richiede prezzo base",
-                "note_en": "Calculation requires base price"
-            },
-            "red_flags_operativi": [
-                {
-                    "code": "MANUAL_REVIEW",
-                    "severity": "AMBER",
-                    "flag_it": "Analisi automatica incompleta",
-                    "flag_en": "Automatic analysis incomplete",
-                    "action_it": "Revisione manuale raccomandata",
-                    "action_en": "Manual review recommended"
-                }
+        "schema_version": "nexodify_perizia_scan_v1",
+        "run": {
+            "run_id": run_id,
+            "generated_at_utc": datetime.now(timezone.utc).isoformat(),
+            "input": {"source_type": "perizia_pdf", "file_name": file_name, "pages_total": len(pages)}
+        },
+        "case_header": {
+            "procedure_id": procedure_id,
+            "lotto": "Lotto Unico",
+            "tribunale": tribunale,
+            "address": {"street": "NOT_SPECIFIED_IN_PERIZIA", "city": "NOT_SPECIFIED_IN_PERIZIA", "full": "NOT_SPECIFIED_IN_PERIZIA"},
+            "deposit_date": "NOT_SPECIFIED_IN_PERIZIA"
+        },
+        "semaforo_generale": {
+            "status": "AMBER",
+            "status_it": "ATTENZIONE",
+            "status_en": "CAUTION",
+            "reason_it": "Analisi automatica parziale - revisione manuale raccomandata",
+            "reason_en": "Partial automatic analysis - manual review recommended",
+            "evidence": []
+        },
+        "decision_rapida_client": {
+            "risk_level": "MEDIUM_RISK",
+            "risk_level_it": "RISCHIO MEDIO",
+            "risk_level_en": "MEDIUM RISK",
+            "summary_it": "Documento analizzato. Alcuni dati richiedono verifica manuale. Consultare un professionista prima di procedere.",
+            "summary_en": "Document analyzed. Some data requires manual verification. Consult a professional before proceeding.",
+            "driver_rosso": []
+        },
+        "money_box": {
+            "items": [
+                {"code": "A", "label_it": "Regolarizzazione urbanistica", "label_en": "Urban regularization", "type": "NOT_SPECIFIED", "action_required_it": "Verificare con tecnico", "action_required_en": "Verify with technician"},
+                {"code": "B", "label_it": "Oneri tecnici / istruttoria", "label_en": "Technical fees", "type": "NEXODIFY_ESTIMATE", "range": {"min": 5000, "max": 25000}, "source": "NEXODIFY_ESTIMATE"},
+                {"code": "C", "label_it": "Rischio ripristini", "label_en": "Restoration risk", "type": "NEXODIFY_ESTIMATE", "range": {"min": 10000, "max": 40000}, "source": "NEXODIFY_ESTIMATE"},
+                {"code": "D", "label_it": "Allineamento catastale", "label_en": "Cadastral alignment", "type": "NEXODIFY_ESTIMATE", "range": {"min": 1000, "max": 2000}, "source": "NEXODIFY_ESTIMATE"},
+                {"code": "E", "label_it": "Spese condominiali arretrate", "label_en": "Condo arrears", "type": "NOT_SPECIFIED", "action_required_it": "Verificare con amministratore", "action_required_en": "Verify with administrator"},
+                {"code": "F", "label_it": "Costi procedura", "label_en": "Procedure costs", "type": "NOT_SPECIFIED", "action_required_it": "Verificare con delegato", "action_required_en": "Verify with delegate"},
+                {"code": "G", "label_it": "Cancellazione formalità", "label_en": "Formality cancellation", "type": "INFO_ONLY", "note_it": "Solitamente con decreto di trasferimento"},
+                {"code": "H", "label_it": "Costo liberazione", "label_en": "Liberation cost", "type": "NEXODIFY_ESTIMATE", "value": 1500, "source": "NEXODIFY_ESTIMATE"}
             ],
-            "checklist_pre_offerta": [
-                {"item_it": "Verificare conformità urbanistica", "item_en": "Verify urban compliance", "status": "TO_CHECK"},
-                {"item_it": "Verificare stato occupativo", "item_en": "Verify occupancy status", "status": "TO_CHECK"},
-                {"item_it": "Verificare formalità", "item_en": "Verify formalities", "status": "TO_CHECK"}
-            ],
-            "summary_for_client": {
-                "summary_it": "Documento caricato. Analisi preliminare completata. Si raccomanda revisione approfondita.",
-                "summary_en": "Document uploaded. Preliminary analysis complete. Detailed review recommended."
-            },
-            "qa": {
-                "status": "WARN",
-                "reasons": [
-                    {"code": "QA_INCOMPLETE", "reason_it": "Analisi parziale", "reason_en": "Partial analysis"}
-                ]
-            }
+            "total_extra_costs": {"range": {"min": 17500, "max": 68500}, "max_is_open": True}
+        },
+        "dati_certi_del_lotto": {
+            "prezzo_base_asta": {"value": prezzo_base, "formatted": f"€{prezzo_base:,.0f}" if prezzo_base else "NOT_SPECIFIED", "evidence": []},
+            "superficie_catastale": {"value": superficie, "evidence": []},
+            "catasto": {"categoria": "NOT_SPECIFIED_IN_PERIZIA", "classe": "NOT_SPECIFIED_IN_PERIZIA", "vani": "NOT_SPECIFIED_IN_PERIZIA"},
+            "diritto_reale": {"value": "NOT_SPECIFIED_IN_PERIZIA", "evidence": []}
+        },
+        "abusi_edilizi_conformita": {
+            "conformita_urbanistica": {"status": "UNKNOWN", "detail_it": "Da verificare nella perizia", "evidence": []},
+            "conformita_catastale": {"status": "UNKNOWN", "detail_it": "Da verificare nella perizia", "evidence": []},
+            "condono": {"present": "UNKNOWN", "status": "UNKNOWN", "evidence": []},
+            "agibilita": {"status": "UNKNOWN", "evidence": []},
+            "commerciabilita": {"status": "UNKNOWN", "evidence": []}
+        },
+        "stato_occupativo": {
+            "status": "UNKNOWN",
+            "status_it": "Da verificare",
+            "status_en": "To verify",
+            "title_opponible": "NOT_SPECIFIED",
+            "evidence": []
+        },
+        "stato_conservativo": {
+            "general_condition_it": "Vedere dettagli nella perizia originale",
+            "general_condition_en": "See details in original appraisal",
+            "issues_found": [],
+            "evidence": []
+        },
+        "formalita": {
+            "ipoteca": {"status": "UNKNOWN", "evidence": []},
+            "pignoramento": {"status": "UNKNOWN", "evidence": []},
+            "cancellazione_decreto": {"status": "UNKNOWN", "evidence": []}
+        },
+        "legal_killers_checklist": {
+            "PEEP_superficie": {"status": "NOT_SPECIFIED", "action_required_it": "Verificare se l'immobile è in area PEEP"},
+            "donazione_catena_20anni": {"status": "NOT_SPECIFIED", "action_required_it": "Verificare catena proprietaria ultimi 20 anni"},
+            "prelazione_stato_beni_culturali": {"status": "NOT_SPECIFIED", "action_required_it": "Verificare vincoli beni culturali"},
+            "usi_civici_diritti_demaniali": {"status": "NOT_SPECIFIED", "action_required_it": "Verificare presenza usi civici"},
+            "fondo_patrimoniale": {"status": "NOT_SPECIFIED", "action_required_it": "Verificare se bene in fondo patrimoniale"},
+            "servitu_atti_obbligo": {"status": "NOT_SPECIFIED", "action_required_it": "Verificare servitù e atti d'obbligo"},
+            "formalita_non_cancellabili": {"status": "NOT_SPECIFIED", "action_required_it": "Verificare formalità non cancellabili"},
+            "amianto": {"status": "NOT_SPECIFIED", "action_required_it": "Verificare presenza amianto"}
+        },
+        "indice_di_convenienza": {
+            "prezzo_base_asta": prezzo_base,
+            "extra_costs_min": 17500,
+            "extra_costs_max": 68500,
+            "all_in_light_min": prezzo_base + 17500 if prezzo_base else 0,
+            "all_in_light_max": prezzo_base + 68500 if prezzo_base else 0,
+            "dry_read_it": f"Prezzo base €{prezzo_base:,.0f} + costi stimati €17.500-68.500 = All-in €{prezzo_base + 17500:,.0f}-{prezzo_base + 68500:,.0f}" if prezzo_base else "Prezzo base non specificato",
+            "dry_read_en": f"Base price €{prezzo_base:,.0f} + estimated costs €17,500-68,500 = All-in €{prezzo_base + 17500:,.0f}-{prezzo_base + 68500:,.0f}" if prezzo_base else "Base price not specified"
+        },
+        "red_flags_operativi": [
+            {"code": "MANUAL_REVIEW", "severity": "AMBER", "flag_it": "Revisione manuale raccomandata", "flag_en": "Manual review recommended", "action_it": "Verificare tutti i dati con la perizia originale"}
+        ],
+        "checklist_pre_offerta": [
+            {"item_it": "Verificare conformità urbanistica e catastale", "item_en": "Verify urban and cadastral compliance", "priority": "P0", "status": "TO_CHECK"},
+            {"item_it": "Verificare stato occupativo e titolo", "item_en": "Verify occupancy status and title", "priority": "P0", "status": "TO_CHECK"},
+            {"item_it": "Controllare formalità e ipoteche", "item_en": "Check formalities and mortgages", "priority": "P0", "status": "TO_CHECK"},
+            {"item_it": "Sopralluogo immobile", "item_en": "Property inspection", "priority": "P1", "status": "TO_CHECK"},
+            {"item_it": "Verificare spese condominiali arretrate", "item_en": "Verify condo arrears", "priority": "P1", "status": "TO_CHECK"}
+        ],
+        "summary_for_client": {
+            "summary_it": f"Analisi del documento {file_name}. Il sistema ha estratto i dati disponibili ma si raccomanda una revisione manuale completa prima di procedere con qualsiasi offerta. Prezzo base: €{prezzo_base:,.0f}. Costi extra stimati: €17.500-68.500. All-in stimato: €{prezzo_base + 17500:,.0f}-{prezzo_base + 68500:,.0f}." if prezzo_base else f"Analisi del documento {file_name}. Dati incompleti - revisione manuale necessaria.",
+            "summary_en": f"Analysis of document {file_name}. The system extracted available data but a complete manual review is recommended before proceeding with any offer. Base price: €{prezzo_base:,.0f}. Estimated extra costs: €17,500-68,500. Estimated all-in: €{prezzo_base + 17500:,.0f}-{prezzo_base + 68500:,.0f}." if prezzo_base else f"Analysis of document {file_name}. Incomplete data - manual review required.",
+            "disclaimer_it": "Documento informativo. Non costituisce consulenza legale. Consultare un professionista qualificato.",
+            "disclaimer_en": "Informational document. Not legal advice. Consult a qualified professional."
+        },
+        "qa": {
+            "status": "WARN",
+            "reasons": [
+                {"code": "PARTIAL_EXTRACTION", "severity": "AMBER", "reason_it": "Estrazione automatica parziale", "reason_en": "Partial automatic extraction"}
+            ]
         }
     }
 
@@ -665,10 +857,10 @@ async def analyze_perizia(request: Request, file: UploadFile = File(...)):
     
     # Check file type - PDF only
     if not file.filename.lower().endswith('.pdf'):
-        raise HTTPException(status_code=400, detail="Only PDF files are accepted / Solo file PDF sono accettati")
+        raise HTTPException(status_code=400, detail="Solo file PDF sono accettati / Only PDF files are accepted")
     
     if file.content_type and file.content_type != "application/pdf":
-        raise HTTPException(status_code=400, detail="Only PDF files are accepted / Solo file PDF sono accettati")
+        raise HTTPException(status_code=400, detail="Solo file PDF sono accettati / Only PDF files are accepted")
     
     # Check quota
     if user.quota.get("perizia_scans_remaining", 0) <= 0 and not user.is_master_admin:
@@ -683,6 +875,7 @@ async def analyze_perizia(request: Request, file: UploadFile = File(...)):
     
     # Read PDF
     contents = await file.read()
+    input_sha256 = hashlib.sha256(contents).hexdigest()
     
     try:
         pdf_reader = PdfReader(io.BytesIO(contents))
@@ -695,18 +888,18 @@ async def analyze_perizia(request: Request, file: UploadFile = File(...)):
             full_text += f"\n=== PAGE {i + 1} ===\n{page_text}"
         
         if not full_text.strip():
-            raise HTTPException(status_code=400, detail="Could not extract text from PDF / Impossibile estrarre testo dal PDF")
+            raise HTTPException(status_code=400, detail="Impossibile estrarre testo dal PDF. Il file potrebbe essere scansionato o protetto. / Could not extract text from PDF. File may be scanned or protected.")
         
     except Exception as e:
         logger.error(f"PDF parsing error: {e}")
-        raise HTTPException(status_code=400, detail="Invalid PDF file / File PDF non valido")
+        raise HTTPException(status_code=400, detail="File PDF non valido / Invalid PDF file")
     
     # Generate IDs
     case_id = f"case_{uuid.uuid4().hex[:8]}"
     run_id = f"run_{uuid.uuid4().hex[:8]}"
     
     # Analyze with LLM
-    result = await analyze_perizia_with_llm(full_text, pages, file.filename, user, case_id, run_id)
+    result = await analyze_perizia_with_llm(full_text, pages, file.filename, user, case_id, run_id, input_sha256)
     
     # Create analysis record
     analysis = PeriziaAnalysis(
@@ -716,11 +909,14 @@ async def analyze_perizia(request: Request, file: UploadFile = File(...)):
         run_id=run_id,
         case_title=file.filename,
         file_name=file.filename,
+        input_sha256=input_sha256,
+        pages_count=len(pages),
         result=result
     )
     
     analysis_dict = analysis.model_dump()
     analysis_dict["created_at"] = analysis_dict["created_at"].isoformat()
+    analysis_dict["raw_text"] = full_text[:100000]  # Store raw text for assistant
     await db.perizia_analyses.insert_one(analysis_dict)
     
     # Decrement quota if not master admin
@@ -739,21 +935,169 @@ async def analyze_perizia(request: Request, file: UploadFile = File(...)):
     }
 
 # ===================
-# IMAGE FORENSICS ENDPOINT
+# PDF REPORT DOWNLOAD
 # ===================
 
-IMAGE_FORENSICS_PROMPT = """You are an expert building forensics analyzer. Analyze the uploaded building/property images and identify:
-1. Visible defects (cracks, water damage, mold, structural issues)
-2. Materials observed (concrete, brick, plaster, etc.)
-3. Compliance flags (safety issues, building code concerns)
-4. Condition assessment
+@api_router.get("/analysis/perizia/{analysis_id}/pdf")
+async def download_perizia_pdf(analysis_id: str, request: Request):
+    """Generate and download PDF report for analysis"""
+    user = await require_auth(request)
+    
+    analysis = await db.perizia_analyses.find_one(
+        {"analysis_id": analysis_id, "user_id": user.user_id},
+        {"_id": 0}
+    )
+    
+    if not analysis:
+        raise HTTPException(status_code=404, detail="Analysis not found")
+    
+    result = analysis.get("result", {})
+    
+    # Generate HTML for PDF
+    html_content = generate_report_html(analysis, result)
+    
+    # Return as downloadable HTML (can be converted to PDF client-side or via print)
+    return Response(
+        content=html_content,
+        media_type="text/html",
+        headers={
+            "Content-Disposition": f'attachment; filename="nexodify_report_{analysis_id}.html"'
+        }
+    )
 
-Output must be valid JSON with:
-- findings: array of {finding_id, title_it, title_en, severity, confidence, what_i_see_it, what_i_see_en, why_it_matters_it, why_it_matters_en}
-- materials_observed: array of strings
-- defects_observed: array of strings
-- compliance_flags: array of {code, severity, note_it, note_en}
-- summary_it, summary_en"""
+def generate_report_html(analysis: Dict, result: Dict) -> str:
+    """Generate HTML report from analysis"""
+    case_header = result.get("case_header", {})
+    semaforo = result.get("semaforo_generale", {})
+    decision = result.get("decision_rapida_client", {})
+    money_box = result.get("money_box", {})
+    dati = result.get("dati_certi_del_lotto", {})
+    summary = result.get("summary_for_client", {})
+    
+    semaforo_color = "#10b981" if semaforo.get("status") == "GREEN" else "#f59e0b" if semaforo.get("status") == "AMBER" else "#ef4444"
+    
+    html = f"""<!DOCTYPE html>
+<html lang="it">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Nexodify Report - {analysis.get('file_name', 'Perizia')}</title>
+    <style>
+        * {{ margin: 0; padding: 0; box-sizing: border-box; }}
+        body {{ font-family: 'Segoe UI', system-ui, sans-serif; background: #09090b; color: #fafafa; padding: 40px; line-height: 1.6; }}
+        .container {{ max-width: 900px; margin: 0 auto; }}
+        .header {{ text-align: center; margin-bottom: 40px; padding-bottom: 20px; border-bottom: 2px solid #D4AF37; }}
+        .header h1 {{ font-size: 28px; color: #D4AF37; margin-bottom: 10px; }}
+        .header p {{ color: #a1a1aa; }}
+        .semaforo {{ display: inline-block; padding: 8px 20px; border-radius: 20px; background: {semaforo_color}20; color: {semaforo_color}; font-weight: bold; margin: 10px 0; border: 1px solid {semaforo_color}40; }}
+        .section {{ background: #18181b; border: 1px solid #27272a; border-radius: 12px; padding: 24px; margin-bottom: 24px; }}
+        .section h2 {{ color: #D4AF37; font-size: 18px; margin-bottom: 16px; padding-bottom: 8px; border-bottom: 1px solid #27272a; }}
+        .grid {{ display: grid; grid-template-columns: repeat(2, 1fr); gap: 16px; }}
+        .field {{ background: #09090b; padding: 12px; border-radius: 8px; }}
+        .field-label {{ font-size: 11px; color: #71717a; text-transform: uppercase; letter-spacing: 0.5px; }}
+        .field-value {{ font-size: 16px; color: #fafafa; margin-top: 4px; font-weight: 500; }}
+        .money-item {{ display: flex; justify-content: space-between; padding: 12px; background: #09090b; border-radius: 8px; margin-bottom: 8px; }}
+        .total {{ background: #D4AF3720; border: 1px solid #D4AF3740; padding: 16px; border-radius: 8px; margin-top: 16px; }}
+        .total-value {{ font-size: 24px; color: #D4AF37; font-weight: bold; }}
+        .disclaimer {{ background: #27272a; padding: 16px; border-radius: 8px; margin-top: 40px; text-align: center; }}
+        .disclaimer p {{ color: #71717a; font-size: 12px; }}
+        .footer {{ text-align: center; margin-top: 40px; color: #52525b; font-size: 12px; }}
+        @media print {{ body {{ background: white; color: black; }} .section {{ border-color: #e5e5e5; background: #f9f9f9; }} }}
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>NEXODIFY AUCTION SCAN REPORT</h1>
+            <p>Analisi Forense Perizia CTU</p>
+            <div class="semaforo">{semaforo.get('status_it', 'ATTENZIONE')}</div>
+        </div>
+        
+        <div class="section">
+            <h2>DATI PROCEDURA</h2>
+            <div class="grid">
+                <div class="field">
+                    <div class="field-label">Procedura</div>
+                    <div class="field-value">{case_header.get('procedure_id', 'N/A')}</div>
+                </div>
+                <div class="field">
+                    <div class="field-label">Lotto</div>
+                    <div class="field-value">{case_header.get('lotto', 'N/A')}</div>
+                </div>
+                <div class="field">
+                    <div class="field-label">Tribunale</div>
+                    <div class="field-value">{case_header.get('tribunale', 'N/A')}</div>
+                </div>
+                <div class="field">
+                    <div class="field-label">File Analizzato</div>
+                    <div class="field-value">{analysis.get('file_name', 'N/A')}</div>
+                </div>
+            </div>
+        </div>
+        
+        <div class="section">
+            <h2>DECISIONE RAPIDA</h2>
+            <p style="font-size: 18px; margin-bottom: 16px;">{decision.get('summary_it', 'Analisi completata')}</p>
+            <p style="color: #a1a1aa;">{decision.get('summary_en', '')}</p>
+        </div>
+        
+        <div class="section">
+            <h2>DATI CERTI DEL LOTTO</h2>
+            <div class="grid">
+                <div class="field">
+                    <div class="field-label">Prezzo Base Asta</div>
+                    <div class="field-value" style="color: #D4AF37; font-size: 20px;">{dati.get('prezzo_base_asta', {}).get('formatted', 'N/A')}</div>
+                </div>
+                <div class="field">
+                    <div class="field-label">Superficie</div>
+                    <div class="field-value">{dati.get('superficie_catastale', {}).get('value', 'N/A')}</div>
+                </div>
+                <div class="field">
+                    <div class="field-label">Diritto Reale</div>
+                    <div class="field-value">{dati.get('diritto_reale', {}).get('value', 'N/A')}</div>
+                </div>
+                <div class="field">
+                    <div class="field-label">Categoria Catastale</div>
+                    <div class="field-value">{dati.get('catasto', {}).get('categoria', 'N/A')}</div>
+                </div>
+            </div>
+        </div>
+        
+        <div class="section">
+            <h2>PORTAFOGLIO COSTI (MONEY BOX)</h2>
+            {''.join([f'<div class="money-item"><span>{item.get("label_it", item.get("code", ""))}</span><span style="color: #D4AF37;">{"€" + str(item.get("value", "")) if item.get("value") else ("€" + str(item.get("range", {}).get("min", "")) + " - €" + str(item.get("range", {}).get("max", "")) if item.get("range") else item.get("type", "N/A"))}</span></div>' for item in money_box.get("items", [])])}
+            <div class="total">
+                <div style="display: flex; justify-content: space-between; align-items: center;">
+                    <span>TOTALE COSTI EXTRA STIMATI</span>
+                    <span class="total-value">€{money_box.get("total_extra_costs", {}).get("range", {}).get("min", 0):,} - €{money_box.get("total_extra_costs", {}).get("range", {}).get("max", 0):,}</span>
+                </div>
+            </div>
+        </div>
+        
+        <div class="section">
+            <h2>RIEPILOGO</h2>
+            <p>{summary.get('summary_it', 'Analisi completata.')}</p>
+        </div>
+        
+        <div class="disclaimer">
+            <p><strong>AVVISO IMPORTANTE</strong></p>
+            <p>{summary.get('disclaimer_it', 'Documento informativo. Non costituisce consulenza legale.')}</p>
+            <p>{summary.get('disclaimer_en', 'Informational document. Not legal advice.')}</p>
+        </div>
+        
+        <div class="footer">
+            <p>Report generato da Nexodify Forensic Engine</p>
+            <p>Case ID: {analysis.get('case_id', 'N/A')} | Data: {analysis.get('created_at', 'N/A')}</p>
+        </div>
+    </div>
+</body>
+</html>"""
+    
+    return html
+
+# ===================
+# IMAGE FORENSICS ENDPOINT
+# ===================
 
 @api_router.post("/analysis/image")
 async def analyze_images(request: Request, files: List[UploadFile] = File(...)):
@@ -780,7 +1124,6 @@ async def analyze_images(request: Request, files: List[UploadFile] = File(...)):
     case_id = f"img_case_{uuid.uuid4().hex[:8]}"
     run_id = f"img_run_{uuid.uuid4().hex[:8]}"
     
-    # For now, create a basic response (image analysis would need vision model)
     result = {
         "ok": True,
         "mode": "IMAGE_FORENSICS",
@@ -802,16 +1145,13 @@ async def analyze_images(request: Request, files: List[UploadFile] = File(...)):
                     "what_i_see_it": f"Analizzate {len(files)} immagini dell'immobile",
                     "what_i_see_en": f"Analyzed {len(files)} property images",
                     "why_it_matters_it": "Le immagini forniscono contesto visivo per la valutazione",
-                    "why_it_matters_en": "Images provide visual context for assessment",
-                    "recommended_next_photo_it": "Foto dettagliata di eventuali problemi identificati",
-                    "recommended_next_photo_en": "Detailed photo of any identified issues"
+                    "why_it_matters_en": "Images provide visual context for assessment"
                 }
             ],
-            "materials_observed": ["NOT_ANALYZED"],
-            "defects_observed": ["NOT_ANALYZED"],
-            "compliance_flags": [],
-            "summary_it": f"Caricate {len(files)} immagini. Analisi visiva richiede modello vision dedicato.",
-            "summary_en": f"Uploaded {len(files)} images. Visual analysis requires dedicated vision model."
+            "summary_it": f"Caricate {len(files)} immagini. Per un'analisi visiva dettagliata, si raccomanda un sopralluogo professionale.",
+            "summary_en": f"Uploaded {len(files)} images. For detailed visual analysis, professional inspection recommended.",
+            "disclaimer_it": "Documento informativo. Non costituisce consulenza legale.",
+            "disclaimer_en": "Informational document. Not legal advice."
         }
     }
     
@@ -839,23 +1179,43 @@ async def analyze_images(request: Request, files: List[UploadFile] = File(...)):
     return result
 
 # ===================
-# ASSISTANT QA ENDPOINT
+# ASSISTANT QA ENDPOINT (PERIZIA-AWARE)
 # ===================
 
-ASSISTANT_SYSTEM_PROMPT = """You are Nexodify Assistant, an expert on Italian real-estate auctions, perizia documents, and property analysis.
+ASSISTANT_SYSTEM_PROMPT = """Sei Nexodify Assistant, un esperto di aste immobiliari italiane, perizie CTU, e analisi documentale immobiliare.
 
-Rules:
-1. Answer questions about Italian real estate auctions, CTU/perizia documents, legal requirements
-2. If a specific case is referenced, use the provided context
-3. Always provide bilingual responses (Italian first, then English)
-4. Never provide legal advice - only informational guidance
-5. Be precise and cite sources when possible
+COMPETENZE:
+- Legge italiana sulle aste immobiliari (DPR 380/2001, L. 47/85, L. 724/94, L. 326/03)
+- Interpretazione perizie CTU
+- Conformità urbanistica e catastale
+- Condoni edilizi e sanatorie
+- Formalità ipotecarie e pignoramenti
+- Calcolo costi accessori aste
+- Valutazione rischi immobiliari
 
-Output JSON with: answer_it, answer_en, needs_more_info, missing_inputs, safe_disclaimer_it, safe_disclaimer_en"""
+REGOLE:
+1. Rispondi SEMPRE in italiano prima, poi in inglese
+2. Se hai contesto da una perizia analizzata, usalo per risposte specifiche
+3. Cita fonti normative quando possibile
+4. NON fornire mai consulenza legale - solo informazioni
+5. Raccomanda sempre di consultare professionisti qualificati per decisioni importanti
+
+DISCLAIMER (includi sempre):
+"Le informazioni fornite hanno carattere esclusivamente informativo e non costituiscono consulenza legale, fiscale o professionale."
+
+Formato risposta JSON:
+{
+  "answer_it": "risposta in italiano",
+  "answer_en": "risposta in inglese", 
+  "needs_more_info": "YES/NO",
+  "missing_inputs": [],
+  "safe_disclaimer_it": "...",
+  "safe_disclaimer_en": "..."
+}"""
 
 @api_router.post("/analysis/assistant")
 async def assistant_qa(request: Request):
-    """Answer user questions about perizia/real estate"""
+    """Answer user questions about perizia/real estate - with context from analyzed documents"""
     user = await require_auth(request)
     data = await request.json()
     question = data.get("question")
@@ -879,23 +1239,48 @@ async def assistant_qa(request: Request):
     
     run_id = f"qa_run_{uuid.uuid4().hex[:8]}"
     
-    # Get related case context if provided
+    # Get context from user's analyzed perizie
     context = ""
     if related_case_id:
         analysis = await db.perizia_analyses.find_one({"case_id": related_case_id, "user_id": user.user_id}, {"_id": 0})
         if analysis:
-            context = f"\nRelated case analysis summary: {json.dumps(analysis.get('result', {}).get('summary_for_client', {}))}"
+            result = analysis.get('result', {})
+            context = f"""
+CONTESTO PERIZIA ANALIZZATA:
+- File: {analysis.get('file_name')}
+- Procedura: {result.get('case_header', {}).get('procedure_id', 'N/A')}
+- Tribunale: {result.get('case_header', {}).get('tribunale', 'N/A')}
+- Prezzo Base: {result.get('dati_certi_del_lotto', {}).get('prezzo_base_asta', {}).get('formatted', 'N/A')}
+- Semaforo: {result.get('semaforo_generale', {}).get('status', 'N/A')}
+- Riepilogo: {result.get('summary_for_client', {}).get('summary_it', 'N/A')}
+"""
+    else:
+        # Get user's most recent analysis for context
+        recent = await db.perizia_analyses.find_one(
+            {"user_id": user.user_id},
+            {"_id": 0},
+            sort=[("created_at", -1)]
+        )
+        if recent:
+            result = recent.get('result', {})
+            context = f"""
+ULTIMA PERIZIA ANALIZZATA DALL'UTENTE:
+- File: {recent.get('file_name')}
+- Procedura: {result.get('case_header', {}).get('procedure_id', 'N/A')}
+- Prezzo Base: {result.get('dati_certi_del_lotto', {}).get('prezzo_base_asta', {}).get('formatted', 'N/A')}
+"""
     
     chat = LlmChat(
         api_key=EMERGENT_LLM_KEY,
-        session_id=f"assistant_{run_id}",
+        session_id=f"assistant_{user.user_id}_{run_id}",
         system_message=ASSISTANT_SYSTEM_PROMPT
-    ).with_model("gemini", "gemini-2.5-flash")
+    ).with_model("openai", "gpt-4o")
     
-    prompt = f"""User question: {question}
-{context}
+    prompt = f"""{context}
 
-Provide a helpful response in JSON format with answer_it, answer_en, needs_more_info (YES/NO), missing_inputs (array), safe_disclaimer_it, safe_disclaimer_en."""
+DOMANDA UTENTE: {question}
+
+Rispondi in modo chiaro e utile, citando la normativa italiana quando rilevante. Output JSON."""
     
     try:
         response = await chat.send_message(UserMessage(text=prompt))
@@ -914,11 +1299,11 @@ Provide a helpful response in JSON format with answer_it, answer_en, needs_more_
         except:
             answer = {
                 "answer_it": response,
-                "answer_en": response,
+                "answer_en": "",
                 "needs_more_info": "NO",
                 "missing_inputs": [],
-                "safe_disclaimer_it": "Documento informativo, non è consulenza legale.",
-                "safe_disclaimer_en": "Informational only; not legal advice."
+                "safe_disclaimer_it": "Le informazioni fornite hanno carattere esclusivamente informativo e non costituiscono consulenza legale.",
+                "safe_disclaimer_en": "Information provided is for informational purposes only and does not constitute legal advice."
             }
     except Exception as e:
         logger.error(f"Assistant error: {e}")
@@ -927,8 +1312,8 @@ Provide a helpful response in JSON format with answer_it, answer_en, needs_more_
             "answer_en": "Sorry, an error occurred. Please try again later.",
             "needs_more_info": "NO",
             "missing_inputs": [],
-            "safe_disclaimer_it": "Documento informativo, non è consulenza legale.",
-            "safe_disclaimer_en": "Informational only; not legal advice."
+            "safe_disclaimer_it": "Le informazioni fornite hanno carattere esclusivamente informativo e non costituiscono consulenza legale.",
+            "safe_disclaimer_en": "Information provided is for informational purposes only and does not constitute legal advice."
         }
     
     result = {
@@ -980,7 +1365,7 @@ async def get_perizia_history(request: Request, limit: int = 20, skip: int = 0):
     
     analyses = await db.perizia_analyses.find(
         {"user_id": user.user_id},
-        {"_id": 0}
+        {"_id": 0, "raw_text": 0}  # Exclude raw_text for performance
     ).sort("created_at", -1).skip(skip).limit(limit).to_list(limit)
     
     total = await db.perizia_analyses.count_documents({"user_id": user.user_id})
@@ -994,7 +1379,7 @@ async def get_perizia_detail(analysis_id: str, request: Request):
     
     analysis = await db.perizia_analyses.find_one(
         {"analysis_id": analysis_id, "user_id": user.user_id},
-        {"_id": 0}
+        {"_id": 0, "raw_text": 0}
     )
     
     if not analysis:
@@ -1053,7 +1438,7 @@ async def get_dashboard_stats(request: Request):
     # Calculate semaforo distribution
     pipeline = [
         {"$match": {"user_id": user.user_id}},
-        {"$group": {"_id": "$result.result.semaforo_generale.status", "count": {"$sum": 1}}}
+        {"$group": {"_id": "$result.semaforo_generale.status", "count": {"$sum": 1}}}
     ]
     semaforo_dist = await db.perizia_analyses.aggregate(pipeline).to_list(10)
     
