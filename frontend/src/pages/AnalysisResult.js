@@ -344,13 +344,26 @@ const AnalysisResult = () => {
   const summary = summaryData;
   const qa = qaPass.status ? qaPass : (result.qa || {});
 
-  // Get money box items
+  // Get money box items - support both old and new format
   const moneyBoxItems = Array.isArray(moneyBox.items) ? moneyBox.items : [];
+  
+  // Get money box total - support both old and new format
+  const moneyBoxTotal = moneyBox.totale_extra_budget || moneyBox.total_extra_costs;
 
-  // Get legal killers as object
-  const legalKillersObj = legalKillers.items ? 
-    legalKillers.items.reduce((acc, item) => { acc[item.key] = item; return acc; }, {}) :
-    legalKillers;
+  // Get legal killers - convert new array format to object for display
+  const legalKillersObj = legalKillers.items 
+    ? legalKillers.items.reduce((acc, item) => { 
+        const key = item.killer || item.key || `item_${acc.length}`;
+        acc[key] = item; 
+        return acc; 
+      }, {}) 
+    : (typeof legalKillers === 'object' ? legalKillers : {});
+
+  // Debug logging for troubleshooting
+  console.log('MoneyBox items:', moneyBoxItems.length, moneyBoxItems);
+  console.log('LegalKillers:', Object.keys(legalKillersObj).length, legalKillersObj);
+  console.log('Dati certi:', dati);
+  console.log('Semaforo:', semaforo);
 
   return (
     <div className="min-h-screen bg-[#09090b]">
