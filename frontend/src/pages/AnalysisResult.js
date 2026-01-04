@@ -127,7 +127,7 @@ const MoneyBoxItem = ({ item }) => {
   );
 };
 
-// Legal Killer Item Component with Evidence
+// Legal Killer Item Component with Evidence - supports both old and ROMA STANDARD formats
 const LegalKillerItem = ({ name, data }) => {
   const status = safeRender(data?.status, 'NOT_SPECIFIED');
   const evidence = getEvidence(data);
@@ -135,21 +135,33 @@ const LegalKillerItem = ({ name, data }) => {
   const pages = hasEvidence ? [...new Set(evidence.map(e => e.page).filter(Boolean))] : [];
   
   const getStatusIcon = (status) => {
-    if (status === 'YES') return <XCircle className="w-5 h-5 text-red-400" />;
-    if (status === 'NO') return <CheckCircle className="w-5 h-5 text-emerald-400" />;
+    const normalizedStatus = status.toUpperCase();
+    if (normalizedStatus === 'YES' || normalizedStatus === 'SI') return <XCircle className="w-5 h-5 text-red-400" />;
+    if (normalizedStatus === 'NO') return <CheckCircle className="w-5 h-5 text-emerald-400" />;
     return <HelpCircle className="w-5 h-5 text-amber-400" />;
   };
 
   const getStatusBg = (status) => {
-    if (status === 'YES') return 'bg-red-500/10 border-red-500/30';
-    if (status === 'NO') return 'bg-emerald-500/10 border-emerald-500/30';
+    const normalizedStatus = status.toUpperCase();
+    if (normalizedStatus === 'YES' || normalizedStatus === 'SI') return 'bg-red-500/10 border-red-500/30';
+    if (normalizedStatus === 'NO') return 'bg-emerald-500/10 border-emerald-500/30';
     return 'bg-amber-500/10 border-amber-500/30';
   };
 
   const formatName = (name) => {
+    // If it's a long killer name from new format, use it directly
+    if (name.includes(' ')) return name;
+    // Old format - convert underscore to space
     return name.replace(/_/g, ' ').split(' ').map(w => 
       w.charAt(0).toUpperCase() + w.slice(1).toLowerCase()
     ).join(' ');
+  };
+  
+  // Get action text - new format uses 'action', old uses 'action_required_it'
+  const actionText = data?.action || data?.action_required_it || '';
+  
+  // Get the display name - use 'killer' from new format or formatted name
+  const displayName = data?.killer || formatName(name);
   };
 
   return (
