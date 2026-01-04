@@ -3,6 +3,11 @@ import sys
 import json
 from datetime import datetime
 import os
+import io
+from reportlab.pdfgen import canvas
+from reportlab.lib.pagesizes import letter
+from reportlab.pdfbase import pdfmetrics
+from reportlab.pdfbase.ttfonts import TTFont
 
 class NexodifyAPITester:
     def __init__(self, base_url="https://property-analyzer-10.preview.emergentagent.com"):
