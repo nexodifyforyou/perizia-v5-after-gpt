@@ -770,31 +770,79 @@ const AnalysisResult = () => {
               </div>
             </div>
             
-            {/* Abusi Edilizi */}
+            {/* Abusi Edilizi / Conformità - Section 5 */}
             <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-6">
               <h2 className="text-xl font-serif font-bold text-zinc-100 mb-4">Abusi Edilizi / Conformità</h2>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <DataValueWithEvidence 
+                  label="Conformità Urbanistica" 
+                  value={abusi.conformita_urbanistica?.status}
+                  evidence={getEvidence(abusi.conformita_urbanistica)}
+                />
+                {abusi.conformita_urbanistica?.detail && (
+                  <div className="p-3 bg-zinc-950 rounded-lg md:col-span-2">
+                    <p className="text-xs text-zinc-500 mb-1">Dettaglio Conformità</p>
+                    <p className="text-sm text-zinc-300">{abusi.conformita_urbanistica.detail}</p>
+                  </div>
+                )}
+                <DataValueWithEvidence 
+                  label="Conformità Catastale" 
+                  value={abusi.conformita_catastale?.status}
+                  evidence={getEvidence(abusi.conformita_catastale)}
+                />
                 <DataValueWithEvidence 
                   label="Condono Presente" 
                   value={abusi.condono?.presente || abusi.condono?.present}
                   evidence={getEvidence(abusi.condono)}
                 />
+                {(abusi.condono?.anno || abusi.condono?.pratica) && (
+                  <DataValueWithEvidence 
+                    label="Pratica Condono" 
+                    value={`${abusi.condono.pratica || ''} (${abusi.condono.anno || ''}) - ${abusi.condono.stato || ''}`}
+                    evidence={getEvidence(abusi.condono)}
+                  />
+                )}
                 <DataValueWithEvidence 
-                  label="Status Condono" 
-                  value={abusi.condono?.status}
-                  evidence={getEvidence(abusi.condono)}
-                />
-                <DataValueWithEvidence 
-                  label="Agibilità" 
+                  label="Agibilità/Abitabilità" 
                   value={abusi.agibilita?.status || abusi.agibilita}
                   evidence={getEvidence(abusi.agibilita)}
                 />
                 <DataValueWithEvidence 
-                  label="Commerciabilità" 
-                  value={abusi.commerciabilita?.status}
-                  evidence={getEvidence(abusi.commerciabilita)}
+                  label="APE (Certificato Energetico)" 
+                  value={abusi.ape?.status || abusi.ape}
+                  evidence={getEvidence(abusi.ape)}
                 />
               </div>
+              
+              {/* Impianti Section */}
+              {abusi.impianti && (
+                <div className="mt-4 p-4 bg-zinc-950 rounded-lg">
+                  <p className="text-xs text-zinc-500 mb-2">Conformità Impianti</p>
+                  <div className="grid grid-cols-3 gap-4">
+                    <div className="text-center">
+                      <p className="text-xs text-zinc-400">Elettrico</p>
+                      <p className={`text-sm font-medium ${
+                        abusi.impianti.elettrico?.conformita === 'SI' ? 'text-emerald-400' : 
+                        abusi.impianti.elettrico?.conformita === 'NO' ? 'text-red-400' : 'text-amber-400'
+                      }`}>{abusi.impianti.elettrico?.conformita || 'NON RISULTA'}</p>
+                    </div>
+                    <div className="text-center">
+                      <p className="text-xs text-zinc-400">Termico</p>
+                      <p className={`text-sm font-medium ${
+                        abusi.impianti.termico?.conformita === 'SI' ? 'text-emerald-400' : 
+                        abusi.impianti.termico?.conformita === 'NO' ? 'text-red-400' : 'text-amber-400'
+                      }`}>{abusi.impianti.termico?.conformita || 'NON RISULTA'}</p>
+                    </div>
+                    <div className="text-center">
+                      <p className="text-xs text-zinc-400">Idrico</p>
+                      <p className={`text-sm font-medium ${
+                        abusi.impianti.idrico?.conformita === 'SI' ? 'text-emerald-400' : 
+                        abusi.impianti.idrico?.conformita === 'NO' ? 'text-red-400' : 'text-amber-400'
+                      }`}>{abusi.impianti.idrico?.conformita || 'NON RISULTA'}</p>
+                    </div>
+                  </div>
+                </div>
+              )}
             </div>
             
             {/* Stato Conservativo */}
