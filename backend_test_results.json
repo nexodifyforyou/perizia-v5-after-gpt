@@ -1,0 +1,197 @@
+{
+  "timestamp": "2026-01-04T16:04:47.227005",
+  "total_tests": 7,
+  "passed_tests": 6,
+  "success_rate": 85.71428571428571,
+  "test_details": [
+    {
+      "test": "Health Check",
+      "method": "GET",
+      "endpoint": "api/health",
+      "expected_status": 200,
+      "actual_status": 200,
+      "success": true,
+      "response": {
+        "status": "healthy",
+        "timestamp": "2026-01-04T16:04:46.878190+00:00"
+      }
+    },
+    {
+      "test": "Get Plans",
+      "method": "GET",
+      "endpoint": "api/plans",
+      "expected_status": 200,
+      "actual_status": 200,
+      "success": true,
+      "response": {
+        "plans": [
+          {
+            "plan_id": "free",
+            "name": "Free Trial",
+            "name_it": "Prova Gratuita",
+            "price": 0.0,
+            "currency": "eur",
+            "features": [
+              "3 Perizia Scans",
+              "5 Image Analyses",
+              "10 Assistant Messages",
+              "Basic Reports"
+            ],
+            "features_it": [
+              "3 Scansioni Perizia",
+              "5 Analisi Immagini",
+              "10 Messaggi Assistente",
+              "Report Base"
+            ],
+            "quota": {
+              "perizia_scans_remaining": 3,
+              "image_scans_remaining": 5,
+              "assistant_messages_remaining": 10
+            }
+          },
+          {
+            "plan_id": "pro",
+            "name": "Professional",
+            "name_it": "Professionale",
+            "price": 49.0,
+            "currency": "eur",
+            "features": [
+              "50 Perizia Scans/month",
+              "100 Image Analyses/month",
+              "Unlimited Assistant",
+              "Premium Reports",
+              "Priority Support"
+            ],
+            "features_it": [
+              "50 Scansioni Perizia/mese",
+              "100 Analisi Immagini/mese",
+              "Assistente Illimitato",
+              "Report Premium",
+              "Supporto Prioritario"
+            ],
+            "quota": {
+              "perizia_scans_remaining": 50,
+              "image_scans_remaining": 100,
+              "assistant_messages_remaining": 9999
+            }
+          },
+          {
+            "plan_id": "enterprise",
+            "name": "Enterprise",
+            "name_it": "Enterprise",
+            "price": 199.0,
+            "currency": "eur",
+            "features": [
+              "Unlimited Perizia Scans",
+              "Unlimited Image Analyses",
+              "Unlimited Assistant",
+              "Custom Reports",
+              "API Access",
+              "Dedicated Support"
+            ],
+            "features_it": [
+              "Scansioni Perizia Illimitate",
+              "Analisi Immagini Illimitate",
+              "Assistente Illimitato",
+              "Report Personalizzati",
+              "Accesso API",
+              "Supporto Dedicato"
+            ],
+            "quota": {
+              "perizia_scans_remaining": 9999,
+              "image_scans_remaining": 9999,
+              "assistant_messages_remaining": 9999
+            }
+          }
+        ]
+      }
+    },
+    {
+      "test": "Auth Me (No Token)",
+      "method": "GET",
+      "endpoint": "api/auth/me",
+      "expected_status": 401,
+      "actual_status": 401,
+      "success": true,
+      "response": {
+        "detail": "Not authenticated"
+      }
+    },
+    {
+      "test": "Auth Me (With Token)",
+      "method": "GET",
+      "endpoint": "api/auth/me",
+      "expected_status": 200,
+      "actual_status": 200,
+      "success": true,
+      "response": {
+        "user_id": "test-user-1767542686584",
+        "email": "test.user.1767542686586@example.com",
+        "name": "Test User",
+        "picture": "https://via.placeholder.com/150",
+        "plan": "pro",
+        "is_master_admin": false,
+        "quota": {
+          "perizia_scans_remaining": 50,
+          "image_scans_remaining": 100,
+          "assistant_messages_remaining": 9999
+        },
+        "created_at": "2026-01-04T16:04:46.586000"
+      }
+    },
+    {
+      "test": "Dashboard Stats",
+      "method": "GET",
+      "endpoint": "api/dashboard/stats",
+      "expected_status": 200,
+      "actual_status": 200,
+      "success": true,
+      "response": {
+        "total_analyses": 0,
+        "total_image_forensics": 0,
+        "total_assistant_queries": 0,
+        "recent_analyses": [],
+        "semaforo_distribution": {},
+        "quota": {
+          "perizia_scans_remaining": 50,
+          "image_scans_remaining": 100,
+          "assistant_messages_remaining": 9999
+        },
+        "plan": "pro"
+      }
+    },
+    {
+      "test": "Perizia Upload (No Auth)",
+      "method": "POST",
+      "endpoint": "api/analysis/perizia",
+      "expected_status": 401,
+      "actual_status": 422,
+      "success": false,
+      "response": {
+        "detail": [
+          {
+            "type": "missing",
+            "loc": [
+              "body",
+              "file"
+            ],
+            "msg": "Field required",
+            "input": null,
+            "url": "https://errors.pydantic.dev/2.12/v/missing"
+          }
+        ]
+      }
+    },
+    {
+      "test": "Assistant (No Auth)",
+      "method": "POST",
+      "endpoint": "api/analysis/assistant",
+      "expected_status": 401,
+      "actual_status": 401,
+      "success": true,
+      "response": {
+        "detail": "Not authenticated"
+      }
+    }
+  ]
+}
