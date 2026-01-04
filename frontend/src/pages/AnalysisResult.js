@@ -26,6 +26,34 @@ import { toast } from 'sonner';
 
 const API_URL = process.env.REACT_APP_BACKEND_URL;
 
+// Helper function to safely render any value (handles objects, arrays, primitives)
+const safeRender = (value, fallback = 'N/A') => {
+  if (value === null || value === undefined) return fallback;
+  if (typeof value === 'string') return value || fallback;
+  if (typeof value === 'number') return value.toString();
+  if (typeof value === 'boolean') return value ? 'Sì' : 'No';
+  if (Array.isArray(value)) {
+    if (value.length === 0) return fallback;
+    return value.map(v => safeRender(v, '')).filter(Boolean).join(', ') || fallback;
+  }
+  if (typeof value === 'object') {
+    // Try common field names
+    if (value.status) return safeRender(value.status, fallback);
+    if (value.value) return safeRender(value.value, fallback);
+    if (value.label_it) return safeRender(value.label_it, fallback);
+    if (value.text) return safeRender(value.text, fallback);
+    if (value.note) return safeRender(value.note, fallback);
+    // Return JSON string for debugging if needed
+    try {
+      const str = JSON.stringify(value);
+      return str.length > 100 ? str.substring(0, 100) + '...' : str;
+    } catch {
+      return fallback;
+    }
+  }
+  return String(value) || fallback;
+};
+
 // Money Box Item Component
 const MoneyBoxItem = ({ item }) => {
   const getTypeColor = (type) => {
@@ -38,26 +66,38 @@ const MoneyBoxItem = ({ item }) => {
     }
   };
 
+  const formatValue = () => {
+    const type = safeRender(item.type, 'UNKNOWN');
+    if (type === 'NEXODIFY_ESTIMATE' && item.range) {
+      const min = item.range.min;
+      const max = item.range.max;
+      return `€${min?.toLocaleString() || '?'} - €${max?.toLocaleString() || '?'}`;
+    }
+    if (item.value !== undefined && item.value !== null) {
+      const val = typeof item.value === 'number' ? item.value : parseFloat(item.value);
+      return isNaN(val) ? safeRender(item.value) : `€${val.toLocaleString()}`;
+    }
+    return type;
+  };
+
   return (
     <div className="flex items-start justify-between p-4 bg-zinc-950/50 rounded-lg border border-zinc-800">
       <div className="flex-1">
         <div className="flex items-center gap-2 mb-1">
-          <span className="font-mono text-xs text-gold">{item.code}</span>
-          <span className="text-sm font-medium text-zinc-100">{item.label_it}</span>
+          <span className="font-mono text-xs text-gold">{safeRender(item.code, '?')}</span>
+          <span className="text-sm font-medium text-zinc-100">{safeRender(item.label_it, item.label || 'Item')}</span>
         </div>
-        <p className="text-xs text-zinc-500">{item.label_en}</p>
+        <p className="text-xs text-zinc-500">{safeRender(item.label_en, '')}</p>
         {item.action_required_it && (
-          <p className="text-xs text-amber-400 mt-1">{item.action_required_it}</p>
+          <p className="text-xs text-amber-400 mt-1">{safeRender(item.action_required_it)}</p>
+        )}
+        {item.note_it && (
+          <p className="text-xs text-zinc-400 mt-1">{safeRender(item.note_it)}</p>
         )}
       </div>
       <div className="text-right">
-        <span className={`font-mono text-sm font-bold ${getTypeColor(item.type)}`}>
-          {item.type === 'NEXODIFY_ESTIMATE' && item.range 
-            ? `€${item.range.min?.toLocaleString()} - €${item.range.max?.toLocaleString()}`
-            : item.value 
-              ? `€${item.value.toLocaleString()}`
-              : item.type
-          }
+        <span className={`font-mono text-sm font-bold ${getTypeColor(safeRender(item.type))}`}>
+          {formatValue()}
         </span>
       </div>
     </div>
@@ -66,6 +106,8 @@ const MoneyBoxItem = ({ item }) => {
 
 // Legal Killer Item Component
 const LegalKillerItem = ({ name, data }) => {
+  const status = safeRender(data?.status, 'UNKNOWN');
+  
   const getStatusIcon = (status) => {
     switch (status) {
       case 'YES': return <XCircle className="w-5 h-5 text-red-400" />;
@@ -83,17 +125,17 @@ const LegalKillerItem = ({ name, data }) => {
   };
 
   return (
-    <div className={`p-4 rounded-lg border ${getStatusBg(data?.status)}`}>
+    <div className={`p-4 rounded-lg border ${getStatusBg(status)}`}>
       <div className="flex items-start gap-3">
-        {getStatusIcon(data?.status)}
+        {getStatusIcon(status)}
         <div className="flex-1">
           <p className="text-sm font-medium text-zinc-100">
             {name.replace(/_/g, ' ').toUpperCase()}
           </p>
-          <p className="text-xs text-zinc-500 mt-1">{data?.action_required_it}</p>
+          <p className="text-xs text-zinc-500 mt-1">{safeRender(data?.action_required_it, data?.action_required_en || '')}</p>
         </div>
         <span className="font-mono text-xs px-2 py-1 rounded bg-zinc-800">
-          {data?.status || 'UNKNOWN'}
+          {status}
         </span>
       </div>
     </div>
@@ -102,6 +144,8 @@ const LegalKillerItem = ({ name, data }) => {
 
 // Red Flag Item Component
 const RedFlagItem = ({ flag }) => {
+  const severity = safeRender(flag.severity, 'AMBER');
+  
   const getSeverityColor = (severity) => {
     switch (severity) {
       case 'RED': return 'border-red-500/30 bg-red-500/5';
@@ -111,33 +155,43 @@ const RedFlagItem = ({ flag }) => {
   };
 
   return (
-    <div className={`p-4 rounded-lg border ${getSeverityColor(flag.severity)}`}>
+    <div className={`p-4 rounded-lg border ${getSeverityColor(severity)}`}>
       <div className="flex items-start gap-3">
         <AlertTriangle className={`w-5 h-5 flex-shrink-0 ${
-          flag.severity === 'RED' ? 'text-red-400' : 'text-amber-400'
+          severity === 'RED' ? 'text-red-400' : 'text-amber-400'
         }`} />
         <div>
-          <p className="text-sm font-medium text-zinc-100">{flag.flag_it}</p>
-          <p className="text-xs text-zinc-500 mt-1">{flag.flag_en}</p>
-          <p className="text-xs text-zinc-400 mt-2">
-            <span className="text-gold">Azione:</span> {flag.action_it}
-          </p>
+          <p className="text-sm font-medium text-zinc-100">{safeRender(flag.flag_it, flag.title_it || flag.code || 'Flag')}</p>
+          <p className="text-xs text-zinc-500 mt-1">{safeRender(flag.flag_en, flag.title_en || '')}</p>
+          {(flag.action_it || flag.action_en) && (
+            <p className="text-xs text-zinc-400 mt-2">
+              <span className="text-gold">Azione:</span> {safeRender(flag.action_it, flag.action_en || '')}
+            </p>
+          )}
         </div>
       </div>
     </div>
   );
 };
 
+// Data Display Card Component
+const DataCard = ({ icon: Icon, label, value, color = 'text-zinc-100' }) => (
+  <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-4">
+    <div className="flex items-center gap-2 mb-3 text-zinc-500">
+      <Icon className="w-4 h-4" />
+      <span className="text-xs uppercase font-mono">{label}</span>
+    </div>
+    <p className={`text-xl font-mono font-bold ${color}`}>
+      {safeRender(value, 'N/A')}
+    </p>
+  </div>
+);
+
 const AnalysisResult = () => {
   const { analysisId } = useParams();
   const { user, logout } = useAuth();
   const [analysis, setAnalysis] = useState(null);
   const [loading, setLoading] = useState(true);
-
-  useEffect(() => {
-    fetchAnalysis();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [analysisId]);
 
   const fetchAnalysis = async () => {
     try {
@@ -151,6 +205,11 @@ const AnalysisResult = () => {
       setLoading(false);
     }
   };
+
+  useEffect(() => {
+    fetchAnalysis();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [analysisId]);
 
   if (loading) {
     return (
@@ -178,20 +237,26 @@ const AnalysisResult = () => {
     );
   }
 
+  // Safely extract nested result data
   const result = analysis.result?.result || analysis.result || {};
   const semaforo = result.semaforo_generale || {};
   const decision = result.decision_rapida_client || {};
   const moneyBox = result.money_box || {};
-  const datiCerti = result.dati_certi_del_lotto || {};
-  const abusi = result.abusi_edilizi_conformita || {};
+  const datiCerti = result.dati_certi_del_lotto || result.dati_certi || {};
+  const abusi = result.abusi_edilizi_conformita || result.abusi_edilizi || {};
   const occupativo = result.stato_occupativo || {};
   const conservativo = result.stato_conservativo || {};
   const formalita = result.formalita || {};
   const legalKillers = result.legal_killers_checklist || {};
-  const redFlags = result.red_flags_operativi || [];
-  const checklist = result.checklist_pre_offerta || [];
+  const redFlags = Array.isArray(result.red_flags_operativi) ? result.red_flags_operativi : [];
+  const checklist = Array.isArray(result.checklist_pre_offerta) ? result.checklist_pre_offerta : [];
   const summary = result.summary_for_client || {};
   const qa = result.qa || {};
+  const caseHeader = result.case_header || {};
+
+  // Get money box items (handle different formats)
+  const moneyBoxItems = Array.isArray(moneyBox.items) ? moneyBox.items : 
+                        Array.isArray(moneyBox) ? moneyBox : [];
 
   return (
     <div className="min-h-screen bg-[#09090b]">
@@ -209,25 +274,28 @@ const AnalysisResult = () => {
           <div className="flex items-start justify-between">
             <div>
               <h1 className="text-2xl font-serif font-bold text-zinc-100 mb-2">
-                {analysis.case_title || analysis.file_name}
+                {safeRender(analysis.case_title || analysis.file_name, 'Analisi Perizia')}
               </h1>
               <div className="flex items-center gap-4 text-sm text-zinc-500">
-                <span className="font-mono">Case: {analysis.case_id}</span>
+                <span className="font-mono">Case: {safeRender(analysis.case_id)}</span>
                 <span>•</span>
                 <span>{new Date(analysis.created_at).toLocaleString('it-IT')}</span>
               </div>
+              {caseHeader.procedure_id && caseHeader.procedure_id !== 'NOT_SPECIFIED_IN_PERIZIA' && (
+                <p className="text-sm text-zinc-400 mt-2">Procedura: {safeRender(caseHeader.procedure_id)}</p>
+              )}
             </div>
             <div className="text-right">
-              <SemaforoBadge status={semaforo.status || 'AMBER'} />
-              <p className="text-sm text-zinc-400 mt-2">{semaforo.reason_it}</p>
+              <SemaforoBadge status={safeRender(semaforo.status, 'AMBER')} />
+              <p className="text-sm text-zinc-400 mt-2">{safeRender(semaforo.reason_it, semaforo.status_it || '')}</p>
             </div>
           </div>
           
           {/* Quick Decision */}
           <div className="mt-6 p-4 bg-zinc-950 rounded-lg border border-zinc-800">
             <p className="text-xs font-mono uppercase text-zinc-500 mb-2">Decisione Rapida</p>
-            <p className="text-lg font-semibold text-zinc-100">{decision.summary_it}</p>
-            <p className="text-sm text-zinc-500 mt-1">{decision.summary_en}</p>
+            <p className="text-lg font-semibold text-zinc-100">{safeRender(decision.summary_it, decision.risk_level_it || 'Analisi completata')}</p>
+            <p className="text-sm text-zinc-500 mt-1">{safeRender(decision.summary_en, decision.risk_level_en || '')}</p>
           </div>
         </div>
         
@@ -248,95 +316,69 @@ const AnalysisResult = () => {
               <h2 className="text-xl font-serif font-bold text-zinc-100 mb-4">Riepilogo</h2>
               <div className="space-y-4">
                 <div className="p-4 bg-zinc-950 rounded-lg">
-                  <p className="text-zinc-300">{summary.summary_it}</p>
+                  <p className="text-zinc-300">{safeRender(summary.summary_it, 'Analisi documento completata.')}</p>
                 </div>
-                <div className="p-4 bg-zinc-950 rounded-lg border-l-2 border-gold">
-                  <p className="text-zinc-400 text-sm">{summary.summary_en}</p>
-                </div>
+                {summary.summary_en && (
+                  <div className="p-4 bg-zinc-950 rounded-lg border-l-2 border-gold">
+                    <p className="text-zinc-400 text-sm">{safeRender(summary.summary_en)}</p>
+                  </div>
+                )}
               </div>
             </div>
             
             {/* Key Data Grid */}
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-              <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-4">
-                <div className="flex items-center gap-2 mb-3 text-zinc-500">
-                  <DollarSign className="w-4 h-4" />
-                  <span className="text-xs uppercase font-mono">Prezzo Base</span>
-                </div>
-                <p className="text-xl font-mono font-bold text-gold">
-                  {datiCerti.prezzo_base_asta || 'N/A'}
-                </p>
-              </div>
-              
-              <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-4">
-                <div className="flex items-center gap-2 mb-3 text-zinc-500">
-                  <Home className="w-4 h-4" />
-                  <span className="text-xs uppercase font-mono">Superficie</span>
-                </div>
-                <p className="text-xl font-mono font-bold text-zinc-100">
-                  {datiCerti.superficie_catastale || 'N/A'}
-                </p>
-              </div>
-              
-              <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-4">
-                <div className="flex items-center gap-2 mb-3 text-zinc-500">
-                  <Users className="w-4 h-4" />
-                  <span className="text-xs uppercase font-mono">Stato Occupativo</span>
-                </div>
-                <p className="text-xl font-mono font-bold text-zinc-100">
-                  {occupativo.status || 'N/A'}
-                </p>
-              </div>
-              
-              <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-4">
-                <div className="flex items-center gap-2 mb-3 text-zinc-500">
-                  <FileCheck className="w-4 h-4" />
-                  <span className="text-xs uppercase font-mono">Conformità Urbanistica</span>
-                </div>
-                <p className="text-xl font-mono font-bold text-zinc-100">
-                  {abusi.conformita_urbanistica || 'N/A'}
-                </p>
-              </div>
-              
-              <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-4">
-                <div className="flex items-center gap-2 mb-3 text-zinc-500">
-                  <FileCheck className="w-4 h-4" />
-                  <span className="text-xs uppercase font-mono">Conformità Catastale</span>
-                </div>
-                <p className="text-xl font-mono font-bold text-zinc-100">
-                  {abusi.conformita_catastale || 'N/A'}
-                </p>
-              </div>
-              
-              <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-4">
-                <div className="flex items-center gap-2 mb-3 text-zinc-500">
-                  <Scale className="w-4 h-4" />
-                  <span className="text-xs uppercase font-mono">Diritto Reale</span>
-                </div>
-                <p className="text-xl font-mono font-bold text-zinc-100">
-                  {datiCerti.diritto_reale || 'N/A'}
-                </p>
-              </div>
+              <DataCard 
+                icon={DollarSign} 
+                label="Prezzo Base" 
+                value={datiCerti.prezzo_base_asta || datiCerti.prezzo_base}
+                color="text-gold"
+              />
+              <DataCard 
+                icon={Home} 
+                label="Superficie" 
+                value={datiCerti.superficie_catastale || datiCerti.superficie}
+              />
+              <DataCard 
+                icon={Users} 
+                label="Stato Occupativo" 
+                value={occupativo.status || occupativo.stato}
+              />
+              <DataCard 
+                icon={FileCheck} 
+                label="Conformità Urbanistica" 
+                value={abusi.conformita_urbanistica}
+              />
+              <DataCard 
+                icon={FileCheck} 
+                label="Conformità Catastale" 
+                value={abusi.conformita_catastale}
+              />
+              <DataCard 
+                icon={Scale} 
+                label="Diritto Reale" 
+                value={datiCerti.diritto_reale}
+              />
             </div>
             
             {/* QA Status */}
             <div className={`p-4 rounded-xl border ${
-              qa.status === 'PASS' ? 'bg-emerald-500/10 border-emerald-500/30' :
-              qa.status === 'FAIL' ? 'bg-red-500/10 border-red-500/30' :
+              safeRender(qa.status) === 'PASS' ? 'bg-emerald-500/10 border-emerald-500/30' :
+              safeRender(qa.status) === 'FAIL' ? 'bg-red-500/10 border-red-500/30' :
               'bg-amber-500/10 border-amber-500/30'
             }`}>
               <div className="flex items-center gap-3">
-                {qa.status === 'PASS' ? (
+                {safeRender(qa.status) === 'PASS' ? (
                   <CheckCircle className="w-6 h-6 text-emerald-400" />
-                ) : qa.status === 'FAIL' ? (
+                ) : safeRender(qa.status) === 'FAIL' ? (
                   <XCircle className="w-6 h-6 text-red-400" />
                 ) : (
                   <AlertTriangle className="w-6 h-6 text-amber-400" />
                 )}
                 <div>
-                  <p className="font-semibold text-zinc-100">Quality Assurance: {qa.status}</p>
-                  {qa.reasons?.map((r, i) => (
-                    <p key={i} className="text-sm text-zinc-400">{r.reason_it}</p>
+                  <p className="font-semibold text-zinc-100">Quality Assurance: {safeRender(qa.status, 'PENDING')}</p>
+                  {Array.isArray(qa.reasons) && qa.reasons.map((r, i) => (
+                    <p key={i} className="text-sm text-zinc-400">{safeRender(r.reason_it, r.reason || r.code || '')}</p>
                   ))}
                 </div>
               </div>
@@ -351,22 +393,28 @@ const AnalysisResult = () => {
                 <h2 className="text-xl font-serif font-bold text-zinc-100">Money Box</h2>
               </div>
               
-              <div className="space-y-3">
-                {moneyBox.items?.map((item, index) => (
-                  <MoneyBoxItem key={index} item={item} />
-                ))}
-              </div>
+              {moneyBoxItems.length > 0 ? (
+                <div className="space-y-3">
+                  {moneyBoxItems.map((item, index) => (
+                    <MoneyBoxItem key={index} item={item} />
+                  ))}
+                </div>
+              ) : (
+                <p className="text-zinc-500 text-center py-8">Nessun dato sui costi disponibile</p>
+              )}
               
               {/* Total */}
-              <div className="mt-6 p-4 bg-gold/10 border border-gold/30 rounded-lg">
-                <div className="flex items-center justify-between">
-                  <span className="text-lg font-semibold text-zinc-100">Totale Costi Extra Stimati</span>
-                  <span className="text-2xl font-mono font-bold text-gold">
-                    €{moneyBox.total_extra_costs?.range?.min?.toLocaleString() || '?'} - €{moneyBox.total_extra_costs?.range?.max?.toLocaleString() || '?'}
-                    {moneyBox.total_extra_costs?.max_is_open && '+'}
-                  </span>
+              {moneyBox.total_extra_costs && (
+                <div className="mt-6 p-4 bg-gold/10 border border-gold/30 rounded-lg">
+                  <div className="flex items-center justify-between">
+                    <span className="text-lg font-semibold text-zinc-100">Totale Costi Extra Stimati</span>
+                    <span className="text-2xl font-mono font-bold text-gold">
+                      €{moneyBox.total_extra_costs?.range?.min?.toLocaleString() || '?'} - €{moneyBox.total_extra_costs?.range?.max?.toLocaleString() || '?'}
+                      {moneyBox.total_extra_costs?.max_is_open && '+'}
+                    </span>
+                  </div>
                 </div>
-              </div>
+              )}
             </div>
           </TabsContent>
           
@@ -378,24 +426,65 @@ const AnalysisResult = () => {
                 <h2 className="text-xl font-serif font-bold text-zinc-100">Legal Killers Checklist</h2>
               </div>
               
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                {Object.entries(legalKillers).map(([key, value]) => (
-                  <LegalKillerItem key={key} name={key} data={value} />
-                ))}
-              </div>
+              {Object.keys(legalKillers).length > 0 ? (
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  {Object.entries(legalKillers).map(([key, value]) => (
+                    <LegalKillerItem key={key} name={key} data={value} />
+                  ))}
+                </div>
+              ) : (
+                <p className="text-zinc-500 text-center py-8">Nessun legal killer da verificare</p>
+              )}
             </div>
           </TabsContent>
           
           {/* Details Tab */}
           <TabsContent value="details" className="space-y-6">
+            {/* Case Header Info */}
+            {Object.keys(caseHeader).length > 0 && (
+              <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-6">
+                <h2 className="text-xl font-serif font-bold text-zinc-100 mb-4">Dati Procedura</h2>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  {caseHeader.procedure_id && (
+                    <div className="p-4 bg-zinc-950 rounded-lg">
+                      <p className="text-xs font-mono text-zinc-500 mb-1">Procedura</p>
+                      <p className="text-zinc-100">{safeRender(caseHeader.procedure_id)}</p>
+                    </div>
+                  )}
+                  {caseHeader.lotto && (
+                    <div className="p-4 bg-zinc-950 rounded-lg">
+                      <p className="text-xs font-mono text-zinc-500 mb-1">Lotto</p>
+                      <p className="text-zinc-100">{safeRender(caseHeader.lotto)}</p>
+                    </div>
+                  )}
+                  {caseHeader.tribunale && (
+                    <div className="p-4 bg-zinc-950 rounded-lg">
+                      <p className="text-xs font-mono text-zinc-500 mb-1">Tribunale</p>
+                      <p className="text-zinc-100">{safeRender(caseHeader.tribunale)}</p>
+                    </div>
+                  )}
+                  {caseHeader.address && (
+                    <div className="p-4 bg-zinc-950 rounded-lg">
+                      <p className="text-xs font-mono text-zinc-500 mb-1">Indirizzo</p>
+                      <p className="text-zinc-100">{safeRender(caseHeader.address)}</p>
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+            
             {/* Abusi Edilizi */}
             <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-6">
               <h2 className="text-xl font-serif font-bold text-zinc-100 mb-4">Abusi Edilizi / Conformità</h2>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div className="p-4 bg-zinc-950 rounded-lg">
                   <p className="text-xs font-mono text-zinc-500 mb-1">Condono</p>
-                  <p className="text-zinc-100">Presente: {abusi.condono?.present || 'N/A'}</p>
-                  <p className="text-zinc-400 text-sm">Status: {abusi.condono?.status || 'N/A'}</p>
+                  <p className="text-zinc-100">Presente: {safeRender(abusi.condono?.present, abusi.condono?.presente || 'N/A')}</p>
+                  <p className="text-zinc-400 text-sm">Status: {safeRender(abusi.condono?.status, abusi.condono?.stato || 'N/A')}</p>
+                </div>
+                <div className="p-4 bg-zinc-950 rounded-lg">
+                  <p className="text-xs font-mono text-zinc-500 mb-1">Agibilità</p>
+                  <p className="text-zinc-100">{safeRender(abusi.agibilita, 'N/A')}</p>
                 </div>
               </div>
             </div>
@@ -403,14 +492,16 @@ const AnalysisResult = () => {
             {/* Stato Conservativo */}
             <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-6">
               <h2 className="text-xl font-serif font-bold text-zinc-100 mb-4">Stato Conservativo</h2>
-              <p className="text-zinc-300">{conservativo.note_it}</p>
-              <p className="text-zinc-500 text-sm mt-2">{conservativo.note_en}</p>
-              {conservativo.issues_found?.length > 0 && (
+              <p className="text-zinc-300">{safeRender(conservativo.note_it, conservativo.descrizione || 'Nessuna nota disponibile')}</p>
+              {conservativo.note_en && (
+                <p className="text-zinc-500 text-sm mt-2">{safeRender(conservativo.note_en)}</p>
+              )}
+              {Array.isArray(conservativo.issues_found) && conservativo.issues_found.length > 0 && (
                 <ul className="mt-4 space-y-2">
                   {conservativo.issues_found.map((issue, i) => (
                     <li key={i} className="flex items-center gap-2 text-amber-400 text-sm">
                       <AlertTriangle className="w-4 h-4" />
-                      {issue}
+                      {safeRender(issue)}
                     </li>
                   ))}
                 </ul>
@@ -423,35 +514,37 @@ const AnalysisResult = () => {
               <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                 <div className="p-4 bg-zinc-950 rounded-lg">
                   <p className="text-xs font-mono text-zinc-500 mb-1">Ipoteca</p>
-                  <p className="text-zinc-100">{formalita.ipoteca || 'N/A'}</p>
+                  <p className="text-zinc-100">{safeRender(formalita.ipoteca)}</p>
                 </div>
                 <div className="p-4 bg-zinc-950 rounded-lg">
                   <p className="text-xs font-mono text-zinc-500 mb-1">Pignoramento</p>
-                  <p className="text-zinc-100">{formalita.pignoramento || 'N/A'}</p>
+                  <p className="text-zinc-100">{safeRender(formalita.pignoramento)}</p>
                 </div>
                 <div className="p-4 bg-zinc-950 rounded-lg">
                   <p className="text-xs font-mono text-zinc-500 mb-1">Cancellazione Decreto</p>
-                  <p className="text-zinc-100">{formalita.cancellazione_decreto || 'N/A'}</p>
+                  <p className="text-zinc-100">{safeRender(formalita.cancellazione_decreto, formalita.cancellazione)}</p>
                 </div>
               </div>
             </div>
             
             {/* Checklist Pre-Offerta */}
-            <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-6">
-              <h2 className="text-xl font-serif font-bold text-zinc-100 mb-4">Checklist Pre-Offerta</h2>
-              <div className="space-y-2">
-                {checklist.map((item, i) => (
-                  <div key={i} className="flex items-center gap-3 p-3 bg-zinc-950 rounded-lg">
-                    {item.status === 'DONE' ? (
-                      <CheckCircle className="w-5 h-5 text-emerald-400" />
-                    ) : (
-                      <div className="w-5 h-5 rounded-full border-2 border-zinc-600" />
-                    )}
-                    <span className="text-zinc-300 text-sm">{item.item_it}</span>
-                  </div>
-                ))}
+            {checklist.length > 0 && (
+              <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-6">
+                <h2 className="text-xl font-serif font-bold text-zinc-100 mb-4">Checklist Pre-Offerta</h2>
+                <div className="space-y-2">
+                  {checklist.map((item, i) => (
+                    <div key={i} className="flex items-center gap-3 p-3 bg-zinc-950 rounded-lg">
+                      {safeRender(item.status) === 'DONE' ? (
+                        <CheckCircle className="w-5 h-5 text-emerald-400" />
+                      ) : (
+                        <div className="w-5 h-5 rounded-full border-2 border-zinc-600" />
+                      )}
+                      <span className="text-zinc-300 text-sm">{safeRender(item.item_it, item.item || item.text || '')}</span>
+                    </div>
+                  ))}
+                </div>
               </div>
-            </div>
+            )}
           </TabsContent>
           
           {/* Red Flags Tab */}
