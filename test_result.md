@@ -203,7 +203,8 @@ metadata:
   run_ui: true
 
 test_plan:
-  current_focus: []
+  current_focus:
+    - "DELETE Endpoints for Nexodify Forensic Engine"
   stuck_tasks: []
   test_all: false
   test_priority: "high_first"
