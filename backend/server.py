@@ -1457,12 +1457,23 @@ async def health():
 # Include the router in the main app
 app.include_router(api_router)
 
+# Get the frontend URL from environment for proper CORS configuration
+FRONTEND_URL = os.environ.get('FRONTEND_URL', '')
+CORS_ORIGINS = [
+    "http://localhost:3000",
+    "https://property-analyzer-10.preview.emergentagent.com",
+]
+# Add any additional origins from environment
+if FRONTEND_URL and FRONTEND_URL not in CORS_ORIGINS:
+    CORS_ORIGINS.append(FRONTEND_URL)
+
 app.add_middleware(
     CORSMiddleware,
     allow_credentials=True,
-    allow_origins=["*"],
+    allow_origins=CORS_ORIGINS,
     allow_methods=["*"],
     allow_headers=["*"],
+    expose_headers=["*"],
 )
 
 @app.on_event("shutdown")
