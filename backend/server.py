@@ -762,36 +762,46 @@ CASE_ID: {case_id}
 ═══════════════════════════════════════════════════════════════════════════════
 CONTENUTO DOCUMENTO (pagina per pagina)
 ═══════════════════════════════════════════════════════════════════════════════
-{page_content[:100000]}
+{page_content[:120000]}
 
 ═══════════════════════════════════════════════════════════════════════════════
-ISTRUZIONI
+ISTRUZIONI CRITICHE
 ═══════════════════════════════════════════════════════════════════════════════
 
-1. LEGGI ATTENTAMENTE ogni pagina del documento
-2. CERCA questi dati specifici:
-   - Numero procedura (R.G.E., E.I.)
+1. LEGGI ATTENTAMENTE OGNI pagina del documento
+
+2. CERCA questi dati SPECIFICI con numeri di pagina:
+   - Numero procedura (R.G.E., E.I.) - solitamente pagina 1 o "SCHEMA RIASSUNTIVO"
    - Tribunale
    - Indirizzo completo
-   - PREZZO BASE D'ASTA (€) - CRITICO
+   - PREZZO BASE D'ASTA (€) - cerca "PREZZO BASE D'ASTA" o in SCHEMA RIASSUNTIVO
    - Valore di stima e deprezzamenti
-   - Stato conformità urbanistica/catastale
-   - Stato condono/sanatoria
-   - Agibilità/Abitabilità
-   - Stato occupativo
-   - Ipoteche e pignoramenti
-   - Costi regolarizzazione stimati dalla CTU
 
-3. Per OGNI valore estratto:
+3. MONEY BOX - CERCA LA TABELLA "Deprezzamenti":
+   Questa tabella contiene valori EUR per:
+   - "Oneri di regolarizzazione urbanistica" → Item A - ESTRAI IL VALORE ESATTO IN EUR
+   - "Rischio assunto per mancata garanzia" o "Vizi occulti" → Item B - ESTRAI IL VALORE ESATTO
+   - "Valore finale di stima" → Valore dopo deprezzamenti
+   
+   ESEMPIO di formato tabella:
+   | Tipologia deprezzamento | Valore |
+   | Oneri di regolarizzazione urbanistica | 23000,00 € |
+   | Rischio assunto per mancata garanzia | 5000,00 € |
+   
+   SE TROVI QUESTI VALORI, inseriscili in section_3_money_box.items con stima_euro ESATTO
+
+4. CONFORMITÀ - CERCA "Certificazioni energetiche e dichiarazioni di conformità":
+   - "Non esiste il certificato energetico" → APE: ASSENTE
+   - "Non esiste la dichiarazione di conformità dell'impianto elettrico" → elettrico: NO
+   - "Non esiste la dichiarazione di conformità dell'impianto termico" → termico: NO  
+   - "Non esiste la dichiarazione di conformità dell'impianto idrico" → idrico: NO
+   - "non è presente l'abitabilità" → agibilita: ASSENTE
+
+5. Per OGNI valore estratto:
    - Indica il numero di PAGINA esatto
    - Cita il TESTO esatto dal documento (max 200 caratteri)
 
-4. CALCOLA:
-   - Money Box: somma costi regolarizzazione + stime prudenziali
-   - All-in Light: prezzo base + extra budget stimato
-   - Semaforo: ROSSO/GIALLO/VERDE basato su criticità trovate
-
-5. OUTPUT: Restituisci SOLO il JSON valido nel formato ROMA STANDARD specificato.
+6. OUTPUT: Restituisci SOLO il JSON valido nel formato ROMA STANDARD specificato.
    NON aggiungere markdown, commenti o testo extra.
 
 INIZIA L'ANALISI:"""
