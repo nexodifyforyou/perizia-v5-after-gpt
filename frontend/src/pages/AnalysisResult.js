@@ -582,18 +582,54 @@ const AnalysisResult = () => {
           
           {/* Overview Tab */}
           <TabsContent value="overview" className="space-y-6">
-            {/* Summary */}
-            <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-6">
-              <h2 className="text-xl font-serif font-bold text-zinc-100 mb-4">Riepilogo</h2>
-              <div className="space-y-4">
-                <div className="p-4 bg-zinc-950 rounded-lg">
-                  <p className="text-zinc-300">{safeRender(summary.summary_it, 'Analisi documento completata.')}</p>
-                </div>
-                {summary.summary_en && (
-                  <div className="p-4 bg-zinc-950 rounded-lg border-l-2 border-gold">
-                    <p className="text-zinc-400 text-sm">{safeRender(summary.summary_en)}</p>
-                  </div>
+            {/* Summary for Client - Section 12 Style */}
+            <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-6 relative">
+              {/* QA Badge - Small Corner */}
+              <div className={`absolute top-4 right-4 px-2 py-1 rounded text-xs font-mono flex items-center gap-1 ${
+                safeRender(qa.status) === 'PASS' ? 'bg-emerald-500/20 text-emerald-400' :
+                safeRender(qa.status) === 'FAIL' ? 'bg-red-500/20 text-red-400' :
+                'bg-amber-500/20 text-amber-400'
+              }`}>
+                {safeRender(qa.status) === 'PASS' ? (
+                  <CheckCircle className="w-3 h-3" />
+                ) : safeRender(qa.status) === 'FAIL' ? (
+                  <XCircle className="w-3 h-3" />
+                ) : (
+                  <AlertTriangle className="w-3 h-3" />
                 )}
+                <span>QA: {safeRender(qa.status, 'PENDING')}</span>
+              </div>
+              
+              <h2 className="text-xl font-serif font-bold text-zinc-100 mb-4">
+                📋 Summary for Client
+              </h2>
+              
+              {/* Recommendation - Main message */}
+              {(summary.raccomandazione || summary.summary_it) && (
+                <div className="space-y-3 mb-4">
+                  {summary.raccomandazione && (
+                    <div className="p-4 bg-amber-500/10 border-l-4 border-amber-500 rounded-r-lg">
+                      <p className="text-zinc-200 font-medium">
+                        ⚠️ {safeRender(summary.raccomandazione)}
+                      </p>
+                    </div>
+                  )}
+                  
+                  <div className="p-4 bg-zinc-950 rounded-lg">
+                    <p className="text-zinc-300 leading-relaxed">{safeRender(summary.summary_it, 'Analisi documento completata.')}</p>
+                  </div>
+                  
+                  {summary.summary_en && (
+                    <div className="p-4 bg-zinc-950/50 rounded-lg border-l-2 border-gold/30">
+                      <p className="text-zinc-400 text-sm italic">{safeRender(summary.summary_en)}</p>
+                    </div>
+                  )}
+                </div>
+              )}
+              
+              {/* Disclaimer */}
+              <div className="text-xs text-zinc-600 mt-4 pt-4 border-t border-zinc-800">
+                <p>📌 {safeRender(summary.disclaimer_it, 'Documento informativo. Non costituisce consulenza legale.')}</p>
               </div>
             </div>
             
@@ -633,45 +669,31 @@ const AnalysisResult = () => {
             </div>
             
             {/* Indice di Convenienza */}
-            {(indice.all_in_light_min || indice.all_in_light_max) && (
+            {(indice.all_in_light_min || indice.all_in_light_max || indice.prezzo_base) && (
               <div className="bg-gold/10 border border-gold/30 rounded-xl p-6">
-                <h3 className="text-lg font-semibold text-zinc-100 mb-4">Indice di Convenienza (All-In Light)</h3>
-                <p className="text-zinc-300 mb-2">{safeRender(indice.dry_read_it)}</p>
-                <div className="flex items-center gap-4 mt-4">
-                  <div className="text-center p-4 bg-zinc-950 rounded-lg flex-1">
-                    <p className="text-xs text-zinc-500 mb-1">MIN</p>
-                    <p className="text-2xl font-mono font-bold text-gold">€{(indice.all_in_light_min || 0).toLocaleString()}</p>
+                <h3 className="text-lg font-semibold text-zinc-100 mb-2">Indice di Convenienza (All-In Light)</h3>
+                <p className="text-zinc-300 mb-4 text-sm">{safeRender(indice.lettura_secca_it || indice.dry_read_it, 'Calcolo basato su prezzo base + extra budget stimato')}</p>
+                <div className="grid grid-cols-3 gap-4">
+                  <div className="text-center p-3 bg-zinc-950 rounded-lg">
+                    <p className="text-xs text-zinc-500 mb-1">PREZZO BASE</p>
+                    <p className="text-lg font-mono font-bold text-zinc-300">€{(indice.prezzo_base || dati.prezzo_base_asta?.value || 0).toLocaleString()}</p>
                   </div>
-                  <div className="text-center p-4 bg-zinc-950 rounded-lg flex-1">
-                    <p className="text-xs text-zinc-500 mb-1">MAX</p>
-                    <p className="text-2xl font-mono font-bold text-gold">€{(indice.all_in_light_max || 0).toLocaleString()}</p>
+                  <div className="text-center p-3 bg-zinc-950 rounded-lg">
+                    <p className="text-xs text-zinc-500 mb-1">ALL-IN MIN</p>
+                    <p className="text-lg font-mono font-bold text-gold">€{(indice.all_in_light_min || 0).toLocaleString()}</p>
+                  </div>
+                  <div className="text-center p-3 bg-zinc-950 rounded-lg">
+                    <p className="text-xs text-zinc-500 mb-1">ALL-IN MAX</p>
+                    <p className="text-lg font-mono font-bold text-gold">€{(indice.all_in_light_max || 0).toLocaleString()}</p>
                   </div>
                 </div>
+                {(indice.extra_budget_min || indice.extra_budget_max) && (
+                  <p className="text-xs text-zinc-500 mt-3 text-center">
+                    Extra budget: €{(indice.extra_budget_min || 0).toLocaleString()} - €{(indice.extra_budget_max || 0).toLocaleString()}
+                  </p>
+                )}
               </div>
             )}
-            
-            {/* QA Status */}
-            <div className={`p-4 rounded-xl border ${
-              safeRender(qa.status) === 'PASS' ? 'bg-emerald-500/10 border-emerald-500/30' :
-              safeRender(qa.status) === 'FAIL' ? 'bg-red-500/10 border-red-500/30' :
-              'bg-amber-500/10 border-amber-500/30'
-            }`}>
-              <div className="flex items-center gap-3">
-                {safeRender(qa.status) === 'PASS' ? (
-                  <CheckCircle className="w-6 h-6 text-emerald-400" />
-                ) : safeRender(qa.status) === 'FAIL' ? (
-                  <XCircle className="w-6 h-6 text-red-400" />
-                ) : (
-                  <AlertTriangle className="w-6 h-6 text-amber-400" />
-                )}
-                <div>
-                  <p className="font-semibold text-zinc-100">Quality Assurance: {safeRender(qa.status, qa.qa_pass || 'PENDING')}</p>
-                  {Array.isArray(qa.reasons) && qa.reasons.map((r, i) => (
-                    <p key={i} className="text-sm text-zinc-400">{safeRender(r.reason_it, r.detail_it || r.code || '')}</p>
-                  ))}
-                </div>
-              </div>
-            </div>
           </TabsContent>
           
           {/* Costs Tab */}
