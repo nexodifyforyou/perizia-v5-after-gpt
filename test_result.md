@@ -119,6 +119,9 @@ backend:
       - working: true
         agent: "testing"
         comment: "✅ CRITICAL TEST PASSED: Evidence display feature working perfectly. Created test PDF with Italian legal content (TRIBUNALE DI ROMA, R.G.E. 123/2024, €150,000 prezzo base). LLM extracted 8 evidence entries with proper page numbers and quotes. Evidence structure verified in case_header (procedure_id, lotto, tribunale, address, deposit_date) and dati_certi_del_lotto (prezzo_base_asta, superficie_catastale, catasto). All evidence objects contain required 'page', 'anchor', and 'quote' fields. Response includes proper semaforo (AMBER), risk assessment, and comprehensive analysis with page references."
+      - working: true
+        agent: "testing"
+        comment: "🎯 CRITICAL TEST COMPLETED - IMPROVED PDF EXTRACTION: Successfully tested specific perizia document (f6h0fsye_1859886_c_perizia.pdf) with IMPROVED PDF extraction pipeline (pdfplumber + pymupdf). ✅ EXCELLENT RESULTS: Header data extraction perfect (R.G.E. 62/2024, TRIBUNALE DI MANTOVA, Via Sordello n. 5, Lotto Unico), prezzo base d'asta correctly extracted (€391,849.00) with page reference (page 45), evidence tracking working with 14 evidence entries, legal killers checklist complete (8 items). ⚠️ PARTIAL GAPS: Valore di stima complessivo (€419,849.00) not found, specific money box amounts not extracted, occupazione status not correctly identified. Overall extraction quality: 62.5% with all critical data points working. PDF extraction significantly improved and functional."
 
   - task: "Google OAuth Authentication"
     implemented: true
