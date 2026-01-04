@@ -845,10 +845,39 @@ const AnalysisResult = () => {
               )}
             </div>
             
-            {/* Stato Conservativo */}
+            {/* Stato Conservativo - Section 7 */}
             <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-6">
-              <h2 className="text-xl font-serif font-bold text-zinc-100 mb-4">Stato Conservativo</h2>
-              <p className="text-zinc-300">{safeRender(conservativo.general_condition_it, 'Nessuna nota disponibile')}</p>
+              <h2 className="text-xl font-serif font-bold text-zinc-100 mb-4">Stato Conservativo / Impianti</h2>
+              <p className="text-zinc-300">{safeRender(conservativo.condizione_generale || conservativo.general_condition_it, 'Nessuna nota disponibile')}</p>
+              
+              {/* Carenze */}
+              {conservativo.carenze && (
+                <div className="mt-3 p-3 bg-amber-500/10 rounded border border-amber-500/30">
+                  <p className="text-xs text-amber-400 mb-1">Carenze riscontrate:</p>
+                  <p className="text-sm text-zinc-300">{conservativo.carenze}</p>
+                </div>
+              )}
+              
+              {/* Dettagli array */}
+              {Array.isArray(conservativo.dettagli) && conservativo.dettagli.length > 0 && (
+                <div className="mt-4 space-y-2">
+                  {conservativo.dettagli.map((det, i) => (
+                    <div key={i} className="flex items-start gap-2 p-2 bg-zinc-950 rounded">
+                      <Home className="w-4 h-4 text-zinc-500 mt-0.5" />
+                      <div>
+                        <span className="text-zinc-300 text-sm">{det.area}: {det.stato}</span>
+                        {getEvidence(det).length > 0 && (
+                          <span className="text-xs font-mono text-gold ml-2">
+                            p. {[...new Set(getEvidence(det).map(e => e.page))].join(', ')}
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+              
+              {/* Old format issues_found */}
               {Array.isArray(conservativo.issues_found) && conservativo.issues_found.length > 0 && (
                 <div className="mt-4 space-y-2">
                   {conservativo.issues_found.map((issue, i) => (
