@@ -999,95 +999,89 @@ async def analyze_perizia(request: Request, file: UploadFile = File(...)):
             }
         )
     
-    # Read PDF with ENHANCED extraction using pdfplumber and pymupdf
+    # Read PDF with Google Document AI for HIGH-QUALITY OCR extraction
     contents = await file.read()
     input_sha256 = hashlib.sha256(contents).hexdigest()
     
     try:
-        import pdfplumber
-        import fitz  # pymupdf
+        # Use Google Document AI for extraction
+        from document_ai import extract_pdf_with_google_docai
         
-        pages = []
-        full_text = ""
+        logger.info(f"Extracting text from {file.filename} using Google Document AI...")
         
-        # Method 1: Try pdfplumber first (best for structured text)
-        logger.info(f"Extracting text from {file.filename} using pdfplumber...")
-        try:
+        # Determine mime type
+        mime_type = "application/pdf"
+        if file.filename.lower().endswith(('.png', '.jpg', '.jpeg')):
+            mime_type = f"image/{file.filename.split('.')[-1].lower()}"
+            if mime_type == "image/jpg":
+                mime_type = "image/jpeg"
+        
+        # Extract with Google Document AI
+        docai_result = extract_pdf_with_google_docai(contents, mime_type)
+        
+        if not docai_result.get("success"):
+            logger.warning(f"Google Document AI failed: {docai_result.get('error')}, falling back to pdfplumber")
+            # Fallback to pdfplumber
+            import pdfplumber
+            pages = []
+            full_text = ""
             with pdfplumber.open(io.BytesIO(contents)) as pdf:
                 for i, page in enumerate(pdf.pages):
-                    # Extract text with better settings
-                    page_text = page.extract_text(
-                        x_tolerance=3,
-                        y_tolerance=3,
-                        layout=True,
-                        x_density=7.25,
-                        y_density=13
-                    ) or ""
-                    
-                    # Also try to extract tables
-                    tables = page.extract_tables()
-                    table_text = ""
-                    if tables:
-                        for table in tables:
-                            for row in table:
-                                if row:
-                                    table_text += " | ".join([str(cell) if cell else "" for cell in row]) + "\n"
-                    
-                    combined_text = page_text + "\n" + table_text if table_text else page_text
-                    pages.append({"page_number": i + 1, "text": combined_text})
-                    full_text += f"\n\n{'='*60}\nPAGINA {i + 1}\n{'='*60}\n{combined_text}"
-                    
-            logger.info(f"pdfplumber extracted {len(pages)} pages, {len(full_text)} chars total")
-        except Exception as e:
-            logger.warning(f"pdfplumber failed: {e}, falling back to pymupdf")
-            pages = []
+                    page_text = page.extract_text(x_tolerance=3, y_tolerance=3, layout=True) or ""
+                    pages.append({"page_number": i + 1, "text": page_text})
+                    full_text += f"\n\n{'='*60}\nPAGINA {i + 1}\n{'='*60}\n{page_text}"
+        else:
+            # Use Google Document AI results
+            pages = docai_result.get("pages", [])
+            
+            # Build full_text with page markers for LLM
             full_text = ""
-        
-        # Method 2: If pdfplumber failed or got little text, try pymupdf
-        if len(full_text.strip()) < 1000:
-            logger.info(f"Trying pymupdf extraction...")
-            pages = []
-            full_text = ""
-            doc = fitz.open(stream=contents, filetype="pdf")
-            for i, page in enumerate(doc):
-                # Extract text with better settings
-                page_text = page.get_text("text", sort=True) or ""
+            for page_data in pages:
+                page_num = page_data.get("page_number", 0)
+                page_text = page_data.get("text", "")
                 
-                # Also try blocks for better layout
-                blocks = page.get_text("blocks", sort=True)
-                if blocks:
-                    block_text = "\n".join([b[4] for b in blocks if isinstance(b[4], str)])
-                    if len(block_text) > len(page_text):
-                        page_text = block_text
+                # Include table data as formatted text
+                tables = page_data.get("tables", [])
+                table_text = ""
+                for table in tables:
+                    table_text += "\n[TABELLA]\n"
+                    for row in table.get("header_rows", []):
+                        table_text += " | ".join(row) + "\n"
+                    table_text += "-" * 40 + "\n"
+                    for row in table.get("body_rows", []):
+                        table_text += " | ".join(row) + "\n"
+                    table_text += "[/TABELLA]\n"
                 
-                pages.append({"page_number": i + 1, "text": page_text})
-                full_text += f"\n\n{'='*60}\nPAGINA {i + 1}\n{'='*60}\n{page_text}"
-            doc.close()
-            logger.info(f"pymupdf extracted {len(pages)} pages, {len(full_text)} chars total")
-        
-        # Method 3: Final fallback to PyPDF2
-        if len(full_text.strip()) < 500:
-            logger.info(f"Trying PyPDF2 fallback...")
-            pages = []
-            full_text = ""
-            pdf_reader = PdfReader(io.BytesIO(contents))
-            for i, page in enumerate(pdf_reader.pages):
-                page_text = page.extract_text() or ""
-                pages.append({"page_number": i + 1, "text": page_text})
-                full_text += f"\n\n{'='*60}\nPAGINA {i + 1}\n{'='*60}\n{page_text}"
-            logger.info(f"PyPDF2 extracted {len(pages)} pages, {len(full_text)} chars total")
+                combined_text = page_text
+                if table_text:
+                    combined_text += "\n" + table_text
+                
+                full_text += f"\n\n{'='*60}\nPAGINA {page_num}\n{'='*60}\n{combined_text}"
+            
+            logger.info(f"Google Document AI extracted {len(pages)} pages, {len(full_text)} chars total")
+            
+            # Log detailed extraction info
+            for i, p in enumerate(pages[:10]):
+                logger.info(f"Page {p.get('page_number', i+1)}: {p.get('char_count', len(p.get('text', '')))} chars, "
+                           f"{len(p.get('tables', []))} tables, confidence: {p.get('confidence', 0):.2%}")
         
         if not full_text.strip():
             raise HTTPException(status_code=400, detail="Impossibile estrarre testo dal PDF. Il file potrebbe essere scansionato o protetto. / Could not extract text from PDF. File may be scanned or protected.")
         
-        # Log extraction quality
-        logger.info(f"Final extraction: {len(pages)} pages, {len(full_text)} total chars")
-        for i, p in enumerate(pages[:5]):  # Log first 5 pages
-            logger.info(f"Page {i+1}: {len(p['text'])} chars")
-        
+    except ImportError as e:
+        logger.error(f"Google Document AI import error: {e}")
+        # Fallback to pdfplumber if Document AI not available
+        import pdfplumber
+        pages = []
+        full_text = ""
+        with pdfplumber.open(io.BytesIO(contents)) as pdf:
+            for i, page in enumerate(pdf.pages):
+                page_text = page.extract_text(x_tolerance=3, y_tolerance=3, layout=True) or ""
+                pages.append({"page_number": i + 1, "text": page_text})
+                full_text += f"\n\n{'='*60}\nPAGINA {i + 1}\n{'='*60}\n{page_text}"
     except Exception as e:
         logger.error(f"PDF parsing error: {e}")
-        raise HTTPException(status_code=400, detail="File PDF non valido / Invalid PDF file")
+        raise HTTPException(status_code=400, detail=f"Errore elaborazione PDF / PDF processing error: {str(e)}")
     
     # Generate IDs
     case_id = f"case_{uuid.uuid4().hex[:8]}"
