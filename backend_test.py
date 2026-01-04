@@ -697,7 +697,7 @@ def create_test_user_and_session():
 
 def main():
     print("🚀 Starting Nexodify Forensic Engine API Tests")
-    print("🎯 FOCUS: Evidence Display Feature (P0 Critical)")
+    print("🎯 FOCUS: DELETE Endpoints Testing")
     print("=" * 60)
     
     # Create test user and session
@@ -720,8 +720,12 @@ def main():
         tester.test_auth_me_with_token(session_token)
         tester.test_dashboard_stats()
         
-        # CRITICAL TESTS - Evidence Display Feature
-        print("\n🎯 CRITICAL TESTS - Evidence Display Feature...")
+        # MAIN FOCUS: DELETE ENDPOINTS TESTING
+        print("\n🎯 MAIN FOCUS: DELETE ENDPOINTS TESTING...")
+        tester.test_delete_endpoints_comprehensive()
+        
+        # Previous critical tests for regression
+        print("\n🔄 Regression Tests - Previous Critical Features...")
         tester.test_perizia_analysis_with_evidence()
         tester.test_assistant_with_context()
         
