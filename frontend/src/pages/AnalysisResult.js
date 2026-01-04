@@ -136,6 +136,7 @@ const AnalysisResult = () => {
 
   useEffect(() => {
     fetchAnalysis();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [analysisId]);
 
   const fetchAnalysis = async () => {

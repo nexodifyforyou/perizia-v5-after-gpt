@@ -31,6 +31,7 @@ const Billing = () => {
     if (sessionId) {
       checkPaymentStatus(sessionId);
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [searchParams]);
 
   const fetchPlans = async () => {
