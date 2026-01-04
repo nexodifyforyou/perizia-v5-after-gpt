@@ -212,10 +212,13 @@ const RedFlagItem = ({ flag }) => {
 
 const AnalysisResult = () => {
   const { analysisId } = useParams();
+  const navigate = useNavigate();
   const { user, logout } = useAuth();
   const [analysis, setAnalysis] = useState(null);
   const [loading, setLoading] = useState(true);
   const [downloading, setDownloading] = useState(false);
+  const [showDeleteModal, setShowDeleteModal] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
 
   const fetchAnalysis = async () => {
     try {
@@ -257,6 +260,22 @@ const AnalysisResult = () => {
       toast.error('Errore durante il download');
     } finally {
       setDownloading(false);
+    }
+  };
+
+  const handleDelete = async () => {
+    setIsDeleting(true);
+    try {
+      await axios.delete(`${API_URL}/api/analysis/perizia/${analysisId}`, {
+        withCredentials: true
+      });
+      toast.success('Analisi eliminata con successo');
+      navigate('/history');
+    } catch (error) {
+      toast.error('Errore durante l\'eliminazione');
+    } finally {
+      setIsDeleting(false);
+      setShowDeleteModal(false);
     }
   };
 
