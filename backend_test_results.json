@@ -1,8 +1,9 @@
 {
-  "timestamp": "2026-01-04T16:04:47.227005",
-  "total_tests": 7,
-  "passed_tests": 6,
-  "success_rate": 85.71428571428571,
+  "timestamp": "2026-01-04T18:14:11.898199",
+  "total_tests": 10,
+  "passed_tests": 8,
+  "success_rate": 80.0,
+  "critical_failures": [],
   "test_details": [
     {
       "test": "Health Check",
@@ -13,7 +14,7 @@
       "success": true,
       "response": {
         "status": "healthy",
-        "timestamp": "2026-01-04T16:04:46.878190+00:00"
+        "timestamp": "2026-01-04T18:13:44.336343+00:00"
       }
     },
     {
@@ -118,6 +119,17 @@
       }
     },
     {
+      "test": "Session Auth Flow",
+      "method": "POST",
+      "endpoint": "api/auth/session",
+      "expected_status": 401,
+      "actual_status": 520,
+      "success": false,
+      "response": {
+        "detail": "Authentication failed"
+      }
+    },
+    {
       "test": "Auth Me (With Token)",
       "method": "GET",
       "endpoint": "api/auth/me",
@@ -125,8 +137,8 @@
       "actual_status": 200,
       "success": true,
       "response": {
-        "user_id": "test-user-1767542686584",
-        "email": "test.user.1767542686586@example.com",
+        "user_id": "test-user-1767550424212",
+        "email": "test.user.1767550424212@example.com",
         "name": "Test User",
         "picture": "https://via.placeholder.com/150",
         "plan": "pro",
@@ -136,7 +148,7 @@
           "image_scans_remaining": 100,
           "assistant_messages_remaining": 9999
         },
-        "created_at": "2026-01-04T16:04:46.586000"
+        "created_at": "2026-01-04T18:13:44.212000"
       }
     },
     {
@@ -158,6 +170,392 @@
           "assistant_messages_remaining": 9999
         },
         "plan": "pro"
+      }
+    },
+    {
+      "test": "CRITICAL: Perizia Analysis with Evidence",
+      "method": "POST",
+      "endpoint": "api/analysis/perizia",
+      "expected_status": 200,
+      "actual_status": 200,
+      "success": true,
+      "response": {
+        "ok": true,
+        "analysis_id": "analysis_d987737e6020",
+        "case_id": "case_40c4d017",
+        "run_id": "run_4dbc3a46",
+        "result": {
+          "schema_version": "nexodify_perizia_scan_v1",
+          "run": {
+            "run_id": "run_4dbc3a46",
+            "generated_at_utc": "ISO_DATE",
+            "input": {
+              "source_type": "perizia_pdf",
+              "file_name": "test_perizia.pdf",
+              "pages_total": 2
+            }
+          },
+          "case_header": {
+            "procedure_id": {
+              "value": "R.G.E. N. 123/2024",
+              "evidence": [
+                {
+                  "page": 1,
+                  "anchor": "R.G.E. N. 123/2024",
+                  "quote": "R.G.E. N. 123/2024"
+                }
+              ]
+            },
+            "lotto": {
+              "value": "Lotto Unico",
+              "evidence": [
+                {
+                  "page": 1,
+                  "anchor": "Lotto Unico",
+                  "quote": "Lotto Unico"
+                }
+              ]
+            },
+            "tribunale": {
+              "value": "TRIBUNALE DI ROMA",
+              "evidence": [
+                {
+                  "page": 1,
+                  "anchor": "TRIBUNALE DI ROMA",
+                  "quote": "TRIBUNALE DI ROMA"
+                }
+              ]
+            },
+            "address": {
+              "value": "Via Roma 123, 00100 Roma (RM)",
+              "evidence": [
+                {
+                  "page": 1,
+                  "anchor": "Via Roma 123, 00100 Roma (RM)",
+                  "quote": "IMMOBILE SITO IN:\nVia Roma 123, 00100 Roma (RM)"
+                }
+              ]
+            },
+            "deposit_date": {
+              "value": "15/03/2024",
+              "evidence": [
+                {
+                  "page": 1,
+                  "anchor": "Depositata il: 15/03/2024",
+                  "quote": "Depositata il: 15/03/2024"
+                }
+              ]
+            }
+          },
+          "semaforo_generale": {
+            "status": "AMBER",
+            "status_it": "GIALLO",
+            "status_en": "AMBER",
+            "reason_it": "Ipoteca presente, potenziale rischio di pignoramento.",
+            "reason_en": "Mortgage present, potential repossession risk.",
+            "evidence": [
+              {
+                "page": 2,
+                "anchor": "Ipoteca iscritta per",
+                "quote": "Ipoteca iscritta per \u20ac 200.000,00"
+              },
+              {
+                "page": 2,
+                "anchor": "Pignoramento trascritto",
+                "quote": "Pignoramento trascritto in data 01/02/2024"
+              }
+            ]
+          },
+          "decision_rapida_client": {
+            "risk_level": "MEDIUM_RISK",
+            "risk_level_it": "RISCHIO MEDIO",
+            "risk_level_en": "MEDIUM RISK",
+            "summary_it": "Presenza di ipoteca e pignoramento aumenta il rischio. Immobile libero da persone e cose al 10/03/2024.",
+            "summary_en": "Presence of mortgage and foreclosure increases risk. Property free of people and things as of 10/03/2024.",
+            "driver_rosso": [
+              {
+                "code": "MORTGAGE_PRESENT",
+                "headline_it": "Ipoteca presente",
+                "severity": "AMBER",
+                "evidence": [
+                  {
+                    "page": 2,
+                    "anchor": "Ipoteca iscritta per",
+                    "quote": "Ipoteca iscritta per \u20ac 200.000,00"
+                  }
+                ]
+              }
+            ]
+          },
+          "money_box": {
+            "items": [
+              {
+                "code": "A",
+                "label_it": "Regolarizzazione urbanistica",
+                "label_en": "Urban regularization",
+                "type": "NEXODIFY_ESTIMATE",
+                "value": 0,
+                "range": {
+                  "min": 0,
+                  "max": 0
+                },
+                "source": "NEXODIFY_ESTIMATE",
+                "evidence": [],
+                "action_required_it": "Verifica costi regolarizzazione urbanistica."
+              }
+            ],
+            "total_extra_costs": {
+              "range": {
+                "min": 0,
+                "max": 0
+              },
+              "max_is_open": false
+            }
+          },
+          "dati_certi_del_lotto": {
+            "prezzo_base_asta": {
+              "value": 150000,
+              "formatted": "\u20ac150.000",
+              "evidence": [
+                {
+                  "page": 1,
+                  "anchor": "prezzo base d'asta",
+                  "quote": "Il prezzo base d'asta \u00e8 fissato in \u20ac 150.000,00"
+                }
+              ]
+            },
+            "valore_tecnico_lordo": {
+              "value": "NOT_SPECIFIED_IN_PERIZIA",
+              "evidence": []
+            },
+            "deprezzamento_ctu_percent": {
+              "value": "NOT_SPECIFIED_IN_PERIZIA",
+              "evidence": []
+            },
+            "superficie_catastale": {
+              "value": "85 mq",
+              "evidence": [
+                {
+                  "page": 1,
+                  "anchor": "Superficie catastale",
+                  "quote": "Superficie catastale: 85 mq"
+                }
+              ]
+            },
+            "catasto": {
+              "categoria": "A/2",
+              "classe": "3",
+              "vani": "4",
+              "evidence": [
+                {
+                  "page": 1,
+                  "anchor": "Categoria: A/2, Classe: 3",
+                  "quote": "Categoria: A/2, Classe: 3, Vani: 4"
+                }
+              ]
+            },
+            "diritto_reale": {
+              "value": "NOT_SPECIFIED_IN_PERIZIA",
+              "evidence": []
+            }
+          },
+          "abusi_edilizi_conformita": {
+            "conformita_urbanistica": {
+              "status": "CONFORME",
+              "detail_it": "L'immobile risulta conforme alla documentazione urbanistica depositata.",
+              "evidence": [
+                {
+                  "page": 2,
+                  "anchor": "conforme alla documentazione urbanistica",
+                  "quote": "L'immobile risulta conforme alla documentazione urbanistica depositata"
+                }
+              ]
+            },
+            "conformita_catastale": {
+              "status": "CONFORME",
+              "evidence": [
+                {
+                  "page": 2,
+                  "anchor": "Conformit\u00e0 catastale",
+                  "quote": "Conformit\u00e0 catastale: CONFORME"
+                }
+              ]
+            },
+            "condono": {
+              "present": "UNKNOWN",
+              "practice_ids": [],
+              "status": "NOT_SPECIFIED_IN_PERIZIA",
+              "evidence": []
+            },
+            "agibilita": {
+              "status": "UNKNOWN",
+              "evidence": []
+            },
+            "commerciabilita": {
+              "status": "OK",
+              "evidence": [
+                {
+                  "page": 2,
+                  "anchor": "L'immobile risulta LIBERO",
+                  "quote": "L'immobile risulta LIBERO da persone e cose"
+                }
+              ]
+            }
+          },
+          "stato_occupativo": {
+            "status": "LIBERO",
+            "status_it": "Libero",
+            "title_opponible": "UNKNOWN",
+            "evidence": [
+              {
+                "page": 2,
+                "anchor": "L'immobile risulta LIBERO",
+                "quote": "L'immobile risulta LIBERO da persone e cose"
+              }
+            ]
+          },
+          "stato_conservativo": {
+            "general_condition_it": "Non specificato",
+            "issues_found": [],
+            "evidence": []
+          },
+          "formalita": {
+            "ipoteca": {
+              "status": "PRESENT",
+              "amount": 200000,
+              "evidence": [
+                {
+                  "page": 2,
+                  "anchor": "Ipoteca iscritta per",
+                  "quote": "Ipoteca iscritta per \u20ac 200.000,00"
+                }
+              ]
+            },
+            "pignoramento": {
+              "status": "PRESENT",
+              "evidence": [
+                {
+                  "page": 2,
+                  "anchor": "Pignoramento trascritto",
+                  "quote": "Pignoramento trascritto in data 01/02/2024"
+                }
+              ]
+            },
+            "cancellazione_decreto": {
+              "status": "NOT_SPECIFIED_IN_PERIZIA",
+              "evidence": []
+            }
+          },
+          "legal_killers_checklist": {
+            "PEEP_superficie": {
+              "status": "NOT_SPECIFIED_IN_PERIZIA",
+              "evidence": [],
+              "action_required_it": "Verifica restrizioni PEEP."
+            },
+            "donazione_catena_20anni": {
+              "status": "NOT_SPECIFIED_IN_PERIZIA",
+              "evidence": [],
+              "action_required_it": "Controlla storia delle donazioni."
+            },
+            "prelazione_stato_beni_culturali": {
+              "status": "NOT_SPECIFIED_IN_PERIZIA",
+              "evidence": [],
+              "action_required_it": "Verifica vincoli delle belle arti."
+            },
+            "usi_civici_diritti_demaniali": {
+              "status": "NOT_SPECIFIED_IN_PERIZIA",
+              "evidence": [],
+              "action_required_it": "Controlla usi civici e demaniali."
+            },
+            "fondo_patrimoniale": {
+              "status": "NOT_SPECIFIED_IN_PERIZIA",
+              "evidence": [],
+              "action_required_it": "Verifica fondo patrimoniale."
+            },
+            "servitu_atti_obbligo": {
+              "status": "NOT_SPECIFIED_IN_PERIZIA",
+              "evidence": [],
+              "action_required_it": "Controlla servit\u00f9 ambientali."
+            },
+            "formalita_non_cancellabili": {
+              "status": "NOT_SPECIFIED_IN_PERIZIA",
+              "evidence": [],
+              "action_required_it": "Verifica formalit\u00e0 persistenti."
+            },
+            "amianto": {
+              "status": "NOT_SPECIFIED_IN_PERIZIA",
+              "evidence": [],
+              "action_required_it": "Indagini sulla presenza di amianto."
+            }
+          },
+          "indice_di_convenienza": {
+            "prezzo_base_asta": 150000,
+            "extra_costs_min": 0,
+            "extra_costs_max": 0,
+            "all_in_light_min": 150000,
+            "all_in_light_max": 150000,
+            "dry_read_it": "Prezzo base d'asta \u20ac150.000 con ipoteca di \u20ac200.000 e pignoramento (pagina 2). Immobile libero al 10/03/2024.",
+            "dry_read_en": "Auction base price \u20ac150,000 with a \u20ac200,000 mortgage and foreclosure (page 2). Property free as of 10/03/2024."
+          },
+          "red_flags_operativi": [],
+          "checklist_pre_offerta": [
+            {
+              "item_it": "Verifica restrizioni PEEP.",
+              "item_en": "Verify PEEP restrictions.",
+              "priority": "P1",
+              "status": "TO_CHECK"
+            },
+            {
+              "item_it": "Controlla storia delle donazioni.",
+              "item_en": "Check donation history.",
+              "priority": "P1",
+              "status": "TO_CHECK"
+            },
+            {
+              "item_it": "Verifica vincoli delle belle arti.",
+              "item_en": "Verify cultural restrictions.",
+              "priority": "P1",
+              "status": "TO_CHECK"
+            }
+          ],
+          "summary_for_client": {
+            "summary_it": "Il Tribunale di Roma offre un immobile all'asta (R.G.E. N. 123/2024) a Via Roma 123, con prezzo base di \u20ac150.000 (pagina 1). L'immobile \u00e8 libero e conforme, ma gravato da ipoteca di \u20ac200.000 e pignoramento (pagina 2).",
+            "summary_en": "The Tribunal of Rome offers a property at auction (R.G.E. N. 123/2024) at Via Roma 123, with a base price of \u20ac150,000 (page 1). The property is free and compliant but burdened with a \u20ac200,000 mortgage and foreclosure (page 2).",
+            "disclaimer_it": "Documento informativo. Non costituisce consulenza legale.",
+            "disclaimer_en": "Informational document. Not legal advice."
+          },
+          "qa": {
+            "status": "PASS",
+            "reasons": []
+          }
+        }
+      }
+    },
+    {
+      "test": "Assistant Q&A",
+      "method": "POST",
+      "endpoint": "api/analysis/assistant",
+      "expected_status": 200,
+      "actual_status": 200,
+      "success": true,
+      "response": {
+        "ok": true,
+        "mode": "ASSISTANT_QA",
+        "result": {
+          "schema_version": "nexodify_assistant_v1",
+          "run": {
+            "run_id": "qa_run_04078edf",
+            "generated_at_utc": "2026-01-04T18:14:11.802024+00:00",
+            "case_id": null,
+            "revision": 0
+          },
+          "answer_it": "Per valutare i rischi principali di un immobile all'asta, ci sono vari aspetti da considerare: \n1. **Conformit\u00e0 urbanistica e catastale**: \u00c8 essenziale verificare che l'immobile sia conforme alle normative urbanistiche e catastali, ai sensi del DPR 380/2001. Incongruenze possono portare a spese aggiuntive per la regolarizzazione o a ritardi nella vendita.\n2. **Vincoli e oneri pregressi**: L'immobile potrebbe avere pendenze ipotecarie o altri gravami. \u00c8 importante verificare presso la Conservatoria chi sia il titolare dei diritti sull'immobile e quali vincoli possano esistere.\n3. **Abusivismi edilizi**: Secondo la L. 47/85 e successive modifiche, la presenza di abusi edilizi pu\u00f2 complicare l'acquisto, richiedendo sanatorie che possono essere costose o non sempre ottenibili.\n4. **Condizioni dell'immobile**: Le condizioni fisiche dell'immobile, evidenziate nella perizia, potrebbero richiedere spese di ristrutturazione o adeguamenti.\n5. **Occupazione**: Verificare se l'immobile \u00e8 occupato e, in tal caso, valutare se l'occupazione \u00e8 regolare o se necessiter\u00e0 di azioni legali per il rilascio.\nSi consiglia di analizzare attentamente la perizia e consultare un professionista qualificato per una valutazione complessiva.\n\n\"Le informazioni fornite hanno carattere esclusivamente informativo e non costituiscono consulenza legale, fiscale o professionale.\"",
+          "answer_en": "To assess the main risks of a property at auction, several factors should be considered:\n1. **Urban and cadastral compliance**: It is essential to verify that the property complies with urban and cadastral regulations, according to DPR 380/2001. Discrepancies can lead to additional costs for regularization or sale delays.\n2. **Existing encumbrances**: The property could have mortgage debts or other encumbrances. It is important to check with the Land Registry who holds the rights on the property and what constraints may exist.\n3. **Building violations**: According to L. 47/85 and subsequent amendments, the presence of building abuses can complicate the purchase, requiring amnesties that can be costly or not always obtainable.\n4. **Property conditions**: The physical conditions of the property, highlighted in the appraisal, may require renovation expenses or upgrades.\n5. **Occupation**: Check if the property is occupied and, if so, assess whether the occupation is lawful or if legal actions will be needed for release.\nIt is recommended to thoroughly review the appraisal and consult a qualified professional for a comprehensive assessment.\n\n\"The information provided is for informational purposes only and does not constitute legal, fiscal, or professional advice.\"",
+          "needs_more_info": "NO",
+          "missing_inputs": [],
+          "safe_disclaimer_it": "\"Le informazioni fornite hanno carattere esclusivamente informativo e non costituiscono consulenza legale, fiscale o professionale.\"",
+          "safe_disclaimer_en": "\"The information provided is for informational purposes only and does not constitute legal, fiscal, or professional advice.\""
+        }
       }
     },
     {
