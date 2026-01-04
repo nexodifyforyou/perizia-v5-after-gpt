@@ -101,3 +101,99 @@
 #====================================================================================================
 # Testing Data - Main Agent and testing sub agent both should log testing data below this section
 #====================================================================================================
+
+user_problem_statement: "Build a deterministic, audit-grade analyzer for Italian real-estate perizie/CTU documents. The system must produce evidence-tracked JSON outputs with page numbers and quotes for every extracted value."
+
+backend:
+  - task: "Perizia Analysis with Evidence"
+    implemented: true
+    working: "NA"
+    file: "/app/backend/server.py"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: true
+    status_history:
+      - working: "NA"
+        agent: "main"
+        comment: "Backend prompt updated to request evidence objects with page, anchor, quote. Needs testing to verify LLM returns proper evidence structure."
+
+  - task: "Google OAuth Authentication"
+    implemented: true
+    working: "NA"
+    file: "/app/backend/server.py"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: true
+    status_history:
+      - working: "NA"
+        agent: "main"
+        comment: "Session-based auth with cookies implemented. CORS configured with allow_credentials=True. User reports cross-domain cookie issues."
+
+  - task: "Image Forensics Analysis"
+    implemented: true
+    working: "NA"
+    file: "/app/backend/server.py"
+    stuck_count: 0
+    priority: "medium"
+    needs_retesting: true
+    status_history:
+      - working: "NA"
+        agent: "main"
+        comment: "Endpoint exists but actual image analysis logic needs verification."
+
+  - task: "Assistant Q&A"
+    implemented: true
+    working: "NA"
+    file: "/app/backend/server.py"
+    stuck_count: 0
+    priority: "medium"
+    needs_retesting: true
+    status_history:
+      - working: "NA"
+        agent: "main"
+        comment: "Assistant endpoint exists. Needs verification that it uses analysis context."
+
+frontend:
+  - task: "Evidence Display in Analysis Results"
+    implemented: true
+    working: "NA"
+    file: "/app/frontend/src/pages/AnalysisResult.js"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: true
+    status_history:
+      - working: "NA"
+        agent: "main"
+        comment: "EvidenceDisplay.js component created. AnalysisResult.js updated with DataValueWithEvidence components. Needs end-to-end test."
+
+  - task: "Authentication Flow"
+    implemented: true
+    working: "NA"
+    file: "/app/frontend/src/context/AuthContext.js"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: true
+    status_history:
+      - working: "NA"
+        agent: "main"
+        comment: "Google OAuth login implemented with Emergent Auth. withCredentials:true set. User reported session not persisting."
+
+metadata:
+  created_by: "main_agent"
+  version: "1.0"
+  test_sequence: 1
+  run_ui: true
+
+test_plan:
+  current_focus:
+    - "Perizia Analysis with Evidence"
+    - "Evidence Display in Analysis Results"
+    - "Google OAuth Authentication"
+    - "Authentication Flow"
+  stuck_tasks: []
+  test_all: false
+  test_priority: "high_first"
+
+agent_communication:
+  - agent: "main"
+    message: "Previous agent implemented evidence display feature (P0) but never tested it. Please run end-to-end test: 1) Login via Google OAuth 2) Upload a sample PDF perizia 3) Verify the API response contains 'evidence' arrays with 'page' and 'quote' keys 4) Verify the frontend displays page numbers and quotes. Also test authentication persistence - check if user stays logged in after page refresh."
