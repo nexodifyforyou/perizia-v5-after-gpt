@@ -408,6 +408,7 @@ def create_test_user_and_session():
 
 def main():
     print("🚀 Starting Nexodify Forensic Engine API Tests")
+    print("🎯 FOCUS: Evidence Display Feature (P0 Critical)")
     print("=" * 60)
     
     # Create test user and session
@@ -424,10 +425,17 @@ def main():
     # Test auth endpoints
     print("\n🔐 Testing Authentication...")
     tester.test_auth_me_without_token()
+    tester.test_session_auth_flow()
     
     if session_token:
         tester.test_auth_me_with_token(session_token)
         tester.test_dashboard_stats()
+        
+        # CRITICAL TESTS - Evidence Display Feature
+        print("\n🎯 CRITICAL TESTS - Evidence Display Feature...")
+        tester.test_perizia_analysis_with_evidence()
+        tester.test_assistant_with_context()
+        
     else:
         print("⚠️ Skipping authenticated tests - no session token")
     
@@ -439,12 +447,23 @@ def main():
     # Print results
     print(f"\n📊 Test Results: {tester.tests_passed}/{tester.tests_run} passed")
     
+    # Report critical failures
+    if tester.critical_failures:
+        print(f"\n🚨 CRITICAL FAILURES ({len(tester.critical_failures)}):")
+        for failure in tester.critical_failures:
+            print(f"   ❌ {failure.get('test', 'Unknown')}")
+            if 'issue' in failure:
+                print(f"      Issue: {failure['issue']}")
+    else:
+        print("\n✅ No critical failures detected")
+    
     # Save detailed results
     results = {
         "timestamp": datetime.now().isoformat(),
         "total_tests": tester.tests_run,
         "passed_tests": tester.tests_passed,
         "success_rate": (tester.tests_passed / tester.tests_run * 100) if tester.tests_run > 0 else 0,
+        "critical_failures": tester.critical_failures,
         "test_details": tester.test_results
     }
     
@@ -453,7 +472,16 @@ def main():
     
     print(f"📄 Detailed results saved to /app/backend_test_results.json")
     
-    return 0 if tester.tests_passed == tester.tests_run else 1
+    # Return exit code based on critical failures
+    if tester.critical_failures:
+        print("\n🚨 EXITING WITH ERROR - Critical failures detected")
+        return 1
+    elif tester.tests_passed == tester.tests_run:
+        print("\n✅ ALL TESTS PASSED")
+        return 0
+    else:
+        print(f"\n⚠️ SOME TESTS FAILED ({tester.tests_run - tester.tests_passed} failures)")
+        return 1
 
 if __name__ == "__main__":
     sys.exit(main())
