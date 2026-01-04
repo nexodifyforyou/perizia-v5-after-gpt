@@ -4,10 +4,12 @@ High-quality OCR extraction for Italian legal documents (Perizia/CTU)
 """
 
 import os
+import io
 import logging
 from typing import List, Dict, Any, Optional
 from google.cloud import documentai_v1 as documentai
 from google.api_core.client_options import ClientOptions
+from PyPDF2 import PdfReader, PdfWriter
 
 logger = logging.getLogger(__name__)
 
@@ -15,6 +17,9 @@ logger = logging.getLogger(__name__)
 GOOGLE_CLOUD_PROJECT = os.environ.get('GOOGLE_CLOUD_PROJECT', 'emergent-perizia')
 GOOGLE_CLOUD_LOCATION = os.environ.get('GOOGLE_CLOUD_LOCATION', 'eu')
 DOCUMENT_AI_PROCESSOR_ID = os.environ.get('DOCUMENT_AI_PROCESSOR_ID', '675530c0dde80224')
+
+# Page limit for Document AI (30 pages per request)
+MAX_PAGES_PER_REQUEST = 30
 
 class GoogleDocumentAIExtractor:
     """
@@ -44,9 +49,46 @@ class GoogleDocumentAIExtractor:
         
         logger.info(f"Initialized Google Document AI with processor: {self.processor_name}")
     
+    def _split_pdf(self, file_content: bytes, max_pages: int = MAX_PAGES_PER_REQUEST) -> List[tuple]:
+        """
+        Split a PDF into chunks if it exceeds the page limit.
+        
+        Returns:
+            List of tuples: (chunk_bytes, start_page, end_page)
+        """
+        try:
+            pdf_reader = PdfReader(io.BytesIO(file_content))
+            total_pages = len(pdf_reader.pages)
+            
+            if total_pages <= max_pages:
+                return [(file_content, 1, total_pages)]
+            
+            chunks = []
+            for start_page in range(0, total_pages, max_pages):
+                end_page = min(start_page + max_pages, total_pages)
+                
+                pdf_writer = PdfWriter()
+                for page_num in range(start_page, end_page):
+                    pdf_writer.add_page(pdf_reader.pages[page_num])
+                
+                output = io.BytesIO()
+                pdf_writer.write(output)
+                chunk_bytes = output.getvalue()
+                
+                # Page numbers are 1-indexed for user display
+                chunks.append((chunk_bytes, start_page + 1, end_page))
+                logger.info(f"Created PDF chunk: pages {start_page + 1}-{end_page}")
+            
+            return chunks
+            
+        except Exception as e:
+            logger.error(f"Error splitting PDF: {e}")
+            return [(file_content, 1, 0)]  # Return original as single chunk
+    
     def process_document(self, file_content: bytes, mime_type: str = "application/pdf") -> Dict[str, Any]:
         """
         Process a document using Google Document AI OCR.
+        Automatically splits large PDFs into chunks.
         
         Args:
             file_content: Raw bytes of the PDF/image file
@@ -58,43 +100,62 @@ class GoogleDocumentAIExtractor:
         try:
             logger.info(f"Processing document with Google Document AI ({len(file_content)} bytes)")
             
-            # Create raw document
-            raw_document = documentai.RawDocument(
-                content=file_content,
-                mime_type=mime_type
-            )
+            all_pages = []
+            full_text_parts = []
             
-            # Configure OCR options for Italian documents
-            process_options = documentai.ProcessOptions(
-                ocr_config=documentai.OcrConfig(
-                    enable_native_pdf_parsing=True,  # Extract embedded PDF text
-                    enable_image_quality_scores=True,  # Get quality metrics
+            # Split PDF if needed
+            if mime_type == "application/pdf":
+                chunks = self._split_pdf(file_content)
+            else:
+                chunks = [(file_content, 1, 1)]
+            
+            logger.info(f"Processing {len(chunks)} chunk(s)")
+            
+            for chunk_idx, (chunk_bytes, start_page, end_page) in enumerate(chunks):
+                logger.info(f"Processing chunk {chunk_idx + 1}/{len(chunks)} (pages {start_page}-{end_page})")
+                
+                # Create raw document
+                raw_document = documentai.RawDocument(
+                    content=chunk_bytes,
+                    mime_type=mime_type
                 )
-            )
+                
+                # Configure OCR options
+                process_options = documentai.ProcessOptions(
+                    ocr_config=documentai.OcrConfig(
+                        enable_native_pdf_parsing=True,
+                        enable_image_quality_scores=True,
+                    )
+                )
+                
+                # Build processing request
+                request = documentai.ProcessRequest(
+                    name=self.processor_name,
+                    raw_document=raw_document,
+                    process_options=process_options
+                )
+                
+                # Process document
+                response = self.client.process_document(request=request)
+                document = response.document
+                
+                logger.info(f"Chunk {chunk_idx + 1}: {len(document.pages)} pages, {len(document.text)} chars")
+                
+                # Extract structured data with correct page numbering
+                chunk_pages = self._extract_pages_data(document, page_offset=start_page - 1)
+                all_pages.extend(chunk_pages)
+                full_text_parts.append(document.text)
             
-            # Build processing request
-            request = documentai.ProcessRequest(
-                name=self.processor_name,
-                raw_document=raw_document,
-                process_options=process_options
-            )
+            full_text = "\n\n".join(full_text_parts)
             
-            # Process document
-            logger.info("Sending document to Google Document AI...")
-            response = self.client.process_document(request=request)
-            document = response.document
-            
-            logger.info(f"Document AI returned {len(document.pages)} pages, {len(document.text)} chars total")
-            
-            # Extract structured data
-            pages_data = self._extract_pages_data(document)
+            logger.info(f"Document AI extracted {len(all_pages)} total pages, {len(full_text)} chars total")
             
             return {
                 "success": True,
-                "pages": pages_data,
-                "full_text": document.text,
-                "total_pages": len(document.pages),
-                "total_chars": len(document.text)
+                "pages": all_pages,
+                "full_text": full_text,
+                "total_pages": len(all_pages),
+                "total_chars": len(full_text)
             }
             
         except Exception as e:
@@ -106,12 +167,13 @@ class GoogleDocumentAIExtractor:
                 "full_text": ""
             }
     
-    def _extract_pages_data(self, document: documentai.Document) -> List[Dict[str, Any]]:
+    def _extract_pages_data(self, document: documentai.Document, page_offset: int = 0) -> List[Dict[str, Any]]:
         """Extract structured data from each page."""
         pages_data = []
         
         for page_idx, page in enumerate(document.pages):
-            page_number = page.page_number if page.page_number else (page_idx + 1)
+            # Calculate actual page number with offset
+            actual_page_number = page_offset + page_idx + 1
             
             # Extract page text
             page_text = self._get_page_text(document, page)
@@ -130,7 +192,7 @@ class GoogleDocumentAIExtractor:
             height = float(page.dimension.height) if page.dimension else 0
             
             page_data = {
-                "page_number": page_number,
+                "page_number": actual_page_number,
                 "text": page_text,
                 "confidence": confidence,
                 "tables": tables,
@@ -141,7 +203,9 @@ class GoogleDocumentAIExtractor:
             }
             
             pages_data.append(page_data)
-            logger.info(f"Page {page_number}: {len(page_text)} chars, {len(tables)} tables, confidence: {confidence:.2%}")
+            logger.info(f"Page {actual_page_number}: {len(page_text)} chars, {len(tables)} tables, confidence: {confidence:.2%}")
+        
+        return pages_data
         
         return pages_data
     
