@@ -324,9 +324,14 @@ const Landing = () => {
             <Scale className="w-6 h-6 text-gold" />
             <span className="font-serif font-bold text-zinc-100">Nexodify</span>
           </div>
-          <p className="text-zinc-500 text-sm">
-            © 2025 Nexodify Forensic Engine. Documento informativo, non è consulenza legale.
-          </p>
+          <div className="text-center md:text-right">
+            <p className="text-zinc-500 text-sm">
+              © 2025 Nexodify Forensic Engine. Piattaforma di supporto all'analisi documentale.
+            </p>
+            <p className="text-zinc-600 text-xs mt-1">
+              Non costituisce consulenza legale, fiscale o professionale. Consultare sempre un professionista qualificato.
+            </p>
+          </div>
         </div>
       </footer>
     </div>
