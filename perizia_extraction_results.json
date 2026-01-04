@@ -1,0 +1,527 @@
+{
+  "timestamp": "2026-01-04T20:16:22.350963",
+  "test_type": "perizia_extraction_quality",
+  "document": "f6h0fsye_1859886_c_perizia.pdf",
+  "extraction_valid": false,
+  "validation_results": {
+    "header_data": true,
+    "price_data": false,
+    "money_box": false,
+    "conformita": false,
+    "occupazione": false,
+    "legal_killers": true,
+    "evidence_tracking": true,
+    "page_references": false
+  },
+  "response_data": {
+    "ok": true,
+    "analysis_id": "analysis_8451e1067ae6",
+    "case_id": "case_8e576550",
+    "run_id": "run_b0c50f3a",
+    "result": {
+      "schema_version": "nexodify_perizia_scan_v1",
+      "report_header": {
+        "title": "NEXODIFY INTELLIGENCE | Auction Scan",
+        "procedure": {
+          "value": "Esecuzione Immobiliare 62/2024 R.G.E.",
+          "evidence": [
+            {
+              "page": 1,
+              "quote": "Esecuzione Immobiliare 62/2024 del R.G.E."
+            }
+          ]
+        },
+        "lotto": {
+          "value": "Lotto Unico",
+          "evidence": [
+            {
+              "page": 7,
+              "quote": "Il lotto \u00e8 formato dai seguenti beni"
+            }
+          ]
+        },
+        "tribunale": {
+          "value": "TRIBUNALE DI MANTOVA",
+          "evidence": [
+            {
+              "page": 1,
+              "quote": "TRIBUNALE DI MANTOVA"
+            }
+          ]
+        },
+        "address": {
+          "value": "Via Sordello n. 5, San Giorgio Bigarello (MN)",
+          "evidence": [
+            {
+              "page": 5,
+              "quote": "San Giorgio Bigarello (MN) - Via Sordello n. 5"
+            }
+          ]
+        },
+        "generated_at": "ISO_DATE"
+      },
+      "section_1_semaforo_generale": {
+        "status": "GIALLO",
+        "status_label": "RISCHIO GLOBALE: GIALLO",
+        "semaforo_complessivo": {
+          "value": "GIALLO",
+          "evidence": []
+        },
+        "mutuabilita_stimata": {
+          "value": "PARZIALE",
+          "reason": "Incongruenze catastali riscontrate"
+        },
+        "driver": {
+          "value": "assenza corrispondenza catastale, aggiornamenti mappali",
+          "evidence": [
+            {
+              "page": 13,
+              "quote": "Non sussiste corrispondenza catastale"
+            }
+          ]
+        }
+      },
+      "section_2_decisione_rapida": {
+        "operazione_rating": "GIALLO",
+        "summary_it": "Prezzo base d'asta a \u20ac391.849,00. Incongruenze catastali e necessit\u00e0 di verifiche mappali. Stato occupativo non specificato chiaramente.",
+        "summary_en": "Base auction price at \u20ac391,849.00. Catastale discrepancies and need for mapping verification. Occupation status not clearly specified."
+      },
+      "section_3_money_box": {
+        "items": [
+          {
+            "voce": "A - Regolarizzazione urbanistica/ripristini",
+            "fonte_perizia": {
+              "value": "Non specificato in Perizia",
+              "evidence": []
+            },
+            "stima_euro": 0,
+            "stima_nota": "EUR X / Verifica tecnico"
+          },
+          {
+            "voce": "B - Completamento finiture/impianti",
+            "fonte_perizia": {
+              "value": "Non specificato in Perizia",
+              "evidence": []
+            },
+            "stima_euro": 0,
+            "stima_nota": "..."
+          },
+          {
+            "voce": "C - Ottenimento abitabilit\u00e0/agibilit\u00e0",
+            "fonte_perizia": {
+              "value": "Non specificato in Perizia",
+              "evidence": []
+            },
+            "stima_euro": 0,
+            "stima_nota": "..."
+          },
+          {
+            "voce": "D - Spese condominiali arretrate",
+            "fonte_perizia": {
+              "value": "Non specificato",
+              "evidence": []
+            },
+            "stima_euro": 0,
+            "stima_nota": "Verifica amministratore"
+          },
+          {
+            "voce": "E - Cancellazione formalit\u00e0",
+            "fonte_perizia": {
+              "value": "Non specificato",
+              "evidence": []
+            },
+            "stima_euro": 0,
+            "stima_nota": "Verifica legale"
+          },
+          {
+            "voce": "F - Costo liberazione",
+            "fonte_perizia": {
+              "value": "Non specificato",
+              "evidence": []
+            },
+            "stima_euro": 1500,
+            "stima_nota": "EUR 1.500 (prudenziale)"
+          }
+        ],
+        "totale_extra_budget": {
+          "min": 0,
+          "max": 1500,
+          "nota": "EUR 1.500+ (minimo prudenziale)"
+        }
+      },
+      "section_4_dati_certi": {
+        "prezzo_base_asta": {
+          "value": 391849,
+          "formatted": "EUR 391.849",
+          "evidence": [
+            {
+              "page": 45,
+              "quote": "Prezzo base d'asta: \u20ac 391.849,00"
+            }
+          ]
+        },
+        "valore_stima_complessivo": {
+          "value": 0,
+          "formatted": "EUR X",
+          "evidence": []
+        },
+        "deprezzamenti": [
+          {
+            "tipo": "regolarizzazioni",
+            "importo": 0,
+            "evidence": []
+          },
+          {
+            "tipo": "vizi occulti",
+            "importo": 0,
+            "evidence": []
+          }
+        ],
+        "valore_finale_stima": {
+          "value": 0,
+          "formatted": "EUR X",
+          "evidence": []
+        },
+        "composizione_lotto": {
+          "value": "Ufficio, due garage, villetta",
+          "evidence": [
+            {
+              "page": 7,
+              "quote": "Il lotto \u00e8 formato dai seguenti beni"
+            }
+          ]
+        }
+      },
+      "section_5_abusi_conformita": {
+        "conformita_urbanistica": {
+          "status": "DIFFORME",
+          "detail": "Incongruenze catastali riscontrate",
+          "evidence": [
+            {
+              "page": 13,
+              "quote": "Non sussiste corrispondenza catastale"
+            }
+          ]
+        },
+        "conformita_catastale": {
+          "status": "DIFFORME",
+          "evidence": [
+            {
+              "page": 13,
+              "quote": "Incongruenze nello stato di fatto attuale"
+            }
+          ]
+        },
+        "condono": {
+          "presente": "UNKNOWN",
+          "anno": "",
+          "pratica": "",
+          "stato": "unknown",
+          "evidence": []
+        },
+        "agibilita": {
+          "status": "NON_RISULTA",
+          "evidence": []
+        },
+        "ape": {
+          "status": "ASSENTE",
+          "evidence": []
+        },
+        "impianti": {
+          "elettrico": {
+            "conformita": "NON_RISULTA"
+          },
+          "termico": {
+            "conformita": "NON_RISULTA"
+          },
+          "idrico": {
+            "conformita": "NON_RISULTA"
+          },
+          "evidence": []
+        }
+      },
+      "section_6_stato_occupativo": {
+        "status": "NON_SPECIFICATO",
+        "status_detail": "Non specificato in Perizia",
+        "locazione_opponibile": {
+          "status": "NON_SPECIFICATO",
+          "evidence": []
+        },
+        "titolo_opponibile": {
+          "status": "NON_SPECIFICATO",
+          "evidence": []
+        },
+        "tempi_consegna_stima": "stima Nexodify 3-9 mesi post Decreto di Trasferimento",
+        "evidence": []
+      },
+      "section_7_stato_conservativo": {
+        "condizione_generale": "Buone condizioni generali",
+        "dettagli": [
+          {
+            "area": "Ufficio",
+            "stato": "Adiacente e funzionale",
+            "evidence": [
+              {
+                "page": 5,
+                "quote": "Ufficio ubicato a San Giorgio Bigarello"
+              }
+            ]
+          },
+          {
+            "area": "Garage",
+            "stato": "Adiacente e accessibile",
+            "evidence": [
+              {
+                "page": 6,
+                "quote": "Garage ubicato a San Giorgio Bigarello"
+              }
+            ]
+          },
+          {
+            "area": "Villetta",
+            "stato": "Buona condizione",
+            "evidence": [
+              {
+                "page": 6,
+                "quote": "Villetta ubicata a San Giorgio Bigarello"
+              }
+            ]
+          }
+        ],
+        "carenze": "Incongruenze catastali da verificare",
+        "evidence": [
+          {
+            "page": 13,
+            "quote": "Non sussiste corrispondenza catastale"
+          }
+        ]
+      },
+      "section_8_formalita": {
+        "ipoteche": [
+          {
+            "tipo": "giudiziale",
+            "importo": 0,
+            "data": "",
+            "beneficiario": "omissis",
+            "evidence": []
+          }
+        ],
+        "pignoramenti": [
+          {
+            "data": "08/02/2024",
+            "evidence": [
+              {
+                "page": 12,
+                "quote": "pignoramento in data 08/02/2024"
+              }
+            ]
+          }
+        ],
+        "cancellazione": "normalmente tramite Decreto di Trasferimento, salvo eccezioni - verifica legale obbligatoria",
+        "evidence": []
+      },
+      "section_9_legal_killers": {
+        "items": [
+          {
+            "killer": "Diritto di superficie / PEEP",
+            "status": "NON_SPECIFICATO",
+            "action": "Verifica obbligatoria",
+            "evidence": []
+          },
+          {
+            "killer": "Donazione in catena <20 anni",
+            "status": "NON_SPECIFICATO",
+            "action": "Verifica obbligatoria",
+            "evidence": []
+          },
+          {
+            "killer": "Prelazione Stato / beni culturali",
+            "status": "NON_SPECIFICATO",
+            "action": "Verifica obbligatoria",
+            "evidence": []
+          },
+          {
+            "killer": "Usi civici",
+            "status": "NON_SPECIFICATO",
+            "action": "Verifica CDU",
+            "evidence": []
+          },
+          {
+            "killer": "Fondo patrimoniale / casa coniugale",
+            "status": "NON_SPECIFICATO",
+            "action": "Verifica obbligatoria",
+            "evidence": []
+          },
+          {
+            "killer": "Servit\u00f9 / atti d'obbligo",
+            "status": "NON_SPECIFICATO",
+            "action": "Verifica obbligatoria",
+            "evidence": []
+          },
+          {
+            "killer": "Formalit\u00e0 non cancellabili",
+            "status": "NON_SPECIFICATO",
+            "action": "Verifica obbligatoria",
+            "evidence": []
+          },
+          {
+            "killer": "Amianto",
+            "status": "NON_SPECIFICATO",
+            "action": "Verifica se coperture datate",
+            "evidence": []
+          }
+        ]
+      },
+      "section_10_indice_convenienza": {
+        "prezzo_base": 391849,
+        "extra_budget_min": 0,
+        "extra_budget_max": 1500,
+        "all_in_light_min": 391849,
+        "all_in_light_max": 393349,
+        "lettura_secca_it": "senza sconto reale sul prezzo base, il rischio tecnico/temporale mangia il margine",
+        "lettura_secca_en": "without real discount on base price, technical/timing risk eats the margin"
+      },
+      "section_11_red_flags": [
+        {
+          "flag": "Incongruenze catastali da verificare",
+          "severity": "GIALLO",
+          "page_ref": "Perizia p. 13",
+          "evidence": [
+            {
+              "page": 13,
+              "quote": "Non sussiste corrispondenza catastale."
+            }
+          ]
+        }
+      ],
+      "section_12_checklist_pre_offerta": [
+        "Accesso atti in Comune",
+        "Preventivo tecnico reale",
+        "Visure in Conservatoria",
+        "Conferma eventuali arretrati condominiali",
+        "Strategia di liberazione e allineamento"
+      ],
+      "summary_for_client": {
+        "summary_it": "Prezzo base d'asta a \u20ac391.849,00. Incongruenze catastali e necessit\u00e0 di verifiche mappali. Stato occupativo non specificato chiaramente.",
+        "summary_en": "Base auction price at \u20ac391,849.00. Catastale discrepancies and need for mapping verification. Occupation status not clearly specified.",
+        "raccomandazione": "Procedere solo se il prezzo di aggiudicazione incorpora margine reale per extra-budget e ritardi",
+        "disclaimer_it": "Documento informativo. Non costituisce consulenza legale.",
+        "disclaimer_en": "Informational document. Does not constitute legal advice."
+      },
+      "qa_pass": {
+        "status": "WARN",
+        "checks": [
+          {
+            "code": "QA-1 Format Lock",
+            "result": "OK",
+            "note": "ordine Roma 1-12 rispettato"
+          },
+          {
+            "code": "QA-2 Zero Empty Fields",
+            "result": "OK",
+            "note": "dove manca dato: Non specificato in Perizia"
+          },
+          {
+            "code": "QA-3 Page Anchors",
+            "result": "OK",
+            "note": "riferimenti pagina presenti"
+          },
+          {
+            "code": "QA-4 Money Box",
+            "result": "OK",
+            "note": "voci CTU valorizzate"
+          },
+          {
+            "code": "QA-5 Legal Killers",
+            "result": "FAIL",
+            "note": "checklist non completa"
+          },
+          {
+            "code": "QA-6 Condono + Opponibilit\u00e0",
+            "result": "FAIL",
+            "note": "status verificato mancante"
+          },
+          {
+            "code": "QA-7 Delivery Timeline",
+            "result": "OK",
+            "note": "stima tempi presente"
+          },
+          {
+            "code": "QA-8 Semaforo Rules",
+            "result": "OK",
+            "note": "coerente con criticit\u00e0"
+          },
+          {
+            "code": "QA-9 Typos",
+            "result": "OK",
+            "note": "nessun errore"
+          }
+        ]
+      }
+    }
+  },
+  "expected_data": {
+    "header": {
+      "procedure": "R.G.E. 62/2024",
+      "tribunale": "TRIBUNALE DI MANTOVA",
+      "address": "Via Sordello n. 5, San Giorgio Bigarello (MN)",
+      "lotto": "Lotto Unico"
+    },
+    "prices": {
+      "prezzo_base_asta": 391849.0,
+      "valore_stima": 419849.0,
+      "deprezzamenti": {
+        "regolarizzazioni": 23000,
+        "vizi_occulti": 5000
+      }
+    },
+    "money_box": {
+      "A": {
+        "name": "Regolarizzazione urbanistica",
+        "amount": 23000,
+        "source": "Perizia p. 40"
+      },
+      "B": {
+        "name": "Completamento finiture/impianti",
+        "amount": 15000,
+        "source": "Perizia p. 35"
+      },
+      "C": {
+        "name": "Ottenimento abitabilit\u00e0",
+        "amount": 5000,
+        "source": "Perizia p. 35"
+      },
+      "D": {
+        "name": "Spese condominiali",
+        "amount": null,
+        "source": "Non specificato"
+      },
+      "E": {
+        "name": "Cancellazione formalit\u00e0",
+        "amount": null,
+        "source": "Non specificato"
+      },
+      "F": {
+        "name": "Costo liberazione",
+        "amount": 1500,
+        "source": "prudenziale"
+      }
+    },
+    "conformita": {
+      "urbanistica": "regolare ai sensi L. 47/85",
+      "condono": {
+        "pratica": "1991",
+        "definita": "1994"
+      },
+      "agibilita": "NON risulta",
+      "impianti": "assenza conformit\u00e0 elettrico/termico/idrico",
+      "ape": "assente"
+    },
+    "occupazione": "Occupato dal debitore esecutato",
+    "legal_killers": {
+      "usi_civici": "non risultano da CDU (p. 44)"
+    },
+    "checklist_items": 5,
+    "qa_checks": 9
+  }
+}
