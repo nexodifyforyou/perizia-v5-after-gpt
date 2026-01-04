@@ -305,23 +305,43 @@ const AnalysisResult = () => {
     );
   }
 
-  // Extract result data
+  // Extract result data - supports both old format and new ROMA STANDARD
   const result = analysis.result || {};
-  const caseHeader = result.case_header || {};
-  const semaforo = result.semaforo_generale || {};
-  const decision = result.decision_rapida_client || {};
-  const moneyBox = result.money_box || {};
-  const dati = result.dati_certi_del_lotto || result.dati_certidel_lotto || {};
-  const abusi = result.abusi_edilizi_conformita || {};
-  const occupativo = result.stato_occupativo || {};
-  const conservativo = result.stato_conservativo || {};
-  const formalita = result.formalita || {};
-  const legalKillers = result.legal_killers_checklist || {};
-  const indice = result.indice_di_convenienza || {};
-  const redFlags = Array.isArray(result.red_flags_operativi) ? result.red_flags_operativi : [];
-  const checklist = Array.isArray(result.checklist_pre_offerta) ? result.checklist_pre_offerta : [];
+  
+  // ROMA STANDARD format
+  const reportHeader = result.report_header || {};
+  const section1 = result.section_1_semaforo_generale || {};
+  const section2 = result.section_2_decisione_rapida || {};
+  const section3 = result.section_3_money_box || {};
+  const section4 = result.section_4_dati_certi || {};
+  const section5 = result.section_5_abusi_conformita || {};
+  const section6 = result.section_6_stato_occupativo || {};
+  const section7 = result.section_7_stato_conservativo || {};
+  const section8 = result.section_8_formalita || {};
+  const section9 = result.section_9_legal_killers || {};
+  const section10 = result.section_10_indice_convenienza || {};
+  const section11 = result.section_11_red_flags || [];
+  const section12 = result.section_12_checklist_pre_offerta || [];
+  const qaPass = result.qa_pass || {};
+  
+  // Backwards compatibility with old format
+  const caseHeader = result.case_header || reportHeader || {};
+  const semaforo = result.semaforo_generale || section1 || {};
+  const decision = result.decision_rapida_client || section2 || {};
+  const moneyBox = result.money_box || section3 || {};
+  const dati = result.dati_certi_del_lotto || result.dati_certidel_lotto || section4 || {};
+  const abusi = result.abusi_edilizi_conformita || section5 || {};
+  const occupativo = result.stato_occupativo || section6 || {};
+  const conservativo = result.stato_conservativo || section7 || {};
+  const formalita = result.formalita || section8 || {};
+  const legalKillers = result.legal_killers_checklist || section9 || {};
+  const indice = result.indice_di_convenienza || section10 || {};
+  const redFlags = Array.isArray(result.red_flags_operativi) ? result.red_flags_operativi : 
+                   Array.isArray(section11) ? section11 : [];
+  const checklist = Array.isArray(result.checklist_pre_offerta) ? result.checklist_pre_offerta : 
+                    Array.isArray(section12) ? section12 : [];
   const summary = result.summary_for_client || {};
-  const qa = result.qa || {};
+  const qa = result.qa || qaPass || {};
 
   // Get money box items
   const moneyBoxItems = Array.isArray(moneyBox.items) ? moneyBox.items : [];
