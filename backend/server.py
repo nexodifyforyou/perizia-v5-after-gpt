@@ -1178,15 +1178,74 @@ async def download_perizia_pdf(analysis_id: str, request: Request):
     )
 
 def generate_report_html(analysis: Dict, result: Dict) -> str:
-    """Generate HTML report from analysis"""
-    case_header = result.get("case_header", {})
-    semaforo = result.get("semaforo_generale", {})
-    decision = result.get("decision_rapida_client", {})
-    money_box = result.get("money_box", {})
-    dati = result.get("dati_certi_del_lotto", {})
+    """Generate HTML report from analysis - supports ROMA STANDARD format"""
+    
+    # Support both old and new format
+    report_header = result.get("report_header", {})
+    case_header = result.get("case_header", report_header)
+    
+    section1 = result.get("section_1_semaforo_generale", {})
+    semaforo = result.get("semaforo_generale", section1)
+    
+    section2 = result.get("section_2_decisione_rapida", {})
+    decision = result.get("decision_rapida_client", section2)
+    
+    section3 = result.get("section_3_money_box", {})
+    money_box = result.get("money_box", section3)
+    
+    section4 = result.get("section_4_dati_certi", {})
+    dati = result.get("dati_certi_del_lotto", section4)
+    
+    section5 = result.get("section_5_abusi_conformita", {})
+    abusi = result.get("abusi_edilizi_conformita", section5)
+    
+    section9 = result.get("section_9_legal_killers", {})
+    legal_killers = result.get("legal_killers_checklist", section9)
+    
+    section12 = result.get("section_12_checklist_pre_offerta", [])
+    checklist = result.get("checklist_pre_offerta", section12)
+    
     summary = result.get("summary_for_client", {})
     
-    semaforo_color = "#10b981" if semaforo.get("status") == "GREEN" else "#f59e0b" if semaforo.get("status") == "AMBER" else "#ef4444"
+    # Get values with fallbacks
+    procedure = case_header.get("procedure", {}).get("value") if isinstance(case_header.get("procedure"), dict) else case_header.get("procedure_id", "N/A")
+    tribunale = case_header.get("tribunale", {}).get("value") if isinstance(case_header.get("tribunale"), dict) else case_header.get("tribunale", "N/A")
+    lotto = case_header.get("lotto", {}).get("value") if isinstance(case_header.get("lotto"), dict) else case_header.get("lotto", "N/A")
+    address = case_header.get("address", {}).get("value") if isinstance(case_header.get("address"), dict) else case_header.get("address", "N/A")
+    
+    prezzo_base = dati.get("prezzo_base_asta", {})
+    prezzo_value = prezzo_base.get("formatted") or f"€{prezzo_base.get('value', 0):,}" if isinstance(prezzo_base, dict) else str(prezzo_base)
+    
+    semaforo_status = semaforo.get("status", "AMBER")
+    semaforo_color = "#10b981" if semaforo_status == "GREEN" or semaforo_status == "VERDE" else "#f59e0b" if semaforo_status == "AMBER" or semaforo_status == "GIALLO" else "#ef4444"
+    
+    # Build money box items HTML
+    money_items_html = ""
+    for item in money_box.get("items", []):
+        voce = item.get("voce") or item.get("label_it") or item.get("code", "")
+        stima = item.get("stima_euro", 0)
+        nota = item.get("stima_nota", "")
+        fonte = item.get("fonte_perizia", {}).get("value", "") if isinstance(item.get("fonte_perizia"), dict) else ""
+        
+        value_display = f"€{stima:,}" if stima else nota or "Verifica"
+        money_items_html += f'<div class="money-item"><span>{voce}</span><span class="page-ref">{fonte}</span><span style="color: #D4AF37;">{value_display}</span></div>'
+    
+    # Build legal killers HTML
+    legal_items = legal_killers.get("items", []) if isinstance(legal_killers, dict) and "items" in legal_killers else []
+    legal_html = ""
+    for item in legal_items:
+        killer = item.get("killer", "")
+        status = item.get("status", "NON_SPECIFICATO")
+        action = item.get("action", "")
+        status_color = "#ef4444" if status == "SI" or status == "YES" else "#10b981" if status == "NO" else "#f59e0b"
+        legal_html += f'<div class="legal-item"><span class="status-dot" style="background:{status_color}"></span><span>{killer}</span><span class="status">{status}</span></div>'
+    
+    # Build checklist HTML
+    checklist_items = checklist if isinstance(checklist, list) else []
+    checklist_html = ""
+    for i, item in enumerate(checklist_items):
+        item_text = item if isinstance(item, str) else item.get("item_it", str(item))
+        checklist_html += f'<div class="checklist-item"><span class="number">{i+1}</span><span>{item_text}</span></div>'
     
     html = f"""<!DOCTYPE html>
 <html lang="it">
@@ -1202,19 +1261,30 @@ def generate_report_html(analysis: Dict, result: Dict) -> str:
         .header h1 {{ font-size: 28px; color: #D4AF37; margin-bottom: 10px; }}
         .header p {{ color: #a1a1aa; }}
         .semaforo {{ display: inline-block; padding: 8px 20px; border-radius: 20px; background: {semaforo_color}20; color: {semaforo_color}; font-weight: bold; margin: 10px 0; border: 1px solid {semaforo_color}40; }}
-        .section {{ background: #18181b; border: 1px solid #27272a; border-radius: 12px; padding: 24px; margin-bottom: 24px; }}
+        .section {{ background: #18181b; border: 1px solid #27272a; border-radius: 12px; padding: 24px; margin-bottom: 24px; page-break-inside: avoid; }}
         .section h2 {{ color: #D4AF37; font-size: 18px; margin-bottom: 16px; padding-bottom: 8px; border-bottom: 1px solid #27272a; }}
         .grid {{ display: grid; grid-template-columns: repeat(2, 1fr); gap: 16px; }}
         .field {{ background: #09090b; padding: 12px; border-radius: 8px; }}
         .field-label {{ font-size: 11px; color: #71717a; text-transform: uppercase; letter-spacing: 0.5px; }}
         .field-value {{ font-size: 16px; color: #fafafa; margin-top: 4px; font-weight: 500; }}
-        .money-item {{ display: flex; justify-content: space-between; padding: 12px; background: #09090b; border-radius: 8px; margin-bottom: 8px; }}
+        .page-ref {{ font-size: 10px; color: #D4AF37; font-family: monospace; margin-left: 8px; }}
+        .money-item {{ display: flex; justify-content: space-between; align-items: center; padding: 12px; background: #09090b; border-radius: 8px; margin-bottom: 8px; }}
         .total {{ background: #D4AF3720; border: 1px solid #D4AF3740; padding: 16px; border-radius: 8px; margin-top: 16px; }}
         .total-value {{ font-size: 24px; color: #D4AF37; font-weight: bold; }}
+        .legal-item {{ display: flex; align-items: center; gap: 12px; padding: 10px; background: #09090b; border-radius: 8px; margin-bottom: 6px; }}
+        .status-dot {{ width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; }}
+        .status {{ margin-left: auto; font-size: 12px; font-family: monospace; color: #a1a1aa; }}
+        .checklist-item {{ display: flex; align-items: center; gap: 12px; padding: 10px; background: #09090b; border-radius: 8px; margin-bottom: 6px; }}
+        .checklist-item .number {{ width: 24px; height: 24px; border-radius: 50%; background: #D4AF3720; border: 1px solid #D4AF37; display: flex; align-items: center; justify-content: center; font-size: 12px; color: #D4AF37; flex-shrink: 0; }}
+        .summary-box {{ background: #f59e0b20; border-left: 4px solid #f59e0b; padding: 16px; border-radius: 0 8px 8px 0; margin-bottom: 16px; }}
         .disclaimer {{ background: #27272a; padding: 16px; border-radius: 8px; margin-top: 40px; text-align: center; }}
         .disclaimer p {{ color: #71717a; font-size: 12px; }}
         .footer {{ text-align: center; margin-top: 40px; color: #52525b; font-size: 12px; }}
-        @media print {{ body {{ background: white; color: black; }} .section {{ border-color: #e5e5e5; background: #f9f9f9; }} }}
+        @media print {{ 
+            body {{ background: white; color: black; padding: 20px; }} 
+            .section {{ border-color: #e5e5e5; background: #f9f9f9; }} 
+            .semaforo {{ print-color-adjust: exact; -webkit-print-color-adjust: exact; }}
+        }}
     </style>
 </head>
 <body>
@@ -1222,73 +1292,86 @@ def generate_report_html(analysis: Dict, result: Dict) -> str:
         <div class="header">
             <h1>NEXODIFY AUCTION SCAN REPORT</h1>
             <p>Analisi Forense Perizia CTU</p>
-            <div class="semaforo">{semaforo.get('status_it', 'ATTENZIONE')}</div>
+            <div class="semaforo">SEMAFORO: {semaforo_status}</div>
+            <p style="margin-top: 10px; font-size: 14px;">{semaforo.get('driver', {}).get('value', semaforo.get('reason_it', ''))}</p>
         </div>
         
         <div class="section">
-            <h2>DATI PROCEDURA</h2>
+            <h2>1. DATI PROCEDURA</h2>
             <div class="grid">
                 <div class="field">
                     <div class="field-label">Procedura</div>
-                    <div class="field-value">{case_header.get('procedure_id', 'N/A')}</div>
+                    <div class="field-value">{procedure}</div>
                 </div>
                 <div class="field">
                     <div class="field-label">Lotto</div>
-                    <div class="field-value">{case_header.get('lotto', 'N/A')}</div>
+                    <div class="field-value">{lotto}</div>
                 </div>
                 <div class="field">
                     <div class="field-label">Tribunale</div>
-                    <div class="field-value">{case_header.get('tribunale', 'N/A')}</div>
+                    <div class="field-value">{tribunale}</div>
                 </div>
                 <div class="field">
-                    <div class="field-label">File Analizzato</div>
-                    <div class="field-value">{analysis.get('file_name', 'N/A')}</div>
+                    <div class="field-label">Indirizzo</div>
+                    <div class="field-value">{address}</div>
                 </div>
             </div>
         </div>
         
         <div class="section">
-            <h2>DECISIONE RAPIDA</h2>
+            <h2>2. DECISIONE RAPIDA</h2>
             <p style="font-size: 18px; margin-bottom: 16px;">{decision.get('summary_it', 'Analisi completata')}</p>
             <p style="color: #a1a1aa;">{decision.get('summary_en', '')}</p>
         </div>
         
         <div class="section">
-            <h2>DATI CERTI DEL LOTTO</h2>
-            <div class="grid">
-                <div class="field">
-                    <div class="field-label">Prezzo Base Asta</div>
-                    <div class="field-value" style="color: #D4AF37; font-size: 20px;">{dati.get('prezzo_base_asta', {}).get('formatted', 'N/A')}</div>
-                </div>
-                <div class="field">
-                    <div class="field-label">Superficie</div>
-                    <div class="field-value">{dati.get('superficie_catastale', {}).get('value', 'N/A')}</div>
-                </div>
-                <div class="field">
-                    <div class="field-label">Diritto Reale</div>
-                    <div class="field-value">{dati.get('diritto_reale', {}).get('value', 'N/A')}</div>
-                </div>
-                <div class="field">
-                    <div class="field-label">Categoria Catastale</div>
-                    <div class="field-value">{dati.get('catasto', {}).get('categoria', 'N/A')}</div>
-                </div>
-            </div>
-        </div>
-        
-        <div class="section">
-            <h2>PORTAFOGLIO COSTI (MONEY BOX)</h2>
-            {''.join([f'<div class="money-item"><span>{item.get("label_it", item.get("code", ""))}</span><span style="color: #D4AF37;">{"€" + str(item.get("value", "")) if item.get("value") else ("€" + str(item.get("range", {}).get("min", "")) + " - €" + str(item.get("range", {}).get("max", "")) if item.get("range") else item.get("type", "N/A"))}</span></div>' for item in money_box.get("items", [])])}
+            <h2>3. PORTAFOGLIO COSTI (MONEY BOX)</h2>
+            {money_items_html or '<p style="color: #71717a;">Nessun dato disponibile</p>'}
             <div class="total">
                 <div style="display: flex; justify-content: space-between; align-items: center;">
                     <span>TOTALE COSTI EXTRA STIMATI</span>
-                    <span class="total-value">€{money_box.get("total_extra_costs", {}).get("range", {}).get("min", 0):,} - €{money_box.get("total_extra_costs", {}).get("range", {}).get("max", 0):,}</span>
+                    <span class="total-value">€{money_box.get('totale_extra_budget', {}).get('min', money_box.get('total_extra_costs', {}).get('range', {}).get('min', 0)):,} - €{money_box.get('totale_extra_budget', {}).get('max', money_box.get('total_extra_costs', {}).get('range', {}).get('max', 0)):,}</span>
                 </div>
             </div>
         </div>
         
         <div class="section">
-            <h2>RIEPILOGO</h2>
+            <h2>4. DATI CERTI DEL LOTTO</h2>
+            <div class="grid">
+                <div class="field">
+                    <div class="field-label">Prezzo Base Asta</div>
+                    <div class="field-value" style="color: #D4AF37; font-size: 20px;">{prezzo_value}</div>
+                </div>
+                <div class="field">
+                    <div class="field-label">Superficie</div>
+                    <div class="field-value">{dati.get('superficie_catastale', {}).get('value', 'N/A') if isinstance(dati.get('superficie_catastale'), dict) else dati.get('superficie_catastale', 'N/A')}</div>
+                </div>
+                <div class="field">
+                    <div class="field-label">Composizione Lotto</div>
+                    <div class="field-value">{dati.get('composizione_lotto', {}).get('value', 'N/A') if isinstance(dati.get('composizione_lotto'), dict) else dati.get('composizione_lotto', 'N/A')}</div>
+                </div>
+                <div class="field">
+                    <div class="field-label">Diritto Reale</div>
+                    <div class="field-value">{dati.get('diritto_reale', {}).get('value', 'N/A') if isinstance(dati.get('diritto_reale'), dict) else dati.get('diritto_reale', 'N/A')}</div>
+                </div>
+            </div>
+        </div>
+        
+        <div class="section">
+            <h2>9. LEGAL KILLERS CHECKLIST</h2>
+            {legal_html or '<p style="color: #71717a;">Nessun dato disponibile</p>'}
+        </div>
+        
+        <div class="section">
+            <h2>12. CHECKLIST PRE-OFFERTA</h2>
+            {checklist_html or '<p style="color: #71717a;">Nessuna checklist disponibile</p>'}
+        </div>
+        
+        <div class="section">
+            <h2>SUMMARY FOR CLIENT</h2>
+            {f'<div class="summary-box"><p>⚠️ {summary.get("raccomandazione", "")}</p></div>' if summary.get("raccomandazione") else ''}
             <p>{summary.get('summary_it', 'Analisi completata.')}</p>
+            <p style="color: #a1a1aa; margin-top: 12px; font-style: italic;">{summary.get('summary_en', '')}</p>
         </div>
         
         <div class="disclaimer">
