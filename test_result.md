@@ -234,7 +234,7 @@ metadata:
 
 test_plan:
   current_focus:
-    - "DELETE Endpoints for Nexodify Forensic Engine"
+    - "ROMA STANDARD Format Display"
   stuck_tasks: []
   test_all: false
   test_priority: "high_first"
