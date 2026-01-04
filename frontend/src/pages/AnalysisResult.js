@@ -449,29 +449,44 @@ const AnalysisResult = () => {
                 <span>{new Date(analysis.created_at).toLocaleString('it-IT')}</span>
               </div>
               
-              {/* Case Header with Evidence */}
+              {/* Case Header with Evidence - support both formats */}
               <div className="mt-4 space-y-1">
-                {caseHeader.procedure_id && (
+                {(caseHeader.procedure || caseHeader.procedure_id) && (
                   <p className="text-sm text-gold flex items-center gap-2">
-                    Procedura: {safeRender(caseHeader.procedure_id)}
-                    <EvidenceBadge evidence={getEvidence(caseHeader.procedure_id)} />
+                    Procedura: {safeRender(caseHeader.procedure?.value || caseHeader.procedure_id)}
+                    <EvidenceBadge evidence={getEvidence(caseHeader.procedure || caseHeader.procedure_id)} />
                   </p>
                 )}
-                {caseHeader.tribunale && (
+                {(caseHeader.tribunale) && (
                   <p className="text-sm text-zinc-400 flex items-center gap-2">
-                    {safeRender(caseHeader.tribunale)}
+                    {safeRender(caseHeader.tribunale?.value || caseHeader.tribunale)}
                     <EvidenceBadge evidence={getEvidence(caseHeader.tribunale)} />
+                  </p>
+                )}
+                {(caseHeader.address) && (
+                  <p className="text-sm text-zinc-400 flex items-center gap-2">
+                    {safeRender(caseHeader.address?.value || caseHeader.address)}
+                    <EvidenceBadge evidence={getEvidence(caseHeader.address)} />
                   </p>
                 )}
               </div>
             </div>
             <div className="text-right">
               <SemaforoBadge status={safeRender(semaforo.status, 'AMBER')} />
-              <p className="text-sm text-zinc-400 mt-2 max-w-xs">{safeRender(semaforo.reason_it, semaforo.status_it || '')}</p>
-              {getEvidence(semaforo).length > 0 && (
+              <p className="text-sm text-zinc-400 mt-2 max-w-xs">
+                {safeRender(semaforo.status_label || semaforo.reason_it || semaforo.status_it, '')}
+              </p>
+              {/* Show driver/reason for semaforo */}
+              {semaforo.driver?.value && (
+                <p className="text-xs text-amber-400 mt-1">
+                  Driver: {semaforo.driver.value}
+                </p>
+              )}
+              {/* Show evidence pages */}
+              {(getEvidence(semaforo.semaforo_complessivo || semaforo).length > 0) && (
                 <p className="text-xs text-gold mt-1 flex items-center justify-end gap-1">
                   <FileText className="w-3 h-3" />
-                  Basato su pag. {[...new Set(getEvidence(semaforo).map(e => e.page))].join(', ')}
+                  Basato su pag. {[...new Set(getEvidence(semaforo.semaforo_complessivo || semaforo).map(e => e.page))].join(', ')}
                 </p>
               )}
             </div>
@@ -483,7 +498,18 @@ const AnalysisResult = () => {
             <p className="text-lg font-semibold text-zinc-100">{safeRender(decision.summary_it, 'Analisi completata')}</p>
             <p className="text-sm text-zinc-500 mt-1">{safeRender(decision.summary_en, '')}</p>
             
-            {/* Driver Rosso with Evidence */}
+            {/* Mutuabilità if available */}
+            {semaforo.mutuabilita_stimata && (
+              <div className="mt-3 p-2 bg-zinc-900 rounded">
+                <span className="text-xs text-zinc-500">Mutuabilità stimata: </span>
+                <span className="text-sm font-medium text-gold">{semaforo.mutuabilita_stimata.value}</span>
+                {semaforo.mutuabilita_stimata.reason && (
+                  <p className="text-xs text-zinc-400 mt-1">{semaforo.mutuabilita_stimata.reason}</p>
+                )}
+              </div>
+            )}
+            
+            {/* Driver Rosso with Evidence - old format */}
             {decision.driver_rosso && decision.driver_rosso.length > 0 && (
               <div className="mt-4 space-y-2">
                 <p className="text-xs font-mono text-red-400 uppercase">Criticità Rilevate:</p>
