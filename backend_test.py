@@ -332,6 +332,304 @@ class NexodifyAPITester:
         self.token = old_token
         return result
 
+    # ===================
+    # DELETE ENDPOINT TESTS
+    # ===================
+
+    def test_delete_endpoints_comprehensive(self):
+        """Comprehensive test suite for all DELETE endpoints"""
+        if not self.token:
+            print("⚠️ Skipping DELETE tests - no authentication token")
+            return False
+        
+        print("\n🗑️ TESTING DELETE ENDPOINTS - Nexodify Forensic Engine")
+        print("=" * 60)
+        
+        # Store original test counts for DELETE-specific reporting
+        delete_tests_start = self.tests_run
+        delete_tests_passed_start = self.tests_passed
+        
+        # Test 1: DELETE endpoints without authentication (should return 401)
+        print("\n🔒 Testing DELETE endpoints without authentication...")
+        self.test_delete_perizia_no_auth()
+        self.test_delete_images_no_auth()
+        self.test_delete_assistant_no_auth()
+        self.test_delete_all_history_no_auth()
+        
+        # Test 2: DELETE non-existent items (should return 404)
+        print("\n🔍 Testing DELETE endpoints with non-existent IDs...")
+        self.test_delete_nonexistent_perizia()
+        self.test_delete_nonexistent_images()
+        self.test_delete_nonexistent_assistant()
+        
+        # Test 3: Create test data and then delete it
+        print("\n📝 Creating test data for deletion tests...")
+        perizia_id, image_id, qa_id = self.create_test_data_for_deletion()
+        
+        if perizia_id or image_id or qa_id:
+            print("\n🗑️ Testing successful deletion of created data...")
+            if perizia_id:
+                self.test_delete_existing_perizia(perizia_id)
+            if image_id:
+                self.test_delete_existing_images(image_id)
+            if qa_id:
+                self.test_delete_existing_assistant(qa_id)
+        
+        # Test 4: Test delete all history
+        print("\n🧹 Testing delete all history...")
+        self.test_delete_all_history_success()
+        
+        # Calculate DELETE-specific results
+        delete_tests_run = self.tests_run - delete_tests_start
+        delete_tests_passed = self.tests_passed - delete_tests_passed_start
+        
+        print(f"\n📊 DELETE Tests Results: {delete_tests_passed}/{delete_tests_run} passed")
+        
+        return delete_tests_passed == delete_tests_run
+
+    def test_delete_perizia_no_auth(self):
+        """Test DELETE perizia without auth (should return 401)"""
+        old_token = self.token
+        self.token = None
+        result = self.run_test(
+            "DELETE Perizia (No Auth)", 
+            "DELETE", 
+            "api/analysis/perizia/test_id", 
+            401
+        )
+        self.token = old_token
+        return result
+
+    def test_delete_images_no_auth(self):
+        """Test DELETE images without auth (should return 401)"""
+        old_token = self.token
+        self.token = None
+        result = self.run_test(
+            "DELETE Images (No Auth)", 
+            "DELETE", 
+            "api/analysis/images/test_id", 
+            401
+        )
+        self.token = old_token
+        return result
+
+    def test_delete_assistant_no_auth(self):
+        """Test DELETE assistant without auth (should return 401)"""
+        old_token = self.token
+        self.token = None
+        result = self.run_test(
+            "DELETE Assistant (No Auth)", 
+            "DELETE", 
+            "api/analysis/assistant/test_id", 
+            401
+        )
+        self.token = old_token
+        return result
+
+    def test_delete_all_history_no_auth(self):
+        """Test DELETE all history without auth (should return 401)"""
+        old_token = self.token
+        self.token = None
+        result = self.run_test(
+            "DELETE All History (No Auth)", 
+            "DELETE", 
+            "api/history/all", 
+            401
+        )
+        self.token = old_token
+        return result
+
+    def test_delete_nonexistent_perizia(self):
+        """Test DELETE non-existent perizia (should return 404)"""
+        return self.run_test(
+            "DELETE Non-existent Perizia", 
+            "DELETE", 
+            "api/analysis/perizia/nonexistent_id_12345", 
+            404
+        )
+
+    def test_delete_nonexistent_images(self):
+        """Test DELETE non-existent images (should return 404)"""
+        return self.run_test(
+            "DELETE Non-existent Images", 
+            "DELETE", 
+            "api/analysis/images/nonexistent_id_12345", 
+            404
+        )
+
+    def test_delete_nonexistent_assistant(self):
+        """Test DELETE non-existent assistant (should return 404)"""
+        return self.run_test(
+            "DELETE Non-existent Assistant", 
+            "DELETE", 
+            "api/analysis/assistant/nonexistent_id_12345", 
+            404
+        )
+
+    def create_test_data_for_deletion(self):
+        """Create test data that can be deleted"""
+        perizia_id = None
+        image_id = None
+        qa_id = None
+        
+        # Create test perizia analysis
+        try:
+            print("📄 Creating test perizia for deletion...")
+            pdf_content = self.create_test_pdf()
+            files = {'file': ('test_delete_perizia.pdf', pdf_content, 'application/pdf')}
+            
+            success, response_data = self.run_file_upload_test(
+                "Create Test Perizia for Deletion", 
+                "api/analysis/perizia", 
+                200, 
+                files
+            )
+            
+            if success and response_data:
+                perizia_id = response_data.get('analysis_id')
+                print(f"✅ Created test perizia: {perizia_id}")
+        except Exception as e:
+            print(f"❌ Failed to create test perizia: {e}")
+        
+        # Create test image analysis
+        try:
+            print("🖼️ Creating test image analysis for deletion...")
+            # Create a simple test image file
+            import tempfile
+            with tempfile.NamedTemporaryFile(suffix='.jpg', delete=False) as tmp_file:
+                # Write minimal JPEG header
+                tmp_file.write(b'\xff\xd8\xff\xe0\x00\x10JFIF\x00\x01\x01\x01\x00H\x00H\x00\x00\xff\xdb\x00C\x00\x08\x06\x06\x07\x06\x05\x08\x07\x07\x07\t\t\x08\n\x0c\x14\r\x0c\x0b\x0b\x0c\x19\x12\x13\x0f\x14\x1d\x1a\x1f\x1e\x1d\x1a\x1c\x1c $.\' ",#\x1c\x1c(7),01444\x1f\'9=82<.342\xff\xc0\x00\x11\x08\x00\x01\x00\x01\x01\x01\x11\x00\x02\x11\x01\x03\x11\x01\xff\xc4\x00\x14\x00\x01\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x08\xff\xc4\x00\x14\x10\x01\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\xff\xda\x00\x0c\x03\x01\x00\x02\x11\x03\x11\x00\x3f\x00\xaa\xff\xd9')
+                tmp_file.flush()
+                
+                with open(tmp_file.name, 'rb') as img_file:
+                    files = {'files': ('test_delete_image.jpg', img_file.read(), 'image/jpeg')}
+                    
+                    success, response_data = self.run_file_upload_test(
+                        "Create Test Image for Deletion", 
+                        "api/analysis/image", 
+                        200, 
+                        files
+                    )
+                    
+                    if success and response_data:
+                        # Extract forensics_id from response
+                        result = response_data.get('result', {})
+                        run_info = result.get('run', {})
+                        image_id = f"forensics_{run_info.get('run_id', 'unknown')}"
+                        print(f"✅ Created test image analysis: {image_id}")
+                
+                os.unlink(tmp_file.name)
+        except Exception as e:
+            print(f"❌ Failed to create test image analysis: {e}")
+        
+        # Create test assistant QA
+        try:
+            print("🤖 Creating test assistant QA for deletion...")
+            assistant_data = {
+                "question": "Test question for deletion test - what are the main risks?",
+                "related_case_id": None
+            }
+            
+            success, response_data = self.run_test(
+                "Create Test Assistant QA for Deletion", 
+                "POST", 
+                "api/analysis/assistant", 
+                200, 
+                data=assistant_data
+            )
+            
+            if success and response_data:
+                result = response_data.get('result', {})
+                run_info = result.get('run', {})
+                qa_id = f"qa_{run_info.get('run_id', 'unknown')}"
+                print(f"✅ Created test assistant QA: {qa_id}")
+        except Exception as e:
+            print(f"❌ Failed to create test assistant QA: {e}")
+        
+        return perizia_id, image_id, qa_id
+
+    def test_delete_existing_perizia(self, perizia_id):
+        """Test DELETE existing perizia (should return 200)"""
+        success, response_data = self.run_test(
+            f"DELETE Existing Perizia ({perizia_id})", 
+            "DELETE", 
+            f"api/analysis/perizia/{perizia_id}", 
+            200
+        )
+        
+        if success:
+            # Verify the response contains success message
+            if response_data.get('ok') and 'eliminata' in response_data.get('message', '').lower():
+                print("✅ Perizia deletion confirmed with proper response")
+            else:
+                print("⚠️ Perizia deleted but response format unexpected")
+        
+        return success, response_data
+
+    def test_delete_existing_images(self, image_id):
+        """Test DELETE existing images (should return 200)"""
+        success, response_data = self.run_test(
+            f"DELETE Existing Images ({image_id})", 
+            "DELETE", 
+            f"api/analysis/images/{image_id}", 
+            200
+        )
+        
+        if success:
+            # Verify the response contains success message
+            if response_data.get('ok') and 'eliminata' in response_data.get('message', '').lower():
+                print("✅ Image analysis deletion confirmed with proper response")
+            else:
+                print("⚠️ Image analysis deleted but response format unexpected")
+        
+        return success, response_data
+
+    def test_delete_existing_assistant(self, qa_id):
+        """Test DELETE existing assistant QA (should return 200)"""
+        success, response_data = self.run_test(
+            f"DELETE Existing Assistant QA ({qa_id})", 
+            "DELETE", 
+            f"api/analysis/assistant/{qa_id}", 
+            200
+        )
+        
+        if success:
+            # Verify the response contains success message
+            if response_data.get('ok') and 'eliminata' in response_data.get('message', '').lower():
+                print("✅ Assistant QA deletion confirmed with proper response")
+            else:
+                print("⚠️ Assistant QA deleted but response format unexpected")
+        
+        return success, response_data
+
+    def test_delete_all_history_success(self):
+        """Test DELETE all history (should return 200 with counts)"""
+        success, response_data = self.run_test(
+            "DELETE All History", 
+            "DELETE", 
+            "api/history/all", 
+            200
+        )
+        
+        if success:
+            # Verify the response contains deletion counts
+            deleted_info = response_data.get('deleted', {})
+            if isinstance(deleted_info, dict):
+                perizia_count = deleted_info.get('perizia', 0)
+                images_count = deleted_info.get('images', 0)
+                assistant_count = deleted_info.get('assistant', 0)
+                total_count = deleted_info.get('total', 0)
+                
+                print(f"✅ History deletion confirmed:")
+                print(f"   📄 Perizia analyses: {perizia_count}")
+                print(f"   🖼️ Image analyses: {images_count}")
+                print(f"   🤖 Assistant QAs: {assistant_count}")
+                print(f"   📊 Total deleted: {total_count}")
+            else:
+                print("⚠️ History deleted but response format unexpected")
+        
+        return success, response_data
+
 def create_test_user_and_session():
     """Create test user and session in MongoDB"""
     import subprocess
