@@ -4,6 +4,7 @@ import { useAuth } from '../context/AuthContext';
 import { Sidebar, SemaforoBadge } from './Dashboard';
 import { Button } from '../components/ui/button';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '../components/ui/tabs';
+import { EvidenceBadge, EvidenceDetail, DataValueWithEvidence } from '../components/EvidenceDisplay';
 import { 
   FileText, 
   AlertTriangle, 
@@ -16,8 +17,8 @@ import {
   Users,
   FileCheck,
   ArrowLeft,
-  Download,
-  FileDown
+  FileDown,
+  Quote
 } from 'lucide-react';
 import axios from 'axios';
 import { toast } from 'sonner';
@@ -35,41 +36,34 @@ const safeRender = (value, fallback = 'N/A') => {
     return value.map(v => safeRender(v, '')).filter(Boolean).join(', ') || fallback;
   }
   if (typeof value === 'object') {
+    if (value.value !== undefined) return safeRender(value.value, fallback);
     if (value.status) return safeRender(value.status, fallback);
-    if (value.value) return safeRender(value.value, fallback);
     if (value.formatted) return safeRender(value.formatted, fallback);
     if (value.label_it) return safeRender(value.label_it, fallback);
-    if (value.text) return safeRender(value.text, fallback);
     if (value.full) return safeRender(value.full, fallback);
-    try {
-      const str = JSON.stringify(value);
-      return str.length > 100 ? str.substring(0, 100) + '...' : str;
-    } catch {
-      return fallback;
-    }
+    return fallback;
   }
   return String(value) || fallback;
 };
 
-// Money Box Item Component
+// Get evidence from an object that might have it
+const getEvidence = (obj) => {
+  if (!obj) return [];
+  if (Array.isArray(obj.evidence)) return obj.evidence;
+  if (Array.isArray(obj)) return obj.filter(e => e.page || e.quote);
+  return [];
+};
+
+// Money Box Item Component with Evidence
 const MoneyBoxItem = ({ item }) => {
-  const getTypeColor = (type) => {
-    switch (type) {
-      case 'NEXODIFY_ESTIMATE': return 'text-gold';
-      case 'NOT_SPECIFIED': return 'text-amber-400';
-      case 'INFO_ONLY': return 'text-zinc-500';
-      case 'FIXED': return 'text-emerald-400';
-      case 'RANGE': return 'text-gold';
-      default: return 'text-zinc-400';
-    }
-  };
+  const evidence = getEvidence(item);
+  const hasEvidence = evidence.length > 0;
+  const pages = hasEvidence ? [...new Set(evidence.map(e => e.page).filter(Boolean))] : [];
 
   const formatValue = () => {
     const type = safeRender(item.type, 'UNKNOWN');
     if ((type === 'NEXODIFY_ESTIMATE' || type === 'RANGE') && item.range) {
-      const min = item.range.min;
-      const max = item.range.max;
-      return `€${min?.toLocaleString() || '?'} - €${max?.toLocaleString() || '?'}`;
+      return `€${(item.range.min || 0).toLocaleString()} - €${(item.range.max || 0).toLocaleString()}`;
     }
     if (item.value !== undefined && item.value !== null && item.value !== 0) {
       const val = typeof item.value === 'number' ? item.value : parseFloat(item.value);
@@ -79,35 +73,51 @@ const MoneyBoxItem = ({ item }) => {
   };
 
   return (
-    <div className="flex items-start justify-between p-4 bg-zinc-950/50 rounded-lg border border-zinc-800">
-      <div className="flex-1">
-        <div className="flex items-center gap-2 mb-1">
-          <span className="font-mono text-xs text-gold">{safeRender(item.code, item.key || '?')}</span>
-          <span className="text-sm font-medium text-zinc-100">{safeRender(item.label_it, item.label || 'Item')}</span>
+    <div className="p-4 bg-zinc-950/50 rounded-lg border border-zinc-800">
+      <div className="flex items-start justify-between mb-2">
+        <div className="flex-1">
+          <div className="flex items-center gap-2 mb-1">
+            <span className="font-mono text-xs text-gold">{safeRender(item.code, item.key || '?')}</span>
+            <span className="text-sm font-medium text-zinc-100">{safeRender(item.label_it, item.label || 'Item')}</span>
+            {hasEvidence && (
+              <span className="text-xs font-mono text-gold flex items-center gap-1">
+                <FileText className="w-3 h-3" />
+                p. {pages.join(', ')}
+              </span>
+            )}
+          </div>
+          <p className="text-xs text-zinc-500">{safeRender(item.label_en, '')}</p>
         </div>
-        <p className="text-xs text-zinc-500">{safeRender(item.label_en, '')}</p>
-        {item.action_required_it && (
-          <p className="text-xs text-amber-400 mt-1">{safeRender(item.action_required_it)}</p>
-        )}
-        {item.note_it && (
-          <p className="text-xs text-zinc-400 mt-1">{safeRender(item.note_it)}</p>
-        )}
-        {item.source && (
-          <p className="text-xs text-zinc-600 mt-1">Fonte: {safeRender(item.source)}</p>
-        )}
+        <div className="text-right">
+          <span className={`font-mono text-sm font-bold ${
+            item.source === 'PERIZIA' ? 'text-emerald-400' : 
+            item.type === 'NEXODIFY_ESTIMATE' ? 'text-gold' : 'text-zinc-400'
+          }`}>
+            {formatValue()}
+          </span>
+          {item.source && (
+            <p className="text-xs text-zinc-600">{item.source}</p>
+          )}
+        </div>
       </div>
-      <div className="text-right">
-        <span className={`font-mono text-sm font-bold ${getTypeColor(safeRender(item.type))}`}>
-          {formatValue()}
-        </span>
-      </div>
+      {item.action_required_it && (
+        <p className="text-xs text-amber-400 mt-1">{safeRender(item.action_required_it)}</p>
+      )}
+      {hasEvidence && evidence[0]?.quote && (
+        <div className="mt-2 p-2 bg-zinc-900 rounded border-l-2 border-gold/30">
+          <p className="text-xs text-zinc-400 italic">"{evidence[0].quote}"</p>
+        </div>
+      )}
     </div>
   );
 };
 
-// Legal Killer Item Component
+// Legal Killer Item Component with Evidence
 const LegalKillerItem = ({ name, data }) => {
   const status = safeRender(data?.status, 'NOT_SPECIFIED');
+  const evidence = getEvidence(data);
+  const hasEvidence = evidence.length > 0;
+  const pages = hasEvidence ? [...new Set(evidence.map(e => e.page).filter(Boolean))] : [];
   
   const getStatusIcon = (status) => {
     if (status === 'YES') return <XCircle className="w-5 h-5 text-red-400" />;
@@ -132,9 +142,22 @@ const LegalKillerItem = ({ name, data }) => {
       <div className="flex items-start gap-3">
         {getStatusIcon(status)}
         <div className="flex-1">
-          <p className="text-sm font-medium text-zinc-100">{formatName(name)}</p>
+          <div className="flex items-center gap-2">
+            <p className="text-sm font-medium text-zinc-100">{formatName(name)}</p>
+            {hasEvidence && (
+              <span className="text-xs font-mono text-gold flex items-center gap-1">
+                <FileText className="w-3 h-3" />
+                p. {pages.join(', ')}
+              </span>
+            )}
+          </div>
           {data?.action_required_it && (
             <p className="text-xs text-zinc-500 mt-1">{safeRender(data.action_required_it)}</p>
+          )}
+          {hasEvidence && evidence[0]?.quote && (
+            <p className="text-xs text-zinc-400 mt-2 italic border-l-2 border-gold/20 pl-2">
+              "{evidence[0].quote.substring(0, 100)}..."
+            </p>
           )}
         </div>
         <span className="font-mono text-xs px-2 py-1 rounded bg-zinc-800">{status}</span>
@@ -143,9 +166,12 @@ const LegalKillerItem = ({ name, data }) => {
   );
 };
 
-// Red Flag Item Component
+// Red Flag Item Component with Evidence
 const RedFlagItem = ({ flag }) => {
   const severity = safeRender(flag.severity, 'AMBER');
+  const evidence = getEvidence(flag);
+  const hasEvidence = evidence.length > 0;
+  const pages = hasEvidence ? [...new Set(evidence.map(e => e.page).filter(Boolean))] : [];
   
   return (
     <div className={`p-4 rounded-lg border ${
@@ -155,32 +181,32 @@ const RedFlagItem = ({ flag }) => {
         <AlertTriangle className={`w-5 h-5 flex-shrink-0 ${
           severity === 'RED' ? 'text-red-400' : 'text-amber-400'
         }`} />
-        <div>
-          <p className="text-sm font-medium text-zinc-100">{safeRender(flag.flag_it, flag.message_it || flag.code || 'Flag')}</p>
+        <div className="flex-1">
+          <div className="flex items-center gap-2 flex-wrap">
+            <p className="text-sm font-medium text-zinc-100">{safeRender(flag.flag_it, flag.message_it || flag.code || 'Flag')}</p>
+            {hasEvidence && (
+              <span className="text-xs font-mono text-gold flex items-center gap-1">
+                <FileText className="w-3 h-3" />
+                p. {pages.join(', ')}
+              </span>
+            )}
+          </div>
           <p className="text-xs text-zinc-500 mt-1">{safeRender(flag.flag_en, flag.message_en || '')}</p>
           {(flag.action_it || flag.action_en) && (
             <p className="text-xs text-zinc-400 mt-2">
               <span className="text-gold">Azione:</span> {safeRender(flag.action_it, flag.action_en || '')}
             </p>
           )}
+          {hasEvidence && evidence[0]?.quote && (
+            <div className="mt-2 p-2 bg-zinc-900 rounded border-l-2 border-gold/30">
+              <p className="text-xs text-zinc-400 italic">"{evidence[0].quote}"</p>
+            </div>
+          )}
         </div>
       </div>
     </div>
   );
 };
-
-// Data Display Card Component
-const DataCard = ({ icon: Icon, label, value, color = 'text-zinc-100' }) => (
-  <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-4">
-    <div className="flex items-center gap-2 mb-3 text-zinc-500">
-      <Icon className="w-4 h-4" />
-      <span className="text-xs uppercase font-mono">{label}</span>
-    </div>
-    <p className={`text-xl font-mono font-bold ${color}`}>
-      {safeRender(value, 'N/A')}
-    </p>
-  </div>
-);
 
 const AnalysisResult = () => {
   const { analysisId } = useParams();
@@ -277,8 +303,7 @@ const AnalysisResult = () => {
   const qa = result.qa || {};
 
   // Get money box items
-  const moneyBoxItems = Array.isArray(moneyBox.items) ? moneyBox.items : 
-                        Array.isArray(moneyBox) ? moneyBox : [];
+  const moneyBoxItems = Array.isArray(moneyBox.items) ? moneyBox.items : [];
 
   // Get legal killers as object
   const legalKillersObj = legalKillers.items ? 
@@ -317,26 +342,64 @@ const AnalysisResult = () => {
               <div className="flex items-center gap-4 text-sm text-zinc-500">
                 <span className="font-mono">Case: {safeRender(analysis.case_id)}</span>
                 <span>•</span>
+                <span>{analysis.pages_count || '?'} pagine</span>
+                <span>•</span>
                 <span>{new Date(analysis.created_at).toLocaleString('it-IT')}</span>
               </div>
-              {caseHeader.procedure_id && caseHeader.procedure_id !== 'NOT_SPECIFIED_IN_PERIZIA' && (
-                <p className="text-sm text-gold mt-2">Procedura: {safeRender(caseHeader.procedure_id)}</p>
-              )}
-              {caseHeader.tribunale && caseHeader.tribunale !== 'NOT_SPECIFIED_IN_PERIZIA' && (
-                <p className="text-sm text-zinc-400">{safeRender(caseHeader.tribunale)}</p>
-              )}
+              
+              {/* Case Header with Evidence */}
+              <div className="mt-4 space-y-1">
+                {caseHeader.procedure_id && (
+                  <p className="text-sm text-gold flex items-center gap-2">
+                    Procedura: {safeRender(caseHeader.procedure_id)}
+                    <EvidenceBadge evidence={getEvidence(caseHeader.procedure_id)} />
+                  </p>
+                )}
+                {caseHeader.tribunale && (
+                  <p className="text-sm text-zinc-400 flex items-center gap-2">
+                    {safeRender(caseHeader.tribunale)}
+                    <EvidenceBadge evidence={getEvidence(caseHeader.tribunale)} />
+                  </p>
+                )}
+              </div>
             </div>
             <div className="text-right">
               <SemaforoBadge status={safeRender(semaforo.status, 'AMBER')} />
               <p className="text-sm text-zinc-400 mt-2 max-w-xs">{safeRender(semaforo.reason_it, semaforo.status_it || '')}</p>
+              {getEvidence(semaforo).length > 0 && (
+                <p className="text-xs text-gold mt-1 flex items-center justify-end gap-1">
+                  <FileText className="w-3 h-3" />
+                  Basato su pag. {[...new Set(getEvidence(semaforo).map(e => e.page))].join(', ')}
+                </p>
+              )}
             </div>
           </div>
           
-          {/* Quick Decision */}
+          {/* Quick Decision with Evidence */}
           <div className="mt-6 p-4 bg-zinc-950 rounded-lg border border-zinc-800">
             <p className="text-xs font-mono uppercase text-zinc-500 mb-2">Decisione Rapida</p>
             <p className="text-lg font-semibold text-zinc-100">{safeRender(decision.summary_it, 'Analisi completata')}</p>
             <p className="text-sm text-zinc-500 mt-1">{safeRender(decision.summary_en, '')}</p>
+            
+            {/* Driver Rosso with Evidence */}
+            {decision.driver_rosso && decision.driver_rosso.length > 0 && (
+              <div className="mt-4 space-y-2">
+                <p className="text-xs font-mono text-red-400 uppercase">Criticità Rilevate:</p>
+                {decision.driver_rosso.map((driver, idx) => (
+                  <div key={idx} className="p-2 bg-red-500/10 rounded border border-red-500/20">
+                    <div className="flex items-center gap-2">
+                      <AlertTriangle className="w-4 h-4 text-red-400" />
+                      <span className="text-sm text-red-400">{safeRender(driver.headline_it)}</span>
+                      {getEvidence(driver).length > 0 && (
+                        <span className="text-xs font-mono text-gold">
+                          p. {[...new Set(getEvidence(driver).map(e => e.page))].join(', ')}
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         </div>
         
@@ -367,38 +430,38 @@ const AnalysisResult = () => {
               </div>
             </div>
             
-            {/* Key Data Grid */}
+            {/* Key Data Grid with Evidence */}
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-              <DataCard 
-                icon={DollarSign} 
+              <DataValueWithEvidence 
                 label="Prezzo Base" 
                 value={dati.prezzo_base_asta?.formatted || dati.prezzo_base_asta?.value || dati.prezzo_base_asta}
-                color="text-gold"
+                evidence={getEvidence(dati.prezzo_base_asta)}
+                valueClassName="text-gold text-xl"
               />
-              <DataCard 
-                icon={Home} 
+              <DataValueWithEvidence 
                 label="Superficie" 
                 value={dati.superficie_catastale?.value || dati.superficie_catastale}
+                evidence={getEvidence(dati.superficie_catastale)}
               />
-              <DataCard 
-                icon={Users} 
+              <DataValueWithEvidence 
                 label="Stato Occupativo" 
                 value={occupativo.status_it || occupativo.status}
+                evidence={getEvidence(occupativo)}
               />
-              <DataCard 
-                icon={FileCheck} 
+              <DataValueWithEvidence 
                 label="Conformità Urbanistica" 
-                value={abusi.conformita_urbanistica?.status || abusi.conformita_urbanistica}
+                value={abusi.conformita_urbanistica?.status}
+                evidence={getEvidence(abusi.conformita_urbanistica)}
               />
-              <DataCard 
-                icon={FileCheck} 
+              <DataValueWithEvidence 
                 label="Conformità Catastale" 
-                value={abusi.conformita_catastale?.status || abusi.conformita_catastale}
+                value={abusi.conformita_catastale?.status}
+                evidence={getEvidence(abusi.conformita_catastale)}
               />
-              <DataCard 
-                icon={Scale} 
+              <DataValueWithEvidence 
                 label="Diritto Reale" 
                 value={dati.diritto_reale?.value || dati.diritto_reale}
+                evidence={getEvidence(dati.diritto_reale)}
               />
             </div>
             
@@ -447,10 +510,14 @@ const AnalysisResult = () => {
           {/* Costs Tab */}
           <TabsContent value="costs" className="space-y-6">
             <div className="money-box-card p-6">
-              <div className="flex items-center gap-3 mb-6">
+              <div className="flex items-center gap-3 mb-2">
                 <DollarSign className="w-6 h-6 text-gold" />
                 <h2 className="text-xl font-serif font-bold text-zinc-100">Portafoglio Costi (Money Box)</h2>
               </div>
+              <p className="text-xs text-zinc-500 mb-6">
+                <span className="text-emerald-400">Verde</span> = dal documento | 
+                <span className="text-gold ml-2">Oro</span> = stima Nexodify
+              </p>
               
               {moneyBoxItems.length > 0 ? (
                 <div className="space-y-3">
@@ -480,10 +547,13 @@ const AnalysisResult = () => {
           {/* Legal Killers Tab */}
           <TabsContent value="legal" className="space-y-6">
             <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-6">
-              <div className="flex items-center gap-3 mb-6">
+              <div className="flex items-center gap-3 mb-2">
                 <Scale className="w-6 h-6 text-red-400" />
                 <h2 className="text-xl font-serif font-bold text-zinc-100">Legal Killers Checklist</h2>
               </div>
+              <p className="text-xs text-zinc-500 mb-6">
+                Verifiche critiche che possono bloccare l'acquisto. I riferimenti alle pagine indicano dove verificare nel documento.
+              </p>
               
               {Object.keys(legalKillersObj).length > 0 ? (
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -494,12 +564,6 @@ const AnalysisResult = () => {
               ) : (
                 <p className="text-zinc-500 text-center py-8">Checklist legal killers non disponibile</p>
               )}
-              
-              {legalKillers.critical_note_it && (
-                <div className="mt-6 p-4 bg-red-500/10 border border-red-500/30 rounded-lg">
-                  <p className="text-red-400">{safeRender(legalKillers.critical_note_it?.text || legalKillers.critical_note_it)}</p>
-                </div>
-              )}
             </div>
           </TabsContent>
           
@@ -509,22 +573,26 @@ const AnalysisResult = () => {
             <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-6">
               <h2 className="text-xl font-serif font-bold text-zinc-100 mb-4">Dati Procedura</h2>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div className="p-4 bg-zinc-950 rounded-lg">
-                  <p className="text-xs font-mono text-zinc-500 mb-1">Procedura</p>
-                  <p className="text-zinc-100">{safeRender(caseHeader.procedure_id)}</p>
-                </div>
-                <div className="p-4 bg-zinc-950 rounded-lg">
-                  <p className="text-xs font-mono text-zinc-500 mb-1">Lotto</p>
-                  <p className="text-zinc-100">{safeRender(caseHeader.lotto)}</p>
-                </div>
-                <div className="p-4 bg-zinc-950 rounded-lg">
-                  <p className="text-xs font-mono text-zinc-500 mb-1">Tribunale</p>
-                  <p className="text-zinc-100">{safeRender(caseHeader.tribunale)}</p>
-                </div>
-                <div className="p-4 bg-zinc-950 rounded-lg">
-                  <p className="text-xs font-mono text-zinc-500 mb-1">Indirizzo</p>
-                  <p className="text-zinc-100">{safeRender(caseHeader.address?.full || caseHeader.address)}</p>
-                </div>
+                <DataValueWithEvidence 
+                  label="Procedura" 
+                  value={caseHeader.procedure_id}
+                  evidence={getEvidence(caseHeader.procedure_id)}
+                />
+                <DataValueWithEvidence 
+                  label="Lotto" 
+                  value={caseHeader.lotto}
+                  evidence={getEvidence(caseHeader.lotto)}
+                />
+                <DataValueWithEvidence 
+                  label="Tribunale" 
+                  value={caseHeader.tribunale}
+                  evidence={getEvidence(caseHeader.tribunale)}
+                />
+                <DataValueWithEvidence 
+                  label="Indirizzo" 
+                  value={caseHeader.address?.value || caseHeader.address?.full || caseHeader.address}
+                  evidence={getEvidence(caseHeader.address)}
+                />
               </div>
             </div>
             
@@ -532,35 +600,49 @@ const AnalysisResult = () => {
             <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-6">
               <h2 className="text-xl font-serif font-bold text-zinc-100 mb-4">Abusi Edilizi / Conformità</h2>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div className="p-4 bg-zinc-950 rounded-lg">
-                  <p className="text-xs font-mono text-zinc-500 mb-1">Condono</p>
-                  <p className="text-zinc-100">Presente: {safeRender(abusi.condono?.present)}</p>
-                  <p className="text-zinc-400 text-sm">Status: {safeRender(abusi.condono?.status)}</p>
-                </div>
-                <div className="p-4 bg-zinc-950 rounded-lg">
-                  <p className="text-xs font-mono text-zinc-500 mb-1">Agibilità</p>
-                  <p className="text-zinc-100">{safeRender(abusi.agibilita?.status || abusi.agibilita)}</p>
-                </div>
-                <div className="p-4 bg-zinc-950 rounded-lg">
-                  <p className="text-xs font-mono text-zinc-500 mb-1">Commerciabilità</p>
-                  <p className="text-zinc-100">{safeRender(abusi.commerciabilita?.status || abusi.commerciabilita)}</p>
-                </div>
+                <DataValueWithEvidence 
+                  label="Condono Presente" 
+                  value={abusi.condono?.present}
+                  evidence={getEvidence(abusi.condono)}
+                />
+                <DataValueWithEvidence 
+                  label="Status Condono" 
+                  value={abusi.condono?.status}
+                  evidence={getEvidence(abusi.condono)}
+                />
+                <DataValueWithEvidence 
+                  label="Agibilità" 
+                  value={abusi.agibilita?.status || abusi.agibilita}
+                  evidence={getEvidence(abusi.agibilita)}
+                />
+                <DataValueWithEvidence 
+                  label="Commerciabilità" 
+                  value={abusi.commerciabilita?.status}
+                  evidence={getEvidence(abusi.commerciabilita)}
+                />
               </div>
             </div>
             
             {/* Stato Conservativo */}
             <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-6">
               <h2 className="text-xl font-serif font-bold text-zinc-100 mb-4">Stato Conservativo</h2>
-              <p className="text-zinc-300">{safeRender(conservativo.general_condition_it, conservativo.note_it || 'Nessuna nota disponibile')}</p>
+              <p className="text-zinc-300">{safeRender(conservativo.general_condition_it, 'Nessuna nota disponibile')}</p>
               {Array.isArray(conservativo.issues_found) && conservativo.issues_found.length > 0 && (
-                <ul className="mt-4 space-y-2">
+                <div className="mt-4 space-y-2">
                   {conservativo.issues_found.map((issue, i) => (
-                    <li key={i} className="flex items-center gap-2 text-amber-400 text-sm">
-                      <AlertTriangle className="w-4 h-4" />
-                      {safeRender(issue.issue_it || issue)}
-                    </li>
+                    <div key={i} className="flex items-start gap-2 p-2 bg-amber-500/10 rounded">
+                      <AlertTriangle className="w-4 h-4 text-amber-400 mt-0.5" />
+                      <div>
+                        <span className="text-amber-400 text-sm">{safeRender(issue.issue_it || issue)}</span>
+                        {getEvidence(issue).length > 0 && (
+                          <span className="text-xs font-mono text-gold ml-2">
+                            p. {[...new Set(getEvidence(issue).map(e => e.page))].join(', ')}
+                          </span>
+                        )}
+                      </div>
+                    </div>
                   ))}
-                </ul>
+                </div>
               )}
             </div>
             
@@ -568,18 +650,21 @@ const AnalysisResult = () => {
             <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-6">
               <h2 className="text-xl font-serif font-bold text-zinc-100 mb-4">Formalità</h2>
               <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                <div className="p-4 bg-zinc-950 rounded-lg">
-                  <p className="text-xs font-mono text-zinc-500 mb-1">Ipoteca</p>
-                  <p className="text-zinc-100">{safeRender(formalita.ipoteca?.status || formalita.ipoteca)}</p>
-                </div>
-                <div className="p-4 bg-zinc-950 rounded-lg">
-                  <p className="text-xs font-mono text-zinc-500 mb-1">Pignoramento</p>
-                  <p className="text-zinc-100">{safeRender(formalita.pignoramento?.status || formalita.pignoramento)}</p>
-                </div>
-                <div className="p-4 bg-zinc-950 rounded-lg">
-                  <p className="text-xs font-mono text-zinc-500 mb-1">Cancellazione Decreto</p>
-                  <p className="text-zinc-100">{safeRender(formalita.cancellazione_decreto?.status || formalita.cancellazione_decreto || formalita.cancellazione)}</p>
-                </div>
+                <DataValueWithEvidence 
+                  label="Ipoteca" 
+                  value={formalita.ipoteca?.status}
+                  evidence={getEvidence(formalita.ipoteca)}
+                />
+                <DataValueWithEvidence 
+                  label="Pignoramento" 
+                  value={formalita.pignoramento?.status}
+                  evidence={getEvidence(formalita.pignoramento)}
+                />
+                <DataValueWithEvidence 
+                  label="Cancellazione con Decreto" 
+                  value={formalita.cancellazione_decreto?.status}
+                  evidence={getEvidence(formalita.cancellazione_decreto)}
+                />
               </div>
             </div>
             
@@ -613,10 +698,13 @@ const AnalysisResult = () => {
           {/* Red Flags Tab */}
           <TabsContent value="flags" className="space-y-6">
             <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-6">
-              <div className="flex items-center gap-3 mb-6">
+              <div className="flex items-center gap-3 mb-2">
                 <AlertTriangle className="w-6 h-6 text-amber-400" />
                 <h2 className="text-xl font-serif font-bold text-zinc-100">Red Flags Operativi</h2>
               </div>
+              <p className="text-xs text-zinc-500 mb-6">
+                Problematiche identificate nel documento. Clicca sul riferimento pagina per verificare nel PDF originale.
+              </p>
               
               {redFlags.length > 0 ? (
                 <div className="space-y-4">
