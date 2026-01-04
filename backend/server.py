@@ -1406,6 +1406,87 @@ async def get_assistant_history(request: Request, limit: int = 50, skip: int = 0
     return {"conversations": qas, "total": total, "limit": limit, "skip": skip}
 
 # ===================
+# DELETE ENDPOINTS
+# ===================
+
+@api_router.delete("/analysis/perizia/{analysis_id}")
+async def delete_perizia_analysis(analysis_id: str, request: Request):
+    """Delete a single perizia analysis"""
+    user = await require_auth(request)
+    
+    result = await db.perizia_analyses.delete_one({
+        "analysis_id": analysis_id,
+        "user_id": user.user_id
+    })
+    
+    if result.deleted_count == 0:
+        raise HTTPException(status_code=404, detail="Analisi non trovata / Analysis not found")
+    
+    logger.info(f"User {user.user_id} deleted perizia analysis {analysis_id}")
+    return {"ok": True, "message": "Analisi eliminata / Analysis deleted"}
+
+@api_router.delete("/analysis/images/{forensics_id}")
+async def delete_image_forensics(forensics_id: str, request: Request):
+    """Delete a single image forensics analysis"""
+    user = await require_auth(request)
+    
+    result = await db.image_forensics.delete_one({
+        "forensics_id": forensics_id,
+        "user_id": user.user_id
+    })
+    
+    if result.deleted_count == 0:
+        raise HTTPException(status_code=404, detail="Analisi non trovata / Analysis not found")
+    
+    logger.info(f"User {user.user_id} deleted image forensics {forensics_id}")
+    return {"ok": True, "message": "Analisi eliminata / Analysis deleted"}
+
+@api_router.delete("/analysis/assistant/{qa_id}")
+async def delete_assistant_qa(qa_id: str, request: Request):
+    """Delete a single assistant Q&A"""
+    user = await require_auth(request)
+    
+    result = await db.assistant_qa.delete_one({
+        "qa_id": qa_id,
+        "user_id": user.user_id
+    })
+    
+    if result.deleted_count == 0:
+        raise HTTPException(status_code=404, detail="Conversazione non trovata / Conversation not found")
+    
+    logger.info(f"User {user.user_id} deleted assistant QA {qa_id}")
+    return {"ok": True, "message": "Conversazione eliminata / Conversation deleted"}
+
+@api_router.delete("/history/all")
+async def delete_all_history(request: Request):
+    """Delete all user's history (perizia, images, assistant)"""
+    user = await require_auth(request)
+    
+    # Delete all perizia analyses
+    perizia_result = await db.perizia_analyses.delete_many({"user_id": user.user_id})
+    
+    # Delete all image forensics
+    image_result = await db.image_forensics.delete_many({"user_id": user.user_id})
+    
+    # Delete all assistant QA
+    qa_result = await db.assistant_qa.delete_many({"user_id": user.user_id})
+    
+    total_deleted = perizia_result.deleted_count + image_result.deleted_count + qa_result.deleted_count
+    
+    logger.info(f"User {user.user_id} deleted all history: {perizia_result.deleted_count} perizia, {image_result.deleted_count} images, {qa_result.deleted_count} QA")
+    
+    return {
+        "ok": True,
+        "message": f"Tutto lo storico eliminato / All history deleted",
+        "deleted": {
+            "perizia": perizia_result.deleted_count,
+            "images": image_result.deleted_count,
+            "assistant": qa_result.deleted_count,
+            "total": total_deleted
+        }
+    }
+
+# ===================
 # DASHBOARD STATS
 # ===================
 
