@@ -165,6 +165,18 @@ backend:
         agent: "testing"
         comment: "✅ Assistant Q&A working perfectly. Responds in both Italian and English with comprehensive real estate risk analysis. Includes proper disclaimers and safety warnings. LLM integration functional with context awareness."
 
+  - task: "DELETE Endpoints for Nexodify Forensic Engine"
+    implemented: true
+    working: "NA"
+    file: "/app/backend/server.py"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: true
+    status_history:
+      - working: "NA"
+        agent: "main"
+        comment: "New DELETE functionality added for perizia analysis, image forensics, assistant QA, and complete history deletion. Endpoints: DELETE /api/analysis/perizia/{analysis_id}, DELETE /api/analysis/images/{forensics_id}, DELETE /api/analysis/assistant/{qa_id}, DELETE /api/history/all. All require authentication and return proper 404 for non-existent items. Needs comprehensive testing for auth requirements, data deletion verification, and proper response codes."
+
 frontend:
   - task: "Evidence Display in Analysis Results"
     implemented: true
