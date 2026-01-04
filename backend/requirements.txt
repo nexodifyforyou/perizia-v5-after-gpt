@@ -68,6 +68,8 @@ packaging==25.0
 pandas==2.3.3
 passlib==1.7.4
 pathspec==0.12.1
+pdfminer.six==20251107
+pdfplumber==0.11.8
 pillow==12.1.0
 platformdirs==4.5.1
 pluggy==1.6.0
@@ -84,8 +86,10 @@ pyflakes==3.4.0
 Pygments==2.19.2
 PyJWT==2.10.1
 pymongo==4.5.0
+PyMuPDF==1.26.7
 pyparsing==3.3.1
 PyPDF2==3.0.1
+pypdfium2==5.2.0
 pytest==9.0.2
 python-dateutil==2.9.0.post0
 python-dotenv==1.2.1
@@ -96,6 +100,7 @@ pytz==2025.2
 PyYAML==6.0.3
 referencing==0.37.0
 regex==2025.11.3
+reportlab==4.4.7
 requests==2.32.5
 requests-oauthlib==2.0.0
 rich==14.2.0
