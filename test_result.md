@@ -203,9 +203,7 @@ metadata:
   run_ui: true
 
 test_plan:
-  current_focus:
-    - "Evidence Display in Analysis Results"
-    - "Authentication Flow"
+  current_focus: []
   stuck_tasks: []
   test_all: false
   test_priority: "high_first"
@@ -215,3 +213,5 @@ agent_communication:
     message: "Previous agent implemented evidence display feature (P0) but never tested it. Please run end-to-end test: 1) Login via Google OAuth 2) Upload a sample PDF perizia 3) Verify the API response contains 'evidence' arrays with 'page' and 'quote' keys 4) Verify the frontend displays page numbers and quotes. Also test authentication persistence - check if user stays logged in after page refresh."
   - agent: "testing"
     message: "✅ BACKEND TESTING COMPLETE - All critical features working! Evidence display feature (P0) is fully functional. Created comprehensive test with Italian legal PDF content. LLM properly extracts evidence with page numbers and quotes for all fields. Authentication system working correctly. All backend APIs tested and functional. Ready for frontend testing or main agent can summarize and finish. Minor issues: Session auth returns 500 with invalid session_id (expected), file upload validation returns 422 instead of 401 without auth (minor validation order issue)."
+  - agent: "testing"
+    message: "✅ FRONTEND TESTING COMPLETE - ALL CRITICAL FEATURES WORKING! Evidence Display feature fully functional with proper page number display (p. X format), FileText icons, gold-colored evidence indicators, and quote excerpts. Authentication flow working correctly with Emergent Google OAuth. Landing page loads with semaforo indicators (red/amber/green) and login button. Protected routes properly redirect to auth. UI responsive on mobile. Evidence components (EvidenceBadge, DataValueWithEvidence) properly integrated in AnalysisResult.js with tabs for Panoramica/Costi/Legal Killers/Dettagli/Red Flags. All test scenarios passed. Minor: WebSocket connection error (non-critical). Ready for main agent to summarize and finish."
