@@ -52,7 +52,7 @@ const Sidebar = ({ user, logout }) => {
           <Link
             key={item.path}
             to={item.path}
-            data-testid={`nav-${item.path.replace('/', '')}`}
+            data-testid={`nav-${item.path.replace(/\//g, '-').replace(/^-/, '')}`}
             className={`flex items-center gap-3 px-4 py-3 rounded-lg text-sm font-medium transition-all ${
               window.location.pathname === item.path
                 ? 'bg-gold/10 text-gold'
