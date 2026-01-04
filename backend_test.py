@@ -16,6 +16,233 @@ class NexodifyAPITester:
         self.tests_run = 0
         self.tests_passed = 0
         self.test_results = []
+        self.critical_failures = []
+
+    def create_test_pdf(self):
+        """Create a test PDF with Italian legal document content"""
+        buffer = io.BytesIO()
+        p = canvas.Canvas(buffer, pagesize=letter)
+        
+        # Page 1 - Header and basic info
+        p.drawString(100, 750, "TRIBUNALE DI ROMA")
+        p.drawString(100, 730, "SEZIONE ESECUZIONI IMMOBILIARI")
+        p.drawString(100, 710, "R.G.E. N. 123/2024")
+        p.drawString(100, 690, "Lotto Unico")
+        p.drawString(100, 670, "Procedura di Esecuzione Immobiliare")
+        p.drawString(100, 650, "Depositata il: 15/03/2024")
+        
+        # Address and property details
+        p.drawString(100, 620, "IMMOBILE SITO IN:")
+        p.drawString(100, 600, "Via Roma 123, 00100 Roma (RM)")
+        p.drawString(100, 580, "Superficie catastale: 85 mq")
+        p.drawString(100, 560, "Categoria: A/2, Classe: 3, Vani: 4")
+        
+        # Price information
+        p.drawString(100, 520, "PREZZO BASE D'ASTA:")
+        p.drawString(100, 500, "Il prezzo base d'asta è fissato in € 150.000,00")
+        p.drawString(100, 480, "(centocinquantamila/00)")
+        
+        p.showPage()
+        
+        # Page 2 - Conformity and occupancy
+        p.drawString(100, 750, "CONFORMITÀ URBANISTICA E CATASTALE")
+        p.drawString(100, 720, "L'immobile risulta conforme alla documentazione urbanistica")
+        p.drawString(100, 700, "depositata presso il Comune di Roma.")
+        p.drawString(100, 680, "Conformità catastale: CONFORME")
+        
+        p.drawString(100, 640, "STATO OCCUPATIVO:")
+        p.drawString(100, 620, "L'immobile risulta LIBERO da persone e cose")
+        p.drawString(100, 600, "alla data del sopralluogo del 10/03/2024.")
+        
+        p.drawString(100, 560, "FORMALITÀ:")
+        p.drawString(100, 540, "Ipoteca iscritta per € 200.000,00")
+        p.drawString(100, 520, "Pignoramento trascritto in data 01/02/2024")
+        
+        p.showPage()
+        p.save()
+        
+        buffer.seek(0)
+        return buffer.getvalue()
+
+    def run_test(self, name, method, endpoint, expected_status, data=None, headers=None, files=None):
+        """Run a single API test"""
+        url = f"{self.base_url}/{endpoint}"
+        test_headers = {}
+        if headers:
+            test_headers.update(headers)
+        if self.token:
+            test_headers['Authorization'] = f'Bearer {self.token}'
+
+        # Don't set Content-Type for file uploads
+        if not files and method == 'POST':
+            test_headers['Content-Type'] = 'application/json'
+
+        self.tests_run += 1
+        print(f"\n🔍 Testing {name}...")
+        
+        try:
+            if method == 'GET':
+                response = requests.get(url, headers=test_headers, timeout=60)
+            elif method == 'POST':
+                if files:
+                    response = requests.post(url, files=files, headers=test_headers, timeout=120)
+                else:
+                    response = requests.post(url, json=data, headers=test_headers, timeout=60)
+
+            success = response.status_code == expected_status
+            if success:
+                self.tests_passed += 1
+                print(f"✅ Passed - Status: {response.status_code}")
+                try:
+                    response_data = response.json()
+                except:
+                    response_data = {}
+            else:
+                print(f"❌ Failed - Expected {expected_status}, got {response.status_code}")
+                try:
+                    response_data = response.json()
+                    print(f"   Response: {response_data}")
+                except:
+                    response_data = {"error": response.text}
+                
+                # Track critical failures
+                if "CRITICAL" in name.upper() or "EVIDENCE" in name.upper():
+                    self.critical_failures.append({
+                        "test": name,
+                        "expected": expected_status,
+                        "actual": response.status_code,
+                        "response": response_data
+                    })
+
+            self.test_results.append({
+                "test": name,
+                "method": method,
+                "endpoint": endpoint,
+                "expected_status": expected_status,
+                "actual_status": response.status_code,
+                "success": success,
+                "response": response_data
+            })
+
+            return success, response_data
+
+        except Exception as e:
+            print(f"❌ Failed - Error: {str(e)}")
+            error_result = {
+                "test": name,
+                "method": method,
+                "endpoint": endpoint,
+                "expected_status": expected_status,
+                "actual_status": "ERROR",
+                "success": False,
+                "error": str(e)
+            }
+            self.test_results.append(error_result)
+            
+            if "CRITICAL" in name.upper() or "EVIDENCE" in name.upper():
+                self.critical_failures.append(error_result)
+            
+            return False, {}
+
+    def test_perizia_analysis_with_evidence(self):
+        """CRITICAL TEST: Test perizia analysis with evidence extraction"""
+        if not self.token:
+            print("⚠️ Skipping perizia test - no authentication token")
+            return False, {}
+        
+        print("📄 Creating test PDF with Italian legal content...")
+        pdf_content = self.create_test_pdf()
+        
+        files = {
+            'file': ('test_perizia.pdf', pdf_content, 'application/pdf')
+        }
+        
+        success, response_data = self.run_test(
+            "CRITICAL: Perizia Analysis with Evidence", 
+            "POST", 
+            "api/analysis/perizia", 
+            200, 
+            files=files
+        )
+        
+        if success and response_data:
+            # Verify evidence structure in response
+            result = response_data.get('result', {})
+            evidence_found = False
+            evidence_details = []
+            
+            # Check case_header for evidence
+            case_header = result.get('case_header', {})
+            for field, data in case_header.items():
+                if isinstance(data, dict) and 'evidence' in data:
+                    evidence_array = data.get('evidence', [])
+                    if evidence_array:
+                        evidence_found = True
+                        for ev in evidence_array:
+                            if 'page' in ev and 'quote' in ev:
+                                evidence_details.append(f"{field}: page {ev['page']}, quote: '{ev['quote'][:50]}...'")
+            
+            # Check dati_certi_del_lotto for evidence
+            dati_certi = result.get('dati_certi_del_lotto', {})
+            for field, data in dati_certi.items():
+                if isinstance(data, dict) and 'evidence' in data:
+                    evidence_array = data.get('evidence', [])
+                    if evidence_array:
+                        evidence_found = True
+                        for ev in evidence_array:
+                            if 'page' in ev and 'quote' in ev:
+                                evidence_details.append(f"{field}: page {ev['page']}, quote: '{ev['quote'][:50]}...'")
+            
+            if evidence_found:
+                print(f"✅ EVIDENCE FOUND: {len(evidence_details)} evidence entries")
+                for detail in evidence_details[:3]:  # Show first 3
+                    print(f"   📍 {detail}")
+            else:
+                print("❌ CRITICAL FAILURE: No evidence arrays with page/quote found in response")
+                self.critical_failures.append({
+                    "test": "Evidence Structure Validation",
+                    "issue": "No evidence arrays with page/quote found",
+                    "response_structure": list(result.keys())
+                })
+            
+            return success, response_data
+        
+        return success, response_data
+
+    def test_session_auth_flow(self):
+        """Test session-based authentication flow"""
+        # This would normally require a real session_id from Emergent Auth
+        # For testing, we'll simulate with a mock session
+        mock_session_data = {
+            "session_id": "mock_session_123"
+        }
+        
+        return self.run_test(
+            "Session Auth Flow", 
+            "POST", 
+            "api/auth/session", 
+            401,  # Expected to fail with mock data
+            data=mock_session_data
+        )
+
+    def test_assistant_with_context(self):
+        """Test assistant with perizia context"""
+        if not self.token:
+            print("⚠️ Skipping assistant test - no authentication token")
+            return False, {}
+        
+        assistant_data = {
+            "question": "Quali sono i rischi principali di questo immobile?",
+            "related_case_id": None
+        }
+        
+        return self.run_test(
+            "Assistant Q&A", 
+            "POST", 
+            "api/analysis/assistant", 
+            200, 
+            data=assistant_data
+        )
 
     def run_test(self, name, method, endpoint, expected_status, data=None, headers=None):
         """Run a single API test"""
