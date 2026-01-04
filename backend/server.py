@@ -999,22 +999,91 @@ async def analyze_perizia(request: Request, file: UploadFile = File(...)):
             }
         )
     
-    # Read PDF
+    # Read PDF with ENHANCED extraction using pdfplumber and pymupdf
     contents = await file.read()
     input_sha256 = hashlib.sha256(contents).hexdigest()
     
     try:
-        pdf_reader = PdfReader(io.BytesIO(contents))
+        import pdfplumber
+        import fitz  # pymupdf
+        
         pages = []
         full_text = ""
         
-        for i, page in enumerate(pdf_reader.pages):
-            page_text = page.extract_text() or ""
-            pages.append({"page_number": i + 1, "text": page_text})
-            full_text += f"\n=== PAGE {i + 1} ===\n{page_text}"
+        # Method 1: Try pdfplumber first (best for structured text)
+        logger.info(f"Extracting text from {file.filename} using pdfplumber...")
+        try:
+            with pdfplumber.open(io.BytesIO(contents)) as pdf:
+                for i, page in enumerate(pdf.pages):
+                    # Extract text with better settings
+                    page_text = page.extract_text(
+                        x_tolerance=3,
+                        y_tolerance=3,
+                        layout=True,
+                        x_density=7.25,
+                        y_density=13
+                    ) or ""
+                    
+                    # Also try to extract tables
+                    tables = page.extract_tables()
+                    table_text = ""
+                    if tables:
+                        for table in tables:
+                            for row in table:
+                                if row:
+                                    table_text += " | ".join([str(cell) if cell else "" for cell in row]) + "\n"
+                    
+                    combined_text = page_text + "\n" + table_text if table_text else page_text
+                    pages.append({"page_number": i + 1, "text": combined_text})
+                    full_text += f"\n\n{'='*60}\nPAGINA {i + 1}\n{'='*60}\n{combined_text}"
+                    
+            logger.info(f"pdfplumber extracted {len(pages)} pages, {len(full_text)} chars total")
+        except Exception as e:
+            logger.warning(f"pdfplumber failed: {e}, falling back to pymupdf")
+            pages = []
+            full_text = ""
+        
+        # Method 2: If pdfplumber failed or got little text, try pymupdf
+        if len(full_text.strip()) < 1000:
+            logger.info(f"Trying pymupdf extraction...")
+            pages = []
+            full_text = ""
+            doc = fitz.open(stream=contents, filetype="pdf")
+            for i, page in enumerate(doc):
+                # Extract text with better settings
+                page_text = page.get_text("text", sort=True) or ""
+                
+                # Also try blocks for better layout
+                blocks = page.get_text("blocks", sort=True)
+                if blocks:
+                    block_text = "\n".join([b[4] for b in blocks if isinstance(b[4], str)])
+                    if len(block_text) > len(page_text):
+                        page_text = block_text
+                
+                pages.append({"page_number": i + 1, "text": page_text})
+                full_text += f"\n\n{'='*60}\nPAGINA {i + 1}\n{'='*60}\n{page_text}"
+            doc.close()
+            logger.info(f"pymupdf extracted {len(pages)} pages, {len(full_text)} chars total")
+        
+        # Method 3: Final fallback to PyPDF2
+        if len(full_text.strip()) < 500:
+            logger.info(f"Trying PyPDF2 fallback...")
+            pages = []
+            full_text = ""
+            pdf_reader = PdfReader(io.BytesIO(contents))
+            for i, page in enumerate(pdf_reader.pages):
+                page_text = page.extract_text() or ""
+                pages.append({"page_number": i + 1, "text": page_text})
+                full_text += f"\n\n{'='*60}\nPAGINA {i + 1}\n{'='*60}\n{page_text}"
+            logger.info(f"PyPDF2 extracted {len(pages)} pages, {len(full_text)} chars total")
         
         if not full_text.strip():
             raise HTTPException(status_code=400, detail="Impossibile estrarre testo dal PDF. Il file potrebbe essere scansionato o protetto. / Could not extract text from PDF. File may be scanned or protected.")
+        
+        # Log extraction quality
+        logger.info(f"Final extraction: {len(pages)} pages, {len(full_text)} total chars")
+        for i, p in enumerate(pages[:5]):  # Log first 5 pages
+            logger.info(f"Page {i+1}: {len(p['text'])} chars")
         
     except Exception as e:
         logger.error(f"PDF parsing error: {e}")
