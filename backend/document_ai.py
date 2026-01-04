@@ -69,7 +69,6 @@ class GoogleDocumentAIExtractor:
                 ocr_config=documentai.OcrConfig(
                     enable_native_pdf_parsing=True,  # Extract embedded PDF text
                     enable_image_quality_scores=True,  # Get quality metrics
-                    language_hints=["it", "en"],  # Italian and English
                 )
             )
             
