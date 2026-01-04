@@ -1,0 +1,202 @@
+{
+  "identity": {
+    "name": "Nexodify Forensic Engine",
+    "persona": "The Forensic Darkroom",
+    "vibe": "Audit-Grade, Italian Luxury, Cyber-Forensic",
+    "emotional_tone": "Authority, Precision, Truth, Security",
+    "archetype": "Swiss High-Contrast x Jewel Luxury"
+  },
+  "typography": {
+    "fonts": {
+      "headings": {
+        "family": "Playfair Display",
+        "weights": ["400", "600", "700"],
+        "usage": "Landing page heroes, legal document titles, major section headers. Adds 'Italian Legal' authority."
+      },
+      "body": {
+        "family": "Manrope",
+        "weights": ["300", "400", "500", "600"],
+        "usage": "General UI text, descriptions, form labels. Clean and modern."
+      },
+      "data": {
+        "family": "JetBrains Mono",
+        "weights": ["400", "500"],
+        "usage": "Financial figures, evidence IDs, page numbers, timestamps, 'Money Box' calculations. Essential for the 'Forensic' feel."
+      }
+    },
+    "scale": {
+      "h1": "text-5xl md:text-7xl font-serif tracking-tight leading-none",
+      "h2": "text-3xl md:text-5xl font-serif tracking-tight",
+      "h3": "text-2xl md:text-3xl font-sans font-semibold tracking-normal",
+      "body_lg": "text-lg md:text-xl font-sans leading-relaxed text-zinc-300",
+      "body_base": "text-base font-sans leading-relaxed text-zinc-400",
+      "caption": "text-xs font-mono uppercase tracking-widest text-zinc-500",
+      "data_value": "text-sm font-mono text-zinc-200"
+    }
+  },
+  "colors": {
+    "palette": {
+      "background": {
+        "default": "#09090b",
+        "surface": "#18181b",
+        "surface_hover": "#27272a",
+        "overlay": "rgba(9, 9, 11, 0.8)"
+      },
+      "primary": {
+        "brand": "#D4AF37",
+        "brand_dim": "#A68A2E",
+        "brand_glow": "rgba(212, 175, 55, 0.3)",
+        "usage": "CTAs, 'Money Box' totals, Premium plan highlights. The 'Gold' standard."
+      },
+      "secondary": {
+        "tech": "#6366f1",
+        "tech_dim": "#4f46e5",
+        "usage": "AI analysis indicators, progress bars, active states."
+      },
+      "semaforo": {
+        "red": "#ef4444",
+        "red_bg": "rgba(239, 68, 68, 0.1)",
+        "amber": "#f59e0b",
+        "amber_bg": "rgba(245, 158, 11, 0.1)",
+        "green": "#10b981",
+        "green_bg": "rgba(16, 185, 129, 0.1)",
+        "usage": "Risk assessment indicators ONLY. Do not use for decoration."
+      },
+      "text": {
+        "primary": "#f4f4f5",
+        "secondary": "#a1a1aa",
+        "muted": "#52525b",
+        "inverse": "#09090b"
+      },
+      "border": {
+        "default": "#27272a",
+        "active": "#3f3f46",
+        "highlight": "#D4AF37"
+      }
+    },
+    "gradients": {
+      "gold_rush": "linear-gradient(135deg, #D4AF37 0%, #A68A2E 100%)",
+      "midnight_bloom": "linear-gradient(180deg, rgba(9,9,11,0) 0%, #09090b 100%)",
+      "risk_spectrum": "linear-gradient(90deg, #ef4444 0%, #f59e0b 50%, #10b981 100%)"
+    }
+  },
+  "layout": {
+    "spacing": {
+      "container_padding": "p-6 md:p-12 lg:p-24",
+      "section_gap": "gap-16 md:gap-32",
+      "card_padding": "p-6 md:p-8"
+    },
+    "grids": {
+      "dashboard": "grid grid-cols-1 md:grid-cols-3 lg:grid-cols-4 gap-4 md:gap-6",
+      "landing": "grid grid-cols-1 md:grid-cols-12 gap-8 md:gap-12",
+      "bento_marketing": "grid grid-cols-1 md:grid-cols-3 gap-4 auto-rows-[300px]"
+    },
+    "containers": {
+      "dashboard_card": "bg-zinc-900/50 border border-zinc-800 rounded-xl backdrop-blur-sm",
+      "marketing_card": "bg-zinc-900 border border-zinc-800 hover:border-zinc-700 transition-colors duration-300 rounded-2xl",
+      "glass_header": "fixed top-0 w-full z-50 bg-zinc-950/70 backdrop-blur-xl border-b border-white/5"
+    }
+  },
+  "components": {
+    "buttons": {
+      "primary": "bg-[#D4AF37] text-zinc-950 hover:bg-[#A68A2E] font-semibold rounded-lg px-6 py-3 transition-all shadow-[0_0_15px_rgba(212,175,55,0.2)] hover:shadow-[0_0_25px_rgba(212,175,55,0.4)]",
+      "secondary": "bg-zinc-800 text-zinc-100 hover:bg-zinc-700 border border-zinc-700 rounded-lg px-6 py-3 transition-all",
+      "ghost": "text-zinc-400 hover:text-[#D4AF37] hover:bg-zinc-900/50 rounded-lg px-4 py-2 transition-all",
+      "destructive": "bg-red-900/20 text-red-400 border border-red-900/50 hover:bg-red-900/40 rounded-lg px-6 py-3"
+    },
+    "cards": {
+      "evidence_card": "group relative overflow-hidden bg-zinc-900 border border-zinc-800 p-6 rounded-xl hover:border-zinc-600 transition-all",
+      "money_box": "bg-zinc-900 border border-[#D4AF37]/30 p-6 rounded-xl shadow-[inset_0_0_20px_rgba(212,175,55,0.05)]",
+      "risk_indicator": "flex items-center gap-3 px-4 py-2 rounded-full font-mono text-sm font-bold uppercase tracking-wider"
+    },
+    "inputs": {
+      "default": "bg-zinc-950 border border-zinc-800 focus:border-[#D4AF37] focus:ring-1 focus:ring-[#D4AF37] rounded-lg px-4 py-3 text-zinc-100 placeholder:text-zinc-600 transition-all",
+      "search": "pl-10 bg-zinc-900/50 border-zinc-800 rounded-full"
+    },
+    "badges": {
+      "risk_high": "bg-red-500/10 text-red-400 border border-red-500/20",
+      "risk_medium": "bg-amber-500/10 text-amber-400 border border-amber-500/20",
+      "risk_low": "bg-emerald-500/10 text-emerald-400 border border-emerald-500/20",
+      "premium": "bg-[#D4AF37]/10 text-[#D4AF37] border border-[#D4AF37]/20"
+    }
+  },
+  "visual_enhancers": {
+    "textures": {
+      "noise": "url(\"data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noiseFilter'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.65' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noiseFilter)' opacity='0.05'/%3E%3C/svg%3E\")",
+      "grid": "bg-[linear-gradient(to_right,#27272a_1px,transparent_1px),linear-gradient(to_bottom,#27272a_1px,transparent_1px)] bg-[size:4rem_4rem]"
+    },
+    "effects": {
+      "glass": "backdrop-blur-xl bg-black/40 border border-white/10",
+      "glow": "shadow-[0_0_30px_-5px_rgba(212,175,55,0.3)]",
+      "vignette": "radial-gradient(circle at center, transparent 0%, #09090b 100%)"
+    }
+  },
+  "assets": {
+    "images": {
+      "hero_bg": {
+        "url": "https://images.pexels.com/photos/13498650/pexels-photo-13498650.jpeg",
+        "alt": "Modern Italian Architecture Night",
+        "usage": "Landing page hero background with heavy dark overlay"
+      },
+      "forensic_abstract": {
+        "url": "https://images.pexels.com/photos/17484975/pexels-photo-17484975.png",
+        "alt": "Abstract Digital Forensic Data",
+        "usage": "Feature section background or 'How it works' visual"
+      },
+      "testimonials": [
+        {
+          "url": "https://images.pexels.com/photos/8730364/pexels-photo-8730364.jpeg",
+          "alt": "Professional Lawyer Male",
+          "role": "Legal Partner"
+        },
+        {
+          "url": "https://images.pexels.com/photos/14634929/pexels-photo-14634929.jpeg",
+          "alt": "Professional Lawyer Female",
+          "role": "Real Estate Investor"
+        }
+      ]
+    },
+    "icons": {
+      "library": "lucide-react",
+      "style": "Stroke width 1.5px, sharp edges where possible"
+    }
+  },
+  "motion": {
+    "transitions": {
+      "default": "transition-all duration-300 ease-out",
+      "slow": "transition-all duration-700 ease-in-out"
+    },
+    "animations": {
+      "fade_in": "animate-in fade-in duration-500",
+      "slide_up": "animate-in slide-in-from-bottom-4 duration-500",
+      "pulse_slow": "animate-pulse duration-[3000ms]"
+    }
+  },
+  "accessibility": {
+    "contrast": "Ensure all text meets WCAG AA (4.5:1). Use lighter grays (Zinc-300/400) on dark backgrounds, never dark gray on black.",
+    "focus": "Visible focus rings using the Gold brand color (#D4AF37).",
+    "reduced_motion": "Respect prefers-reduced-motion media query."
+  },
+  "instructions_to_main_agent": {
+    "general": "You are building a 'Forensic Engine'. The UI must feel like a high-end tool for detectives and lawyers. It should be dark, serious, and extremely precise. No playful animations. No rounded 'bubbly' UI. Think 'Batman's Computer' meets 'Italian Law Firm'.",
+    "dashboard": "Use the 'Control Room' grid. Dense data. Use the 'Semaforo' colors strictly for risk status. Do not use them for decoration.",
+    "money_box": "This is a key feature. Make the 'Money Box' component look like a digital safe or a premium financial card. Use the Gold accent color here.",
+    "legal_killers": "Design this as a 'Checklist of Doom'. High contrast. Red alerts for found killers.",
+    "pdf_viewer": "Maximize screen real estate. Dark mode PDF viewer if possible, or high-contrast container.",
+    "auth": "Simple, secure, centered. Google Auth button should be prominent but styled to match the dark theme (e.g., white button with dark text, or dark button with white border)."
+  },
+  "universal_guidelines": {
+    "do_not": [
+      "Use gradients for text unless it's a very large headline.",
+      "Use 'Inter' font for headings.",
+      "Use bright/neon colors for backgrounds (keep them for tiny accents only).",
+      "Center text in long paragraphs."
+    ],
+    "must_do": [
+      "Use 'data-testid' on all interactive elements.",
+      "Use 'sonner' for toasts.",
+      "Use 'lucide-react' for icons.",
+      "Ensure mobile responsiveness (stack grids to 1 column)."
+    ]
+  }
+}
