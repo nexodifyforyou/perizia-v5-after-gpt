@@ -1798,7 +1798,7 @@ def create_fallback_analysis(file_name: str, case_id: str, run_id: str, pages: L
             "disclaimer_it": "Documento informativo. Non costituisce consulenza legale. Consultare un professionista qualificato.",
             "disclaimer_en": "Informational document. Not legal advice. Consult a qualified professional."
         },
-        "qa": {
+        "qa_pass": {
             "status": "WARN",
             "reasons": [
                 {"code": "PARTIAL_EXTRACTION", "severity": "AMBER", "reason_it": "Estrazione automatica parziale - LLM fallback", "reason_en": "Partial automatic extraction - LLM fallback"},
@@ -1807,6 +1807,7 @@ def create_fallback_analysis(file_name: str, case_id: str, run_id: str, pages: L
             "checks": [
                 {"code": "QA-PageCoverage", "result": "WARN", "note": f"Fallback mode - page_coverage_log created with {len(pages)} placeholder entries"},
                 {"code": "QA-MoneyBox-Honesty", "result": "OK", "note": "All values set to TBD (no fake estimates)"},
+                {"code": "QA-MultiLot", "result": "OK" if len(extracted_lots) >= 2 else "WARN", "note": f"Multi-lot detected: {len(extracted_lots)} lots" if len(extracted_lots) >= 2 else f"Single lot: {len(extracted_lots)} lots"},
                 {"code": "QA-Lotto", "result": "OK" if extracted_lots else "WARN", "note": f"Detected lots: {len(extracted_lots)}" if extracted_lots else "No lots detected"}
             ]
         }
