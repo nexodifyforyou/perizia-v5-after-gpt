@@ -1189,9 +1189,36 @@ NON aggiungere commenti, solo JSON valido."""
         return create_fallback_analysis(file_name, case_id, run_id, pages, pdf_text, detected_lots)
 
 
-def apply_deterministic_fixes(result: Dict, pdf_text: str, pages: List[Dict]) -> Dict:
+def apply_deterministic_fixes(result: Dict, pdf_text: str, pages: List[Dict], detected_lots: Dict = None, has_evidence_fn = None) -> Dict:
     """Apply deterministic fixes and calculations to ensure data consistency"""
     import re
+    
+    # Default has_evidence function if not provided
+    def has_evidence(ev):
+        if not isinstance(ev, list) or not ev:
+            return False
+        e0 = ev[0]
+        return isinstance(e0, dict) and "page" in e0 and "quote" in e0 and str(e0.get("quote","")).strip() != ""
+    
+    if has_evidence_fn:
+        has_evidence = has_evidence_fn
+    
+    detected_lots = detected_lots or {"lots": [], "evidence": []}
+    
+    # ==========================================
+    # FIX 0: Final Multi-Lot Override (CHANGE 2)
+    # ==========================================
+    lots = detected_lots.get("lots", [])
+    if isinstance(lots, list) and len(lots) >= 2:
+        hdr = result.setdefault("report_header", {})
+        lotto_obj = hdr.setdefault("lotto", {"value": "Non specificato in Perizia", "evidence": []})
+        lotto_obj["value"] = "Lotti " + ", ".join(str(x) for x in lots)
+        lotto_obj["evidence"] = detected_lots.get("evidence", [])
+        
+        # Also update case_header if it exists
+        case_hdr = result.get("case_header", {})
+        if case_hdr:
+            case_hdr["lotto"] = "Lotti " + ", ".join(str(x) for x in lots)
     
     # ==========================================
     # FIX 1: Recalculate Money Box Totals
