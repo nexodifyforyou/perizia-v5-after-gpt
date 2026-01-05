@@ -1138,37 +1138,25 @@ INIZIA L'ANALISI:"""
             if status in ("SI", "NO", "YES") and not has_evidence(ev):
                 it["status"] = "NON_SPECIFICATO"
                 it.setdefault("action", "Verifica obbligatoria")
-            lotto_obj = hdr.setdefault("lotto", {"value": "Non specificato in Perizia", "evidence": []})
-            lotto_obj["value"] = "Lotti " + ", ".join(str(x) for x in lots)
-            lotto_obj["evidence"] = detected_lots.get("evidence", [])
-
-            # Add a QA note
+                logger.info(f"Legal killer '{it.get('killer', 'unknown')}' status reset to NON_SPECIFICATO (no evidence)")
+        
+        # Add QA note for multi-lot detection
+        if len(extracted_lots) >= 2:
             qa = result.setdefault("qa_pass", {"status": "WARN", "checks": []})
             qa["checks"] = qa.get("checks", [])
             qa["checks"].append({
-                "code": "QA-Lotto",
+                "code": "QA-MultiLot",
                 "result": "OK",
-                "note": f"Multi-lot detected deterministically: {lots}"
+                "note": f"Multi-lot detected: {len(extracted_lots)} lots"
             })
-            logger.info(f"Multi-lot override applied: {lots}")
         
-        # Add detected lot_index to result
-        if lots:
-            result["lot_index"] = [{"lot": lot_num, "page": ev_item.get("page", 0), "quote": ev_item.get("quote", "")} 
-                                   for lot_num, ev_item in zip(lots, detected_lots.get("evidence", [{}]*len(lots)))]
+        # Add lot_index
+        result["lot_index"] = [
+            {"lot": lot["lot_number"], "prezzo": lot["prezzo_base_eur"], "ubicazione": lot["ubicazione"][:50]}
+            for lot in extracted_lots
+        ]
         
-        # ---- CHANGE 3: Enforce tri-state for section_9_legal_killers ----
-        lk = result.get("section_9_legal_killers", {})
-        items = lk.get("items", []) if isinstance(lk, dict) else []
-        for it in items:
-            status = str(it.get("status", "NON_SPECIFICATO")).upper()
-            ev = it.get("evidence", [])
-            if status in ("SI", "NO", "YES") and not has_evidence(ev):
-                it["status"] = "NON_SPECIFICATO"
-                it.setdefault("action", "Verifica obbligatoria")
-                logger.info(f"Legal killer '{it.get('killer', 'unknown')}' status reset to NON_SPECIFICATO (no evidence)")
-        
-        # ---- CHANGE 3: Enforce evidence on critical header fields ----
+        # ---- Enforce evidence on critical header fields ----
         qa = result.setdefault("qa_pass", {"status": "PASS", "checks": []})
         qa["checks"] = qa.get("checks", [])
         
@@ -1184,30 +1172,22 @@ INIZIA L'ANALISI:"""
                 ev = field_data.get("evidence", [])
                 if not has_evidence(ev):
                     val = field_data.get("value", "")
-                    if val and "Non specificato" not in str(val):
-                        field_data["value"] = "Non specificato in Perizia"
+                    if val and "Non specificato" not in str(val) and val not in ["None", "N/A", "NOT_SPECIFIED_IN_PERIZIA"]:
+                        field_data["value"] = "NON SPECIFICATO IN PERIZIA"
                         qa["checks"].append({
                             "code": f"QA-Evidence-{field}",
                             "result": "WARN",
                             "note": f"Field {section}.{field} had no evidence, reset to Non specificato"
                         })
         
-        # Check section_4_dati_certi.prezzo_base_asta
-        dati = result.get("section_4_dati_certi", {})
-        prezzo = dati.get("prezzo_base_asta", {})
-        if isinstance(prezzo, dict):
-            ev = prezzo.get("evidence", [])
-            if not has_evidence(ev) and prezzo.get("value", 0) > 0:
-                qa["checks"].append({
-                    "code": "QA-Evidence-prezzo_base",
-                    "result": "WARN", 
-                    "note": "prezzo_base_asta has value but no evidence"
-                })
-        
-        # ---- CHANGE 4: Money Box Honesty ----
+        # ---- Money Box Honesty with TBD handling ----
         mb = result.get("section_3_money_box", {})
         mb_items = mb.get("items", []) if isinstance(mb, dict) else []
         money_box_violations = []
+        has_numeric_total = False
+        total_numeric_min = 0
+        total_numeric_max = 0
+        all_tbd = True
         
         for it in mb_items:
             fonte = (it.get("fonte_perizia", {}) or {})
@@ -1215,9 +1195,31 @@ INIZIA L'ANALISI:"""
             fonte_ev = fonte.get("evidence", [])
             euro = it.get("stima_euro", 0)
 
-            is_unspecified = ("non specificato" in fonte_val) or (not has_evidence(fonte_ev))
-            if is_unspecified and euro and euro > 0:
-                voce = it.get("voce", "unknown")
+            is_unspecified = ("non specificato" in fonte_val) or ("tbd" in fonte_val.lower()) or (not has_evidence(fonte_ev))
+            
+            if is_unspecified:
+                # Mark as TBD, not €0
+                it["stima_euro"] = "TBD"
+                it["stima_nota"] = "TBD (NON SPECIFICATO IN PERIZIA) — Verifica tecnico/legale"
+            elif euro and isinstance(euro, (int, float)) and euro > 0:
+                has_numeric_total = True
+                all_tbd = False
+                total_numeric_min += euro
+                total_numeric_max += euro
+        
+        # Update money box totals - NEVER show €0-€0 if items are TBD
+        if all_tbd:
+            mb["totale_extra_budget"] = {
+                "min": "TBD",
+                "max": "TBD",
+                "nota": "TBD — Costi non quantificati in perizia"
+            }
+        elif has_numeric_total:
+            mb["totale_extra_budget"] = {
+                "min": total_numeric_min,
+                "max": int(total_numeric_max * 1.2),
+                "nota": f"EUR {total_numeric_min:,.0f}+ (minimo da perizia)" + (" + TBD" if not all_tbd else "")
+            }
                 note = str(it.get("stima_nota", "") or "")
                 if "STIMA NEXODIFY" not in note.upper():
                     it["stima_euro"] = 0
