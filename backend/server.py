@@ -763,7 +763,7 @@ async def analyze_perizia_with_llm(pdf_text: str, pages: List[Dict], file_name: 
     from emergentintegrations.llm.chat import LlmChat, UserMessage
     
     # ===========================================================================
-    # HELPER FUNCTIONS FOR FULL-DOCUMENT COVERAGE (CHANGE 1)
+    # HELPER FUNCTIONS FOR FULL-DOCUMENT COVERAGE
     # ===========================================================================
     def compress_page_text(t: str, max_chars: int = 1400) -> str:
         t = (t or "").strip()
@@ -776,12 +776,11 @@ async def analyze_perizia_with_llm(pdf_text: str, pages: List[Dict], file_name: 
             r"(prezzo|base|asta|lotto|tribunale|via|comune|catast|urban|"
             r"agibil|abitabil|conform|ipotec|pignor|servit|amianto|"
             r"deprezz|oneri|regolarizz|€|eur|euro|mq|superficie|foglio|"
-            r"particella|sub|rendita|p\.?e\.?e\.?p|usi\s+civici|beni\s+culturali|"
-            r"donazione|fondo\s+patrimoniale|formalità|non\s+cancell|locazione|opponib)"
+            r"particella|sub|decreto di trasferimento|formalità|stradella|barriera|"
+            r"salva casa|D\.L\.\s*69|L\.R\.\s*Toscana|accertamento di conformità)"
             , re.I
         )
         kept = []
-        # keep head, tail, and keyword lines from middle
         mid = lines[18:-18] if len(lines) > 36 else []
         for ln in head + mid + tail:
             if ln in head or ln in tail or key_re.search(ln):
@@ -793,7 +792,6 @@ async def analyze_perizia_with_llm(pdf_text: str, pages: List[Dict], file_name: 
 
     def build_page_content(per_page_cap: int) -> str:
         out = ""
-        # include up to 200 pages (your PDFs are <= 200 typically; adjust if needed)
         for p in pages[:200]:
             out += (
                 f"\n\n{'='*60}\nPAGINA {p.get('page_number')}\n{'='*60}\n"
@@ -802,30 +800,159 @@ async def analyze_perizia_with_llm(pdf_text: str, pages: List[Dict], file_name: 
         return out
     
     # ===========================================================================
-    # DETERMINISTIC MULTI-LOT DETECTION (CHANGE 2)
+    # DETERMINISTIC LOT EXTRACTION FROM "SCHEMA RIASSUNTIVO"
     # ===========================================================================
-    def detect_lots_from_pages(pages_in):
-        lots = set()
-        evidence = []
+    def extract_lots_from_schema_riassuntivo(pages_in):
+        """Extract lots deterministically from SCHEMA RIASSUNTIVO pages"""
+        lots = []
+        schema_pages = []
+        
+        # Find pages with SCHEMA RIASSUNTIVO
         for p in pages_in:
-            t = str(p.get("text", "") or "")
-            for m in re.finditer(r"\bLotto\s+(\d+)\b", t, flags=re.I):
-                try:
-                    n = int(m.group(1))
-                    lots.add(n)
-                    if len(evidence) < 3:
-                        s = max(m.start() - 80, 0)
-                        e = min(m.end() + 80, len(t))
-                        evidence.append({
-                            "page": int(p.get("page_number", 0)),
-                            "quote": t[s:e].replace("\n"," ")[:200]
-                        })
-                except Exception:
+            text = str(p.get("text", "") or "")
+            if "SCHEMA RIASSUNTIVO" in text.upper() or ("LOTTO" in text.upper() and "PREZZO BASE" in text.upper()):
+                schema_pages.append(p)
+        
+        # If no schema pages found, scan all pages for lot patterns
+        if not schema_pages:
+            schema_pages = pages_in
+        
+        # Find all lot numbers mentioned
+        all_lot_numbers = set()
+        for p in pages_in:
+            text = str(p.get("text", "") or "")
+            for m in re.finditer(r"\bLOTTO\s+(\d+)\b", text, flags=re.I):
+                all_lot_numbers.add(int(m.group(1)))
+        
+        # Extract details for each lot
+        for lot_num in sorted(all_lot_numbers):
+            lot_data = {
+                "lot_number": lot_num,
+                "prezzo_base_eur": "NON SPECIFICATO IN PERIZIA",
+                "prezzo_base_value": 0,
+                "ubicazione": "NON SPECIFICATO IN PERIZIA",
+                "diritto_reale": "NON SPECIFICATO IN PERIZIA",
+                "superficie_mq": "NON SPECIFICATO IN PERIZIA",
+                "tipologia": "NON SPECIFICATO IN PERIZIA",
+                "evidence": {}
+            }
+            
+            # Search for lot-specific data
+            for p in schema_pages:
+                text = str(p.get("text", "") or "")
+                page_num = p.get("page_number", 0)
+                
+                # Check if this page contains this lot
+                lot_pattern = rf"\bLOTTO\s+{lot_num}\b"
+                if not re.search(lot_pattern, text, re.I):
                     continue
-        return {"lots": sorted(lots), "evidence": evidence}
+                
+                # Try to extract lot block (from LOTTO N to next LOTTO or end)
+                lot_block_match = re.search(
+                    rf"(LOTTO\s+{lot_num}\b.*?)(?=LOTTO\s+\d+\b|$)",
+                    text, re.I | re.DOTALL
+                )
+                block = lot_block_match.group(1) if lot_block_match else text
+                
+                # Extract PREZZO BASE D'ASTA
+                prezzo_match = re.search(
+                    r"PREZZO\s+BASE\s+D['']?ASTA[:\s]*€?\s*([\d.,]+)",
+                    block, re.I
+                )
+                if prezzo_match and lot_data["prezzo_base_eur"] == "NON SPECIFICATO IN PERIZIA":
+                    prezzo_str = prezzo_match.group(1).strip()
+                    lot_data["prezzo_base_eur"] = f"€ {prezzo_str}"
+                    # Parse numeric value
+                    try:
+                        val = prezzo_str.replace(".", "").replace(",", ".")
+                        lot_data["prezzo_base_value"] = float(val)
+                    except:
+                        pass
+                    lot_data["evidence"]["prezzo_base"] = [{"page": page_num, "quote": prezzo_match.group(0)[:150]}]
+                
+                # Extract Ubicazione
+                ubic_match = re.search(
+                    r"Ubicazione[:\s]*([^\n]+)",
+                    block, re.I
+                )
+                if ubic_match and lot_data["ubicazione"] == "NON SPECIFICATO IN PERIZIA":
+                    lot_data["ubicazione"] = ubic_match.group(1).strip()[:200]
+                    lot_data["evidence"]["ubicazione"] = [{"page": page_num, "quote": ubic_match.group(0)[:150]}]
+                
+                # Extract Diritto reale
+                diritto_match = re.search(
+                    r"Diritto\s+reale[:\s]*([^\n]+)",
+                    block, re.I
+                )
+                if diritto_match and lot_data["diritto_reale"] == "NON SPECIFICATO IN PERIZIA":
+                    lot_data["diritto_reale"] = diritto_match.group(1).strip()[:100]
+                    lot_data["evidence"]["diritto_reale"] = [{"page": page_num, "quote": diritto_match.group(0)[:150]}]
+                
+                # Extract Superficie
+                sup_match = re.search(
+                    r"Superficie[^:]*[:\s]*([\d.,]+)\s*mq",
+                    block, re.I
+                )
+                if sup_match and lot_data["superficie_mq"] == "NON SPECIFICATO IN PERIZIA":
+                    lot_data["superficie_mq"] = f"{sup_match.group(1)} mq"
+                    lot_data["evidence"]["superficie"] = [{"page": page_num, "quote": sup_match.group(0)[:150]}]
+                
+                # Extract Tipologia
+                tipo_match = re.search(
+                    r"Tipologia[:\s]*([^\n]+)",
+                    block, re.I
+                )
+                if tipo_match and lot_data["tipologia"] == "NON SPECIFICATO IN PERIZIA":
+                    lot_data["tipologia"] = tipo_match.group(1).strip()[:100]
+            
+            lots.append(lot_data)
+        
+        return lots
     
     # ===========================================================================
-    # EVIDENCE VALIDATION HELPER (CHANGE 3)
+    # DETERMINISTIC LEGAL KILLERS SCANNER
+    # ===========================================================================
+    def scan_legal_killers(pages_in):
+        """Scan for legal killers with evidence"""
+        killers = []
+        patterns = [
+            (r"FORMALITÀ\s+DA\s+CANCELLARE\s+CON\s+IL\s+DECRETO\s+DI\s+TRASFERIMENTO", "Formalità da cancellare", "GIALLO"),
+            (r"Oneri\s+di\s+cancellazione[:\s]*([^\n]+)", "Oneri di cancellazione", "GIALLO"),
+            (r"servitù[^.]*", "Servitù rilevata", "GIALLO"),
+            (r"stradella|barriera", "Servitù di passaggio/barriera", "GIALLO"),
+            (r"D\.?L\.?\s*69/2024|salva\s+casa", "Riferimento D.L. 69/2024 Salva Casa", "GIALLO"),
+            (r"L\.?R\.?\s*Toscana\s*65/2014", "Riferimento L.R. Toscana 65/2014", "GIALLO"),
+            (r"accertamento\s+di\s+conformità", "Accertamento di conformità richiesto", "GIALLO"),
+            (r"difformità[^.]*regolarizz", "Difformità da regolarizzare", "ROSSO"),
+            (r"abuso[^.]*edilizio|abuso[^.]*insanabile", "Abuso edilizio", "ROSSO"),
+            (r"usi\s+civici", "Usi civici", "ROSSO"),
+            (r"PEEP|diritto\s+di\s+superficie", "Diritto di superficie / PEEP", "ROSSO"),
+            (r"amianto|eternit", "Presenza amianto/eternit", "ROSSO"),
+        ]
+        
+        seen = set()
+        for p in pages_in:
+            text = str(p.get("text", "") or "")
+            page_num = p.get("page_number", 0)
+            
+            for pattern, title, severity in patterns:
+                for m in re.finditer(pattern, text, re.I):
+                    key = f"{title}_{page_num}"
+                    if key not in seen:
+                        seen.add(key)
+                        snippet = text[max(0, m.start()-30):min(len(text), m.end()+100)]
+                        killers.append({
+                            "title": title,
+                            "severity": severity,
+                            "page": page_num,
+                            "quote": snippet.replace("\n", " ")[:200],
+                            "why_it_matters": f"Rilevato: {m.group(0)[:80]}"
+                        })
+        
+        return killers
+    
+    # ===========================================================================
+    # EVIDENCE VALIDATION HELPER
     # ===========================================================================
     def has_evidence(ev):
         if not isinstance(ev, list) or not ev:
@@ -833,9 +960,10 @@ async def analyze_perizia_with_llm(pdf_text: str, pages: List[Dict], file_name: 
         e0 = ev[0]
         return isinstance(e0, dict) and "page" in e0 and "quote" in e0 and str(e0.get("quote","")).strip() != ""
     
-    # Detect lots deterministically BEFORE LLM call
-    detected_lots = detect_lots_from_pages(pages)
-    logger.info(f"Deterministic lot detection: {detected_lots}")
+    # Extract lots and legal killers deterministically BEFORE LLM call
+    extracted_lots = extract_lots_from_schema_riassuntivo(pages)
+    detected_legal_killers = scan_legal_killers(pages)
+    logger.info(f"Deterministic extraction: {len(extracted_lots)} lots, {len(detected_legal_killers)} legal killers")
     
     chat = LlmChat(
         api_key=EMERGENT_LLM_KEY,
@@ -844,21 +972,37 @@ async def analyze_perizia_with_llm(pdf_text: str, pages: List[Dict], file_name: 
     ).with_model("openai", "gpt-4o")
     
     # ===========================================================================
-    # CHARACTER-BUDGETED PAGE CONTENT (CHANGE 1 - no truncation)
+    # CHARACTER-BUDGETED PAGE CONTENT (no truncation)
     # ===========================================================================
-    # Per-page cap: 1400 chars (fallback 900)
-    # Total cap: 160,000 chars (hard)
     page_content = build_page_content(1400)
     if len(page_content) > 160000:
         page_content = build_page_content(900)
-    # If still too big, hard cut ONLY AFTER page markers are preserved
     if len(page_content) > 160000:
         page_content = page_content[:160000]
     
     logger.info(f"Page content built: {len(page_content)} chars for {len(pages)} pages")
     
+    # Build deterministic facts string for LLM
+    lots_facts = ""
+    if extracted_lots:
+        lots_facts = "\n\n═══════════════════════════════════════════════════════════════════════════════\nDETERMINISTIC FACTS - LOTTI (DO NOT OVERRIDE)\n═══════════════════════════════════════════════════════════════════════════════\n"
+        for lot in extracted_lots:
+            lots_facts += f"""
+LOTTO {lot['lot_number']}:
+- Prezzo Base d'Asta: {lot['prezzo_base_eur']}
+- Ubicazione: {lot['ubicazione']}
+- Diritto Reale: {lot['diritto_reale']}
+- Superficie: {lot['superficie_mq']}
+"""
+    
+    legal_facts = ""
+    if detected_legal_killers:
+        legal_facts = "\n\n═══════════════════════════════════════════════════════════════════════════════\nDETERMINISTIC FACTS - LEGAL KILLERS RILEVATI\n═══════════════════════════════════════════════════════════════════════════════\n"
+        for lk in detected_legal_killers[:10]:
+            legal_facts += f"- [{lk['severity']}] {lk['title']} (p. {lk['page']}): {lk['quote'][:100]}\n"
+    
     # ===========================================================================
-    # UPDATED PROMPT WITH ENFORCEABLE CONSTRAINTS (CHANGE 6)
+    # UPDATED PROMPT WITH DETERMINISTIC FACTS
     # ===========================================================================
     prompt = f"""ANALIZZA questa Perizia CTU italiana per asta immobiliare.
 
