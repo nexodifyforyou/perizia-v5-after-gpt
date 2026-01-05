@@ -2266,29 +2266,52 @@ COMPETENZE:
 - Calcolo costi accessori aste
 - Valutazione rischi immobiliari
 
-REGOLE:
-1. Rispondi SEMPRE in italiano prima, poi in inglese
-2. Se hai contesto da una perizia analizzata, usalo per risposte specifiche
-3. Cita fonti normative quando possibile
-4. NON fornire mai consulenza legale - solo informazioni
-5. Raccomanda sempre di consultare professionisti qualificati per decisioni importanti
+═══════════════════════════════════════════════════════════════════════════════
+REGOLE DETERMINISTIC (NON-NEGOTIABLE)
+═══════════════════════════════════════════════════════════════════════════════
 
-DISCLAIMER (includi sempre):
-"Le informazioni fornite hanno carattere esclusivamente informativo e non costituiscono consulenza legale, fiscale o professionale."
+1. EVIDENCE-LOCKED RESPONSES:
+   - Se citi un dato dalla perizia → DEVI includere "source" con riferimento
+   - Se non hai dati specifici → ammettilo: "Non ho informazioni specifiche su questo"
+   - Mai inventare numeri, date, o fatti
+
+2. CONFIDENCE TRACKING:
+   - "confidence": "HIGH" solo se hai fonte diretta (perizia, legge citata)
+   - "confidence": "MEDIUM" se è ragionamento basato su prassi comune
+   - "confidence": "LOW" se è opinione generale o mancano dati
+
+3. TRI-STATE ANSWERS:
+   - Se puoi rispondere con certezza → rispondi
+   - Se mancano dati → "needs_more_info": "YES" + lista "missing_inputs"
+   - Se non è tua competenza → "out_of_scope": true
+
+4. NO HALLUCINATIONS:
+   - Mai fingere di sapere cosa non sai
+   - Mai inventare riferimenti normativi
+   - Se non sei sicuro → dillo esplicitamente
+
+5. DISCLAIMER SEMPRE INCLUSO
 
 Formato risposta JSON:
 {
   "answer_it": "risposta in italiano",
   "answer_en": "risposta in inglese", 
-  "needs_more_info": "YES/NO",
+  "confidence": "HIGH|MEDIUM|LOW",
+  "sources": [{"type": "perizia|legge|prassi", "reference": "..."}],
+  "needs_more_info": "YES|NO",
   "missing_inputs": [],
-  "safe_disclaimer_it": "...",
-  "safe_disclaimer_en": "..."
+  "out_of_scope": false,
+  "safe_disclaimer_it": "Le informazioni fornite hanno carattere esclusivamente informativo e non costituiscono consulenza legale, fiscale o professionale.",
+  "safe_disclaimer_en": "Information provided is for informational purposes only and does not constitute legal, tax or professional advice.",
+  "qa_pass": {
+    "status": "PASS|WARN|FAIL",
+    "reason": "..."
+  }
 }"""
 
 @api_router.post("/analysis/assistant")
 async def assistant_qa(request: Request):
-    """Answer user questions about perizia/real estate - with context from analyzed documents"""
+    """Answer user questions about perizia/real estate - with evidence-locked responses"""
     user = await require_auth(request)
     data = await request.json()
     question = data.get("question")
@@ -2314,18 +2337,33 @@ async def assistant_qa(request: Request):
     
     # Get context from user's analyzed perizie
     context = ""
+    has_perizia_context = False
+    perizia_file = None
+    
     if related_case_id:
         analysis = await db.perizia_analyses.find_one({"case_id": related_case_id, "user_id": user.user_id}, {"_id": 0})
         if analysis:
+            has_perizia_context = True
+            perizia_file = analysis.get('file_name')
             result = analysis.get('result', {})
+            
+            # Extract key data with source tracking
+            report_header = result.get('report_header', {})
+            case_header = result.get('case_header', report_header)
+            dati = result.get('section_4_dati_certi', result.get('dati_certi_del_lotto', {}))
+            semaforo = result.get('section_1_semaforo_generale', result.get('semaforo_generale', {}))
+            
             context = f"""
-CONTESTO PERIZIA ANALIZZATA:
-- File: {analysis.get('file_name')}
-- Procedura: {result.get('case_header', {}).get('procedure_id', 'N/A')}
-- Tribunale: {result.get('case_header', {}).get('tribunale', 'N/A')}
-- Prezzo Base: {result.get('dati_certi_del_lotto', {}).get('prezzo_base_asta', {}).get('formatted', 'N/A')}
-- Semaforo: {result.get('semaforo_generale', {}).get('status', 'N/A')}
+CONTESTO PERIZIA ANALIZZATA (FONTE VERIFICABILE):
+- File: {perizia_file}
+- Procedura: {case_header.get('procedure', {}).get('value', case_header.get('procedure_id', 'N/A'))}
+- Tribunale: {case_header.get('tribunale', {}).get('value', case_header.get('tribunale', 'N/A'))}
+- Lotto: {case_header.get('lotto', {}).get('value', case_header.get('lotto', 'N/A'))}
+- Prezzo Base: {dati.get('prezzo_base_asta', {}).get('formatted', dati.get('prezzo_base_asta', {}).get('value', 'N/A'))}
+- Semaforo: {semaforo.get('status', 'N/A')}
 - Riepilogo: {result.get('summary_for_client', {}).get('summary_it', 'N/A')}
+
+NOTA: Se citi questi dati, indica "source": {{"type": "perizia", "reference": "{perizia_file}"}}
 """
     else:
         # Get user's most recent analysis for context
@@ -2335,12 +2373,16 @@ CONTESTO PERIZIA ANALIZZATA:
             sort=[("created_at", -1)]
         )
         if recent:
+            has_perizia_context = True
+            perizia_file = recent.get('file_name')
             result = recent.get('result', {})
             context = f"""
-ULTIMA PERIZIA ANALIZZATA DALL'UTENTE:
-- File: {recent.get('file_name')}
+ULTIMA PERIZIA ANALIZZATA (FONTE VERIFICABILE):
+- File: {perizia_file}
 - Procedura: {result.get('case_header', {}).get('procedure_id', 'N/A')}
 - Prezzo Base: {result.get('dati_certi_del_lotto', {}).get('prezzo_base_asta', {}).get('formatted', 'N/A')}
+
+NOTA: Se citi questi dati, indica "source": {{"type": "perizia", "reference": "{perizia_file}"}}
 """
     
     chat = LlmChat(
@@ -2349,11 +2391,19 @@ ULTIMA PERIZIA ANALIZZATA DALL'UTENTE:
         system_message=ASSISTANT_SYSTEM_PROMPT
     ).with_model("openai", "gpt-4o")
     
+    # Enhanced prompt with evidence requirements
     prompt = f"""{context}
 
 DOMANDA UTENTE: {question}
 
-Rispondi in modo chiaro e utile, citando la normativa italiana quando rilevante. Output JSON."""
+REGOLE PER LA RISPOSTA:
+1. Se rispondi basandoti sulla perizia, indica "sources" con riferimento al file
+2. Se rispondi basandoti su leggi, cita la normativa specifica
+3. Se non hai dati sufficienti, imposta "needs_more_info": "YES"
+4. Imposta "confidence" in modo onesto (HIGH solo con fonte diretta)
+5. Se la domanda è fuori competenza, imposta "out_of_scope": true
+
+Output JSON secondo lo schema specificato."""
     
     try:
         response = await chat.send_message(UserMessage(text=prompt))
@@ -2369,38 +2419,91 @@ Rispondi in modo chiaro e utile, citando la normativa italiana quando rilevante.
         
         try:
             answer = json.loads(response_text)
-        except:
+            
+            # Enforce evidence-locked rules
+            # If confidence is HIGH but no sources, downgrade to MEDIUM
+            if answer.get("confidence") == "HIGH" and not answer.get("sources"):
+                answer["confidence"] = "MEDIUM"
+                answer.setdefault("qa_pass", {})["status"] = "WARN"
+                answer["qa_pass"]["reason"] = "Confidence downgraded: HIGH without sources"
+            
+            # Ensure required fields exist
+            if "confidence" not in answer:
+                answer["confidence"] = "MEDIUM"
+            if "sources" not in answer:
+                answer["sources"] = []
+            if "needs_more_info" not in answer:
+                answer["needs_more_info"] = "NO"
+            if "missing_inputs" not in answer:
+                answer["missing_inputs"] = []
+            if "out_of_scope" not in answer:
+                answer["out_of_scope"] = False
+                
+        except json.JSONDecodeError:
             answer = {
                 "answer_it": response,
                 "answer_en": "",
+                "confidence": "LOW",
+                "sources": [],
                 "needs_more_info": "NO",
                 "missing_inputs": [],
+                "out_of_scope": False,
                 "safe_disclaimer_it": "Le informazioni fornite hanno carattere esclusivamente informativo e non costituiscono consulenza legale.",
-                "safe_disclaimer_en": "Information provided is for informational purposes only and does not constitute legal advice."
+                "safe_disclaimer_en": "Information provided is for informational purposes only and does not constitute legal advice.",
+                "qa_pass": {"status": "WARN", "reason": "Response not in structured JSON format"}
             }
     except Exception as e:
         logger.error(f"Assistant error: {e}")
         answer = {
             "answer_it": "Mi scusi, si è verificato un errore. Riprovi più tardi.",
             "answer_en": "Sorry, an error occurred. Please try again later.",
+            "confidence": "LOW",
+            "sources": [],
             "needs_more_info": "NO",
             "missing_inputs": [],
+            "out_of_scope": False,
             "safe_disclaimer_it": "Le informazioni fornite hanno carattere esclusivamente informativo e non costituiscono consulenza legale.",
-            "safe_disclaimer_en": "Information provided is for informational purposes only and does not constitute legal advice."
+            "safe_disclaimer_en": "Information provided is for informational purposes only and does not constitute legal advice.",
+            "qa_pass": {"status": "FAIL", "reason": f"LLM error: {str(e)}"}
         }
+    
+    # Add standard disclaimers if missing
+    if "safe_disclaimer_it" not in answer:
+        answer["safe_disclaimer_it"] = "Le informazioni fornite hanno carattere esclusivamente informativo e non costituiscono consulenza legale, fiscale o professionale."
+    if "safe_disclaimer_en" not in answer:
+        answer["safe_disclaimer_en"] = "Information provided is for informational purposes only and does not constitute legal, tax or professional advice."
+    
+    # Build QA checks
+    qa_checks = [
+        {"code": "QA-HasContext", "result": "OK" if has_perizia_context else "WARN", "note": f"Perizia context: {perizia_file}" if has_perizia_context else "No perizia context available"},
+        {"code": "QA-ConfidenceHonesty", "result": "OK" if answer.get("confidence") in ["LOW", "MEDIUM"] or answer.get("sources") else "WARN", "note": f"Confidence: {answer.get('confidence', 'N/A')}"},
+        {"code": "QA-SourcesProvided", "result": "OK" if answer.get("sources") else "WARN", "note": f"Sources: {len(answer.get('sources', []))}"},
+        {"code": "QA-DisclaimerIncluded", "result": "OK", "note": "Disclaimer included"}
+    ]
+    
+    # Determine overall QA status
+    qa_status = answer.get("qa_pass", {}).get("status", "PASS")
+    if not answer.get("sources") and answer.get("confidence") == "HIGH":
+        qa_status = "WARN"
     
     result = {
         "ok": True,
         "mode": "ASSISTANT_QA",
         "result": {
-            "schema_version": "nexodify_assistant_v1",
+            "schema_version": "nexodify_assistant_v2",
             "run": {
                 "run_id": run_id,
                 "generated_at_utc": datetime.now(timezone.utc).isoformat(),
                 "case_id": related_case_id,
-                "revision": 0
+                "revision": 0,
+                "has_perizia_context": has_perizia_context,
+                "perizia_file": perizia_file
             },
-            **answer
+            **answer,
+            "qa_pass": {
+                "status": qa_status,
+                "checks": qa_checks
+            }
         }
     }
     
