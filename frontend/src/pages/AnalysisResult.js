@@ -446,12 +446,26 @@ const AnalysisResult = () => {
   const summaryData = result.summary_for_client || {};
   const qaPass = result.qa_pass || {};
   
+  // Get lots array for multi-lot support
+  const lots = result.lots || [];
+  const isMultiLot = lots.length > 1;
+  const selectedLot = lots[selectedLotIndex] || null;
+  
   // Map to display variables - prioritize NEW format, fallback to OLD
   const caseHeader = reportHeader.procedure ? reportHeader : (result.case_header || {});
   const semaforo = section1.status ? section1 : (result.semaforo_generale || {});
   const decision = section2.summary_it ? section2 : (result.decision_rapida_client || {});
   const moneyBox = section3.items ? section3 : (result.money_box || {});
-  const dati = section4.prezzo_base_asta ? section4 : (result.dati_certi_del_lotto || {});
+  
+  // For multi-lot: use selected lot data, otherwise use section4
+  const dati = selectedLot ? {
+    prezzo_base_asta: { value: selectedLot.prezzo_base_value, formatted: selectedLot.prezzo_base_eur, evidence: selectedLot.evidence?.prezzo_base || [] },
+    ubicazione: { value: selectedLot.ubicazione, evidence: selectedLot.evidence?.ubicazione || [] },
+    diritto_reale: { value: selectedLot.diritto_reale, evidence: selectedLot.evidence?.diritto_reale || [] },
+    superficie_catastale: { value: selectedLot.superficie_mq, evidence: selectedLot.evidence?.superficie || [] },
+    tipologia: { value: selectedLot.tipologia, evidence: [] }
+  } : (section4.prezzo_base_asta ? section4 : (result.dati_certi_del_lotto || {}));
+  
   const abusi = section5.conformita_urbanistica ? section5 : (result.abusi_edilizi_conformita || {});
   const occupativo = section6.status ? section6 : (result.stato_occupativo || {});
   const conservativo = section7.condizione_generale ? section7 : (result.stato_conservativo || {});
@@ -468,13 +482,16 @@ const AnalysisResult = () => {
   // Get money box items - support both old and new format
   const moneyBoxItems = Array.isArray(moneyBox.items) ? moneyBox.items : [];
   
-  // Get money box total - support both old and new format
+  // Get money box total - support both old and new format, handle TBD
   const moneyBoxTotal = moneyBox.totale_extra_budget || moneyBox.total_extra_costs;
+  const moneyBoxTotalMin = moneyBoxTotal?.min;
+  const moneyBoxTotalMax = moneyBoxTotal?.max;
+  const isTotalTBD = moneyBoxTotalMin === 'TBD' || moneyBoxTotalMax === 'TBD';
 
   // Get legal killers - convert new array format to object for display
   const legalKillersObj = legalKillers.items 
     ? legalKillers.items.reduce((acc, item) => { 
-        const key = item.killer || item.key || `item_${acc.length}`;
+        const key = item.killer || item.key || `item_${Object.keys(acc).length}`;
         acc[key] = item; 
         return acc; 
       }, {}) 
@@ -482,7 +499,10 @@ const AnalysisResult = () => {
 
   // Debug logging for troubleshooting
   if (process.env.NODE_ENV === 'development') {
+    console.log('Lots:', lots.length, lots);
+    console.log('Selected Lot:', selectedLotIndex, selectedLot);
     console.log('MoneyBox items:', moneyBoxItems.length, moneyBoxItems);
+    console.log('MoneyBox total:', moneyBoxTotal, 'isTBD:', isTotalTBD);
     console.log('LegalKillers:', Object.keys(legalKillersObj).length, legalKillersObj);
     console.log('Dati certi:', dati);
     console.log('Semaforo:', semaforo);
