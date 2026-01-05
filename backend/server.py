@@ -1158,7 +1158,7 @@ NON aggiungere commenti, solo JSON valido."""
         logger.info(f"PASS 3: Final validation for {file_name}")
         
         # Deterministic calculations and fixes
-        result = apply_deterministic_fixes(result, pdf_text, pages)
+        result = apply_deterministic_fixes(result, pdf_text, pages, detected_lots, has_evidence)
         
         # Ensure required fields exist
         if "schema_version" not in result:
@@ -1176,7 +1176,9 @@ NON aggiungere commenti, solo JSON valido."""
         result["_verification"] = {
             "passes_completed": 3,
             "final_validation": "PASS",
-            "timestamp": datetime.now(timezone.utc).isoformat()
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "detected_lots": detected_lots,
+            "pages_total": len(pages)
         }
         
         logger.info(f"Successfully analyzed perizia {file_name} - {len(pages)} pages (3-pass verification)")
@@ -1184,7 +1186,7 @@ NON aggiungere commenti, solo JSON valido."""
         
     except Exception as e:
         logger.error(f"LLM analysis error: {e}")
-        return create_fallback_analysis(file_name, case_id, run_id, pages, pdf_text)
+        return create_fallback_analysis(file_name, case_id, run_id, pages, pdf_text, detected_lots)
 
 
 def apply_deterministic_fixes(result: Dict, pdf_text: str, pages: List[Dict]) -> Dict:
