@@ -1349,23 +1349,33 @@ def apply_deterministic_fixes(result: Dict, pdf_text: str, pages: List[Dict], de
     # ==========================================
     # FIX 6: Update QA Pass with verification status and QA GATES
     # ==========================================
-    qa = result.get("qa_pass") or result.get("qa") or {}
-    qa_checks = qa.get("checks", [])
-    qa_status = "PASS"
+    # Get existing qa_pass or create new one
+    qa = result.get("qa_pass", None)
+    if qa is None:
+        qa = result.get("qa", None)
+    if qa is None:
+        qa = {"status": "PASS", "checks": []}
+    
+    # Preserve existing checks and merge with new ones
+    existing_checks = qa.get("checks", [])
+    qa_checks = list(existing_checks)  # Copy existing checks
+    qa_status = qa.get("status", "PASS")
     
     # QA Gate 1: Page Coverage Log
     page_coverage_log = result.get("page_coverage_log", [])
     pages_total = len(pages)
-    if len(page_coverage_log) < pages_total:
-        qa_checks.append({
-            "code": "QA-PageCoverage",
-            "result": "WARN",
-            "note": f"page_coverage_log has {len(page_coverage_log)} entries, expected {pages_total}"
-        })
+    
+    # Always add QA-PageCoverage check
+    qa_checks.append({
+        "code": "QA-PageCoverage",
+        "result": "OK" if len(page_coverage_log) >= pages_total else "WARN",
+        "note": f"page_coverage_log has {len(page_coverage_log)} entries, expected {pages_total}"
+    })
     
     # QA Gate 2: Money Box Honesty (final check)
     money_box_final = result.get("section_3_money_box", {})
     mb_items_final = money_box_final.get("items", []) if isinstance(money_box_final, dict) else []
+    money_box_honest = True
     for it in mb_items_final:
         fonte = (it.get("fonte_perizia", {}) or {})
         fonte_val = str(fonte.get("value", "")).lower()
@@ -1375,26 +1385,31 @@ def apply_deterministic_fixes(result: Dict, pdf_text: str, pages: List[Dict], de
         if is_unspecified and euro and euro > 0:
             note = str(it.get("stima_nota", "") or "")
             if "STIMA NEXODIFY" not in note.upper():
+                money_box_honest = False
                 qa_status = "FAIL"
-                qa_checks.append({
-                    "code": "QA-MoneyBox-Violation",
-                    "result": "FAIL",
-                    "note": f"Money Box item '{it.get('voce', 'unknown')}' has EUR value with unspecified fonte"
-                })
+    
+    qa_checks.append({
+        "code": "QA-MoneyBox-Honesty",
+        "result": "OK" if money_box_honest else "FAIL",
+        "note": "All Money Box items honest (no fake € values)" if money_box_honest else "Money Box has EUR values with unspecified fonte"
+    })
     
     # QA Gate 3: Legal Killers Evidence
     lk_final = result.get("section_9_legal_killers", {})
     lk_items = lk_final.get("items", []) if isinstance(lk_final, dict) else []
+    legal_killers_valid = True
     for it in lk_items:
         status = str(it.get("status", "")).upper()
         ev = it.get("evidence", [])
         if status in ("SI", "NO", "YES") and not has_evidence(ev):
+            legal_killers_valid = False
             qa_status = "WARN" if qa_status != "FAIL" else qa_status
-            qa_checks.append({
-                "code": "QA-LegalKiller-Evidence",
-                "result": "WARN",
-                "note": f"Legal killer '{it.get('killer', 'unknown')}' has SI/NO without evidence"
-            })
+    
+    qa_checks.append({
+        "code": "QA-LegalKiller-Evidence",
+        "result": "OK" if legal_killers_valid else "WARN",
+        "note": "All SI/NO status have evidence" if legal_killers_valid else "Some Legal killers have SI/NO without evidence"
+    })
     
     # Standard QA checks
     qa_checks.extend([
@@ -1412,10 +1427,9 @@ def apply_deterministic_fixes(result: Dict, pdf_text: str, pages: List[Dict], de
     qa["status"] = qa_status
     qa["checks"] = qa_checks
     
-    if "qa_pass" in result:
-        result["qa_pass"] = qa
-    if "qa" in result:
-        result["qa"] = qa
+    # Always set both qa_pass and qa to ensure consistency
+    result["qa_pass"] = qa
+    result["qa"] = qa
     
     return result
 
