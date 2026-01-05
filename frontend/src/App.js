@@ -45,8 +45,11 @@ function AppRouter() {
   const location = useLocation();
   
   // REMINDER: DO NOT HARDCODE THE URL, OR ADD ANY FALLBACKS OR REDIRECT URLS, THIS BREAKS THE AUTH
-  // Check URL fragment for session_id (Emergent Auth callback)
-  if (location.hash?.includes('session_id=')) {
+  // Check URL fragment OR query params for session_id (Emergent Auth callback)
+  const hasSessionInHash = location.hash?.includes('session_id=');
+  const hasSessionInSearch = location.search?.includes('session_id=');
+  
+  if (hasSessionInHash || hasSessionInSearch) {
     return <AuthCallback />;
   }
 
