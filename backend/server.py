@@ -1564,12 +1564,12 @@ def create_fallback_analysis(file_name: str, case_id: str, run_id: str, pages: L
         },
         "indice_di_convenienza": {
             "prezzo_base_asta": prezzo_base,
-            "extra_costs_min": 17500,
-            "extra_costs_max": 68500,
-            "all_in_light_min": prezzo_base + 17500 if prezzo_base else 0,
-            "all_in_light_max": prezzo_base + 68500 if prezzo_base else 0,
-            "dry_read_it": f"Prezzo base €{prezzo_base:,.0f} + costi stimati €17.500-68.500 = All-in €{prezzo_base + 17500:,.0f}-{prezzo_base + 68500:,.0f}" if prezzo_base else "Prezzo base non specificato",
-            "dry_read_en": f"Base price €{prezzo_base:,.0f} + estimated costs €17,500-68,500 = All-in €{prezzo_base + 17500:,.0f}-{prezzo_base + 68500:,.0f}" if prezzo_base else "Base price not specified"
+            "extra_costs_min": 0,
+            "extra_costs_max": 0,
+            "all_in_light_min": prezzo_base if prezzo_base else 0,
+            "all_in_light_max": prezzo_base if prezzo_base else 0,
+            "dry_read_it": f"Prezzo base €{prezzo_base:,.0f} - Costi extra TBD (non specificati in perizia)" if prezzo_base else "Prezzo base non specificato - Verifica obbligatoria",
+            "dry_read_en": f"Base price €{prezzo_base:,.0f} - Extra costs TBD (not specified in perizia)" if prezzo_base else "Base price not specified - Verification required"
         },
         "red_flags_operativi": [
             {"code": "MANUAL_REVIEW", "severity": "AMBER", "flag_it": "Revisione manuale raccomandata", "flag_en": "Manual review recommended", "action_it": "Verificare tutti i dati con la perizia originale"}
