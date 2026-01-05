@@ -84,27 +84,38 @@ const NewAnalysis = () => {
     formData.append('file', file);
     
     try {
-      // Simulate progress
+      // Slower progress animation - at least 20 seconds before reaching 90%
+      // Increment by 4% every 1 second = 22.5 seconds to reach 90%
       const progressInterval = setInterval(() => {
-        setProgress(prev => Math.min(prev + 10, 90));
-      }, 500);
+        setProgress(prev => {
+          if (prev < 90) {
+            return Math.min(prev + 4, 90);
+          }
+          return prev;
+        });
+      }, 1000);
       
       const response = await axios.post(`${API_URL}/api/analysis/perizia`, formData, {
         withCredentials: true,
         headers: {
           'Content-Type': 'multipart/form-data',
-        }
+        },
+        timeout: 300000 // 5 minute timeout for large documents
       });
       
       clearInterval(progressInterval);
+      
+      // Smooth completion animation
+      setProgress(95);
+      await new Promise(resolve => setTimeout(resolve, 500));
       setProgress(100);
       
       toast.success('Analisi completata!');
       
-      // Navigate to results
+      // Navigate to results after brief delay
       setTimeout(() => {
         navigate(`/analysis/${response.data.analysis_id}`);
-      }, 500);
+      }, 1000);
       
     } catch (err) {
       console.error('Upload error:', err);
