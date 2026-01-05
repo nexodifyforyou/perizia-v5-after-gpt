@@ -1,117 +1,39 @@
 {
-  "timestamp": "2026-01-05T03:29:31.444713",
-  "total_tests": 28,
-  "passed_tests": 24,
-  "success_rate": 85.71428571428571,
+  "timestamp": "2026-01-05T03:50:42.476179",
+  "total_tests": 27,
+  "passed_tests": 19,
+  "success_rate": 70.37037037037037,
   "critical_failures": [
     {
-      "test": "CHANGE 5 & 6 - QA Gates",
-      "issue": "Missing expected QA checks",
-      "expected": [
-        "QA-PageCoverage",
-        "QA-MoneyBox-Honesty",
-        "QA-LegalKiller-Evidence"
-      ],
-      "found": [],
-      "all_checks": []
+      "test": "CRITICAL: Review Request Multi-Lot Correctness Patches",
+      "expected": 200,
+      "actual": 520,
+      "response": {
+        "error": "Internal Server Error"
+      }
     },
     {
-      "test": "Deterministic Patches Overall",
-      "issue": "Only 3/5 changes passed",
-      "changes_results": [
-        [
-          "CHANGE 1 - Full-Document Coverage",
-          true
-        ],
-        [
-          "CHANGE 2 - Multi-Lot Detection",
-          false
-        ],
-        [
-          "CHANGE 3 - Evidence-Locked Legal Killers",
-          true
-        ],
-        [
-          "CHANGE 4 - Money Box Honesty",
-          true
-        ],
-        [
-          "CHANGE 5 & 6 - QA Gates",
-          false
-        ]
-      ]
+      "test": "Review Request - Analysis Request Failed",
+      "issue": "Analysis request failed",
+      "response": {
+        "error": "Internal Server Error"
+      }
     },
     {
-      "test": "ROMA STANDARD Structure",
-      "issue": "Missing sections: ['section_1_semaforo_generale', 'section_2_decisione_rapida', 'section_3_money_box', 'section_4_dati_certi', 'section_5_abusi_conformita', 'section_12_checklist_pre_offerta', 'qa_pass']",
-      "expected": [
-        "section_1_semaforo_generale",
-        "section_2_decisione_rapida",
-        "section_3_money_box",
-        "section_4_dati_certi",
-        "section_5_abusi_conformita",
-        "section_12_checklist_pre_offerta",
-        "qa_pass"
-      ],
-      "found": [
-        "schema_version",
-        "run",
-        "case_header",
-        "report_header",
-        "lot_index",
-        "page_coverage_log",
-        "semaforo_generale",
-        "decision_rapida_client",
-        "money_box",
-        "dati_certi_del_lotto",
-        "abusi_edilizi_conformita",
-        "stato_occupativo",
-        "stato_conservativo",
-        "formalita",
-        "legal_killers_checklist",
-        "indice_di_convenienza",
-        "red_flags_operativi",
-        "checklist_pre_offerta",
-        "summary_for_client",
-        "qa"
-      ]
+      "test": "CRITICAL: Google Document AI Perizia Extraction",
+      "expected": 200,
+      "actual": 520,
+      "response": {
+        "error": "Internal Server Error"
+      }
     },
     {
-      "test": "Google Document AI Extraction",
-      "issue": "Extraction quality 40.0% or critical data missing",
-      "verification_results": [
-        "\u2705 Procedure ID: Found R.G.E. 62/2024",
-        "\u2705 Tribunale: Found TRIBUNALE DI MANTOVA",
-        "\u274c Address: Expected 'Via Sordello, San Giorgio Bigarello', got 'Non specificato in Perizia'",
-        "\u274c Prezzo Base: Expected 391849, got 0",
-        "\u274c Valore Finale: Expected 391849, got 0"
-      ]
-    },
-    {
-      "test": "Evidence Structure Validation",
-      "issue": "No evidence arrays with page/quote found",
-      "response_structure": [
-        "schema_version",
-        "report_header",
-        "section_1_semaforo_generale",
-        "section_2_decisione_rapida",
-        "section_3_money_box",
-        "section_4_dati_certi",
-        "section_5_abusi_conformita",
-        "section_6_stato_occupativo",
-        "section_7_stato_conservativo",
-        "section_8_formalita",
-        "section_9_legal_killers",
-        "section_10_indice_convenienza",
-        "section_11_red_flags",
-        "section_12_checklist_pre_offerta",
-        "summary_for_client",
-        "qa_pass",
-        "page_coverage_log",
-        "lot_index",
-        "qa",
-        "_verification"
-      ]
+      "test": "CRITICAL: Perizia Analysis with Evidence",
+      "expected": 200,
+      "actual": 520,
+      "response": {
+        "error": "Internal Server Error"
+      }
     }
   ],
   "test_details": [
@@ -124,7 +46,7 @@
       "success": true,
       "response": {
         "status": "healthy",
-        "timestamp": "2026-01-05T03:28:04.345413+00:00"
+        "timestamp": "2026-01-05T03:47:15.034682+00:00"
       }
     },
     {
@@ -247,8 +169,8 @@
       "actual_status": 200,
       "success": true,
       "response": {
-        "user_id": "test-user-1767583684187",
-        "email": "test.user.1767583684188@example.com",
+        "user_id": "test-user-1767584834841",
+        "email": "test.user.1767584834842@example.com",
         "name": "Test User",
         "picture": "https://via.placeholder.com/150",
         "plan": "pro",
@@ -258,7 +180,7 @@
           "image_scans_remaining": 100,
           "assistant_messages_remaining": 9999
         },
-        "created_at": "2026-01-05T03:28:04.188000"
+        "created_at": "2026-01-05T03:47:14.842000"
       }
     },
     {
@@ -283,6 +205,17 @@
       }
     },
     {
+      "test": "CRITICAL: Review Request Multi-Lot Correctness Patches",
+      "method": "POST",
+      "endpoint": "api/analysis/perizia",
+      "expected_status": 200,
+      "actual_status": 520,
+      "success": false,
+      "response": {
+        "error": "Internal Server Error"
+      }
+    },
+    {
       "test": "CRITICAL: Image Forensics Deterministic Patches",
       "method": "POST",
       "endpoint": "api/analysis/image",
@@ -295,9 +228,9 @@
         "result": {
           "schema_version": "nexodify_image_forensics_v2",
           "run": {
-            "run_id": "img_run_d0db3952",
-            "case_id": "img_case_f3c50c0d",
-            "generated_at_utc": "2026-01-05T03:28:06.934531+00:00",
+            "run_id": "img_run_f0b0a4d0",
+            "case_id": "img_case_8e558d77",
+            "generated_at_utc": "2026-01-05T03:48:09.329509+00:00",
             "revision": 0,
             "images_analyzed": 1,
             "image_names": [
@@ -306,17 +239,56 @@
           },
           "findings": [
             {
-              "finding_id": "find_56bceaa3",
-              "category": "GENERALE",
-              "title_it": "Analisi immagini - Verifica manuale richiesta",
-              "title_en": "Image analysis - Manual verification required",
+              "finding_id": "finding_1",
+              "category": "STRUTTURALE",
+              "title_it": "Stato Conservativo Struttura",
+              "title_en": "Structural Condition",
               "severity": "NON_VERIFICABILE",
               "confidence": "LOW",
-              "what_i_see_it": "Caricate 1 immagini. L'analisi automatica ha limiti significativi senza ispezione diretta.",
-              "what_i_see_en": "Uploaded 1 images. Automatic analysis has significant limits without direct inspection.",
-              "evidence": "NON DISPONIBILE - Richiede analisi visiva diretta",
-              "action_required_it": "Sopralluogo professionale obbligatorio prima di qualsiasi decisione",
-              "action_required_en": "Professional inspection mandatory before any decision"
+              "what_i_see_it": "L'immagine non \u00e8 disponibile per una valutazione.",
+              "what_i_see_en": "The image is not available for evaluation.",
+              "evidence": "Senza accesso diretto all'immagine non \u00e8 possibile eseguire una valutazione.",
+              "action_required_it": "Durante un sopralluogo, verificare crepe e segni di cedimento nelle pareti e nei soffitti.",
+              "action_required_en": "During a site visit, check for cracks and signs of settlement in walls and ceilings."
+            },
+            {
+              "finding_id": "finding_2",
+              "category": "IMPIANTI",
+              "title_it": "Stato degli Impianti Visibili",
+              "title_en": "Condition of Visible Systems",
+              "severity": "NON_VERIFICABILE",
+              "confidence": "LOW",
+              "what_i_see_it": "L'immagine non \u00e8 disponibile per una valutazione.",
+              "what_i_see_en": "The image is not available for evaluation.",
+              "evidence": "Senza accesso diretto all'immagine non \u00e8 possibile determinare lo stato degli impianti.",
+              "action_required_it": "Durante un sopralluogo, controllare lo stato degli impianti elettrici e idraulici.",
+              "action_required_en": "During a site visit, check the condition of the electrical and plumbing systems."
+            },
+            {
+              "finding_id": "finding_3",
+              "category": "MATERIALI",
+              "title_it": "Presenza di Materiali Pericolosi",
+              "title_en": "Presence of Hazardous Materials",
+              "severity": "NON_VERIFICABILE",
+              "confidence": "LOW",
+              "what_i_see_it": "L'immagine non \u00e8 disponibile per una valutazione.",
+              "what_i_see_en": "The image is not available for evaluation.",
+              "evidence": "Senza accesso diretto all'immagine non \u00e8 possibile identificare materiali pericolosi.",
+              "action_required_it": "Durante un sopralluogo, verificare la presenza di amianto o altri materiali pericolosi.",
+              "action_required_en": "During a site visit, check for the presence of asbestos or other hazardous materials."
+            },
+            {
+              "finding_id": "finding_4",
+              "category": "UMIDITA",
+              "title_it": "Segni di Umidit\u00e0 o Muffa",
+              "title_en": "Signs of Dampness or Mold",
+              "severity": "NON_VERIFICABILE",
+              "confidence": "LOW",
+              "what_i_see_it": "L'immagine non \u00e8 disponibile per una valutazione.",
+              "what_i_see_en": "The image is not available for evaluation.",
+              "evidence": "Senza accesso diretto all'immagine non \u00e8 possibile rilevare segni di umidit\u00e0 o muffa.",
+              "action_required_it": "Durante un sopralluogo, cercare macchie di umidit\u00e0 o muffa su pareti e soffitti.",
+              "action_required_en": "During a site visit, look for damp or mold stains on walls and ceilings."
             }
           ],
           "overall_assessment": {
@@ -335,6 +307,8 @@
           "qa_pass": {
             "status": "WARN",
             "checks": [
+              "Limitazione dell'analisi riconosciuta.",
+              "Tutte le valutazioni sono marcate come NON_VERIFICABILE.",
               {
                 "code": "QA-ImageCount",
                 "result": "OK",
@@ -348,7 +322,7 @@
               {
                 "code": "QA-ConfidenceHonesty",
                 "result": "OK",
-                "note": "1/1 findings con confidence LOW (onest\u00e0)"
+                "note": "4/4 findings con confidence LOW (onest\u00e0)"
               },
               {
                 "code": "QA-NoHallucination",
@@ -375,24 +349,27 @@
         "result": {
           "schema_version": "nexodify_assistant_v2",
           "run": {
-            "run_id": "qa_run_f8f577ad",
-            "generated_at_utc": "2026-01-05T03:28:07.256133+00:00",
+            "run_id": "qa_run_d5c877ec",
+            "generated_at_utc": "2026-01-05T03:48:11.093795+00:00",
             "case_id": null,
             "revision": 0,
             "has_perizia_context": false,
             "perizia_file": null
           },
-          "answer_it": "Mi scusi, si \u00e8 verificato un errore. Riprovi pi\u00f9 tardi.",
-          "answer_en": "Sorry, an error occurred. Please try again later.",
+          "answer_it": "Non ho informazioni specifiche sul prezzo base d'asta.",
+          "answer_en": "I do not have specific information on the starting auction price.",
           "confidence": "LOW",
           "sources": [],
-          "needs_more_info": "NO",
-          "missing_inputs": [],
+          "needs_more_info": "YES",
+          "missing_inputs": [
+            "Perizia completa",
+            "Avviso di Vendita"
+          ],
           "out_of_scope": false,
-          "safe_disclaimer_it": "Le informazioni fornite hanno carattere esclusivamente informativo e non costituiscono consulenza legale.",
-          "safe_disclaimer_en": "Information provided is for informational purposes only and does not constitute legal advice.",
+          "safe_disclaimer_it": "Le informazioni fornite hanno carattere esclusivamente informativo e non costituiscono consulenza legale, fiscale o professionale.",
+          "safe_disclaimer_en": "Information provided is for informational purposes only and does not constitute legal, tax or professional advice.",
           "qa_pass": {
-            "status": "FAIL",
+            "status": "PASS",
             "checks": [
               {
                 "code": "QA-HasContext",
@@ -420,961 +397,14 @@
       }
     },
     {
-      "test": "CRITICAL: Deterministic Patches Analysis",
-      "method": "POST",
-      "endpoint": "api/analysis/perizia",
-      "expected_status": 200,
-      "actual_status": 200,
-      "success": true,
-      "response": {
-        "ok": true,
-        "analysis_id": "analysis_973e03dc3fba",
-        "case_id": "case_95017667",
-        "run_id": "run_23c00356",
-        "result": {
-          "schema_version": "nexodify_perizia_scan_v1",
-          "run": {
-            "run_id": "run_23c00356",
-            "generated_at_utc": "2026-01-05T03:28:07.549870+00:00",
-            "input": {
-              "source_type": "perizia_pdf",
-              "file_name": "deterministic_test_multi_lot.pdf",
-              "pages_total": 5
-            }
-          },
-          "case_header": {
-            "procedure_id": "R.G.E. N. 456/2024",
-            "lotto": "Lotti 1, 2",
-            "tribunale": "TRIBUNALE DI ROMA                                                     \n                                                                                    \n              SEZIONE ESECUZIONI IMMOBILIARI                                        \n                                                                                    \n              R",
-            "address": {
-              "street": "NOT_SPECIFIED_IN_PERIZIA",
-              "city": "NOT_SPECIFIED_IN_PERIZIA",
-              "full": "NOT_SPECIFIED_IN_PERIZIA"
-            },
-            "deposit_date": "NOT_SPECIFIED_IN_PERIZIA"
-          },
-          "report_header": {
-            "title": "NEXODIFY INTELLIGENCE | Auction Scan",
-            "procedure": {
-              "value": "R.G.E. N. 456/2024",
-              "evidence": []
-            },
-            "lotto": {
-              "value": "Lotti 1, 2",
-              "evidence": [
-                {
-                  "page": 1,
-                  "quote": "                                                                                LOTTO 1                                                                              Ap"
-                },
-                {
-                  "page": 1,
-                  "quote": "                                                             Prezzo base d'asta Lotto 1: \u20ac 100.000,00                                                                  "
-                },
-                {
-                  "page": 2,
-                  "quote": "                                                                                LOTTO 2                                                                                "
-                }
-              ]
-            },
-            "tribunale": {
-              "value": "TRIBUNALE DI ROMA                                                     \n                                                                                    \n              SEZIONE ESECUZIONI IMMOBILIARI                                        \n                                                                                    \n              R",
-              "evidence": []
-            },
-            "address": {
-              "value": "Non specificato in Perizia",
-              "evidence": []
-            },
-            "generated_at": "2026-01-05T03:28:07.549884+00:00"
-          },
-          "lot_index": [
-            {
-              "lot": 1,
-              "page": 1,
-              "quote": "                                                                                LOTTO 1                                                                              Ap"
-            },
-            {
-              "lot": 2,
-              "page": 1,
-              "quote": "                                                             Prezzo base d'asta Lotto 1: \u20ac 100.000,00                                                                  "
-            }
-          ],
-          "page_coverage_log": [
-            {
-              "page": 1,
-              "summary": "Fallback - manual review required"
-            },
-            {
-              "page": 2,
-              "summary": "Fallback - manual review required"
-            },
-            {
-              "page": 3,
-              "summary": "Fallback - manual review required"
-            },
-            {
-              "page": 4,
-              "summary": "Fallback - manual review required"
-            },
-            {
-              "page": 5,
-              "summary": "Fallback - manual review required"
-            }
-          ],
-          "semaforo_generale": {
-            "status": "AMBER",
-            "status_it": "ATTENZIONE",
-            "status_en": "CAUTION",
-            "reason_it": "Analisi automatica parziale - revisione manuale raccomandata",
-            "reason_en": "Partial automatic analysis - manual review recommended",
-            "evidence": []
-          },
-          "decision_rapida_client": {
-            "risk_level": "MEDIUM_RISK",
-            "risk_level_it": "RISCHIO MEDIO",
-            "risk_level_en": "MEDIUM RISK",
-            "summary_it": "Documento analizzato. Alcuni dati richiedono verifica manuale. Consultare un professionista prima di procedere.",
-            "summary_en": "Document analyzed. Some data requires manual verification. Consult a professional before proceeding.",
-            "driver_rosso": []
-          },
-          "money_box": {
-            "items": [
-              {
-                "code": "A",
-                "label_it": "Regolarizzazione urbanistica",
-                "label_en": "Urban regularization",
-                "type": "NOT_SPECIFIED",
-                "stima_euro": 0,
-                "stima_nota": "TBD (NON SPECIFICATO IN PERIZIA) \u2014 Verifica tecnico",
-                "action_required_it": "Verificare con tecnico",
-                "action_required_en": "Verify with technician"
-              },
-              {
-                "code": "B",
-                "label_it": "Oneri tecnici / istruttoria",
-                "label_en": "Technical fees",
-                "type": "NOT_SPECIFIED",
-                "stima_euro": 0,
-                "stima_nota": "TBD (NON SPECIFICATO IN PERIZIA)",
-                "source": "NOT_SPECIFIED"
-              },
-              {
-                "code": "C",
-                "label_it": "Rischio ripristini",
-                "label_en": "Restoration risk",
-                "type": "NOT_SPECIFIED",
-                "stima_euro": 0,
-                "stima_nota": "TBD (NON SPECIFICATO IN PERIZIA)",
-                "source": "NOT_SPECIFIED"
-              },
-              {
-                "code": "D",
-                "label_it": "Allineamento catastale",
-                "label_en": "Cadastral alignment",
-                "type": "NOT_SPECIFIED",
-                "stima_euro": 0,
-                "stima_nota": "TBD (NON SPECIFICATO IN PERIZIA)",
-                "source": "NOT_SPECIFIED"
-              },
-              {
-                "code": "E",
-                "label_it": "Spese condominiali arretrate",
-                "label_en": "Condo arrears",
-                "type": "NOT_SPECIFIED",
-                "stima_euro": 0,
-                "stima_nota": "TBD (NON SPECIFICATO IN PERIZIA)",
-                "action_required_it": "Verificare con amministratore",
-                "action_required_en": "Verify with administrator"
-              },
-              {
-                "code": "F",
-                "label_it": "Costi procedura",
-                "label_en": "Procedure costs",
-                "type": "NOT_SPECIFIED",
-                "stima_euro": 0,
-                "stima_nota": "TBD (NON SPECIFICATO IN PERIZIA)",
-                "action_required_it": "Verificare con delegato",
-                "action_required_en": "Verify with delegate"
-              },
-              {
-                "code": "G",
-                "label_it": "Cancellazione formalit\u00e0",
-                "label_en": "Formality cancellation",
-                "type": "INFO_ONLY",
-                "stima_euro": 0,
-                "stima_nota": "Solitamente con decreto di trasferimento"
-              },
-              {
-                "code": "H",
-                "label_it": "Costo liberazione",
-                "label_en": "Liberation cost",
-                "type": "NOT_SPECIFIED",
-                "stima_euro": 0,
-                "stima_nota": "TBD (NON SPECIFICATO IN PERIZIA)",
-                "source": "NOT_SPECIFIED"
-              }
-            ],
-            "total_extra_costs": {
-              "range": {
-                "min": 0,
-                "max": 0
-              },
-              "max_is_open": true
-            }
-          },
-          "dati_certi_del_lotto": {
-            "prezzo_base_asta": {
-              "value": 100000.0,
-              "formatted": "\u20ac100,000",
-              "evidence": []
-            },
-            "superficie_catastale": {
-              "value": "90 mq",
-              "evidence": []
-            },
-            "catasto": {
-              "categoria": "NOT_SPECIFIED_IN_PERIZIA",
-              "classe": "NOT_SPECIFIED_IN_PERIZIA",
-              "vani": "NOT_SPECIFIED_IN_PERIZIA"
-            },
-            "diritto_reale": {
-              "value": "NOT_SPECIFIED_IN_PERIZIA",
-              "evidence": []
-            }
-          },
-          "abusi_edilizi_conformita": {
-            "conformita_urbanistica": {
-              "status": "UNKNOWN",
-              "detail_it": "Da verificare nella perizia",
-              "evidence": []
-            },
-            "conformita_catastale": {
-              "status": "UNKNOWN",
-              "detail_it": "Da verificare nella perizia",
-              "evidence": []
-            },
-            "condono": {
-              "present": "UNKNOWN",
-              "status": "UNKNOWN",
-              "evidence": []
-            },
-            "agibilita": {
-              "status": "UNKNOWN",
-              "evidence": []
-            },
-            "commerciabilita": {
-              "status": "UNKNOWN",
-              "evidence": []
-            }
-          },
-          "stato_occupativo": {
-            "status": "UNKNOWN",
-            "status_it": "Da verificare",
-            "status_en": "To verify",
-            "title_opponible": "NOT_SPECIFIED",
-            "evidence": []
-          },
-          "stato_conservativo": {
-            "general_condition_it": "Vedere dettagli nella perizia originale",
-            "general_condition_en": "See details in original appraisal",
-            "issues_found": [],
-            "evidence": []
-          },
-          "formalita": {
-            "ipoteca": {
-              "status": "UNKNOWN",
-              "evidence": []
-            },
-            "pignoramento": {
-              "status": "UNKNOWN",
-              "evidence": []
-            },
-            "cancellazione_decreto": {
-              "status": "UNKNOWN",
-              "evidence": []
-            }
-          },
-          "legal_killers_checklist": {
-            "PEEP_superficie": {
-              "status": "NOT_SPECIFIED",
-              "action_required_it": "Verificare se l'immobile \u00e8 in area PEEP"
-            },
-            "donazione_catena_20anni": {
-              "status": "NOT_SPECIFIED",
-              "action_required_it": "Verificare catena proprietaria ultimi 20 anni"
-            },
-            "prelazione_stato_beni_culturali": {
-              "status": "NOT_SPECIFIED",
-              "action_required_it": "Verificare vincoli beni culturali"
-            },
-            "usi_civici_diritti_demaniali": {
-              "status": "NOT_SPECIFIED",
-              "action_required_it": "Verificare presenza usi civici"
-            },
-            "fondo_patrimoniale": {
-              "status": "NOT_SPECIFIED",
-              "action_required_it": "Verificare se bene in fondo patrimoniale"
-            },
-            "servitu_atti_obbligo": {
-              "status": "NOT_SPECIFIED",
-              "action_required_it": "Verificare servit\u00f9 e atti d'obbligo"
-            },
-            "formalita_non_cancellabili": {
-              "status": "NOT_SPECIFIED",
-              "action_required_it": "Verificare formalit\u00e0 non cancellabili"
-            },
-            "amianto": {
-              "status": "NOT_SPECIFIED",
-              "action_required_it": "Verificare presenza amianto"
-            }
-          },
-          "indice_di_convenienza": {
-            "prezzo_base_asta": 100000.0,
-            "extra_costs_min": 0,
-            "extra_costs_max": 0,
-            "all_in_light_min": 100000.0,
-            "all_in_light_max": 100000.0,
-            "dry_read_it": "Prezzo base \u20ac100,000 - Costi extra TBD (non specificati in perizia)",
-            "dry_read_en": "Base price \u20ac100,000 - Extra costs TBD (not specified in perizia)"
-          },
-          "red_flags_operativi": [
-            {
-              "code": "MANUAL_REVIEW",
-              "severity": "AMBER",
-              "flag_it": "Revisione manuale raccomandata",
-              "flag_en": "Manual review recommended",
-              "action_it": "Verificare tutti i dati con la perizia originale"
-            }
-          ],
-          "checklist_pre_offerta": [
-            {
-              "item_it": "Verificare conformit\u00e0 urbanistica e catastale",
-              "item_en": "Verify urban and cadastral compliance",
-              "priority": "P0",
-              "status": "TO_CHECK"
-            },
-            {
-              "item_it": "Verificare stato occupativo e titolo",
-              "item_en": "Verify occupancy status and title",
-              "priority": "P0",
-              "status": "TO_CHECK"
-            },
-            {
-              "item_it": "Controllare formalit\u00e0 e ipoteche",
-              "item_en": "Check formalities and mortgages",
-              "priority": "P0",
-              "status": "TO_CHECK"
-            },
-            {
-              "item_it": "Sopralluogo immobile",
-              "item_en": "Property inspection",
-              "priority": "P1",
-              "status": "TO_CHECK"
-            },
-            {
-              "item_it": "Verificare spese condominiali arretrate",
-              "item_en": "Verify condo arrears",
-              "priority": "P1",
-              "status": "TO_CHECK"
-            }
-          ],
-          "summary_for_client": {
-            "summary_it": "Analisi del documento deterministic_test_multi_lot.pdf. Il sistema ha estratto i dati disponibili ma si raccomanda una revisione manuale completa prima di procedere con qualsiasi offerta. Prezzo base: \u20ac100,000. Costi extra stimati: \u20ac17.500-68.500. All-in stimato: \u20ac117,500-168,500.",
-            "summary_en": "Analysis of document deterministic_test_multi_lot.pdf. The system extracted available data but a complete manual review is recommended before proceeding with any offer. Base price: \u20ac100,000. Estimated extra costs: \u20ac17,500-68,500. Estimated all-in: \u20ac117,500-168,500.",
-            "disclaimer_it": "Documento informativo. Non costituisce consulenza legale. Consultare un professionista qualificato.",
-            "disclaimer_en": "Informational document. Not legal advice. Consult a qualified professional."
-          },
-          "qa": {
-            "status": "WARN",
-            "reasons": [
-              {
-                "code": "PARTIAL_EXTRACTION",
-                "severity": "AMBER",
-                "reason_it": "Estrazione automatica parziale - LLM fallback",
-                "reason_en": "Partial automatic extraction - LLM fallback"
-              },
-              {
-                "code": "NO_EVIDENCE",
-                "severity": "AMBER",
-                "reason_it": "Nessuna evidence estratta - verifica manuale",
-                "reason_en": "No evidence extracted - manual verification needed"
-              }
-            ],
-            "checks": [
-              {
-                "code": "QA-PageCoverage",
-                "result": "WARN",
-                "note": "Fallback mode - page_coverage_log created with 5 placeholder entries"
-              },
-              {
-                "code": "QA-MoneyBox-Honesty",
-                "result": "OK",
-                "note": "All values set to TBD (no fake estimates)"
-              },
-              {
-                "code": "QA-Lotto",
-                "result": "OK",
-                "note": "Detected lots: [1, 2]"
-              }
-            ]
-          }
-        }
-      }
-    },
-    {
       "test": "CRITICAL: Google Document AI Perizia Extraction",
       "method": "POST",
       "endpoint": "api/analysis/perizia",
       "expected_status": 200,
-      "actual_status": 200,
-      "success": true,
+      "actual_status": 520,
+      "success": false,
       "response": {
-        "ok": true,
-        "analysis_id": "analysis_73dcb5ab5b25",
-        "case_id": "case_3b2a6833",
-        "run_id": "run_02fada33",
-        "result": {
-          "schema_version": "nexodify_perizia_scan_v1",
-          "run": {
-            "run_id": "run_02fada33",
-            "generated_at_utc": "2026-01-05T03:28:11.974252+00:00",
-            "input": {
-              "source_type": "perizia_pdf",
-              "file_name": "f6h0fsye_1859886_c_perizia.pdf",
-              "pages_total": 50
-            }
-          },
-          "case_header": {
-            "procedure_id": "ESECUZIONE IMMOBILIARE 62/2024",
-            "lotto": "Non specificato in Perizia",
-            "tribunale": "TRIBUNALE DI MANTOVA                             \n                                                                                  \n                                                                                  \n                                                                                  \n                                     SEZIONE EE",
-            "address": {
-              "street": "NOT_SPECIFIED_IN_PERIZIA",
-              "city": "NOT_SPECIFIED_IN_PERIZIA",
-              "full": "NOT_SPECIFIED_IN_PERIZIA"
-            },
-            "deposit_date": "NOT_SPECIFIED_IN_PERIZIA"
-          },
-          "report_header": {
-            "title": "NEXODIFY INTELLIGENCE | Auction Scan",
-            "procedure": {
-              "value": "ESECUZIONE IMMOBILIARE 62/2024",
-              "evidence": []
-            },
-            "lotto": {
-              "value": "Non specificato in Perizia",
-              "evidence": []
-            },
-            "tribunale": {
-              "value": "TRIBUNALE DI MANTOVA                             \n                                                                                  \n                                                                                  \n                                                                                  \n                                     SEZIONE EE",
-              "evidence": []
-            },
-            "address": {
-              "value": "Non specificato in Perizia",
-              "evidence": []
-            },
-            "generated_at": "2026-01-05T03:28:11.974272+00:00"
-          },
-          "lot_index": [],
-          "page_coverage_log": [
-            {
-              "page": 1,
-              "summary": "Fallback - manual review required"
-            },
-            {
-              "page": 2,
-              "summary": "Fallback - manual review required"
-            },
-            {
-              "page": 3,
-              "summary": "Fallback - manual review required"
-            },
-            {
-              "page": 4,
-              "summary": "Fallback - manual review required"
-            },
-            {
-              "page": 5,
-              "summary": "Fallback - manual review required"
-            },
-            {
-              "page": 6,
-              "summary": "Fallback - manual review required"
-            },
-            {
-              "page": 7,
-              "summary": "Fallback - manual review required"
-            },
-            {
-              "page": 8,
-              "summary": "Fallback - manual review required"
-            },
-            {
-              "page": 9,
-              "summary": "Fallback - manual review required"
-            },
-            {
-              "page": 10,
-              "summary": "Fallback - manual review required"
-            },
-            {
-              "page": 11,
-              "summary": "Fallback - manual review required"
-            },
-            {
-              "page": 12,
-              "summary": "Fallback - manual review required"
-            },
-            {
-              "page": 13,
-              "summary": "Fallback - manual review required"
-            },
-            {
-              "page": 14,
-              "summary": "Fallback - manual review required"
-            },
-            {
-              "page": 15,
-              "summary": "Fallback - manual review required"
-            },
-            {
-              "page": 16,
-              "summary": "Fallback - manual review required"
-            },
-            {
-              "page": 17,
-              "summary": "Fallback - manual review required"
-            },
-            {
-              "page": 18,
-              "summary": "Fallback - manual review required"
-            },
-            {
-              "page": 19,
-              "summary": "Fallback - manual review required"
-            },
-            {
-              "page": 20,
-              "summary": "Fallback - manual review required"
-            },
-            {
-              "page": 21,
-              "summary": "Fallback - manual review required"
-            },
-            {
-              "page": 22,
-              "summary": "Fallback - manual review required"
-            },
-            {
-              "page": 23,
-              "summary": "Fallback - manual review required"
-            },
-            {
-              "page": 24,
-              "summary": "Fallback - manual review required"
-            },
-            {
-              "page": 25,
-              "summary": "Fallback - manual review required"
-            },
-            {
-              "page": 26,
-              "summary": "Fallback - manual review required"
-            },
-            {
-              "page": 27,
-              "summary": "Fallback - manual review required"
-            },
-            {
-              "page": 28,
-              "summary": "Fallback - manual review required"
-            },
-            {
-              "page": 29,
-              "summary": "Fallback - manual review required"
-            },
-            {
-              "page": 30,
-              "summary": "Fallback - manual review required"
-            },
-            {
-              "page": 31,
-              "summary": "Fallback - manual review required"
-            },
-            {
-              "page": 32,
-              "summary": "Fallback - manual review required"
-            },
-            {
-              "page": 33,
-              "summary": "Fallback - manual review required"
-            },
-            {
-              "page": 34,
-              "summary": "Fallback - manual review required"
-            },
-            {
-              "page": 35,
-              "summary": "Fallback - manual review required"
-            },
-            {
-              "page": 36,
-              "summary": "Fallback - manual review required"
-            },
-            {
-              "page": 37,
-              "summary": "Fallback - manual review required"
-            },
-            {
-              "page": 38,
-              "summary": "Fallback - manual review required"
-            },
-            {
-              "page": 39,
-              "summary": "Fallback - manual review required"
-            },
-            {
-              "page": 40,
-              "summary": "Fallback - manual review required"
-            },
-            {
-              "page": 41,
-              "summary": "Fallback - manual review required"
-            },
-            {
-              "page": 42,
-              "summary": "Fallback - manual review required"
-            },
-            {
-              "page": 43,
-              "summary": "Fallback - manual review required"
-            },
-            {
-              "page": 44,
-              "summary": "Fallback - manual review required"
-            },
-            {
-              "page": 45,
-              "summary": "Fallback - manual review required"
-            },
-            {
-              "page": 46,
-              "summary": "Fallback - manual review required"
-            },
-            {
-              "page": 47,
-              "summary": "Fallback - manual review required"
-            },
-            {
-              "page": 48,
-              "summary": "Fallback - manual review required"
-            },
-            {
-              "page": 49,
-              "summary": "Fallback - manual review required"
-            },
-            {
-              "page": 50,
-              "summary": "Fallback - manual review required"
-            }
-          ],
-          "semaforo_generale": {
-            "status": "AMBER",
-            "status_it": "ATTENZIONE",
-            "status_en": "CAUTION",
-            "reason_it": "Analisi automatica parziale - revisione manuale raccomandata",
-            "reason_en": "Partial automatic analysis - manual review recommended",
-            "evidence": []
-          },
-          "decision_rapida_client": {
-            "risk_level": "MEDIUM_RISK",
-            "risk_level_it": "RISCHIO MEDIO",
-            "risk_level_en": "MEDIUM RISK",
-            "summary_it": "Documento analizzato. Alcuni dati richiedono verifica manuale. Consultare un professionista prima di procedere.",
-            "summary_en": "Document analyzed. Some data requires manual verification. Consult a professional before proceeding.",
-            "driver_rosso": []
-          },
-          "money_box": {
-            "items": [
-              {
-                "code": "A",
-                "label_it": "Regolarizzazione urbanistica",
-                "label_en": "Urban regularization",
-                "type": "NOT_SPECIFIED",
-                "stima_euro": 0,
-                "stima_nota": "TBD (NON SPECIFICATO IN PERIZIA) \u2014 Verifica tecnico",
-                "action_required_it": "Verificare con tecnico",
-                "action_required_en": "Verify with technician"
-              },
-              {
-                "code": "B",
-                "label_it": "Oneri tecnici / istruttoria",
-                "label_en": "Technical fees",
-                "type": "NOT_SPECIFIED",
-                "stima_euro": 0,
-                "stima_nota": "TBD (NON SPECIFICATO IN PERIZIA)",
-                "source": "NOT_SPECIFIED"
-              },
-              {
-                "code": "C",
-                "label_it": "Rischio ripristini",
-                "label_en": "Restoration risk",
-                "type": "NOT_SPECIFIED",
-                "stima_euro": 0,
-                "stima_nota": "TBD (NON SPECIFICATO IN PERIZIA)",
-                "source": "NOT_SPECIFIED"
-              },
-              {
-                "code": "D",
-                "label_it": "Allineamento catastale",
-                "label_en": "Cadastral alignment",
-                "type": "NOT_SPECIFIED",
-                "stima_euro": 0,
-                "stima_nota": "TBD (NON SPECIFICATO IN PERIZIA)",
-                "source": "NOT_SPECIFIED"
-              },
-              {
-                "code": "E",
-                "label_it": "Spese condominiali arretrate",
-                "label_en": "Condo arrears",
-                "type": "NOT_SPECIFIED",
-                "stima_euro": 0,
-                "stima_nota": "TBD (NON SPECIFICATO IN PERIZIA)",
-                "action_required_it": "Verificare con amministratore",
-                "action_required_en": "Verify with administrator"
-              },
-              {
-                "code": "F",
-                "label_it": "Costi procedura",
-                "label_en": "Procedure costs",
-                "type": "NOT_SPECIFIED",
-                "stima_euro": 0,
-                "stima_nota": "TBD (NON SPECIFICATO IN PERIZIA)",
-                "action_required_it": "Verificare con delegato",
-                "action_required_en": "Verify with delegate"
-              },
-              {
-                "code": "G",
-                "label_it": "Cancellazione formalit\u00e0",
-                "label_en": "Formality cancellation",
-                "type": "INFO_ONLY",
-                "stima_euro": 0,
-                "stima_nota": "Solitamente con decreto di trasferimento"
-              },
-              {
-                "code": "H",
-                "label_it": "Costo liberazione",
-                "label_en": "Liberation cost",
-                "type": "NOT_SPECIFIED",
-                "stima_euro": 0,
-                "stima_nota": "TBD (NON SPECIFICATO IN PERIZIA)",
-                "source": "NOT_SPECIFIED"
-              }
-            ],
-            "total_extra_costs": {
-              "range": {
-                "min": 0,
-                "max": 0
-              },
-              "max_is_open": true
-            }
-          },
-          "dati_certi_del_lotto": {
-            "prezzo_base_asta": {
-              "value": 391849.0,
-              "formatted": "\u20ac391,849",
-              "evidence": []
-            },
-            "superficie_catastale": {
-              "value": "56,62 mq",
-              "evidence": []
-            },
-            "catasto": {
-              "categoria": "NOT_SPECIFIED_IN_PERIZIA",
-              "classe": "NOT_SPECIFIED_IN_PERIZIA",
-              "vani": "NOT_SPECIFIED_IN_PERIZIA"
-            },
-            "diritto_reale": {
-              "value": "NOT_SPECIFIED_IN_PERIZIA",
-              "evidence": []
-            }
-          },
-          "abusi_edilizi_conformita": {
-            "conformita_urbanistica": {
-              "status": "UNKNOWN",
-              "detail_it": "Da verificare nella perizia",
-              "evidence": []
-            },
-            "conformita_catastale": {
-              "status": "UNKNOWN",
-              "detail_it": "Da verificare nella perizia",
-              "evidence": []
-            },
-            "condono": {
-              "present": "UNKNOWN",
-              "status": "UNKNOWN",
-              "evidence": []
-            },
-            "agibilita": {
-              "status": "UNKNOWN",
-              "evidence": []
-            },
-            "commerciabilita": {
-              "status": "UNKNOWN",
-              "evidence": []
-            }
-          },
-          "stato_occupativo": {
-            "status": "UNKNOWN",
-            "status_it": "Da verificare",
-            "status_en": "To verify",
-            "title_opponible": "NOT_SPECIFIED",
-            "evidence": []
-          },
-          "stato_conservativo": {
-            "general_condition_it": "Vedere dettagli nella perizia originale",
-            "general_condition_en": "See details in original appraisal",
-            "issues_found": [],
-            "evidence": []
-          },
-          "formalita": {
-            "ipoteca": {
-              "status": "UNKNOWN",
-              "evidence": []
-            },
-            "pignoramento": {
-              "status": "UNKNOWN",
-              "evidence": []
-            },
-            "cancellazione_decreto": {
-              "status": "UNKNOWN",
-              "evidence": []
-            }
-          },
-          "legal_killers_checklist": {
-            "PEEP_superficie": {
-              "status": "NOT_SPECIFIED",
-              "action_required_it": "Verificare se l'immobile \u00e8 in area PEEP"
-            },
-            "donazione_catena_20anni": {
-              "status": "NOT_SPECIFIED",
-              "action_required_it": "Verificare catena proprietaria ultimi 20 anni"
-            },
-            "prelazione_stato_beni_culturali": {
-              "status": "NOT_SPECIFIED",
-              "action_required_it": "Verificare vincoli beni culturali"
-            },
-            "usi_civici_diritti_demaniali": {
-              "status": "NOT_SPECIFIED",
-              "action_required_it": "Verificare presenza usi civici"
-            },
-            "fondo_patrimoniale": {
-              "status": "NOT_SPECIFIED",
-              "action_required_it": "Verificare se bene in fondo patrimoniale"
-            },
-            "servitu_atti_obbligo": {
-              "status": "NOT_SPECIFIED",
-              "action_required_it": "Verificare servit\u00f9 e atti d'obbligo"
-            },
-            "formalita_non_cancellabili": {
-              "status": "NOT_SPECIFIED",
-              "action_required_it": "Verificare formalit\u00e0 non cancellabili"
-            },
-            "amianto": {
-              "status": "NOT_SPECIFIED",
-              "action_required_it": "Verificare presenza amianto"
-            }
-          },
-          "indice_di_convenienza": {
-            "prezzo_base_asta": 391849.0,
-            "extra_costs_min": 0,
-            "extra_costs_max": 0,
-            "all_in_light_min": 391849.0,
-            "all_in_light_max": 391849.0,
-            "dry_read_it": "Prezzo base \u20ac391,849 - Costi extra TBD (non specificati in perizia)",
-            "dry_read_en": "Base price \u20ac391,849 - Extra costs TBD (not specified in perizia)"
-          },
-          "red_flags_operativi": [
-            {
-              "code": "MANUAL_REVIEW",
-              "severity": "AMBER",
-              "flag_it": "Revisione manuale raccomandata",
-              "flag_en": "Manual review recommended",
-              "action_it": "Verificare tutti i dati con la perizia originale"
-            }
-          ],
-          "checklist_pre_offerta": [
-            {
-              "item_it": "Verificare conformit\u00e0 urbanistica e catastale",
-              "item_en": "Verify urban and cadastral compliance",
-              "priority": "P0",
-              "status": "TO_CHECK"
-            },
-            {
-              "item_it": "Verificare stato occupativo e titolo",
-              "item_en": "Verify occupancy status and title",
-              "priority": "P0",
-              "status": "TO_CHECK"
-            },
-            {
-              "item_it": "Controllare formalit\u00e0 e ipoteche",
-              "item_en": "Check formalities and mortgages",
-              "priority": "P0",
-              "status": "TO_CHECK"
-            },
-            {
-              "item_it": "Sopralluogo immobile",
-              "item_en": "Property inspection",
-              "priority": "P1",
-              "status": "TO_CHECK"
-            },
-            {
-              "item_it": "Verificare spese condominiali arretrate",
-              "item_en": "Verify condo arrears",
-              "priority": "P1",
-              "status": "TO_CHECK"
-            }
-          ],
-          "summary_for_client": {
-            "summary_it": "Analisi del documento f6h0fsye_1859886_c_perizia.pdf. Il sistema ha estratto i dati disponibili ma si raccomanda una revisione manuale completa prima di procedere con qualsiasi offerta. Prezzo base: \u20ac391,849. Costi extra stimati: \u20ac17.500-68.500. All-in stimato: \u20ac409,349-460,349.",
-            "summary_en": "Analysis of document f6h0fsye_1859886_c_perizia.pdf. The system extracted available data but a complete manual review is recommended before proceeding with any offer. Base price: \u20ac391,849. Estimated extra costs: \u20ac17,500-68,500. Estimated all-in: \u20ac409,349-460,349.",
-            "disclaimer_it": "Documento informativo. Non costituisce consulenza legale. Consultare un professionista qualificato.",
-            "disclaimer_en": "Informational document. Not legal advice. Consult a qualified professional."
-          },
-          "qa": {
-            "status": "WARN",
-            "reasons": [
-              {
-                "code": "PARTIAL_EXTRACTION",
-                "severity": "AMBER",
-                "reason_it": "Estrazione automatica parziale - LLM fallback",
-                "reason_en": "Partial automatic extraction - LLM fallback"
-              },
-              {
-                "code": "NO_EVIDENCE",
-                "severity": "AMBER",
-                "reason_it": "Nessuna evidence estratta - verifica manuale",
-                "reason_en": "No evidence extracted - manual verification needed"
-              }
-            ],
-            "checks": [
-              {
-                "code": "QA-PageCoverage",
-                "result": "WARN",
-                "note": "Fallback mode - page_coverage_log created with 50 placeholder entries"
-              },
-              {
-                "code": "QA-MoneyBox-Honesty",
-                "result": "OK",
-                "note": "All values set to TBD (no fake estimates)"
-              },
-              {
-                "code": "QA-Lotto",
-                "result": "WARN",
-                "note": "No lots detected"
-              }
-            ]
-          }
-        }
+        "error": "Internal Server Error"
       }
     },
     {
@@ -1459,619 +489,10 @@
       "method": "POST",
       "endpoint": "api/analysis/perizia",
       "expected_status": 200,
-      "actual_status": 200,
-      "success": true,
+      "actual_status": 520,
+      "success": false,
       "response": {
-        "ok": true,
-        "analysis_id": "analysis_5bb63ec1221c",
-        "case_id": "case_95849268",
-        "run_id": "run_2d4aa6cd",
-        "result": {
-          "schema_version": "nexodify_perizia_scan_v1",
-          "report_header": {
-            "title": "NEXODIFY INTELLIGENCE | Auction Scan",
-            "procedure": {
-              "value": "Esecuzione Immobiliare 123/2024 R.G.E.",
-              "evidence": [
-                {
-                  "page": 1,
-                  "quote": "TRIBUNALE DI ROMA | SEZIONE ESECUZIONI IMMOBILIARI | R.G.E. N. 123/2024"
-                }
-              ]
-            },
-            "lotto": {
-              "value": "Lotto Unico",
-              "evidence": [
-                {
-                  "page": 1,
-                  "quote": "Lotto Unico"
-                }
-              ]
-            },
-            "tribunale": {
-              "value": "TRIBUNALE DI ROMA",
-              "evidence": [
-                {
-                  "page": 1,
-                  "quote": "TRIBUNALE DI ROMA"
-                }
-              ]
-            },
-            "address": {
-              "value": "Via Roma 123, 00100 Roma (RM)",
-              "evidence": [
-                {
-                  "page": 1,
-                  "quote": "IMMOBILE SITO IN: | Via Roma 123, 00100 Roma (RM)"
-                }
-              ]
-            },
-            "generated_at": "ISO_DATE"
-          },
-          "section_1_semaforo_generale": {
-            "status": "VERDE",
-            "status_label": "RISCHIO GLOBALE: VERDE",
-            "semaforo_complessivo": {
-              "value": "VERDE",
-              "evidence": []
-            },
-            "mutuabilita_stimata": {
-              "value": "TOTALE",
-              "reason": "No significant risks detected",
-              "evidence": []
-            },
-            "driver": {
-              "value": "None",
-              "evidence": []
-            }
-          },
-          "section_2_decisione_rapida": {
-            "operazione_rating": "VERDE",
-            "summary_it": "L'immobile \u00e8 conforme dal punto di vista urbanistico e catastale, ed \u00e8 libero da persone e cose.",
-            "summary_en": "The property meets urban and cadastral conformity and is free of people and objects."
-          },
-          "section_3_money_box": {
-            "items": [
-              {
-                "voce": "A - Regolarizzazione urbanistica/ripristini",
-                "fonte_perizia": {
-                  "value": "Non specificato",
-                  "evidence": []
-                },
-                "stima_euro": 0,
-                "stima_nota": "TBD (NON SPECIFICATO IN PERIZIA)"
-              },
-              {
-                "voce": "B - Completamento finiture/impianti",
-                "fonte_perizia": {
-                  "value": "Non specificato",
-                  "evidence": []
-                },
-                "stima_euro": 0,
-                "stima_nota": "TBD (NON SPECIFICATO IN PERIZIA)"
-              },
-              {
-                "voce": "C - Ottenimento abitabilit\u00e0/agibilit\u00e0",
-                "fonte_perizia": {
-                  "value": "Non specificato",
-                  "evidence": []
-                },
-                "stima_euro": 0,
-                "stima_nota": "TBD (NON SPECIFICATO IN PERIZIA)"
-              },
-              {
-                "voce": "D - Spese condominiali arretrate",
-                "fonte_perizia": {
-                  "value": "Non specificato",
-                  "evidence": []
-                },
-                "stima_euro": 0,
-                "stima_nota": "Verifica amministratore"
-              },
-              {
-                "voce": "E - Cancellazione formalit\u00e0",
-                "fonte_perizia": {
-                  "value": "Non specificato",
-                  "evidence": []
-                },
-                "stima_euro": 0,
-                "stima_nota": "Verifica legale"
-              },
-              {
-                "voce": "F - Costo liberazione",
-                "fonte_perizia": {
-                  "value": "Non specificato",
-                  "evidence": []
-                },
-                "stima_euro": 0,
-                "stima_nota": "TBD (NON SPECIFICATO IN PERIZIA) \u2014 Verifica tecnico/legale"
-              }
-            ],
-            "totale_extra_budget": {
-              "min": 0,
-              "max": 0,
-              "nota": "EUR 0+ (minimo prudenziale)"
-            }
-          },
-          "section_4_dati_certi": {
-            "prezzo_base_asta": {
-              "value": 150000,
-              "formatted": "EUR 150.000",
-              "evidence": [
-                {
-                  "page": 1,
-                  "quote": "PREZZO BASE D'ASTA: | Il prezzo base d'asta \u00e8 fissato in \u20ac 150.000,00"
-                }
-              ]
-            },
-            "valore_stima_complessivo": {
-              "value": 0,
-              "formatted": "EUR X",
-              "evidence": []
-            },
-            "deprezzamenti": [
-              {
-                "tipo": "regolarizzazioni",
-                "importo": 0,
-                "evidence": []
-              },
-              {
-                "tipo": "vizi occulti",
-                "importo": 0,
-                "evidence": []
-              }
-            ],
-            "valore_finale_stima": {
-              "value": 0,
-              "formatted": "EUR X",
-              "evidence": []
-            },
-            "composizione_lotto": {
-              "value": "Appartamento di categoria A/2, classe 3, vani 4",
-              "evidence": [
-                {
-                  "page": 1,
-                  "quote": "Superficie catastale: 85 mq | Categoria: A/2, Classe: 3, Vani: 4"
-                }
-              ]
-            }
-          },
-          "section_5_abusi_conformita": {
-            "conformita_urbanistica": {
-              "status": "CONFORME",
-              "detail": "L'immobile risulta conforme alla documentazione urbanistica",
-              "evidence": [
-                {
-                  "page": 2,
-                  "quote": "L'immobile risulta conforme alla documentazione urbanistica"
-                }
-              ]
-            },
-            "conformita_catastale": {
-              "status": "CONFORME",
-              "evidence": [
-                {
-                  "page": 2,
-                  "quote": "Conformit\u00e0 catastale: CONFORME"
-                }
-              ]
-            },
-            "condono": {
-              "presente": "UNKNOWN",
-              "anno": "",
-              "pratica": "",
-              "stato": "unknown",
-              "evidence": []
-            },
-            "agibilita": {
-              "status": "NON_RISULTA",
-              "evidence": []
-            },
-            "ape": {
-              "status": "NON_SPECIFICATO",
-              "evidence": []
-            },
-            "impianti": {
-              "elettrico": {
-                "conformita": "NON_RISULTA"
-              },
-              "termico": {
-                "conformita": "NON_RISULTA"
-              },
-              "idrico": {
-                "conformita": "NON_RISULTA"
-              },
-              "evidence": []
-            }
-          },
-          "section_6_stato_occupativo": {
-            "status": "LIBERO",
-            "status_detail": "L'immobile risulta LIBERO da persone e cose",
-            "locazione_opponibile": {
-              "status": "NON_SPECIFICATO",
-              "evidence": []
-            },
-            "titolo_opponibile": {
-              "status": "NON_SPECIFICATO",
-              "evidence": []
-            },
-            "tempi_consegna_stima": "stima Nexodify 3-9 mesi post Decreto di Trasferimento",
-            "evidence": [
-              {
-                "page": 2,
-                "quote": "L'immobile risulta LIBERO da persone e cose"
-              }
-            ]
-          },
-          "section_7_stato_conservativo": {
-            "condizione_generale": "Non specificato",
-            "dettagli": [],
-            "carenze": "Non specificato",
-            "evidence": []
-          },
-          "section_8_formalita": {
-            "ipoteche": [
-              {
-                "tipo": "giudiziale",
-                "importo": 200000,
-                "data": "",
-                "beneficiario": "omissis",
-                "evidence": [
-                  {
-                    "page": 2,
-                    "quote": "Ipoteca iscritta per \u20ac 200.000,00"
-                  }
-                ]
-              }
-            ],
-            "pignoramenti": [
-              {
-                "data": "01/02/2024",
-                "evidence": [
-                  {
-                    "page": 2,
-                    "quote": "Pignoramento trascritto in data 01/02/2024"
-                  }
-                ]
-              }
-            ],
-            "cancellazione": "normalmente tramite Decreto di Trasferimento, salvo eccezioni - verifica legale obbligatoria",
-            "evidence": []
-          },
-          "section_9_legal_killers": {
-            "items": [
-              {
-                "killer": "Diritto di superficie / PEEP",
-                "status": "NON_SPECIFICATO",
-                "action": "Verifica obbligatoria",
-                "evidence": []
-              },
-              {
-                "killer": "Donazione in catena <20 anni",
-                "status": "NON_SPECIFICATO",
-                "action": "Verifica obbligatoria",
-                "evidence": []
-              },
-              {
-                "killer": "Prelazione Stato / beni culturali",
-                "status": "NON_SPECIFICATO",
-                "action": "Verifica obbligatoria",
-                "evidence": []
-              },
-              {
-                "killer": "Usi civici",
-                "status": "NON_SPECIFICATO",
-                "action": "Verifica CDU",
-                "evidence": []
-              },
-              {
-                "killer": "Fondo patrimoniale / casa coniugale",
-                "status": "NON_SPECIFICATO",
-                "action": "Verifica obbligatoria",
-                "evidence": []
-              },
-              {
-                "killer": "Servit\u00f9 / atti d'obbligo",
-                "status": "NON_SPECIFICATO",
-                "action": "Verifica obbligatoria",
-                "evidence": []
-              },
-              {
-                "killer": "Formalit\u00e0 non cancellabili",
-                "status": "NON_SPECIFICATO",
-                "action": "Verifica obbligatoria",
-                "evidence": []
-              },
-              {
-                "killer": "Amianto",
-                "status": "NON_SPECIFICATO",
-                "action": "Verifica se coperture datate",
-                "evidence": []
-              }
-            ]
-          },
-          "section_10_indice_convenienza": {
-            "prezzo_base": 150000,
-            "extra_budget_min": 0,
-            "extra_budget_max": 0,
-            "all_in_light_min": 150000,
-            "all_in_light_max": 150000,
-            "lettura_secca_it": "senza sconto reale sul prezzo base, il rischio tecnico/temporale mangia il margine",
-            "lettura_secca_en": "without real discount on base price, technical/timing risk eats the margin"
-          },
-          "section_11_red_flags": [],
-          "section_12_checklist_pre_offerta": [
-            "Accesso atti in Comune",
-            "Preventivo tecnico reale",
-            "Visure in Conservatoria",
-            "Conferma eventuali arretrati condominiali",
-            "Strategia di liberazione e allineamento"
-          ],
-          "summary_for_client": {
-            "summary_it": "La perizia conferma la conformit\u00e0 urbanistica e catastale. L'immobile \u00e8 libero e ipotecato. Nessun deprezzamento specificato.",
-            "summary_en": "The appraisal confirms urban and cadastral compliance. The property is free and mortgaged. No specific depreciation noted.",
-            "raccomandazione": "Procedere solo se il prezzo di aggiudicazione incorpora margine reale per extra-budget e ritardi",
-            "disclaimer_it": "Documento informativo. Non costituisce consulenza legale.",
-            "disclaimer_en": "Informational document. Does not constitute legal advice."
-          },
-          "qa_pass": {
-            "status": "PASS",
-            "checks": [
-              {
-                "code": "QA-1 Format Lock",
-                "result": "OK",
-                "note": "ordine Roma 1-12 rispettato"
-              },
-              {
-                "code": "QA-2 Zero Empty Fields",
-                "result": "OK",
-                "note": "dove manca dato: Non specificato in Perizia"
-              },
-              {
-                "code": "QA-3 Page Anchors",
-                "result": "OK",
-                "note": "riferimenti pagina presenti"
-              },
-              {
-                "code": "QA-4 Money Box",
-                "result": "FAIL",
-                "note": "voci CTU non valorate, aumento stima prudenziale"
-              },
-              {
-                "code": "QA-5 Legal Killers",
-                "result": "OK",
-                "note": "checklist completa"
-              },
-              {
-                "code": "QA-6 Condono + Opponibilit\u00e0",
-                "result": "OK",
-                "note": "status verificato"
-              },
-              {
-                "code": "QA-7 Delivery Timeline",
-                "result": "OK",
-                "note": "stima tempi presente"
-              },
-              {
-                "code": "QA-8 Semaforo Rules",
-                "result": "OK",
-                "note": "coerente con criticit\u00e0"
-              },
-              {
-                "code": "QA-9 Typos",
-                "result": "OK",
-                "note": "nessun errore"
-              },
-              {
-                "code": "QA-MoneyBox-Honesty",
-                "result": "OK",
-                "note": "Money Box items valued correctly"
-              },
-              {
-                "code": "QA-PageCoverage",
-                "result": "OK",
-                "note": "page_coverage_log has 2 entries, expected 2"
-              },
-              {
-                "code": "QA-MoneyBox-Honesty",
-                "result": "OK",
-                "note": "All Money Box items honest (no fake \u20ac values)"
-              },
-              {
-                "code": "QA-LegalKiller-Evidence",
-                "result": "OK",
-                "note": "All SI/NO status have evidence"
-              },
-              {
-                "code": "QA-1 Format Lock",
-                "result": "OK",
-                "note": "ordine Roma 1-12 rispettato"
-              },
-              {
-                "code": "QA-2 Zero Empty Fields",
-                "result": "OK",
-                "note": "dove manca dato: Non specificato in Perizia"
-              },
-              {
-                "code": "QA-3 Page Anchors",
-                "result": "OK",
-                "note": "riferimenti pagina presenti"
-              },
-              {
-                "code": "QA-4 Money Box",
-                "result": "WARN",
-                "note": "totale: EUR 0"
-              },
-              {
-                "code": "QA-5 Legal Killers",
-                "result": "OK",
-                "note": "checklist 8 items"
-              },
-              {
-                "code": "QA-6 Condono + Opponibilit\u00e0",
-                "result": "OK",
-                "note": "status verificato"
-              },
-              {
-                "code": "QA-7 Delivery Timeline",
-                "result": "OK",
-                "note": "stima tempi presente"
-              },
-              {
-                "code": "QA-8 Semaforo Rules",
-                "result": "OK",
-                "note": "coerente con criticit\u00e0"
-              },
-              {
-                "code": "QA-9 3-Pass Verification",
-                "result": "OK",
-                "note": "verificato con 3 passaggi"
-              }
-            ]
-          },
-          "page_coverage_log": [
-            {
-              "page": 1,
-              "summary": "Dettagli della procedura e indirizzo immobile. Prezzo base d'asta e descrizioni catastali."
-            },
-            {
-              "page": 2,
-              "summary": "Conformit\u00e0 urbanistica e catastale. Stato occupativo dell'immobile. Formalit\u00e0 come ipoteca e pignoramento."
-            }
-          ],
-          "lot_index": [
-            {
-              "lot": 1,
-              "page": 1,
-              "quote": "Lotto Unico"
-            }
-          ],
-          "qa": {
-            "status": "PASS",
-            "checks": [
-              {
-                "code": "QA-1 Format Lock",
-                "result": "OK",
-                "note": "ordine Roma 1-12 rispettato"
-              },
-              {
-                "code": "QA-2 Zero Empty Fields",
-                "result": "OK",
-                "note": "dove manca dato: Non specificato in Perizia"
-              },
-              {
-                "code": "QA-3 Page Anchors",
-                "result": "OK",
-                "note": "riferimenti pagina presenti"
-              },
-              {
-                "code": "QA-4 Money Box",
-                "result": "FAIL",
-                "note": "voci CTU non valorate, aumento stima prudenziale"
-              },
-              {
-                "code": "QA-5 Legal Killers",
-                "result": "OK",
-                "note": "checklist completa"
-              },
-              {
-                "code": "QA-6 Condono + Opponibilit\u00e0",
-                "result": "OK",
-                "note": "status verificato"
-              },
-              {
-                "code": "QA-7 Delivery Timeline",
-                "result": "OK",
-                "note": "stima tempi presente"
-              },
-              {
-                "code": "QA-8 Semaforo Rules",
-                "result": "OK",
-                "note": "coerente con criticit\u00e0"
-              },
-              {
-                "code": "QA-9 Typos",
-                "result": "OK",
-                "note": "nessun errore"
-              },
-              {
-                "code": "QA-MoneyBox-Honesty",
-                "result": "OK",
-                "note": "Money Box items valued correctly"
-              },
-              {
-                "code": "QA-PageCoverage",
-                "result": "OK",
-                "note": "page_coverage_log has 2 entries, expected 2"
-              },
-              {
-                "code": "QA-MoneyBox-Honesty",
-                "result": "OK",
-                "note": "All Money Box items honest (no fake \u20ac values)"
-              },
-              {
-                "code": "QA-LegalKiller-Evidence",
-                "result": "OK",
-                "note": "All SI/NO status have evidence"
-              },
-              {
-                "code": "QA-1 Format Lock",
-                "result": "OK",
-                "note": "ordine Roma 1-12 rispettato"
-              },
-              {
-                "code": "QA-2 Zero Empty Fields",
-                "result": "OK",
-                "note": "dove manca dato: Non specificato in Perizia"
-              },
-              {
-                "code": "QA-3 Page Anchors",
-                "result": "OK",
-                "note": "riferimenti pagina presenti"
-              },
-              {
-                "code": "QA-4 Money Box",
-                "result": "WARN",
-                "note": "totale: EUR 0"
-              },
-              {
-                "code": "QA-5 Legal Killers",
-                "result": "OK",
-                "note": "checklist 8 items"
-              },
-              {
-                "code": "QA-6 Condono + Opponibilit\u00e0",
-                "result": "OK",
-                "note": "status verificato"
-              },
-              {
-                "code": "QA-7 Delivery Timeline",
-                "result": "OK",
-                "note": "stima tempi presente"
-              },
-              {
-                "code": "QA-8 Semaforo Rules",
-                "result": "OK",
-                "note": "coerente con criticit\u00e0"
-              },
-              {
-                "code": "QA-9 3-Pass Verification",
-                "result": "OK",
-                "note": "verificato con 3 passaggi"
-              }
-            ]
-          },
-          "_verification": {
-            "passes_completed": 3,
-            "final_validation": "PASS",
-            "timestamp": "2026-01-05T03:28:45.709659+00:00",
-            "detected_lots": {
-              "lots": [],
-              "evidence": []
-            },
-            "pages_total": 2
-          }
-        }
+        "error": "Internal Server Error"
       }
     },
     {
@@ -2087,9 +508,9 @@
         "result": {
           "schema_version": "nexodify_image_forensics_v2",
           "run": {
-            "run_id": "img_run_43a84f97",
-            "case_id": "img_case_6e9de5ae",
-            "generated_at_utc": "2026-01-05T03:28:53.329823+00:00",
+            "run_id": "img_run_1831db7a",
+            "case_id": "img_case_432be348",
+            "generated_at_utc": "2026-01-05T03:50:02.533579+00:00",
             "revision": 0,
             "images_analyzed": 1,
             "image_names": [
@@ -2098,69 +519,43 @@
           },
           "findings": [
             {
-              "finding_id": "1",
+              "finding_id": "FND-001",
               "category": "STRUTTURALE",
-              "title_it": "Analisi strutturale limitata",
-              "title_en": "Limited structural analysis",
+              "title_it": "Stato strutturale immobile",
+              "title_en": "Structural condition of the property",
               "severity": "NON_VERIFICABILE",
               "confidence": "LOW",
-              "what_i_see_it": "Impossibilit\u00e0 di valutare elementi strutturali senza visione diretta.",
-              "what_i_see_en": "Cannot assess structural elements without direct view.",
-              "evidence": "Assenza di accesso visivo diretto all'immagine.",
-              "action_required_it": "Verificare eventuali segni di cedimento strutturale nel sopralluogo.",
-              "action_required_en": "Check for any signs of structural failure during inspection."
+              "what_i_see_it": "Non posso valutare lo stato strutturale senza accesso diretto all'immagine.",
+              "what_i_see_en": "I cannot evaluate the structural condition without direct access to the image.",
+              "evidence": "N/A",
+              "action_required_it": "Verificare crepe, segni di cedimento o danni strutturali durante un sopralluogo.",
+              "action_required_en": "Check for cracks, signs of settlement, or structural damage during an on-site inspection."
             },
             {
-              "finding_id": "2",
-              "category": "IMPIANTI",
-              "title_it": "Analisi degli impianti limitata",
-              "title_en": "Limited installations analysis",
-              "severity": "NON_VERIFICABILE",
-              "confidence": "LOW",
-              "what_i_see_it": "Impossibilit\u00e0 di valutare lo stato degli impianti senza visione diretta.",
-              "what_i_see_en": "Cannot assess the condition of installations without direct view.",
-              "evidence": "Assenza di accesso visivo diretto all'immagine.",
-              "action_required_it": "Verificare lo stato degli impianti elettrici e idraulici nel sopralluogo.",
-              "action_required_en": "Check the condition of electrical and plumbing systems during inspection."
-            },
-            {
-              "finding_id": "3",
-              "category": "FINITURE",
-              "title_it": "Analisi delle finiture limitata",
-              "title_en": "Limited finishes analysis",
-              "severity": "NON_VERIFICABILE",
-              "confidence": "LOW",
-              "what_i_see_it": "Impossibilit\u00e0 di valutare le finiture senza visione diretta.",
-              "what_i_see_en": "Cannot assess finishes without direct view.",
-              "evidence": "Assenza di accesso visivo diretto all'immagine.",
-              "action_required_it": "Verificare lo stato delle finiture superficiali nel sopralluogo.",
-              "action_required_en": "Check the condition of surface finishes during inspection."
-            },
-            {
-              "finding_id": "4",
+              "finding_id": "FND-002",
               "category": "MATERIALI",
-              "title_it": "Analisi dei materiali limitata",
-              "title_en": "Limited materials analysis",
+              "title_it": "Presenza materiali pericolosi",
+              "title_en": "Presence of hazardous materials",
               "severity": "NON_VERIFICABILE",
               "confidence": "LOW",
-              "what_i_see_it": "Impossibilit\u00e0 di valutare i materiali senza visione diretta.",
-              "what_i_see_en": "Cannot assess materials without direct view.",
-              "evidence": "Assenza di accesso visivo diretto all'immagine.",
-              "action_required_it": "Verificare se ci sono materiali non conformi o pericolosi nel sopralluogo.",
-              "action_required_en": "Check if there are non-compliant or hazardous materials during inspection."
+              "what_i_see_it": "Non posso identificare materiali pericolosi come amianto senza vedere l'immagine.",
+              "what_i_see_en": "I cannot identify hazardous materials like asbestos without seeing the image.",
+              "evidence": "N/A",
+              "action_required_it": "Durante il sopralluogo, controllare se vi sono materiali che potrebbero contenere amianto o altre sostanze pericolose.",
+              "action_required_en": "During the inspection, check for materials that might contain asbestos or other hazardous substances."
             },
             {
-              "finding_id": "5",
+              "finding_id": "FND-003",
               "category": "UMIDITA",
-              "title_it": "Analisi umidit\u00e0 limitata",
-              "title_en": "Limited moisture analysis",
+              "title_it": "Problemi di umidit\u00e0",
+              "title_en": "Moisture issues",
               "severity": "NON_VERIFICABILE",
               "confidence": "LOW",
-              "what_i_see_it": "Impossibilit\u00e0 di valutare la presenza di umidit\u00e0 senza visione diretta.",
-              "what_i_see_en": "Cannot assess moisture presence without direct view.",
-              "evidence": "Assenza di accesso visivo diretto all'immagine.",
-              "action_required_it": "Verificare la presenza di umidit\u00e0 o muffe nel sopralluogo.",
-              "action_required_en": "Check for moisture or mold presence during inspection."
+              "what_i_see_it": "Non \u00e8 possibile rilevare problemi di umidit\u00e0 senza le immagini.",
+              "what_i_see_en": "Moisture issues cannot be detected without the images.",
+              "evidence": "N/A",
+              "action_required_it": "Ispezionare zone con potenziali segni di umidit\u00e0 o muffa.",
+              "action_required_en": "Inspect areas for potential signs of moisture or mold."
             }
           ],
           "overall_assessment": {
@@ -2179,8 +574,8 @@
           "qa_pass": {
             "status": "WARN",
             "checks": [
-              "Confidenza bassa su tutti i findings per mancanza di accesso visivo diretto.",
-              "Analisi non determinabile senza immagine diretta.",
+              "Possibilit\u00e0 di verifica delle immagini \u00e8 limitata.",
+              "Confidence tutti i findings impostata a LOW a causa della mancanza di visibilit\u00e0.",
               {
                 "code": "QA-ImageCount",
                 "result": "OK",
@@ -2194,7 +589,7 @@
               {
                 "code": "QA-ConfidenceHonesty",
                 "result": "OK",
-                "note": "5/5 findings con confidence LOW (onest\u00e0)"
+                "note": "3/3 findings con confidence LOW (onest\u00e0)"
               },
               {
                 "code": "QA-NoHallucination",
@@ -2221,36 +616,37 @@
         "result": {
           "schema_version": "nexodify_assistant_v2",
           "run": {
-            "run_id": "qa_run_3b57deb0",
-            "generated_at_utc": "2026-01-05T03:28:55.812295+00:00",
+            "run_id": "qa_run_a96093fb",
+            "generated_at_utc": "2026-01-05T03:50:05.419366+00:00",
             "case_id": null,
             "revision": 0,
-            "has_perizia_context": true,
-            "perizia_file": "test_delete_perizia.pdf"
+            "has_perizia_context": false,
+            "perizia_file": null
           },
-          "answer_it": "Non ho dati specifici dalla perizia 'test_delete_perizia.pdf' riguardanti i rischi principali. Solitamente, i principali rischi nelle aste immobiliari includono problemi di conformit\u00e0 urbanistica, ipoteche non note, e risvolti legali non risolti. Si consiglia di verificare i dettagli nella documentazione disponibile e consultare un esperto prima di procedere.",
-          "answer_en": "I do not have specific data from the 'test_delete_perizia.pdf' regarding the main risks. Generally, the main risks in real estate auctions include urban planning non-compliance, unknown mortgages, and unresolved legal issues. It is advisable to check the details in the available documentation and consult an expert before proceeding.",
-          "confidence": "LOW",
+          "answer_it": "I principali rischi associati alle aste immobiliari possono includere la non conformit\u00e0 urbanistica, vizi non dichiarati nella perizia CTU, problemi legati a pignoramenti pendenti, o formalit\u00e0 ipotecarie non risolte. Senza una specifica perizia o documentazione legale a supporto, non posso fornire dettagli specifici su rischi correlati in questo caso.",
+          "answer_en": "The main risks associated with real estate auctions can include non-compliance with urban planning, undisclosed defects in the CTU appraisal, issues related to pending foreclosures, or unresolved mortgage formalities. Without a specific appraisal or supporting legal documentation, I cannot provide specific details on related risks in this case.",
+          "confidence": "MEDIUM",
           "sources": [],
           "needs_more_info": "YES",
           "missing_inputs": [
-            "Main risks specified in 'test_delete_perizia.pdf'"
+            "specific appraisal (perizia)",
+            "relevant legal documentation"
           ],
           "out_of_scope": false,
           "safe_disclaimer_it": "Le informazioni fornite hanno carattere esclusivamente informativo e non costituiscono consulenza legale, fiscale o professionale.",
           "safe_disclaimer_en": "Information provided is for informational purposes only and does not constitute legal, tax or professional advice.",
           "qa_pass": {
-            "status": "WARN",
+            "status": "PASS",
             "checks": [
               {
                 "code": "QA-HasContext",
-                "result": "OK",
-                "note": "Perizia context: test_delete_perizia.pdf"
+                "result": "WARN",
+                "note": "No perizia context available"
               },
               {
                 "code": "QA-ConfidenceHonesty",
                 "result": "OK",
-                "note": "Confidence: LOW"
+                "note": "Confidence: MEDIUM"
               },
               {
                 "code": "QA-SourcesProvided",
@@ -2268,21 +664,9 @@
       }
     },
     {
-      "test": "DELETE Existing Perizia (analysis_5bb63ec1221c)",
+      "test": "DELETE Existing Images (forensics_img_run_1831db7a)",
       "method": "DELETE",
-      "endpoint": "api/analysis/perizia/analysis_5bb63ec1221c",
-      "expected_status": 200,
-      "actual_status": 200,
-      "success": true,
-      "response": {
-        "ok": true,
-        "message": "Analisi eliminata / Analysis deleted"
-      }
-    },
-    {
-      "test": "DELETE Existing Images (forensics_img_run_43a84f97)",
-      "method": "DELETE",
-      "endpoint": "api/analysis/images/forensics_img_run_43a84f97",
+      "endpoint": "api/analysis/images/forensics_img_run_1831db7a",
       "expected_status": 200,
       "actual_status": 404,
       "success": false,
@@ -2291,9 +675,9 @@
       }
     },
     {
-      "test": "DELETE Existing Assistant QA (qa_qa_run_3b57deb0)",
+      "test": "DELETE Existing Assistant QA (qa_qa_run_a96093fb)",
       "method": "DELETE",
-      "endpoint": "api/analysis/assistant/qa_qa_run_3b57deb0",
+      "endpoint": "api/analysis/assistant/qa_qa_run_a96093fb",
       "expected_status": 200,
       "actual_status": 404,
       "success": false,
@@ -2312,10 +696,10 @@
         "ok": true,
         "message": "Tutto lo storico eliminato / All history deleted",
         "deleted": {
-          "perizia": 2,
+          "perizia": 0,
           "images": 2,
           "assistant": 2,
-          "total": 6
+          "total": 4
         }
       }
     },
@@ -2324,608 +708,10 @@
       "method": "POST",
       "endpoint": "api/analysis/perizia",
       "expected_status": 200,
-      "actual_status": 200,
-      "success": true,
+      "actual_status": 520,
+      "success": false,
       "response": {
-        "ok": true,
-        "analysis_id": "analysis_1ba6c9e37d5e",
-        "case_id": "case_b5a04e4f",
-        "run_id": "run_1b6de0a7",
-        "result": {
-          "schema_version": "nexodify_perizia_scan_v1",
-          "report_header": {
-            "title": "NEXODIFY INTELLIGENCE | Auction Scan",
-            "procedure": {
-              "value": "Esecuzione Immobiliare 123/2024 R.G.E.",
-              "evidence": [
-                {
-                  "page": 1,
-                  "quote": "R.G.E. N. 123/2024"
-                }
-              ]
-            },
-            "lotto": {
-              "value": "Lotto Unico",
-              "evidence": [
-                {
-                  "page": 1,
-                  "quote": "Lotto Unico"
-                }
-              ]
-            },
-            "tribunale": {
-              "value": "TRIBUNALE DI ROMA",
-              "evidence": [
-                {
-                  "page": 1,
-                  "quote": "TRIBUNALE DI ROMA"
-                }
-              ]
-            },
-            "address": {
-              "value": "Via Roma 123, 00100 Roma (RM)",
-              "evidence": [
-                {
-                  "page": 1,
-                  "quote": "IMMOBILE SITO IN: | Via Roma 123, 00100 Roma (RM)"
-                }
-              ]
-            },
-            "generated_at": "ISO_DATE"
-          },
-          "section_1_semaforo_generale": {
-            "status": "VERDE",
-            "status_label": "RISCHIO GLOBALE: VERDE",
-            "semaforo_complessivo": {
-              "value": "VERDE",
-              "evidence": []
-            },
-            "mutuabilita_stimata": {
-              "value": "TOTALE",
-              "reason": "L'immobile \u00e8 libero, conforme e non presenta criticit\u00e0 rilevanti."
-            },
-            "driver": {
-              "value": "nessuna criticit\u00e0 rilevante",
-              "evidence": []
-            }
-          },
-          "section_2_decisione_rapida": {
-            "operazione_rating": "VERDE",
-            "summary_it": "L'immobile \u00e8 libero, conforme alla documentazione urbanistica e catastale, senza criticit\u00e0 rilevanti. Prezzo di partenza all'asta \u00e8 \u20ac 150.000,00.",
-            "summary_en": "The property is vacant, conforms to urban and cadastral documentation, without significant issues. Auction starting price is \u20ac 150,000.00."
-          },
-          "section_3_money_box": {
-            "items": [
-              {
-                "voce": "A - Regolarizzazione urbanistica/ripristini",
-                "fonte_perizia": {
-                  "value": "Non specificato",
-                  "evidence": []
-                },
-                "stima_euro": 0,
-                "stima_nota": "TBD (NON SPECIFICATO IN PERIZIA)"
-              },
-              {
-                "voce": "B - Completamento finiture/impianti",
-                "fonte_perizia": {
-                  "value": "Non specificato",
-                  "evidence": []
-                },
-                "stima_euro": 0,
-                "stima_nota": "TBD (NON SPECIFICATO IN PERIZIA)"
-              },
-              {
-                "voce": "C - Ottenimento abitabilit\u00e0/agibilit\u00e0",
-                "fonte_perizia": {
-                  "value": "Non specificato",
-                  "evidence": []
-                },
-                "stima_euro": 0,
-                "stima_nota": "TBD (NON SPECIFICATO IN PERIZIA)"
-              },
-              {
-                "voce": "D - Spese condominiali arretrate",
-                "fonte_perizia": {
-                  "value": "Non specificato",
-                  "evidence": []
-                },
-                "stima_euro": 0,
-                "stima_nota": "Verifica amministratore"
-              },
-              {
-                "voce": "E - Cancellazione formalit\u00e0",
-                "fonte_perizia": {
-                  "value": "Non specificato",
-                  "evidence": []
-                },
-                "stima_euro": 0,
-                "stima_nota": "Verifica legale"
-              },
-              {
-                "voce": "F - Costo liberazione",
-                "fonte_perizia": {
-                  "value": "Non specificato",
-                  "evidence": []
-                },
-                "stima_euro": 0,
-                "stima_nota": "TBD (NON SPECIFICATO IN PERIZIA) \u2014 Verifica tecnico/legale"
-              }
-            ],
-            "totale_extra_budget": {
-              "min": 0,
-              "max": 0,
-              "nota": "EUR 0+ (minimo prudenziale)"
-            }
-          },
-          "section_4_dati_certi": {
-            "prezzo_base_asta": {
-              "value": 150000,
-              "formatted": "EUR 150.000",
-              "evidence": [
-                {
-                  "page": 1,
-                  "quote": "Il prezzo base d'asta \u00e8 fissato in \u20ac 150.000,00"
-                }
-              ]
-            },
-            "valore_stima_complessivo": {
-              "value": 0,
-              "formatted": "EUR X",
-              "evidence": []
-            },
-            "deprezzamenti": [
-              {
-                "tipo": "regolarizzazioni",
-                "importo": 0,
-                "evidence": []
-              },
-              {
-                "tipo": "vizi occulti",
-                "importo": 0,
-                "evidence": []
-              }
-            ],
-            "valore_finale_stima": {
-              "value": 0,
-              "formatted": "EUR X",
-              "evidence": []
-            },
-            "composizione_lotto": {
-              "value": "Superficie catastale: 85 mq, Categoria: A/2, Classe: 3, Vani: 4",
-              "evidence": [
-                {
-                  "page": 1,
-                  "quote": "Superficie catastale: 85 mq | Categoria: A/2, Classe: 3, Vani: 4"
-                }
-              ]
-            }
-          },
-          "section_5_abusi_conformita": {
-            "conformita_urbanistica": {
-              "status": "CONFORME",
-              "detail": "L'immobile risulta conforme alla documentazione urbanistica",
-              "evidence": [
-                {
-                  "page": 2,
-                  "quote": "L'immobile risulta conforme alla documentazione urbanistica"
-                }
-              ]
-            },
-            "conformita_catastale": {
-              "status": "CONFORME",
-              "evidence": [
-                {
-                  "page": 2,
-                  "quote": "Conformit\u00e0 catastale: CONFORME"
-                }
-              ]
-            },
-            "condono": {
-              "presente": "NO",
-              "anno": "",
-              "pratica": "",
-              "stato": "",
-              "evidence": []
-            },
-            "agibilita": {
-              "status": "NON_RISULTA",
-              "evidence": []
-            },
-            "ape": {
-              "status": "NON_SPECIFICATO",
-              "evidence": []
-            },
-            "impianti": {
-              "elettrico": {
-                "conformita": "NON_RISULTA"
-              },
-              "termico": {
-                "conformita": "NON_RISULTA"
-              },
-              "idrico": {
-                "conformita": "NON_RISULTA"
-              },
-              "evidence": []
-            }
-          },
-          "section_6_stato_occupativo": {
-            "status": "LIBERO",
-            "status_detail": "L'immobile risulta LIBERO da persone e cose.",
-            "locazione_opponibile": {
-              "status": "NON_SPECIFICATO",
-              "evidence": []
-            },
-            "titolo_opponibile": {
-              "status": "NON_SPECIFICATO",
-              "evidence": []
-            },
-            "tempi_consegna_stima": "stima Nexodify 3-9 mesi post Decreto di Trasferimento",
-            "evidence": [
-              {
-                "page": 2,
-                "quote": "L'immobile risulta LIBERO da persone e cose"
-              }
-            ]
-          },
-          "section_7_stato_conservativo": {
-            "condizione_generale": "Buono",
-            "dettagli": [],
-            "carenze": "Non specificato in Perizia",
-            "evidence": []
-          },
-          "section_8_formalita": {
-            "ipoteche": [
-              {
-                "tipo": "giudiziale",
-                "importo": 200000,
-                "data": "",
-                "beneficiario": "omissis",
-                "evidence": [
-                  {
-                    "page": 2,
-                    "quote": "Ipoteca iscritta per \u20ac 200.000,00"
-                  }
-                ]
-              }
-            ],
-            "pignoramenti": [
-              {
-                "data": "01/02/2024",
-                "evidence": [
-                  {
-                    "page": 2,
-                    "quote": "Pignoramento trascritto in data 01/02/2024"
-                  }
-                ]
-              }
-            ],
-            "cancellazione": "normalmente tramite Decreto di Trasferimento, salvo eccezioni - verifica legale obbligatoria",
-            "evidence": []
-          },
-          "section_9_legal_killers": {
-            "items": [
-              {
-                "killer": "Diritto di superficie / PEEP",
-                "status": "NON_SPECIFICATO",
-                "action": "Verifica obbligatoria",
-                "evidence": []
-              },
-              {
-                "killer": "Donazione in catena <20 anni",
-                "status": "NON_SPECIFICATO",
-                "action": "Verifica obbligatoria",
-                "evidence": []
-              },
-              {
-                "killer": "Prelazione Stato / beni culturali",
-                "status": "NON_SPECIFICATO",
-                "action": "Verifica obbligatoria",
-                "evidence": []
-              },
-              {
-                "killer": "Usi civici",
-                "status": "NON_SPECIFICATO",
-                "action": "Verifica CDU",
-                "evidence": []
-              },
-              {
-                "killer": "Fondo patrimoniale / casa coniugale",
-                "status": "NON_SPECIFICATO",
-                "action": "Verifica obbligatoria",
-                "evidence": []
-              },
-              {
-                "killer": "Servit\u00f9 / atti d'obbligo",
-                "status": "NON_SPECIFICATO",
-                "action": "Verifica obbligatoria",
-                "evidence": []
-              },
-              {
-                "killer": "Formalit\u00e0 non cancellabili",
-                "status": "NON_SPECIFICATO",
-                "action": "Verifica obbligatoria",
-                "evidence": []
-              },
-              {
-                "killer": "Amianto",
-                "status": "NON_SPECIFICATO",
-                "action": "Verifica se coperture datate",
-                "evidence": []
-              }
-            ]
-          },
-          "section_10_indice_convenienza": {
-            "prezzo_base": 150000,
-            "extra_budget_min": 0,
-            "extra_budget_max": 0,
-            "all_in_light_min": 150000,
-            "all_in_light_max": 150000,
-            "lettura_secca_it": "senza sconto reale sul prezzo base, il rischio tecnico/temporale mangia il margine",
-            "lettura_secca_en": "without real discount on base price, technical/timing risk eats the margin"
-          },
-          "section_11_red_flags": [],
-          "section_12_checklist_pre_offerta": [
-            "Accesso atti in Comune",
-            "Preventivo tecnico reale",
-            "Visure in Conservatoria",
-            "Conferma eventuali arretrati condominiali",
-            "Strategia di liberazione e allineamento"
-          ],
-          "summary_for_client": {
-            "summary_it": "L'immobile sito in Via Roma 123, Roma \u00e8 all'asta con un prezzo base di \u20ac 150.000. \u00c8 libero e conforme alle documentazioni urbanistiche e catastali. Importante verificare eventuali formalit\u00e0 ancora da cancellare.",
-            "summary_en": "The property located at Via Roma 123, Rome is up for auction with a base price of \u20ac 150,000. It is vacant and compliant with urban and cadastral documentation. It's important to verify any uncancelled formalities.",
-            "raccomandazione": "Procedere solo se il prezzo di aggiudicazione incorpora margine reale per extra-budget e ritardi",
-            "disclaimer_it": "Documento informativo. Non costituisce consulenza legale.",
-            "disclaimer_en": "Informational document. Does not constitute legal advice."
-          },
-          "qa_pass": {
-            "status": "PASS",
-            "checks": [
-              {
-                "code": "QA-1 Format Lock",
-                "result": "OK",
-                "note": "ordine Roma 1-12 rispettato"
-              },
-              {
-                "code": "QA-2 Zero Empty Fields",
-                "result": "OK",
-                "note": "dove manca dato: Non specificato in Perizia"
-              },
-              {
-                "code": "QA-3 Page Anchors",
-                "result": "OK",
-                "note": "riferimenti pagina presenti"
-              },
-              {
-                "code": "QA-4 Money Box",
-                "result": "OK",
-                "note": "voci CTU valorizzate"
-              },
-              {
-                "code": "QA-5 Legal Killers",
-                "result": "OK",
-                "note": "checklist completa"
-              },
-              {
-                "code": "QA-6 Condono + Opponibilit\u00e0",
-                "result": "OK",
-                "note": "status verificato"
-              },
-              {
-                "code": "QA-7 Delivery Timeline",
-                "result": "OK",
-                "note": "stima tempi presente"
-              },
-              {
-                "code": "QA-8 Semaforo Rules",
-                "result": "OK",
-                "note": "coerente con criticit\u00e0"
-              },
-              {
-                "code": "QA-9 Typos",
-                "result": "OK",
-                "note": "nessun errore"
-              },
-              {
-                "code": "QA-PageCoverage",
-                "result": "OK",
-                "note": "page_coverage_log has 2 entries, expected 2"
-              },
-              {
-                "code": "QA-MoneyBox-Honesty",
-                "result": "OK",
-                "note": "All Money Box items honest (no fake \u20ac values)"
-              },
-              {
-                "code": "QA-LegalKiller-Evidence",
-                "result": "OK",
-                "note": "All SI/NO status have evidence"
-              },
-              {
-                "code": "QA-1 Format Lock",
-                "result": "OK",
-                "note": "ordine Roma 1-12 rispettato"
-              },
-              {
-                "code": "QA-2 Zero Empty Fields",
-                "result": "OK",
-                "note": "dove manca dato: Non specificato in Perizia"
-              },
-              {
-                "code": "QA-3 Page Anchors",
-                "result": "OK",
-                "note": "riferimenti pagina presenti"
-              },
-              {
-                "code": "QA-4 Money Box",
-                "result": "WARN",
-                "note": "totale: EUR 0"
-              },
-              {
-                "code": "QA-5 Legal Killers",
-                "result": "OK",
-                "note": "checklist 8 items"
-              },
-              {
-                "code": "QA-6 Condono + Opponibilit\u00e0",
-                "result": "OK",
-                "note": "status verificato"
-              },
-              {
-                "code": "QA-7 Delivery Timeline",
-                "result": "OK",
-                "note": "stima tempi presente"
-              },
-              {
-                "code": "QA-8 Semaforo Rules",
-                "result": "OK",
-                "note": "coerente con criticit\u00e0"
-              },
-              {
-                "code": "QA-9 3-Pass Verification",
-                "result": "OK",
-                "note": "verificato con 3 passaggi"
-              }
-            ]
-          },
-          "page_coverage_log": [
-            {
-              "page": 1,
-              "summary": "Dati anagrafici dell'asta, prezzo base, indirizzo e descrizione immobile."
-            },
-            {
-              "page": 2,
-              "summary": "Conformit\u00e0 urbanistica e catastale, stato occupativo, ipoteche e pignoramenti."
-            }
-          ],
-          "lot_index": [
-            {
-              "lot": 1,
-              "page": 1,
-              "quote": "Lotto Unico"
-            }
-          ],
-          "qa": {
-            "status": "PASS",
-            "checks": [
-              {
-                "code": "QA-1 Format Lock",
-                "result": "OK",
-                "note": "ordine Roma 1-12 rispettato"
-              },
-              {
-                "code": "QA-2 Zero Empty Fields",
-                "result": "OK",
-                "note": "dove manca dato: Non specificato in Perizia"
-              },
-              {
-                "code": "QA-3 Page Anchors",
-                "result": "OK",
-                "note": "riferimenti pagina presenti"
-              },
-              {
-                "code": "QA-4 Money Box",
-                "result": "OK",
-                "note": "voci CTU valorizzate"
-              },
-              {
-                "code": "QA-5 Legal Killers",
-                "result": "OK",
-                "note": "checklist completa"
-              },
-              {
-                "code": "QA-6 Condono + Opponibilit\u00e0",
-                "result": "OK",
-                "note": "status verificato"
-              },
-              {
-                "code": "QA-7 Delivery Timeline",
-                "result": "OK",
-                "note": "stima tempi presente"
-              },
-              {
-                "code": "QA-8 Semaforo Rules",
-                "result": "OK",
-                "note": "coerente con criticit\u00e0"
-              },
-              {
-                "code": "QA-9 Typos",
-                "result": "OK",
-                "note": "nessun errore"
-              },
-              {
-                "code": "QA-PageCoverage",
-                "result": "OK",
-                "note": "page_coverage_log has 2 entries, expected 2"
-              },
-              {
-                "code": "QA-MoneyBox-Honesty",
-                "result": "OK",
-                "note": "All Money Box items honest (no fake \u20ac values)"
-              },
-              {
-                "code": "QA-LegalKiller-Evidence",
-                "result": "OK",
-                "note": "All SI/NO status have evidence"
-              },
-              {
-                "code": "QA-1 Format Lock",
-                "result": "OK",
-                "note": "ordine Roma 1-12 rispettato"
-              },
-              {
-                "code": "QA-2 Zero Empty Fields",
-                "result": "OK",
-                "note": "dove manca dato: Non specificato in Perizia"
-              },
-              {
-                "code": "QA-3 Page Anchors",
-                "result": "OK",
-                "note": "riferimenti pagina presenti"
-              },
-              {
-                "code": "QA-4 Money Box",
-                "result": "WARN",
-                "note": "totale: EUR 0"
-              },
-              {
-                "code": "QA-5 Legal Killers",
-                "result": "OK",
-                "note": "checklist 8 items"
-              },
-              {
-                "code": "QA-6 Condono + Opponibilit\u00e0",
-                "result": "OK",
-                "note": "status verificato"
-              },
-              {
-                "code": "QA-7 Delivery Timeline",
-                "result": "OK",
-                "note": "stima tempi presente"
-              },
-              {
-                "code": "QA-8 Semaforo Rules",
-                "result": "OK",
-                "note": "coerente con criticit\u00e0"
-              },
-              {
-                "code": "QA-9 3-Pass Verification",
-                "result": "OK",
-                "note": "verificato con 3 passaggi"
-              }
-            ]
-          },
-          "_verification": {
-            "passes_completed": 3,
-            "final_validation": "PASS",
-            "timestamp": "2026-01-05T03:29:27.230744+00:00",
-            "detected_lots": {
-              "lots": [],
-              "evidence": []
-            },
-            "pages_total": 2
-          }
-        }
+        "error": "Internal Server Error"
       }
     },
     {
@@ -2941,25 +727,21 @@
         "result": {
           "schema_version": "nexodify_assistant_v2",
           "run": {
-            "run_id": "qa_run_8f5ca208",
-            "generated_at_utc": "2026-01-05T03:29:31.371507+00:00",
+            "run_id": "qa_run_57f7a7c4",
+            "generated_at_utc": "2026-01-05T03:50:42.390953+00:00",
             "case_id": null,
             "revision": 0,
-            "has_perizia_context": true,
-            "perizia_file": "test_perizia.pdf"
+            "has_perizia_context": false,
+            "perizia_file": null
           },
-          "answer_it": "Non ho informazioni specifiche sui rischi dell'immobile poich\u00e9 non sono disponibili dettagli sulla procedura o altre informazioni rilevanti dalla perizia. Sarebbe necessario esaminare il contenuto completo del documento 'test_perizia.pdf' per valutare eventuali rischi legati a conformit\u00e0 urbanistica, formalit\u00e0 ipotecarie o altre criticit\u00e0.\n\nSenza ulteriori dati, posso sottolineare che i rischi comuni in contesti di aste immobiliari possono includere: irregolarit\u00e0 urbanistiche, difformit\u00e0 catastali, presenze di ipoteche o gravami, oltre a possibili occupazioni abusive. Tuttavia, per una valutazione accurata, servono dettagli specifici dall'immobile in questione.",
-          "answer_en": "I don't have specific information on the risks of the property as there are no available details about the procedure or other relevant information from the appraisal. It would be necessary to review the full content of the 'test_perizia.pdf' document to assess any risks related to urban planning compliance, mortgage issues, or other critical aspects.\n\nWithout further data, I can highlight that common risks in real estate auctions may include urban planning irregularities, cadastral inconsistencies, presence of mortgages or encumbrances, in addition to possible illegal occupation. However, for an accurate assessment, specific details of the property in question are needed.",
+          "answer_it": "Non ho informazioni specifiche sui rischi dell'immobile in quanto non ho accesso ai dettagli della perizia o ad altri documenti rilevanti per questo caso particolare. Tuttavia, i rischi comuni negli immobili messi all'asta possono includere vincoli ipotecari, problemi di conformit\u00e0 urbanistica e catastale, e pendenze legali. Sarebbe utile analizzare una perizia dell'immobile se disponibile.",
+          "answer_en": "I do not have specific information on the risks of the property as I do not have access to the details of the appraisal or other relevant documents for this particular case. However, common risks in auctioned properties may include mortgage liens, issues with urban planning and cadastral compliance, and legal liabilities. Reviewing a property appraisal would be helpful if available.",
           "confidence": "LOW",
-          "sources": [
-            {
-              "type": "perizia",
-              "reference": "test_perizia.pdf"
-            }
-          ],
+          "sources": [],
           "needs_more_info": "YES",
           "missing_inputs": [
-            "Dettagli dalla perizia specifica"
+            "Perizia completa dell'immobile",
+            "Documenti legali e catastali"
           ],
           "out_of_scope": false,
           "safe_disclaimer_it": "Le informazioni fornite hanno carattere esclusivamente informativo e non costituiscono consulenza legale, fiscale o professionale.",
@@ -2969,8 +751,8 @@
             "checks": [
               {
                 "code": "QA-HasContext",
-                "result": "OK",
-                "note": "Perizia context: test_perizia.pdf"
+                "result": "WARN",
+                "note": "No perizia context available"
               },
               {
                 "code": "QA-ConfidenceHonesty",
@@ -2979,8 +761,8 @@
               },
               {
                 "code": "QA-SourcesProvided",
-                "result": "OK",
-                "note": "Sources: 1"
+                "result": "WARN",
+                "note": "Sources: 0"
               },
               {
                 "code": "QA-DisclaimerIncluded",
