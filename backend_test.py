@@ -1024,6 +1024,548 @@ class NexodifyAPITester:
             data=assistant_data
         )
 
+    def test_image_forensics_deterministic_patches(self):
+        """CRITICAL TEST: Test Image Forensics endpoint with DETERMINISTIC PATCHES"""
+        if not self.token:
+            print("⚠️ Skipping image forensics test - no authentication token")
+            return False, {}
+        
+        print("🎯 CRITICAL TEST: IMAGE FORENSICS DETERMINISTIC PATCHES")
+        print("=" * 60)
+        print("Testing evidence-locked image forensics with honest output and QA gates")
+        
+        # Create a simple test image
+        import tempfile
+        import os
+        
+        try:
+            with tempfile.NamedTemporaryFile(suffix='.jpg', delete=False) as tmp_file:
+                # Write minimal JPEG header
+                tmp_file.write(b'\xff\xd8\xff\xe0\x10JFIF\x01\x01\x01HH\xff\xdbC\x08\x06\x06\x07\x06\x05\x08\x07\x07\x07\t\t\x08\n\x0c\x14\r\x0c\x0b\x0b\x0c\x19\x12\x13\x0f\x14\x1d\x1a\x1f\x1e\x1d\x1a\x1c\x1c $.\' ",#\x1c\x1c(7),01444\x1f\'9=82<.342\xff\xc0\x11\x08\x01\x01\x01\x01\x11\x02\x11\x01\x03\x11\x01\xff\xc4\x14\x01\x08\xff\xc4\x14\x10\x01\xff\xda\x0c\x03\x01\x02\x11\x03\x11\x3f\xaa\xff\xd9')
+                tmp_file.flush()
+                
+                with open(tmp_file.name, 'rb') as img_file:
+                    files = {'files': ('test_forensics.jpg', img_file.read(), 'image/jpeg')}
+                    
+                    success, response_data = self.run_file_upload_test(
+                        "CRITICAL: Image Forensics Deterministic Patches", 
+                        "api/analysis/image", 
+                        200, 
+                        files
+                    )
+                
+                os.unlink(tmp_file.name)
+                
+        except Exception as e:
+            print(f"❌ Error creating test image: {e}")
+            return False, {}
+        
+        if not success or not response_data:
+            print("❌ CRITICAL FAILURE: Image forensics request failed")
+            self.critical_failures.append({
+                "test": "Image Forensics - Request Failed",
+                "issue": "Image forensics analysis request failed",
+                "response": response_data
+            })
+            return False, {}
+        
+        result = response_data.get('result', {})
+        if not result:
+            print("❌ CRITICAL FAILURE: No result in image forensics response")
+            self.critical_failures.append({
+                "test": "Image Forensics - No Result",
+                "issue": "No result object in response",
+                "response": response_data
+            })
+            return False, {}
+        
+        print("✅ Image forensics analysis completed, verifying deterministic patches...")
+        
+        # ===========================================
+        # VERIFY SCHEMA VERSION v2
+        # ===========================================
+        print("\n🔍 Verifying Schema Version v2")
+        
+        schema_version = result.get('schema_version', '')
+        if schema_version == "nexodify_image_forensics_v2":
+            print("✅ Schema version: nexodify_image_forensics_v2")
+            schema_passed = True
+        else:
+            print(f"❌ Schema version: Expected 'nexodify_image_forensics_v2', got '{schema_version}'")
+            self.critical_failures.append({
+                "test": "Image Forensics - Schema Version",
+                "issue": f"Wrong schema version: {schema_version}",
+                "expected": "nexodify_image_forensics_v2",
+                "actual": schema_version
+            })
+            schema_passed = False
+        
+        # ===========================================
+        # VERIFY FINDINGS STRUCTURE
+        # ===========================================
+        print("\n🔍 Verifying Findings Structure")
+        
+        findings = result.get('findings', [])
+        findings_passed = True
+        
+        if not isinstance(findings, list):
+            print("❌ Findings: Not an array")
+            findings_passed = False
+        elif len(findings) == 0:
+            print("⚠️ Findings: Empty array (acceptable for honest output)")
+        else:
+            print(f"✅ Findings: Array with {len(findings)} entries")
+            
+            # Check first finding structure
+            first_finding = findings[0]
+            required_fields = ['confidence', 'evidence', 'severity']
+            
+            for field in required_fields:
+                if field not in first_finding:
+                    print(f"❌ Finding missing field: {field}")
+                    findings_passed = False
+                else:
+                    value = first_finding[field]
+                    if field == 'confidence' and value in ['HIGH', 'MEDIUM', 'LOW']:
+                        print(f"✅ Finding {field}: {value}")
+                    elif field == 'evidence' and isinstance(value, str):
+                        print(f"✅ Finding {field}: Present")
+                    elif field == 'severity' and 'NON_VERIFICABILE' in str(value):
+                        print(f"✅ Finding {field}: Contains NON_VERIFICABILE option")
+                    else:
+                        print(f"✅ Finding {field}: {value}")
+        
+        # ===========================================
+        # VERIFY OVERALL ASSESSMENT
+        # ===========================================
+        print("\n🔍 Verifying Overall Assessment")
+        
+        overall_assessment = result.get('overall_assessment', {})
+        assessment_passed = True
+        
+        if not isinstance(overall_assessment, dict):
+            print("❌ Overall assessment: Not an object")
+            assessment_passed = False
+        else:
+            risk_level = overall_assessment.get('risk_level', '')
+            confidence = overall_assessment.get('confidence', '')
+            
+            if risk_level:
+                print(f"✅ Overall assessment risk_level: {risk_level}")
+            else:
+                print("❌ Overall assessment missing risk_level")
+                assessment_passed = False
+                
+            if confidence in ['HIGH', 'MEDIUM', 'LOW']:
+                print(f"✅ Overall assessment confidence: {confidence}")
+            else:
+                print(f"❌ Overall assessment confidence: Expected HIGH/MEDIUM/LOW, got '{confidence}'")
+                assessment_passed = False
+        
+        # ===========================================
+        # VERIFY LIMITATIONS ARRAY
+        # ===========================================
+        print("\n🔍 Verifying Limitations Array")
+        
+        limitations = result.get('limitations', [])
+        limitations_passed = True
+        
+        if not isinstance(limitations, list):
+            print("❌ Limitations: Not an array")
+            limitations_passed = False
+        else:
+            print(f"✅ Limitations: Array with {len(limitations)} entries")
+            if len(limitations) > 0:
+                print(f"   First limitation: {limitations[0][:100]}...")
+        
+        # ===========================================
+        # VERIFY QA PASS WITH REQUIRED CHECKS
+        # ===========================================
+        print("\n🔍 Verifying QA Pass with Required Checks")
+        
+        qa_pass = result.get('qa_pass', {})
+        qa_passed = True
+        
+        if not isinstance(qa_pass, dict):
+            print("❌ QA Pass: Not an object")
+            qa_passed = False
+        else:
+            qa_status = qa_pass.get('status', '')
+            qa_checks = qa_pass.get('checks', [])
+            
+            print(f"✅ QA Pass status: {qa_status}")
+            print(f"✅ QA Pass checks: {len(qa_checks)} entries")
+            
+            # Look for required QA checks
+            required_qa_checks = [
+                'QA-ImageCount',
+                'QA-EvidenceLocked', 
+                'QA-ConfidenceHonesty',
+                'QA-NoHallucination'
+            ]
+            
+            found_checks = []
+            check_codes = [check.get('code', '') for check in qa_checks if isinstance(check, dict)]
+            
+            for required_check in required_qa_checks:
+                found = any(required_check in code for code in check_codes)
+                if found:
+                    found_checks.append(required_check)
+                    print(f"✅ Found QA check: {required_check}")
+                else:
+                    print(f"❌ Missing QA check: {required_check}")
+                    qa_passed = False
+            
+            if len(found_checks) < 3:  # At least 3 of 4 required checks
+                self.critical_failures.append({
+                    "test": "Image Forensics - QA Checks",
+                    "issue": f"Missing required QA checks. Found: {found_checks}",
+                    "expected": required_qa_checks,
+                    "found": found_checks
+                })
+        
+        # ===========================================
+        # VERIFY HONEST OUTPUT (LOW CONFIDENCE)
+        # ===========================================
+        print("\n🔍 Verifying Honest Output (LOW confidence expected)")
+        
+        honest_output_passed = True
+        
+        # Check overall assessment confidence
+        overall_confidence = overall_assessment.get('confidence', '')
+        if overall_confidence == 'LOW':
+            print("✅ Honest output: Overall confidence is LOW (expected for no real vision model)")
+        elif overall_confidence in ['HIGH', 'MEDIUM']:
+            print(f"⚠️ Honest output: Overall confidence is {overall_confidence} (may be too high without real vision model)")
+            honest_output_passed = False
+        
+        # Check findings confidence
+        high_confidence_findings = 0
+        for finding in findings:
+            if finding.get('confidence') == 'HIGH':
+                high_confidence_findings += 1
+        
+        if high_confidence_findings == 0:
+            print("✅ Honest output: No HIGH confidence findings (appropriate without real vision model)")
+        else:
+            print(f"⚠️ Honest output: {high_confidence_findings} HIGH confidence findings (may be inappropriate)")
+        
+        # Check for NON_VERIFICABILE status
+        non_verificabile_count = 0
+        for finding in findings:
+            if 'NON_VERIFICABILE' in str(finding.get('severity', '')):
+                non_verificabile_count += 1
+        
+        if non_verificabile_count > 0 or len(findings) == 0:
+            print(f"✅ Honest output: {non_verificabile_count} NON_VERIFICABILE findings or empty findings (honest)")
+        else:
+            print("⚠️ Honest output: No NON_VERIFICABILE findings (may be overconfident)")
+        
+        # ===========================================
+        # OVERALL RESULTS
+        # ===========================================
+        print("\n📊 IMAGE FORENSICS DETERMINISTIC PATCHES RESULTS:")
+        print("=" * 50)
+        
+        checks_results = [
+            ("Schema Version v2", schema_passed),
+            ("Findings Structure", findings_passed),
+            ("Overall Assessment", assessment_passed),
+            ("Limitations Array", limitations_passed),
+            ("QA Pass with Required Checks", qa_passed),
+            ("Honest Output (LOW confidence)", honest_output_passed)
+        ]
+        
+        passed_checks = 0
+        for check_name, passed in checks_results:
+            status = "✅ PASSED" if passed else "❌ FAILED"
+            print(f"   {status}: {check_name}")
+            if passed:
+                passed_checks += 1
+        
+        overall_success = passed_checks >= 5  # At least 5 out of 6 checks must pass
+        
+        print(f"\n📈 OVERALL IMAGE FORENSICS: {passed_checks}/6 checks passed")
+        
+        if overall_success:
+            print("✅ IMAGE FORENSICS DETERMINISTIC PATCHES TEST PASSED")
+        else:
+            print("❌ IMAGE FORENSICS DETERMINISTIC PATCHES TEST FAILED")
+            self.critical_failures.append({
+                "test": "Image Forensics Deterministic Patches Overall",
+                "issue": f"Only {passed_checks}/6 checks passed",
+                "checks_results": checks_results
+            })
+        
+        return overall_success, response_data
+
+    def test_assistant_deterministic_patches(self):
+        """CRITICAL TEST: Test Assistant endpoint with DETERMINISTIC PATCHES"""
+        if not self.token:
+            print("⚠️ Skipping assistant deterministic patches test - no authentication token")
+            return False, {}
+        
+        print("🎯 CRITICAL TEST: ASSISTANT DETERMINISTIC PATCHES")
+        print("=" * 60)
+        print("Testing evidence-locked assistant with source tracking and QA gates")
+        
+        # Test 1: Assistant with Italian question (as specified in review request)
+        print("\n📝 Test 1: Assistant with Italian question")
+        
+        assistant_data = {
+            "question": "Qual è il prezzo base d'asta?",
+            "related_case_id": None
+        }
+        
+        success, response_data = self.run_test(
+            "CRITICAL: Assistant Deterministic Patches (Italian)", 
+            "POST", 
+            "api/analysis/assistant", 
+            200, 
+            data=assistant_data
+        )
+        
+        if not success or not response_data:
+            print("❌ CRITICAL FAILURE: Assistant request failed")
+            self.critical_failures.append({
+                "test": "Assistant - Request Failed",
+                "issue": "Assistant analysis request failed",
+                "response": response_data
+            })
+            return False, {}
+        
+        result = response_data.get('result', {})
+        if not result:
+            print("❌ CRITICAL FAILURE: No result in assistant response")
+            self.critical_failures.append({
+                "test": "Assistant - No Result",
+                "issue": "No result object in response",
+                "response": response_data
+            })
+            return False, {}
+        
+        print("✅ Assistant analysis completed, verifying deterministic patches...")
+        
+        # ===========================================
+        # VERIFY SCHEMA VERSION v2
+        # ===========================================
+        print("\n🔍 Verifying Schema Version v2")
+        
+        schema_version = result.get('schema_version', '')
+        if schema_version == "nexodify_assistant_v2":
+            print("✅ Schema version: nexodify_assistant_v2")
+            schema_passed = True
+        else:
+            print(f"❌ Schema version: Expected 'nexodify_assistant_v2', got '{schema_version}'")
+            self.critical_failures.append({
+                "test": "Assistant - Schema Version",
+                "issue": f"Wrong schema version: {schema_version}",
+                "expected": "nexodify_assistant_v2",
+                "actual": schema_version
+            })
+            schema_passed = False
+        
+        # ===========================================
+        # VERIFY CONFIDENCE TRACKING
+        # ===========================================
+        print("\n🔍 Verifying Confidence Tracking")
+        
+        confidence = result.get('confidence', '')
+        confidence_passed = True
+        
+        if confidence in ['HIGH', 'MEDIUM', 'LOW']:
+            print(f"✅ Confidence: {confidence}")
+        else:
+            print(f"❌ Confidence: Expected HIGH/MEDIUM/LOW, got '{confidence}'")
+            confidence_passed = False
+            self.critical_failures.append({
+                "test": "Assistant - Confidence",
+                "issue": f"Invalid confidence value: {confidence}",
+                "expected": "HIGH|MEDIUM|LOW",
+                "actual": confidence
+            })
+        
+        # ===========================================
+        # VERIFY SOURCES ARRAY
+        # ===========================================
+        print("\n🔍 Verifying Sources Array")
+        
+        sources = result.get('sources', [])
+        sources_passed = True
+        
+        if not isinstance(sources, list):
+            print("❌ Sources: Not an array")
+            sources_passed = False
+        else:
+            print(f"✅ Sources: Array with {len(sources)} entries")
+            if len(sources) > 0:
+                print(f"   First source: {sources[0][:100]}...")
+        
+        # ===========================================
+        # VERIFY TRI-STATE FIELDS
+        # ===========================================
+        print("\n🔍 Verifying Tri-State Fields")
+        
+        needs_more_info = result.get('needs_more_info', '')
+        out_of_scope = result.get('out_of_scope', False)
+        missing_inputs = result.get('missing_inputs', [])
+        
+        tristate_passed = True
+        
+        if needs_more_info in ['YES', 'NO']:
+            print(f"✅ needs_more_info: {needs_more_info}")
+        else:
+            print(f"❌ needs_more_info: Expected YES/NO, got '{needs_more_info}'")
+            tristate_passed = False
+        
+        if isinstance(out_of_scope, bool):
+            print(f"✅ out_of_scope: {out_of_scope}")
+        else:
+            print(f"❌ out_of_scope: Expected boolean, got {type(out_of_scope)}")
+            tristate_passed = False
+        
+        if isinstance(missing_inputs, list):
+            print(f"✅ missing_inputs: Array with {len(missing_inputs)} entries")
+        else:
+            print(f"❌ missing_inputs: Expected array, got {type(missing_inputs)}")
+            tristate_passed = False
+        
+        # ===========================================
+        # VERIFY QA PASS WITH REQUIRED CHECKS
+        # ===========================================
+        print("\n🔍 Verifying QA Pass with Required Checks")
+        
+        qa_pass = result.get('qa_pass', {})
+        qa_passed = True
+        
+        if not isinstance(qa_pass, dict):
+            print("❌ QA Pass: Not an object")
+            qa_passed = False
+        else:
+            qa_status = qa_pass.get('status', '')
+            qa_checks = qa_pass.get('checks', [])
+            
+            print(f"✅ QA Pass status: {qa_status}")
+            print(f"✅ QA Pass checks: {len(qa_checks)} entries")
+            
+            # Look for required QA checks
+            required_qa_checks = [
+                'QA-HasContext',
+                'QA-ConfidenceHonesty',
+                'QA-SourcesProvided',
+                'QA-DisclaimerIncluded'
+            ]
+            
+            found_checks = []
+            check_codes = [check.get('code', '') for check in qa_checks if isinstance(check, dict)]
+            
+            for required_check in required_qa_checks:
+                found = any(required_check in code for code in check_codes)
+                if found:
+                    found_checks.append(required_check)
+                    print(f"✅ Found QA check: {required_check}")
+                else:
+                    print(f"❌ Missing QA check: {required_check}")
+                    qa_passed = False
+            
+            if len(found_checks) < 3:  # At least 3 of 4 required checks
+                self.critical_failures.append({
+                    "test": "Assistant - QA Checks",
+                    "issue": f"Missing required QA checks. Found: {found_checks}",
+                    "expected": required_qa_checks,
+                    "found": found_checks
+                })
+        
+        # ===========================================
+        # VERIFY PERIZIA CONTEXT METADATA
+        # ===========================================
+        print("\n🔍 Verifying Perizia Context Metadata")
+        
+        run_metadata = result.get('run', {})
+        context_passed = True
+        
+        has_perizia_context = run_metadata.get('has_perizia_context', False)
+        perizia_file = run_metadata.get('perizia_file', '')
+        
+        print(f"✅ has_perizia_context: {has_perizia_context}")
+        print(f"✅ perizia_file: {perizia_file}")
+        
+        # For this test without perizia context, QA-HasContext should be WARN
+        qa_has_context_check = None
+        for check in qa_checks:
+            if isinstance(check, dict) and 'QA-HasContext' in check.get('code', ''):
+                qa_has_context_check = check
+                break
+        
+        if qa_has_context_check:
+            result_status = qa_has_context_check.get('result', '')
+            if not has_perizia_context and result_status == 'WARN':
+                print("✅ QA-HasContext correctly shows WARN without perizia context")
+            elif has_perizia_context and result_status == 'OK':
+                print("✅ QA-HasContext correctly shows OK with perizia context")
+            else:
+                print(f"⚠️ QA-HasContext status: {result_status} (context: {has_perizia_context})")
+        
+        # ===========================================
+        # VERIFY CONFIDENCE DOWNGRADE LOGIC
+        # ===========================================
+        print("\n🔍 Verifying Confidence Downgrade Logic")
+        
+        confidence_logic_passed = True
+        
+        # If confidence is HIGH but no sources, it should be downgraded
+        if confidence == 'HIGH' and len(sources) == 0:
+            print("⚠️ Confidence Logic: HIGH confidence without sources (should be downgraded)")
+            confidence_logic_passed = False
+        elif confidence in ['MEDIUM', 'LOW'] or len(sources) > 0:
+            print("✅ Confidence Logic: Appropriate confidence level or sources provided")
+        
+        # ===========================================
+        # TEST 2: WITHOUT PERIZIA CONTEXT
+        # ===========================================
+        print("\n📝 Test 2: Assistant without perizia context (should have QA-HasContext as WARN)")
+        
+        # This test is already covered above since we didn't provide related_case_id
+        
+        # ===========================================
+        # OVERALL RESULTS
+        # ===========================================
+        print("\n📊 ASSISTANT DETERMINISTIC PATCHES RESULTS:")
+        print("=" * 50)
+        
+        checks_results = [
+            ("Schema Version v2", schema_passed),
+            ("Confidence Tracking", confidence_passed),
+            ("Sources Array", sources_passed),
+            ("Tri-State Fields", tristate_passed),
+            ("QA Pass with Required Checks", qa_passed),
+            ("Perizia Context Metadata", context_passed),
+            ("Confidence Downgrade Logic", confidence_logic_passed)
+        ]
+        
+        passed_checks = 0
+        for check_name, passed in checks_results:
+            status = "✅ PASSED" if passed else "❌ FAILED"
+            print(f"   {status}: {check_name}")
+            if passed:
+                passed_checks += 1
+        
+        overall_success = passed_checks >= 6  # At least 6 out of 7 checks must pass
+        
+        print(f"\n📈 OVERALL ASSISTANT: {passed_checks}/7 checks passed")
+        
+        if overall_success:
+            print("✅ ASSISTANT DETERMINISTIC PATCHES TEST PASSED")
+        else:
+            print("❌ ASSISTANT DETERMINISTIC PATCHES TEST FAILED")
+            self.critical_failures.append({
+                "test": "Assistant Deterministic Patches Overall",
+                "issue": f"Only {passed_checks}/7 checks passed",
+                "checks_results": checks_results
+            })
+        
+        return overall_success, response_data
+
     def test_health_check(self):
         """Test health endpoint"""
         return self.run_test("Health Check", "GET", "api/health", 200)
