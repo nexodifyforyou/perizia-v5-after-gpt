@@ -146,6 +146,96 @@ class NexodifyAPITester:
         buffer.seek(0)
         return buffer.getvalue()
 
+    def create_review_request_test_pdf(self):
+        """Create a test PDF specifically for the review request requirements"""
+        buffer = io.BytesIO()
+        p = canvas.Canvas(buffer, pagesize=letter)
+        
+        # Page 1 - Header and SCHEMA RIASSUNTIVO with LOTTO 1
+        p.drawString(100, 750, "TRIBUNALE DI MILANO")
+        p.drawString(100, 730, "SEZIONE ESECUZIONI IMMOBILIARI")
+        p.drawString(100, 710, "R.G.E. N. 789/2024")
+        p.drawString(100, 690, "Procedura di Esecuzione Immobiliare")
+        p.drawString(100, 670, "Depositata il: 15/12/2024")
+        
+        p.drawString(100, 630, "SCHEMA RIASSUNTIVO")
+        p.drawString(100, 610, "=" * 50)
+        p.drawString(100, 590, "LOTTO 1")
+        p.drawString(100, 570, "PREZZO BASE D'ASTA: € 180.000,00")
+        p.drawString(100, 550, "Ubicazione: Via Garibaldi 15, Milano (MI)")
+        p.drawString(100, 530, "Diritto reale: Piena proprietà")
+        p.drawString(100, 510, "Superficie: 95 mq")
+        
+        p.showPage()
+        
+        # Page 2 - LOTTO 2 and LOTTO 3 in SCHEMA RIASSUNTIVO
+        p.drawString(100, 750, "SCHEMA RIASSUNTIVO (continua)")
+        p.drawString(100, 730, "LOTTO 2")
+        p.drawString(100, 710, "PREZZO BASE D'ASTA: € 45.000,00")
+        p.drawString(100, 690, "Ubicazione: Via Garibaldi 15, Milano (MI) - Box auto")
+        p.drawString(100, 670, "Diritto reale: Piena proprietà")
+        p.drawString(100, 650, "Superficie: 18 mq")
+        
+        p.drawString(100, 610, "LOTTO 3")
+        p.drawString(100, 590, "PREZZO BASE D'ASTA: € 25.000,00")
+        p.drawString(100, 570, "Ubicazione: Via Garibaldi 15, Milano (MI) - Cantina")
+        p.drawString(100, 550, "Diritto reale: Piena proprietà")
+        p.drawString(100, 530, "Superficie: 12 mq")
+        
+        p.showPage()
+        
+        # Page 3 - Legal Killers content
+        p.drawString(100, 750, "FORMALITÀ DA CANCELLARE CON IL DECRETO DI TRASFERIMENTO")
+        p.drawString(100, 720, "Oneri di cancellazione: Da liquidare secondo tariffe notarili")
+        p.drawString(100, 700, "Presenza di servitù di passaggio pedonale")
+        p.drawString(100, 680, "Stradella privata con diritto di transito")
+        p.drawString(100, 660, "Barriera architettonica da rimuovere")
+        p.drawString(100, 640, "Riferimento D.L. 69/2024 (decreto salva casa)")
+        p.drawString(100, 620, "Applicazione normativa salva casa per regolarizzazione")
+        
+        p.drawString(100, 580, "CONFORMITÀ URBANISTICA:")
+        p.drawString(100, 560, "Non esiste il certificato energetico")
+        p.drawString(100, 540, "Non esiste la dichiarazione di conformità dell'impianto elettrico")
+        p.drawString(100, 520, "Non esiste la dichiarazione di conformità dell'impianto termico")
+        p.drawString(100, 500, "Non è presente l'abitabilità")
+        
+        p.showPage()
+        
+        # Page 4 - Money Box with TBD scenarios
+        p.drawString(100, 750, "DEPREZZAMENTI E ONERI")
+        p.drawString(100, 720, "Oneri di regolarizzazione urbanistica: Non specificato in perizia")
+        p.drawString(100, 700, "Completamento finiture: Non specificato in perizia")
+        p.drawString(100, 680, "Spese condominiali arretrate: Non specificato")
+        p.drawString(100, 660, "Costi di liberazione: Non specificato")
+        p.drawString(100, 640, "Vizi occulti: Non specificato in perizia")
+        
+        p.drawString(100, 600, "STATO OCCUPATIVO")
+        p.drawString(100, 580, "Gli immobili risultano LIBERI")
+        p.drawString(100, 560, "Nessuna locazione opponibile")
+        
+        p.drawString(100, 520, "VALUTAZIONE FINALE")
+        p.drawString(100, 500, "Valore di stima complessivo: € 250.000,00")
+        
+        p.showPage()
+        
+        # Page 5 - Additional content for full coverage
+        p.drawString(100, 750, "CONSIDERAZIONI FINALI")
+        p.drawString(100, 730, "Raccomandazioni per l'acquirente")
+        p.drawString(100, 710, "Verifiche da effettuare prima dell'offerta")
+        p.drawString(100, 690, "Stima dei tempi di liberazione: 6-12 mesi")
+        
+        p.drawString(100, 650, "ALLEGATI")
+        p.drawString(100, 630, "- Planimetrie catastali")
+        p.drawString(100, 610, "- Documentazione urbanistica")
+        p.drawString(100, 590, "- Visure ipotecarie")
+        p.drawString(100, 570, "- Certificazioni energetiche")
+        
+        p.showPage()
+        p.save()
+        
+        buffer.seek(0)
+        return buffer.getvalue()
+
     def run_test(self, name, method, endpoint, expected_status, data=None, headers=None):
         """Run a single API test"""
         url = f"{self.base_url}/{endpoint}"
