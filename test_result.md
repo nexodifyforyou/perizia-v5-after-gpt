@@ -258,11 +258,8 @@ metadata:
 
 test_plan:
   current_focus:
-    - "Deterministic Patches Testing"
-    - "Full-Document Coverage"
-    - "Multi-Lot Detection"
-    - "Evidence-Locked Legal Killers"
-    - "Money Box Honesty"
+    - "Image Forensics Analysis"
+    - "Assistant Q&A"
   stuck_tasks: []
   test_all: false
   test_priority: "high_first"
