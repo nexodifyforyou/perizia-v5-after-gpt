@@ -1735,8 +1735,8 @@ def create_fallback_analysis(file_name: str, case_id: str, run_id: str, pages: L
         "dati_certi_del_lotto": {
             "prezzo_base_asta": {"value": prezzo_base, "formatted": f"€{prezzo_base:,.0f}" if prezzo_base else "NOT_SPECIFIED", "evidence": []},
             "superficie_catastale": {"value": superficie, "evidence": []},
-            "catasto": {"categoria": "NOT_SPECIFIED_IN_PERIZIA", "classe": "NOT_SPECIFIED_IN_PERIZIA", "vani": "NOT_SPECIFIED_IN_PERIZIA"},
-            "diritto_reale": {"value": "NOT_SPECIFIED_IN_PERIZIA", "evidence": []}
+            "catasto": {"categoria": "NON SPECIFICATO IN PERIZIA", "classe": "NON SPECIFICATO IN PERIZIA", "vani": "NON SPECIFICATO IN PERIZIA"},
+            "diritto_reale": {"value": "NON SPECIFICATO IN PERIZIA", "evidence": []}
         },
         "abusi_edilizi_conformita": {
             "conformita_urbanistica": {"status": "UNKNOWN", "detail_it": "Da verificare nella perizia", "evidence": []},
