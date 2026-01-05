@@ -1807,7 +1807,7 @@ def create_fallback_analysis(file_name: str, case_id: str, run_id: str, pages: L
             "checks": [
                 {"code": "QA-PageCoverage", "result": "WARN", "note": f"Fallback mode - page_coverage_log created with {len(pages)} placeholder entries"},
                 {"code": "QA-MoneyBox-Honesty", "result": "OK", "note": "All values set to TBD (no fake estimates)"},
-                {"code": "QA-Lotto", "result": "OK" if lots else "WARN", "note": f"Detected lots: {lots}" if lots else "No lots detected"}
+                {"code": "QA-Lotto", "result": "OK" if extracted_lots else "WARN", "note": f"Detected lots: {len(extracted_lots)}" if extracted_lots else "No lots detected"}
             ]
         }
     }
