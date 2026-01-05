@@ -268,6 +268,68 @@ const RedFlagItem = ({ flag }) => {
   );
 };
 
+// Multi-Lot Selector Component
+const MultiLotSelector = ({ lots, selectedLot, onSelectLot }) => {
+  if (!lots || lots.length <= 1) return null;
+  
+  return (
+    <div className="mb-6 p-4 bg-gradient-to-r from-gold/10 to-amber-500/10 rounded-lg border border-gold/30">
+      <div className="flex items-center gap-2 mb-3">
+        <Home className="w-5 h-5 text-gold" />
+        <h3 className="text-lg font-semibold text-zinc-100">Perizia Multi-Lotto ({lots.length} lotti)</h3>
+      </div>
+      
+      {/* Compact Lots Table */}
+      <div className="overflow-x-auto mb-4">
+        <table className="w-full text-sm">
+          <thead>
+            <tr className="border-b border-zinc-700">
+              <th className="text-left py-2 px-3 text-zinc-400">Lotto</th>
+              <th className="text-left py-2 px-3 text-zinc-400">Prezzo Base</th>
+              <th className="text-left py-2 px-3 text-zinc-400">Ubicazione</th>
+              <th className="text-left py-2 px-3 text-zinc-400">Superficie</th>
+              <th className="text-left py-2 px-3 text-zinc-400">Diritto</th>
+            </tr>
+          </thead>
+          <tbody>
+            {lots.map((lot, idx) => (
+              <tr 
+                key={lot.lot_number || idx}
+                className={`border-b border-zinc-800 cursor-pointer transition-colors ${
+                  selectedLot === idx ? 'bg-gold/20' : 'hover:bg-zinc-800/50'
+                }`}
+                onClick={() => onSelectLot(idx)}
+              >
+                <td className="py-2 px-3 font-mono text-gold">Lotto {lot.lot_number}</td>
+                <td className="py-2 px-3 font-mono text-emerald-400">{lot.prezzo_base_eur || 'TBD'}</td>
+                <td className="py-2 px-3 text-zinc-300">{(lot.ubicazione || 'NON SPECIFICATO').substring(0, 40)}...</td>
+                <td className="py-2 px-3 text-zinc-300">{lot.superficie_mq || 'TBD'}</td>
+                <td className="py-2 px-3 text-zinc-300">{(lot.diritto_reale || 'NON SPECIFICATO').substring(0, 20)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      
+      {/* Lot Selector Dropdown */}
+      <div className="flex items-center gap-3">
+        <label className="text-sm text-zinc-400">Seleziona Lotto:</label>
+        <select 
+          value={selectedLot}
+          onChange={(e) => onSelectLot(parseInt(e.target.value))}
+          className="bg-zinc-900 border border-zinc-700 rounded-lg px-4 py-2 text-zinc-100 focus:border-gold focus:outline-none"
+        >
+          {lots.map((lot, idx) => (
+            <option key={lot.lot_number || idx} value={idx}>
+              Lotto {lot.lot_number} - {lot.prezzo_base_eur || 'TBD'}
+            </option>
+          ))}
+        </select>
+      </div>
+    </div>
+  );
+};
+
 const AnalysisResult = () => {
   const { analysisId } = useParams();
   const navigate = useNavigate();
@@ -277,6 +339,7 @@ const AnalysisResult = () => {
   const [downloading, setDownloading] = useState(false);
   const [showDeleteModal, setShowDeleteModal] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
+  const [selectedLotIndex, setSelectedLotIndex] = useState(0);
 
   const fetchAnalysis = async () => {
     try {
