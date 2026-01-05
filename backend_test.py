@@ -1289,7 +1289,7 @@ def create_test_user_and_session():
 
 def main():
     print("🚀 Starting Nexodify Forensic Engine API Tests")
-    print("🎯 FOCUS: Google Document AI OCR Integration Testing")
+    print("🎯 FOCUS: DETERMINISTIC PATCHES Testing (CHANGES 1-6)")
     print("=" * 60)
     
     # Create test user and session
@@ -1312,8 +1312,12 @@ def main():
         tester.test_auth_me_with_token(session_token)
         tester.test_dashboard_stats()
         
-        # MAIN FOCUS: Google Document AI OCR Integration Test
-        print("\n🎯 MAIN FOCUS: Google Document AI OCR Integration Test...")
+        # MAIN FOCUS: DETERMINISTIC PATCHES TESTING
+        print("\n🎯 MAIN FOCUS: DETERMINISTIC PATCHES TESTING (CHANGES 1-6)...")
+        tester.test_deterministic_patches_comprehensive()
+        
+        # SECONDARY: Google Document AI OCR Integration Test
+        print("\n🔄 SECONDARY: Google Document AI OCR Integration Test...")
         tester.test_google_docai_perizia_extraction()
         
         # DELETE ENDPOINTS TESTING
