@@ -943,7 +943,111 @@ INIZIA L'ANALISI:"""
             result = json.loads(response_text)
         except json.JSONDecodeError as e:
             logger.error(f"PASS 1 JSON parse error: {e}")
-            return create_fallback_analysis(file_name, case_id, run_id, pages, pdf_text)
+            return create_fallback_analysis(file_name, case_id, run_id, pages, pdf_text, detected_lots)
+        
+        # ===========================================================================
+        # POST-PARSE DETERMINISTIC FIXES (CHANGE 2, 3, 4)
+        # ===========================================================================
+        
+        # ---- CHANGE 2: Deterministic multi-lot override (no "Lotto Unico" lies) ----
+        lots = detected_lots.get("lots", [])
+        if isinstance(lots, list) and len(lots) >= 2:
+            # Ensure report_header exists
+            hdr = result.setdefault("report_header", {})
+            lotto_obj = hdr.setdefault("lotto", {"value": "Non specificato in Perizia", "evidence": []})
+            lotto_obj["value"] = "Lotti " + ", ".join(str(x) for x in lots)
+            lotto_obj["evidence"] = detected_lots.get("evidence", [])
+
+            # Add a QA note
+            qa = result.setdefault("qa_pass", {"status": "WARN", "checks": []})
+            qa["checks"] = qa.get("checks", [])
+            qa["checks"].append({
+                "code": "QA-Lotto",
+                "result": "OK",
+                "note": f"Multi-lot detected deterministically: {lots}"
+            })
+            logger.info(f"Multi-lot override applied: {lots}")
+        
+        # Add detected lot_index to result
+        if lots:
+            result["lot_index"] = [{"lot": l, "page": e.get("page", 0), "quote": e.get("quote", "")} 
+                                   for l, e in zip(lots, detected_lots.get("evidence", [{}]*len(lots)))]
+        
+        # ---- CHANGE 3: Enforce tri-state for section_9_legal_killers ----
+        lk = result.get("section_9_legal_killers", {})
+        items = lk.get("items", []) if isinstance(lk, dict) else []
+        for it in items:
+            status = str(it.get("status", "NON_SPECIFICATO")).upper()
+            ev = it.get("evidence", [])
+            if status in ("SI", "NO", "YES") and not has_evidence(ev):
+                it["status"] = "NON_SPECIFICATO"
+                it.setdefault("action", "Verifica obbligatoria")
+                logger.info(f"Legal killer '{it.get('killer', 'unknown')}' status reset to NON_SPECIFICATO (no evidence)")
+        
+        # ---- CHANGE 3: Enforce evidence on critical header fields ----
+        qa = result.setdefault("qa_pass", {"status": "PASS", "checks": []})
+        qa["checks"] = qa.get("checks", [])
+        
+        critical_fields = [
+            ("report_header", "procedure"),
+            ("report_header", "tribunale"),
+            ("report_header", "address"),
+        ]
+        for section, field in critical_fields:
+            sec_data = result.get(section, {})
+            field_data = sec_data.get(field, {})
+            if isinstance(field_data, dict):
+                ev = field_data.get("evidence", [])
+                if not has_evidence(ev):
+                    val = field_data.get("value", "")
+                    if val and "Non specificato" not in str(val):
+                        field_data["value"] = "Non specificato in Perizia"
+                        qa["checks"].append({
+                            "code": f"QA-Evidence-{field}",
+                            "result": "WARN",
+                            "note": f"Field {section}.{field} had no evidence, reset to Non specificato"
+                        })
+        
+        # Check section_4_dati_certi.prezzo_base_asta
+        dati = result.get("section_4_dati_certi", {})
+        prezzo = dati.get("prezzo_base_asta", {})
+        if isinstance(prezzo, dict):
+            ev = prezzo.get("evidence", [])
+            if not has_evidence(ev) and prezzo.get("value", 0) > 0:
+                qa["checks"].append({
+                    "code": "QA-Evidence-prezzo_base",
+                    "result": "WARN", 
+                    "note": "prezzo_base_asta has value but no evidence"
+                })
+        
+        # ---- CHANGE 4: Money Box Honesty ----
+        mb = result.get("section_3_money_box", {})
+        mb_items = mb.get("items", []) if isinstance(mb, dict) else []
+        money_box_violations = []
+        
+        for it in mb_items:
+            fonte = (it.get("fonte_perizia", {}) or {})
+            fonte_val = str(fonte.get("value", "")).lower()
+            fonte_ev = fonte.get("evidence", [])
+            euro = it.get("stima_euro", 0)
+
+            is_unspecified = ("non specificato" in fonte_val) or (not has_evidence(fonte_ev))
+            if is_unspecified and euro and euro > 0:
+                voce = it.get("voce", "unknown")
+                note = str(it.get("stima_nota", "") or "")
+                if "STIMA NEXODIFY" not in note.upper():
+                    it["stima_euro"] = 0
+                    it["stima_nota"] = "TBD (NON SPECIFICATO IN PERIZIA) — Verifica tecnico/legale"
+                    money_box_violations.append(voce)
+                    logger.info(f"Money Box item '{voce}' reset to 0 (fonte unspecified, no evidence)")
+        
+        # QA gate for money box violations
+        if money_box_violations:
+            qa["checks"].append({
+                "code": "QA-MoneyBox-Honesty",
+                "result": "WARN",
+                "note": f"Money Box items reset due to unspecified fonte: {money_box_violations}"
+            })
         
         # ==========================================
         # PASS 2: Verification & Gap Detection
