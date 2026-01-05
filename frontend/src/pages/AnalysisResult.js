@@ -590,6 +590,15 @@ const AnalysisResult = () => {
           </div>
         )}
         
+        {/* Multi-Lot Selector - show if multiple lots */}
+        {isMultiLot && (
+          <MultiLotSelector 
+            lots={lots} 
+            selectedLot={selectedLotIndex} 
+            onSelectLot={setSelectedLotIndex} 
+          />
+        )}
+        
         {/* Header with Semaforo */}
         <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-6 mb-8">
           <div className="flex items-start justify-between">
@@ -603,6 +612,12 @@ const AnalysisResult = () => {
                 <span>{analysis.pages_count || '?'} pagine</span>
                 <span>•</span>
                 <span>{new Date(analysis.created_at).toLocaleString('it-IT')}</span>
+                {isMultiLot && (
+                  <>
+                    <span>•</span>
+                    <span className="text-gold font-semibold">{lots.length} Lotti</span>
+                  </>
+                )}
               </div>
               
               {/* Case Header with Evidence - support both formats */}
