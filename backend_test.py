@@ -64,6 +64,88 @@ class NexodifyAPITester:
         buffer.seek(0)
         return buffer.getvalue()
 
+    def create_multi_lot_test_pdf(self):
+        """Create a multi-page test PDF with multiple lots for deterministic patches testing"""
+        buffer = io.BytesIO()
+        p = canvas.Canvas(buffer, pagesize=letter)
+        
+        # Page 1 - Header and Lotto 1
+        p.drawString(100, 750, "TRIBUNALE DI ROMA")
+        p.drawString(100, 730, "SEZIONE ESECUZIONI IMMOBILIARI")
+        p.drawString(100, 710, "R.G.E. N. 456/2024")
+        p.drawString(100, 690, "Procedura di Esecuzione Immobiliare")
+        p.drawString(100, 670, "Depositata il: 20/11/2024")
+        
+        p.drawString(100, 630, "LOTTO 1")
+        p.drawString(100, 610, "Appartamento sito in Via Nazionale 45, Roma")
+        p.drawString(100, 590, "Superficie: 90 mq")
+        p.drawString(100, 570, "Prezzo base d'asta Lotto 1: € 100.000,00")
+        
+        p.showPage()
+        
+        # Page 2 - Lotto 2
+        p.drawString(100, 750, "LOTTO 2")
+        p.drawString(100, 730, "Garage sito in Via Nazionale 45, Roma")
+        p.drawString(100, 710, "Superficie: 20 mq")
+        p.drawString(100, 690, "Prezzo base d'asta Lotto 2: € 25.000,00")
+        
+        p.drawString(100, 650, "CONFORMITÀ URBANISTICA:")
+        p.drawString(100, 630, "Non esiste il certificato energetico")
+        p.drawString(100, 610, "Non esiste la dichiarazione di conformità dell'impianto elettrico")
+        p.drawString(100, 590, "Non esiste la dichiarazione di conformità dell'impianto termico")
+        p.drawString(100, 570, "Non esiste la dichiarazione di conformità dell'impianto idrico")
+        p.drawString(100, 550, "Non è presente l'abitabilità")
+        
+        p.showPage()
+        
+        # Page 3 - Deprezzamenti (Money Box data)
+        p.drawString(100, 750, "DEPREZZAMENTI E ONERI")
+        p.drawString(100, 720, "Oneri di regolarizzazione urbanistica: € 15.000,00")
+        p.drawString(100, 700, "Rischio assunto per mancata garanzia: € 5.000,00")
+        p.drawString(100, 680, "Completamento finiture: Non specificato in perizia")
+        p.drawString(100, 660, "Spese condominiali arretrate: Non specificato")
+        
+        p.drawString(100, 620, "LEGAL KILLERS:")
+        p.drawString(100, 600, "Diritto di superficie: Non risulta")
+        p.drawString(100, 580, "Donazione in catena: Non presente")
+        p.drawString(100, 560, "Prelazione Stato: Non applicabile")
+        p.drawString(100, 540, "Usi civici: Non presenti")
+        
+        p.showPage()
+        
+        # Page 4 - Additional content for coverage testing
+        p.drawString(100, 750, "STATO OCCUPATIVO")
+        p.drawString(100, 730, "Gli immobili risultano LIBERI")
+        p.drawString(100, 710, "Nessuna locazione opponibile")
+        
+        p.drawString(100, 670, "FORMALITÀ PREGIUDIZIEVOLI")
+        p.drawString(100, 650, "Ipoteca volontaria per € 150.000,00")
+        p.drawString(100, 630, "Pignoramento trascritto il 15/10/2024")
+        
+        p.drawString(100, 590, "VALUTAZIONE FINALE")
+        p.drawString(100, 570, "Valore di stima complessivo: € 130.000,00")
+        p.drawString(100, 550, "Considerazioni tecniche aggiuntive")
+        
+        p.showPage()
+        
+        # Page 5 - More content for full document coverage
+        p.drawString(100, 750, "CONSIDERAZIONI FINALI")
+        p.drawString(100, 730, "Raccomandazioni per l'acquirente")
+        p.drawString(100, 710, "Verifiche da effettuare prima dell'offerta")
+        p.drawString(100, 690, "Stima dei tempi di liberazione")
+        
+        p.drawString(100, 650, "ALLEGATI")
+        p.drawString(100, 630, "- Planimetrie catastali")
+        p.drawString(100, 610, "- Documentazione urbanistica")
+        p.drawString(100, 590, "- Visure ipotecarie")
+        p.drawString(100, 570, "- Certificazioni energetiche")
+        
+        p.showPage()
+        p.save()
+        
+        buffer.seek(0)
+        return buffer.getvalue()
+
     def run_test(self, name, method, endpoint, expected_status, data=None, headers=None):
         """Run a single API test"""
         url = f"{self.base_url}/{endpoint}"
