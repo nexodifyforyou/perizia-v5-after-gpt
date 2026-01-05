@@ -2424,12 +2424,8 @@ def main():
         tester.test_image_forensics_deterministic_patches()
         tester.test_assistant_deterministic_patches()
         
-        # TERTIARY: Previous deterministic patches testing
-        print("\n🔄 TERTIARY: Previous Deterministic Patches Testing (CHANGES 1-6)...")
-        tester.test_deterministic_patches_comprehensive()
-        
-        # QUATERNARY: Google Document AI OCR Integration Test
-        print("\n🔄 QUATERNARY: Google Document AI OCR Integration Test...")
+        # TERTIARY: Google Document AI OCR Integration Test
+        print("\n🔄 TERTIARY: Google Document AI OCR Integration Test...")
         tester.test_google_docai_perizia_extraction()
         
         # DELETE ENDPOINTS TESTING
