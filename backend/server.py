@@ -1419,9 +1419,11 @@ def apply_deterministic_fixes(result: Dict, pdf_text: str, pages: List[Dict], de
     
     return result
 
-def create_fallback_analysis(file_name: str, case_id: str, run_id: str, pages: List[Dict], pdf_text: str) -> Dict:
+def create_fallback_analysis(file_name: str, case_id: str, run_id: str, pages: List[Dict], pdf_text: str, detected_lots: Dict = None) -> Dict:
     """Create fallback analysis when LLM fails - extract what we can deterministically"""
     import re
+    
+    detected_lots = detected_lots or {"lots": [], "evidence": []}
     
     # Try to extract basic info from text
     text_lower = pdf_text.lower()
@@ -1437,6 +1439,15 @@ def create_fallback_analysis(file_name: str, case_id: str, run_id: str, pages: L
     trib_match = re.search(r'tribunale\s+(di\s+)?([a-z\s]+)', text_lower)
     if trib_match:
         tribunale = "TRIBUNALE DI " + trib_match.group(2).strip().upper()
+    
+    # Determine lotto value based on detected lots (CHANGE 2 - no "Lotto Unico" lies)
+    lots = detected_lots.get("lots", [])
+    if isinstance(lots, list) and len(lots) >= 2:
+        lotto_value = "Lotti " + ", ".join(str(x) for x in lots)
+    elif isinstance(lots, list) and len(lots) == 1:
+        lotto_value = f"Lotto {lots[0]}"
+    else:
+        lotto_value = "Non specificato in Perizia"
     
     # Find prezzo base
     prezzo_base = 0
@@ -1465,11 +1476,22 @@ def create_fallback_analysis(file_name: str, case_id: str, run_id: str, pages: L
         },
         "case_header": {
             "procedure_id": procedure_id,
-            "lotto": "Lotto Unico",
+            "lotto": lotto_value,
             "tribunale": tribunale,
             "address": {"street": "NOT_SPECIFIED_IN_PERIZIA", "city": "NOT_SPECIFIED_IN_PERIZIA", "full": "NOT_SPECIFIED_IN_PERIZIA"},
             "deposit_date": "NOT_SPECIFIED_IN_PERIZIA"
         },
+        "report_header": {
+            "title": "NEXODIFY INTELLIGENCE | Auction Scan",
+            "procedure": {"value": procedure_id, "evidence": []},
+            "lotto": {"value": lotto_value, "evidence": detected_lots.get("evidence", [])},
+            "tribunale": {"value": tribunale, "evidence": []},
+            "address": {"value": "Non specificato in Perizia", "evidence": []},
+            "generated_at": datetime.now(timezone.utc).isoformat()
+        },
+        "lot_index": [{"lot": l, "page": e.get("page", 0), "quote": e.get("quote", "")} 
+                      for l, e in zip(lots, detected_lots.get("evidence", [{}]*len(lots)))] if lots else [],
+        "page_coverage_log": [{"page": i+1, "summary": "Fallback - manual review required"} for i in range(len(pages))],
         "semaforo_generale": {
             "status": "AMBER",
             "status_it": "ATTENZIONE",
