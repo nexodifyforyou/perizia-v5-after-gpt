@@ -970,8 +970,8 @@ INIZIA L'ANALISI:"""
         
         # Add detected lot_index to result
         if lots:
-            result["lot_index"] = [{"lot": l, "page": e.get("page", 0), "quote": e.get("quote", "")} 
-                                   for l, e in zip(lots, detected_lots.get("evidence", [{}]*len(lots)))]
+            result["lot_index"] = [{"lot": lot_num, "page": ev_item.get("page", 0), "quote": ev_item.get("quote", "")} 
+                                   for lot_num, ev_item in zip(lots, detected_lots.get("evidence", [{}]*len(lots)))]
         
         # ---- CHANGE 3: Enforce tri-state for section_9_legal_killers ----
         lk = result.get("section_9_legal_killers", {})
