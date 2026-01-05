@@ -631,6 +631,144 @@ class NexodifyAPITester:
             })
         
         return overall_success, response_data
+
+    def test_google_docai_perizia_extraction(self):
+        """CRITICAL TEST: Test Google Document AI OCR integration with specific perizia document"""
+        if not self.token:
+            print("⚠️ Skipping Google Document AI test - no authentication token")
+            return False, {}
+        
+        print("🎯 CRITICAL TEST: Google Document AI OCR Integration")
+        print("📄 Downloading specific perizia document for testing...")
+        
+        # Download the specific test document
+        test_pdf_url = "https://customer-assets.emergentagent.com/job_property-analyzer-10/artifacts/f6h0fsye_1859886_c_perizia.pdf"
+        
+        try:
+            import requests
+            pdf_response = requests.get(test_pdf_url, timeout=60)
+            if pdf_response.status_code != 200:
+                print(f"❌ Failed to download test PDF: {pdf_response.status_code}")
+                return False, {}
+            
+            pdf_content = pdf_response.content
+            print(f"✅ Downloaded PDF: {len(pdf_content)} bytes")
+            
+        except Exception as e:
+            print(f"❌ Error downloading test PDF: {e}")
+            return False, {}
+        
+        files = {
+            'file': ('f6h0fsye_1859886_c_perizia.pdf', pdf_content, 'application/pdf')
+        }
+        
+        success, response_data = self.run_file_upload_test(
+            "CRITICAL: Google Document AI Perizia Extraction", 
+            "api/analysis/perizia", 
+            200, 
+            files
+        )
+        
+        if success and response_data:
+            result = response_data.get('result', {})
+            
+            # Verify ROMA STANDARD structure
+            expected_sections = [
+                'section_1_semaforo_generale',
+                'section_2_decisione_rapida', 
+                'section_3_money_box',
+                'section_4_dati_certi',
+                'section_5_abusi_conformita',
+                'section_12_checklist_pre_offerta',
+                'qa_pass'
+            ]
+            
+            missing_sections = []
+            for section in expected_sections:
+                if section not in result:
+                    missing_sections.append(section)
+            
+            if missing_sections:
+                print(f"❌ MISSING SECTIONS: {missing_sections}")
+                self.critical_failures.append({
+                    "test": "ROMA STANDARD Structure",
+                    "issue": f"Missing sections: {missing_sections}",
+                    "expected": expected_sections,
+                    "found": list(result.keys())
+                })
+            else:
+                print("✅ ROMA STANDARD structure complete")
+            
+            # Verify specific expected data from the review request
+            verification_results = []
+            
+            # Check report_header data
+            report_header = result.get('report_header', {})
+            procedure = report_header.get('procedure', {}).get('value', '')
+            if 'Esecuzione Immobiliare 62/2024' in procedure or '62/2024' in procedure:
+                verification_results.append("✅ Procedure ID: Found R.G.E. 62/2024")
+            else:
+                verification_results.append(f"❌ Procedure ID: Expected '62/2024', got '{procedure}'")
+            
+            tribunale = report_header.get('tribunale', {}).get('value', '')
+            if 'MANTOVA' in tribunale.upper():
+                verification_results.append("✅ Tribunale: Found TRIBUNALE DI MANTOVA")
+            else:
+                verification_results.append(f"❌ Tribunale: Expected 'MANTOVA', got '{tribunale}'")
+            
+            address = report_header.get('address', {}).get('value', '')
+            if 'Sordello' in address and 'San Giorgio Bigarello' in address:
+                verification_results.append("✅ Address: Found Via Sordello, San Giorgio Bigarello")
+            else:
+                verification_results.append(f"❌ Address: Expected 'Via Sordello, San Giorgio Bigarello', got '{address}'")
+            
+            # Check section_4_dati_certi
+            dati_certi = result.get('section_4_dati_certi', {})
+            prezzo_base = dati_certi.get('prezzo_base_asta', {}).get('value', 0)
+            if prezzo_base == 391849:
+                verification_results.append("✅ Prezzo Base: Found €391,849.00")
+            else:
+                verification_results.append(f"❌ Prezzo Base: Expected 391849, got {prezzo_base}")
+            
+            valore_finale = dati_certi.get('valore_finale_stima', {}).get('value', 0)
+            if valore_finale == 391849:
+                verification_results.append("✅ Valore Finale: Found €391,849.00")
+            else:
+                verification_results.append(f"❌ Valore Finale: Expected 391849, got {valore_finale}")
+            
+            # Print verification results
+            print("\n📊 VERIFICATION RESULTS:")
+            passed_verifications = 0
+            total_verifications = len(verification_results)
+            
+            for result_line in verification_results:
+                print(f"   {result_line}")
+                if result_line.startswith("✅"):
+                    passed_verifications += 1
+            
+            extraction_quality = (passed_verifications / total_verifications * 100) if total_verifications > 0 else 0
+            print(f"\n📈 EXTRACTION QUALITY: {extraction_quality:.1f}% ({passed_verifications}/{total_verifications})")
+            
+            # Determine if test passed
+            critical_data_found = (
+                '62/2024' in procedure and
+                'MANTOVA' in tribunale.upper() and
+                extraction_quality >= 60
+            )
+            
+            if critical_data_found:
+                print("✅ GOOGLE DOCUMENT AI TEST PASSED - Critical data extracted successfully")
+                return True, response_data
+            else:
+                print("❌ GOOGLE DOCUMENT AI TEST FAILED - Critical data missing or extraction quality too low")
+                self.critical_failures.append({
+                    "test": "Google Document AI Extraction",
+                    "issue": f"Extraction quality {extraction_quality:.1f}% or critical data missing",
+                    "verification_results": verification_results
+                })
+                return False, response_data
+        
+        return success, response_data
         """CRITICAL TEST: Test Google Document AI OCR integration with specific perizia document"""
         if not self.token:
             print("⚠️ Skipping Google Document AI test - no authentication token")
