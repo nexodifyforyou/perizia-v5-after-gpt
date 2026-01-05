@@ -5,9 +5,10 @@ import { useAuth } from '../context/AuthContext';
 const AuthCallback = () => {
   const navigate = useNavigate();
   const location = useLocation();
-  const { exchangeSession } = useAuth();
+  const { exchangeSession, refreshUser } = useAuth();
   const hasProcessed = useRef(false);
   const [error, setError] = useState(null);
+  const [status, setStatus] = useState('Verifying session...');
 
   useEffect(() => {
     // Prevent double execution in StrictMode
@@ -52,15 +53,25 @@ const AuthCallback = () => {
           return;
         }
 
+        setStatus('Exchanging session token...');
         console.log('Exchanging session_id:', sessionId.substring(0, 10) + '...');
         
         // Exchange session_id for session_token
         const user = await exchangeSession(sessionId);
         
         console.log('Session exchanged successfully, user:', user?.email);
+        setStatus('Session verified! Redirecting...');
         
-        // Clear the hash and search from URL and navigate to dashboard
+        // Clear the hash and search from URL
         window.history.replaceState(null, '', '/dashboard');
+        
+        // Small delay to ensure auth state is updated
+        await new Promise(resolve => setTimeout(resolve, 500));
+        
+        // Refresh user to ensure state is synced
+        await refreshUser();
+        
+        // Navigate to dashboard
         navigate('/dashboard', { replace: true });
         
       } catch (error) {
@@ -71,7 +82,7 @@ const AuthCallback = () => {
     };
 
     processAuth();
-  }, [exchangeSession, navigate, location]);
+  }, [exchangeSession, refreshUser, navigate, location]);
 
   return (
     <div className="min-h-screen bg-[#09090b] flex items-center justify-center">
@@ -89,7 +100,7 @@ const AuthCallback = () => {
           <>
             <div className="w-16 h-16 border-4 border-gold border-t-transparent rounded-full animate-spin mx-auto mb-6"></div>
             <h2 className="text-2xl font-serif text-zinc-100 mb-2">Authenticating</h2>
-            <p className="text-zinc-400 font-mono text-sm">Securing your session...</p>
+            <p className="text-zinc-400 font-mono text-sm">{status}</p>
           </>
         )}
       </div>
