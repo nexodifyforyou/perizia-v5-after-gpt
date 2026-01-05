@@ -1347,11 +1347,57 @@ def apply_deterministic_fixes(result: Dict, pdf_text: str, pages: List[Dict], de
             result["indice_di_convenienza"] = indice
     
     # ==========================================
-    # FIX 6: Update QA Pass with verification status
+    # FIX 6: Update QA Pass with verification status and QA GATES
     # ==========================================
     qa = result.get("qa_pass") or result.get("qa") or {}
-    qa["status"] = "PASS"
-    qa["checks"] = [
+    qa_checks = qa.get("checks", [])
+    qa_status = "PASS"
+    
+    # QA Gate 1: Page Coverage Log
+    page_coverage_log = result.get("page_coverage_log", [])
+    pages_total = len(pages)
+    if len(page_coverage_log) < pages_total:
+        qa_checks.append({
+            "code": "QA-PageCoverage",
+            "result": "WARN",
+            "note": f"page_coverage_log has {len(page_coverage_log)} entries, expected {pages_total}"
+        })
+    
+    # QA Gate 2: Money Box Honesty (final check)
+    money_box_final = result.get("section_3_money_box", {})
+    mb_items_final = money_box_final.get("items", []) if isinstance(money_box_final, dict) else []
+    for it in mb_items_final:
+        fonte = (it.get("fonte_perizia", {}) or {})
+        fonte_val = str(fonte.get("value", "")).lower()
+        fonte_ev = fonte.get("evidence", [])
+        euro = it.get("stima_euro", 0)
+        is_unspecified = ("non specificato" in fonte_val) or (not has_evidence(fonte_ev))
+        if is_unspecified and euro and euro > 0:
+            note = str(it.get("stima_nota", "") or "")
+            if "STIMA NEXODIFY" not in note.upper():
+                qa_status = "FAIL"
+                qa_checks.append({
+                    "code": "QA-MoneyBox-Violation",
+                    "result": "FAIL",
+                    "note": f"Money Box item '{it.get('voce', 'unknown')}' has EUR value with unspecified fonte"
+                })
+    
+    # QA Gate 3: Legal Killers Evidence
+    lk_final = result.get("section_9_legal_killers", {})
+    lk_items = lk_final.get("items", []) if isinstance(lk_final, dict) else []
+    for it in lk_items:
+        status = str(it.get("status", "")).upper()
+        ev = it.get("evidence", [])
+        if status in ("SI", "NO", "YES") and not has_evidence(ev):
+            qa_status = "WARN" if qa_status != "FAIL" else qa_status
+            qa_checks.append({
+                "code": "QA-LegalKiller-Evidence",
+                "result": "WARN",
+                "note": f"Legal killer '{it.get('killer', 'unknown')}' has SI/NO without evidence"
+            })
+    
+    # Standard QA checks
+    qa_checks.extend([
         {"code": "QA-1 Format Lock", "result": "OK", "note": "ordine Roma 1-12 rispettato"},
         {"code": "QA-2 Zero Empty Fields", "result": "OK", "note": "dove manca dato: Non specificato in Perizia"},
         {"code": "QA-3 Page Anchors", "result": "OK", "note": "riferimenti pagina presenti"},
@@ -1361,7 +1407,10 @@ def apply_deterministic_fixes(result: Dict, pdf_text: str, pages: List[Dict], de
         {"code": "QA-7 Delivery Timeline", "result": "OK", "note": "stima tempi presente"},
         {"code": "QA-8 Semaforo Rules", "result": "OK", "note": "coerente con criticità"},
         {"code": "QA-9 3-Pass Verification", "result": "OK", "note": "verificato con 3 passaggi"}
-    ]
+    ])
+    
+    qa["status"] = qa_status
+    qa["checks"] = qa_checks
     
     if "qa_pass" in result:
         result["qa_pass"] = qa
