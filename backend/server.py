@@ -1358,7 +1358,7 @@ NON aggiungere commenti, solo JSON valido."""
         
     except Exception as e:
         logger.error(f"LLM analysis error: {e}")
-        return create_fallback_analysis(file_name, case_id, run_id, pages, pdf_text, detected_lots)
+        return create_fallback_analysis(file_name, case_id, run_id, pages, pdf_text, extracted_lots, detected_legal_killers)
 
 
 def apply_deterministic_fixes(result: Dict, pdf_text: str, pages: List[Dict], detected_lots: Dict = None, has_evidence_fn = None) -> Dict:
