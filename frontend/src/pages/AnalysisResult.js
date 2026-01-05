@@ -905,22 +905,29 @@ const AnalysisResult = () => {
                 <p className="text-zinc-500 text-center py-8">Nessun dato sui costi disponibile</p>
               )}
               
-              {/* Total - support both old and new format */}
+              {/* Total - support TBD and numeric totals */}
               {(moneyBoxTotal || moneyBox.total_extra_costs) && (
                 <div className="mt-6 p-4 bg-gold/10 border border-gold/30 rounded-lg">
                   <div className="flex items-center justify-between">
                     <span className="text-lg font-semibold text-zinc-100">Totale Costi Extra Stimati</span>
-                    <span className="text-2xl font-mono font-bold text-gold">
-                      {moneyBoxTotal?.nota || moneyBoxTotal?.min !== undefined ? (
-                        `€${(moneyBoxTotal?.min || 0).toLocaleString()} - €${(moneyBoxTotal?.max || 0).toLocaleString()}`
+                    <span className={`text-2xl font-mono font-bold ${isTotalTBD ? 'text-amber-400' : 'text-gold'}`}>
+                      {isTotalTBD ? (
+                        'TBD'
+                      ) : moneyBoxTotal?.min !== undefined ? (
+                        `€${(typeof moneyBoxTotal.min === 'number' ? moneyBoxTotal.min : 0).toLocaleString()} - €${(typeof moneyBoxTotal.max === 'number' ? moneyBoxTotal.max : 0).toLocaleString()}`
                       ) : (
                         `€${(moneyBox.total_extra_costs?.range?.min || 0).toLocaleString()} - €${(moneyBox.total_extra_costs?.range?.max || 0).toLocaleString()}`
                       )}
-                      {(moneyBoxTotal?.nota?.includes('+') || moneyBox.total_extra_costs?.max_is_open) && '+'}
+                      {!isTotalTBD && (moneyBoxTotal?.nota?.includes('+') || moneyBox.total_extra_costs?.max_is_open) && '+'}
                     </span>
                   </div>
                   {moneyBoxTotal?.nota && (
                     <p className="text-xs text-zinc-400 mt-2">{moneyBoxTotal.nota}</p>
+                  )}
+                  {isTotalTBD && (
+                    <p className="text-xs text-amber-400 mt-2">
+                      ⚠️ Costi non quantificati in perizia — Verifica tecnico/legale obbligatoria
+                    </p>
                   )}
                 </div>
               )}
