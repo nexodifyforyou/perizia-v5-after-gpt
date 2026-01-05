@@ -1111,8 +1111,44 @@ NON aggiungere commenti, solo JSON valido."""
         ver_text = ver_text.strip()
         
         try:
-            result = json.loads(ver_text)
-            logger.info("PASS 2: Verification successful")
+            verified_result = json.loads(ver_text)
+            
+            # Re-apply deterministic fixes after verification
+            # ---- Multi-lot override (ensure not reverted) ----
+            lots = detected_lots.get("lots", [])
+            if isinstance(lots, list) and len(lots) >= 2:
+                hdr = verified_result.setdefault("report_header", {})
+                lotto_obj = hdr.setdefault("lotto", {"value": "Non specificato in Perizia", "evidence": []})
+                lotto_obj["value"] = "Lotti " + ", ".join(str(x) for x in lots)
+                lotto_obj["evidence"] = detected_lots.get("evidence", [])
+            
+            # ---- Re-enforce legal killers tri-state ----
+            lk = verified_result.get("section_9_legal_killers", {})
+            items = lk.get("items", []) if isinstance(lk, dict) else []
+            for it in items:
+                status = str(it.get("status", "NON_SPECIFICATO")).upper()
+                ev = it.get("evidence", [])
+                if status in ("SI", "NO", "YES") and not has_evidence(ev):
+                    it["status"] = "NON_SPECIFICATO"
+                    it.setdefault("action", "Verifica obbligatoria")
+            
+            # ---- Re-enforce Money Box honesty ----
+            mb = verified_result.get("section_3_money_box", {})
+            mb_items = mb.get("items", []) if isinstance(mb, dict) else []
+            for it in mb_items:
+                fonte = (it.get("fonte_perizia", {}) or {})
+                fonte_val = str(fonte.get("value", "")).lower()
+                fonte_ev = fonte.get("evidence", [])
+                euro = it.get("stima_euro", 0)
+                is_unspecified = ("non specificato" in fonte_val) or (not has_evidence(fonte_ev))
+                if is_unspecified and euro and euro > 0:
+                    note = str(it.get("stima_nota", "") or "")
+                    if "STIMA NEXODIFY" not in note.upper():
+                        it["stima_euro"] = 0
+                        it["stima_nota"] = "TBD (NON SPECIFICATO IN PERIZIA) — Verifica tecnico/legale"
+            
+            result = verified_result
+            logger.info("PASS 2: Verification successful with deterministic re-enforcement")
         except json.JSONDecodeError:
             logger.warning("PASS 2: Could not parse verification, keeping PASS 1 result")
         
