@@ -1709,16 +1709,19 @@ def create_fallback_analysis(file_name: str, case_id: str, run_id: str, pages: L
         },
         "money_box": {
             "items": [
-                {"code": "A", "label_it": "Regolarizzazione urbanistica", "label_en": "Urban regularization", "type": "NOT_SPECIFIED", "stima_euro": 0, "stima_nota": "TBD (NON SPECIFICATO IN PERIZIA) — Verifica tecnico", "action_required_it": "Verificare con tecnico", "action_required_en": "Verify with technician"},
-                {"code": "B", "label_it": "Oneri tecnici / istruttoria", "label_en": "Technical fees", "type": "NOT_SPECIFIED", "stima_euro": 0, "stima_nota": "TBD (NON SPECIFICATO IN PERIZIA)", "source": "NOT_SPECIFIED"},
-                {"code": "C", "label_it": "Rischio ripristini", "label_en": "Restoration risk", "type": "NOT_SPECIFIED", "stima_euro": 0, "stima_nota": "TBD (NON SPECIFICATO IN PERIZIA)", "source": "NOT_SPECIFIED"},
-                {"code": "D", "label_it": "Allineamento catastale", "label_en": "Cadastral alignment", "type": "NOT_SPECIFIED", "stima_euro": 0, "stima_nota": "TBD (NON SPECIFICATO IN PERIZIA)", "source": "NOT_SPECIFIED"},
-                {"code": "E", "label_it": "Spese condominiali arretrate", "label_en": "Condo arrears", "type": "NOT_SPECIFIED", "stima_euro": 0, "stima_nota": "TBD (NON SPECIFICATO IN PERIZIA)", "action_required_it": "Verificare con amministratore", "action_required_en": "Verify with administrator"},
-                {"code": "F", "label_it": "Costi procedura", "label_en": "Procedure costs", "type": "NOT_SPECIFIED", "stima_euro": 0, "stima_nota": "TBD (NON SPECIFICATO IN PERIZIA)", "action_required_it": "Verificare con delegato", "action_required_en": "Verify with delegate"},
-                {"code": "G", "label_it": "Cancellazione formalità", "label_en": "Formality cancellation", "type": "INFO_ONLY", "stima_euro": 0, "stima_nota": "Solitamente con decreto di trasferimento"},
-                {"code": "H", "label_it": "Costo liberazione", "label_en": "Liberation cost", "type": "NOT_SPECIFIED", "stima_euro": 0, "stima_nota": "TBD (NON SPECIFICATO IN PERIZIA)", "source": "NOT_SPECIFIED"}
+                {"code": "A", "label_it": "Regolarizzazione urbanistica", "label_en": "Urban regularization", "type": "TBD", "stima_euro": "TBD", "stima_nota": "TBD (NON SPECIFICATO IN PERIZIA) — Verifica tecnico", "action_required_it": "Verificare con tecnico", "action_required_en": "Verify with technician"},
+                {"code": "B", "label_it": "Oneri tecnici / istruttoria", "label_en": "Technical fees", "type": "TBD", "stima_euro": "TBD", "stima_nota": "TBD (NON SPECIFICATO IN PERIZIA)", "source": "TBD"},
+                {"code": "C", "label_it": "Rischio ripristini", "label_en": "Restoration risk", "type": "TBD", "stima_euro": "TBD", "stima_nota": "TBD (NON SPECIFICATO IN PERIZIA)", "source": "TBD"},
+                {"code": "D", "label_it": "Allineamento catastale", "label_en": "Cadastral alignment", "type": "TBD", "stima_euro": "TBD", "stima_nota": "TBD (NON SPECIFICATO IN PERIZIA)", "source": "TBD"},
+                {"code": "E", "label_it": "Spese condominiali arretrate", "label_en": "Condo arrears", "type": "TBD", "stima_euro": "TBD", "stima_nota": "TBD (NON SPECIFICATO IN PERIZIA)", "action_required_it": "Verificare con amministratore", "action_required_en": "Verify with administrator"},
+                {"code": "F", "label_it": "Costi procedura", "label_en": "Procedure costs", "type": "TBD", "stima_euro": "TBD", "stima_nota": "TBD (NON SPECIFICATO IN PERIZIA)", "action_required_it": "Verificare con delegato", "action_required_en": "Verify with delegate"},
+                {"code": "G", "label_it": "Cancellazione formalità", "label_en": "Formality cancellation", "type": "INFO_ONLY", "stima_euro": "TBD", "stima_nota": "Da liquidare con decreto di trasferimento"},
+                {"code": "H", "label_it": "Costo liberazione", "label_en": "Liberation cost", "type": "TBD", "stima_euro": "TBD", "stima_nota": "TBD (NON SPECIFICATO IN PERIZIA)", "source": "TBD"}
             ],
-            "total_extra_costs": {"range": {"min": 0, "max": 0}, "max_is_open": True}
+            "total_extra_costs": {"min": "TBD", "max": "TBD", "nota": "TBD — Costi non quantificati in perizia"}
+        },
+        "section_9_legal_killers": {
+            "items": legal_killers_items
         },
         "dati_certi_del_lotto": {
             "prezzo_base_asta": {"value": prezzo_base, "formatted": f"€{prezzo_base:,.0f}" if prezzo_base else "NOT_SPECIFIED", "evidence": []},
