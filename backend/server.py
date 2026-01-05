@@ -1489,8 +1489,8 @@ def create_fallback_analysis(file_name: str, case_id: str, run_id: str, pages: L
             "address": {"value": "Non specificato in Perizia", "evidence": []},
             "generated_at": datetime.now(timezone.utc).isoformat()
         },
-        "lot_index": [{"lot": l, "page": e.get("page", 0), "quote": e.get("quote", "")} 
-                      for l, e in zip(lots, detected_lots.get("evidence", [{}]*len(lots)))] if lots else [],
+        "lot_index": [{"lot": lot_num, "page": ev_item.get("page", 0), "quote": ev_item.get("quote", "")} 
+                      for lot_num, ev_item in zip(lots, detected_lots.get("evidence", [{}]*len(lots)))] if lots else [],
         "page_coverage_log": [{"page": i+1, "summary": "Fallback - manual review required"} for i in range(len(pages))],
         "semaforo_generale": {
             "status": "AMBER",
