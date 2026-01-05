@@ -1054,7 +1054,12 @@ INIZIA L'ANALISI:"""
         # ==========================================
         logger.info(f"PASS 2: Verification pass for {file_name}")
         
+        # Include lot_index requirement in verification
+        lot_index_info = f"DETECTED LOTS: {detected_lots.get('lots', [])} - If 2+ lots, do NOT use 'Lotto Unico'" if detected_lots.get('lots') else ""
+        
         verification_prompt = f"""VERIFICA E COMPLETA questa analisi perizia.
+
+{lot_index_info}
 
 ANALISI ATTUALE (da verificare):
 {json.dumps(result, indent=2, ensure_ascii=False)[:30000]}
@@ -1064,33 +1069,33 @@ DOCUMENTO ORIGINALE (pagine chiave):
 
 ISTRUZIONI DI VERIFICA:
 
-1. VERIFICA MONEY BOX:
+1. VERIFICA PAGE COVERAGE LOG:
+   - DEVE avere {len(pages)} entries (una per pagina)
+   - Se mancante o incompleto, crea entries per TUTTE le pagine
+
+2. VERIFICA MONEY BOX:
    - Cerca "Deprezzamenti", "Oneri di regolarizzazione", "regolarizzazione urbanistica"
    - Il valore esatto in EUR deve essere estratto (es: "23000,00 €" → 23000)
-   - Se manca, cercalo nelle pagine 35-45
+   - Se fonte è "Non specificato", stima_euro DEVE essere 0
 
-2. VERIFICA CONFORMITÀ IMPIANTI:
+3. VERIFICA CONFORMITÀ IMPIANTI:
    - Cerca "dichiarazione di conformità dell'impianto elettrico/termico/idrico"
    - Se dice "Non esiste" → status: "NO"
    - Se dice "esiste" o "presente" → status: "SI"
-   - Aggiungi in section_5_abusi_conformita.impianti
 
-3. VERIFICA LEGAL KILLERS:
-   - Per ogni item, cerca nel documento se è menzionato
-   - "diritto di superficie" / "PEEP" → cerca in tutto il documento
-   - "usi civici" → cerca "CDU" o "certificato destinazione urbanistica"
-   - Se trovato info specifica, aggiorna status da "NON_SPECIFICATO" a "SI" o "NO"
+4. VERIFICA LEGAL KILLERS:
+   - Per ogni item con status SI/NO, DEVE avere evidence con page e quote
+   - Se evidence vuota → status DEVE essere "NON_SPECIFICATO"
 
-4. VERIFICA TOTALI:
+5. VERIFICA TOTALI:
    - totale_extra_budget.min = somma di tutti stima_euro in money_box.items
    - totale_extra_budget.max = min + 20% margine
-   - Ricalcola all_in_light = prezzo_base + totale_extra_budget
 
-5. VERIFICA CHECKLIST PRE-OFFERTA:
-   - Deve avere esattamente 5 items:
-     ["Accesso atti in Comune", "Preventivo tecnico reale", "Visure in Conservatoria", "Conferma eventuali arretrati condominiali", "Strategia di liberazione e allineamento"]
+6. QA PASS:
+   - Se page_coverage_log.length < {len(pages)} → status="FAIL"
+   - Se Money Box ha € con fonte vuota → status="FAIL"
 
-RESTITUISCI il JSON CORRETTO e COMPLETO con tutti i campi verificati e corretti.
+RESTITUISCI il JSON CORRETTO e COMPLETO con tutti i campi verificati.
 NON aggiungere commenti, solo JSON valido."""
 
         verification_response = await chat.send_message(UserMessage(text=verification_prompt))
