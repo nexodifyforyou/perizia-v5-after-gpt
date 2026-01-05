@@ -1220,32 +1220,18 @@ INIZIA L'ANALISI:"""
                 "max": int(total_numeric_max * 1.2),
                 "nota": f"EUR {total_numeric_min:,.0f}+ (minimo da perizia)" + (" + TBD" if not all_tbd else "")
             }
-                note = str(it.get("stima_nota", "") or "")
-                if "STIMA NEXODIFY" not in note.upper():
-                    it["stima_euro"] = 0
-                    it["stima_nota"] = "TBD (NON SPECIFICATO IN PERIZIA) — Verifica tecnico/legale"
-                    money_box_violations.append(voce)
-                    logger.info(f"Money Box item '{voce}' reset to 0 (fonte unspecified, no evidence)")
-        
-        # QA gate for money box violations
-        if money_box_violations:
-            qa["checks"].append({
-                "code": "QA-MoneyBox-Honesty",
-                "result": "WARN",
-                "note": f"Money Box items reset due to unspecified fonte: {money_box_violations}"
-            })
         
         # ==========================================
         # PASS 2: Verification & Gap Detection
         # ==========================================
         logger.info(f"PASS 2: Verification pass for {file_name}")
         
-        # Include lot_index requirement in verification
-        lot_index_info = f"DETECTED LOTS: {detected_lots.get('lots', [])} - If 2+ lots, do NOT use 'Lotto Unico'" if detected_lots.get('lots') else ""
+        # Include lots info in verification
+        lots_info = f"LOTTI ESTRATTI: {len(extracted_lots)} lotti" if extracted_lots else ""
         
         verification_prompt = f"""VERIFICA E COMPLETA questa analisi perizia.
 
-{lot_index_info}
+{lots_info}
 
 ANALISI ATTUALE (da verificare):
 {json.dumps(result, indent=2, ensure_ascii=False)[:30000]}
