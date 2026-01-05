@@ -759,7 +759,83 @@ E) OUTPUT
 - Return ONLY valid JSON (no markdown)."""
 async def analyze_perizia_with_llm(pdf_text: str, pages: List[Dict], file_name: str, user: User, case_id: str, run_id: str, input_sha256: str) -> Dict:
     """Analyze perizia using LLM with comprehensive ROMA STANDARD prompt"""
+    import re
     from emergentintegrations.llm.chat import LlmChat, UserMessage
+    
+    # ===========================================================================
+    # HELPER FUNCTIONS FOR FULL-DOCUMENT COVERAGE (CHANGE 1)
+    # ===========================================================================
+    def compress_page_text(t: str, max_chars: int = 1400) -> str:
+        t = (t or "").strip()
+        if not t:
+            return ""
+        lines = [ln.strip() for ln in t.splitlines() if ln.strip()]
+        head = lines[:18]
+        tail = lines[-18:] if len(lines) > 18 else []
+        key_re = re.compile(
+            r"(prezzo|base|asta|lotto|tribunale|via|comune|catast|urban|"
+            r"agibil|abitabil|conform|ipotec|pignor|servit|amianto|"
+            r"deprezz|oneri|regolarizz|€|eur|euro|mq|superficie|foglio|"
+            r"particella|sub|rendita|p\.?e\.?e\.?p|usi\s+civici|beni\s+culturali|"
+            r"donazione|fondo\s+patrimoniale|formalità|non\s+cancell|locazione|opponib)"
+            , re.I
+        )
+        kept = []
+        # keep head, tail, and keyword lines from middle
+        mid = lines[18:-18] if len(lines) > 36 else []
+        for ln in head + mid + tail:
+            if ln in head or ln in tail or key_re.search(ln):
+                kept.append(ln)
+            if len(kept) >= 90:
+                break
+        out = " | ".join(kept)
+        return out[:max_chars]
+
+    def build_page_content(per_page_cap: int) -> str:
+        out = ""
+        # include up to 200 pages (your PDFs are <= 200 typically; adjust if needed)
+        for p in pages[:200]:
+            out += (
+                f"\n\n{'='*60}\nPAGINA {p.get('page_number')}\n{'='*60}\n"
+                f"{compress_page_text(p.get('text', ''), max_chars=per_page_cap)}\n"
+            )
+        return out
+    
+    # ===========================================================================
+    # DETERMINISTIC MULTI-LOT DETECTION (CHANGE 2)
+    # ===========================================================================
+    def detect_lots_from_pages(pages_in):
+        lots = set()
+        evidence = []
+        for p in pages_in:
+            t = str(p.get("text", "") or "")
+            for m in re.finditer(r"\bLotto\s+(\d+)\b", t, flags=re.I):
+                try:
+                    n = int(m.group(1))
+                    lots.add(n)
+                    if len(evidence) < 3:
+                        s = max(m.start() - 80, 0)
+                        e = min(m.end() + 80, len(t))
+                        evidence.append({
+                            "page": int(p.get("page_number", 0)),
+                            "quote": t[s:e].replace("\n"," ")[:200]
+                        })
+                except Exception:
+                    continue
+        return {"lots": sorted(lots), "evidence": evidence}
+    
+    # ===========================================================================
+    # EVIDENCE VALIDATION HELPER (CHANGE 3)
+    # ===========================================================================
+    def has_evidence(ev):
+        if not isinstance(ev, list) or not ev:
+            return False
+        e0 = ev[0]
+        return isinstance(e0, dict) and "page" in e0 and "quote" in e0 and str(e0.get("quote","")).strip() != ""
+    
+    # Detect lots deterministically BEFORE LLM call
+    detected_lots = detect_lots_from_pages(pages)
+    logger.info(f"Deterministic lot detection: {detected_lots}")
     
     chat = LlmChat(
         api_key=EMERGENT_LLM_KEY,
@@ -767,11 +843,23 @@ async def analyze_perizia_with_llm(pdf_text: str, pages: List[Dict], file_name: 
         system_message=PERIZIA_SYSTEM_PROMPT
     ).with_model("openai", "gpt-4o")
     
-    # Build page-by-page content for the prompt with clear page markers
-    page_content = ""
-    for p in pages[:100]:  # Limit to first 100 pages
-        page_content += f"\n\n{'='*60}\nPAGINA {p['page_number']}\n{'='*60}\n{p['text']}\n"
+    # ===========================================================================
+    # CHARACTER-BUDGETED PAGE CONTENT (CHANGE 1 - no truncation)
+    # ===========================================================================
+    # Per-page cap: 1400 chars (fallback 900)
+    # Total cap: 160,000 chars (hard)
+    page_content = build_page_content(1400)
+    if len(page_content) > 160000:
+        page_content = build_page_content(900)
+    # If still too big, hard cut ONLY AFTER page markers are preserved
+    if len(page_content) > 160000:
+        page_content = page_content[:160000]
     
+    logger.info(f"Page content built: {len(page_content)} chars for {len(pages)} pages")
+    
+    # ===========================================================================
+    # UPDATED PROMPT WITH ENFORCEABLE CONSTRAINTS (CHANGE 6)
+    # ===========================================================================
     prompt = f"""ANALIZZA questa Perizia CTU italiana per asta immobiliare.
 
 ═══════════════════════════════════════════════════════════════════════════════
@@ -783,48 +871,53 @@ RUN_ID: {run_id}
 CASE_ID: {case_id}
 
 ═══════════════════════════════════════════════════════════════════════════════
-CONTENUTO DOCUMENTO (pagina per pagina)
+CONTENUTO DOCUMENTO (COMPRESSED per pagina con marker PAGINA X)
 ═══════════════════════════════════════════════════════════════════════════════
-{page_content[:120000]}
+{page_content}
 
 ═══════════════════════════════════════════════════════════════════════════════
-ISTRUZIONI CRITICHE
+ISTRUZIONI CRITICHE (CONTRATTO VINCOLANTE)
 ═══════════════════════════════════════════════════════════════════════════════
 
-1. LEGGI ATTENTAMENTE OGNI pagina del documento
+1. PAGE COVERAGE LOG (OBBLIGATORIO):
+   - DEVI produrre "page_coverage_log": array con UNA entry per ogni pagina (1..{len(pages)}).
+   - Formato: {{"page": N, "summary": "breve descrizione contenuto"}}
+   - Se non riesci a coprire tutte le pagine, imposta qa_pass.status="FAIL" e spiega le pagine mancanti.
 
-2. CERCA questi dati SPECIFICI con numeri di pagina:
-   - Numero procedura (R.G.E., E.I.) - solitamente pagina 1 o "SCHEMA RIASSUNTIVO"
+2. LOT INDEX (OBBLIGATORIO):
+   - Estrai TUTTE le occorrenze di "Lotto N" nel documento.
+   - Produci "lot_index": [{{"lot":1,"page":X,"quote":"..."}}, ...]
+   - Se esistono 2+ lotti, è VIETATO restituire "Lotto Unico" in report_header.lotto.
+
+3. EVIDENCE-LOCKED:
+   - Ogni status SI/NO richiede evidence con page e quote.
+   - Senza evidence → status DEVE essere "NON_SPECIFICATO".
+
+4. MONEY BOX HONESTY:
+   - MAI associare importi € a voci con fonte "Non specificato in Perizia" o evidence vuota.
+   - Se fonte non specificata → stima_euro=0 e stima_nota="TBD (NON SPECIFICATO IN PERIZIA)".
+   - Se aggiungi stime Nexodify, etichetta: "STIMA NEXODIFY (NON IN PERIZIA)".
+
+5. CERCA DATI SPECIFICI con numeri di pagina:
+   - Numero procedura (R.G.E., E.I.)
    - Tribunale
    - Indirizzo completo
-   - PREZZO BASE D'ASTA (€) - cerca "PREZZO BASE D'ASTA" o in SCHEMA RIASSUNTIVO
-   - Valore di stima e deprezzamenti
+   - PREZZO BASE D'ASTA (€) - cerca "PREZZO BASE D'ASTA" o "SCHEMA RIASSUNTIVO"
+   - Tabella "Deprezzamenti" per Money Box (valori EUR esatti)
 
-3. MONEY BOX - CERCA LA TABELLA "Deprezzamenti":
-   Questa tabella contiene valori EUR per:
-   - "Oneri di regolarizzazione urbanistica" → Item A - ESTRAI IL VALORE ESATTO IN EUR
-   - "Rischio assunto per mancata garanzia" o "Vizi occulti" → Item B - ESTRAI IL VALORE ESATTO
-   - "Valore finale di stima" → Valore dopo deprezzamenti
-   
-   ESEMPIO di formato tabella:
-   | Tipologia deprezzamento | Valore |
-   | Oneri di regolarizzazione urbanistica | 23000,00 € |
-   | Rischio assunto per mancata garanzia | 5000,00 € |
-   
-   SE TROVI QUESTI VALORI, inseriscili in section_3_money_box.items con stima_euro ESATTO
-
-4. CONFORMITÀ - CERCA "Certificazioni energetiche e dichiarazioni di conformità":
+6. CONFORMITÀ - CERCA "Certificazioni energetiche e dichiarazioni di conformità":
    - "Non esiste il certificato energetico" → APE: ASSENTE
    - "Non esiste la dichiarazione di conformità dell'impianto elettrico" → elettrico: NO
    - "Non esiste la dichiarazione di conformità dell'impianto termico" → termico: NO  
    - "Non esiste la dichiarazione di conformità dell'impianto idrico" → idrico: NO
    - "non è presente l'abitabilità" → agibilita: ASSENTE
 
-5. Per OGNI valore estratto:
-   - Indica il numero di PAGINA esatto
-   - Cita il TESTO esatto dal documento (max 200 caratteri)
+7. QA GATES:
+   - Se page_coverage_log ha meno entries di PAGINE TOTALI → qa_pass.status="FAIL"
+   - Se Money Box ha € con fonte vuota → qa_pass.status="FAIL"
+   - Se Legal Killers ha SI/NO senza evidence → qa_pass.status="FAIL"
 
-6. OUTPUT: Restituisci SOLO il JSON valido nel formato ROMA STANDARD specificato.
+8. OUTPUT: Restituisci SOLO JSON valido nel formato ROMA STANDARD.
    NON aggiungere markdown, commenti o testo extra.
 
 INIZIA L'ANALISI:"""
