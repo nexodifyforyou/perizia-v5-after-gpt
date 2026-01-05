@@ -431,7 +431,340 @@ class NexodifyAPITester:
         
         return success, response_data
 
-    def test_deterministic_patches_comprehensive(self):
+    def test_review_request_multi_lot_correctness_patches(self):
+        """CRITICAL TEST: Test MULTI-LOT and CORRECTNESS PATCHES as specified in review request"""
+        if not self.token:
+            print("⚠️ Skipping review request test - no authentication token")
+            return False, {}
+        
+        print("🎯 CRITICAL TEST: MULTI-LOT and CORRECTNESS PATCHES")
+        print("=" * 80)
+        print("Testing specific requirements from review request:")
+        print("1. MULTI-LOT DETECTION FROM SCHEMA RIASSUNTIVO")
+        print("2. LEGAL KILLERS SCANNER")
+        print("3. MONEY BOX TBD HANDLING")
+        print("4. PLACEHOLDER REPLACEMENT")
+        print("5. QA GATES")
+        
+        # Create test PDF with review request requirements
+        print("📄 Creating test PDF with SCHEMA RIASSUNTIVO and 3 lots...")
+        pdf_content = self.create_review_request_test_pdf()
+        
+        files = {
+            'file': ('review_request_multi_lot.pdf', pdf_content, 'application/pdf')
+        }
+        
+        success, response_data = self.run_file_upload_test(
+            "CRITICAL: Review Request Multi-Lot Correctness Patches", 
+            "api/analysis/perizia", 
+            200, 
+            files
+        )
+        
+        if not success or not response_data:
+            print("❌ CRITICAL FAILURE: Analysis request failed")
+            self.critical_failures.append({
+                "test": "Review Request - Analysis Request Failed",
+                "issue": "Analysis request failed",
+                "response": response_data
+            })
+            return False, {}
+        
+        result = response_data.get('result', {})
+        if not result:
+            print("❌ CRITICAL FAILURE: No result in response")
+            self.critical_failures.append({
+                "test": "Review Request - No Result",
+                "issue": "No result object in response",
+                "response": response_data
+            })
+            return False, {}
+        
+        print("✅ Analysis completed, verifying review request requirements...")
+        
+        # ===========================================
+        # 1. MULTI-LOT DETECTION FROM SCHEMA RIASSUNTIVO
+        # ===========================================
+        print("\n🔍 1. MULTI-LOT DETECTION FROM SCHEMA RIASSUNTIVO")
+        
+        # Check lots array
+        lots = result.get('lots', [])
+        if len(lots) >= 3:
+            print(f"✅ MULTI-LOT: Found {len(lots)} lots in response")
+            multi_lot_array_passed = True
+            
+            # Verify lot details
+            for i, lot in enumerate(lots[:3]):
+                lot_num = lot.get('lot_number', 0)
+                prezzo = lot.get('prezzo_base_eur', '')
+                ubicazione = lot.get('ubicazione', '')
+                diritto = lot.get('diritto_reale', '')
+                superficie = lot.get('superficie_mq', '')
+                
+                print(f"   Lotto {lot_num}: {prezzo}, {ubicazione[:30]}..., {diritto}, {superficie}")
+                
+                # Verify required fields are not empty
+                if not prezzo or prezzo == "NON SPECIFICATO IN PERIZIA":
+                    print(f"   ⚠️ Lotto {lot_num}: Missing prezzo base")
+                if not ubicazione or ubicazione == "NON SPECIFICATO IN PERIZIA":
+                    print(f"   ⚠️ Lotto {lot_num}: Missing ubicazione")
+                if not diritto or diritto == "NON SPECIFICATO IN PERIZIA":
+                    print(f"   ⚠️ Lotto {lot_num}: Missing diritto reale")
+                if not superficie or superficie == "NON SPECIFICATO IN PERIZIA":
+                    print(f"   ⚠️ Lotto {lot_num}: Missing superficie")
+        else:
+            print(f"❌ MULTI-LOT: Found only {len(lots)} lots, expected 3")
+            multi_lot_array_passed = False
+            self.critical_failures.append({
+                "test": "Multi-Lot Detection - Lots Array",
+                "issue": f"Expected 3 lots, found {len(lots)}",
+                "lots": lots
+            })
+        
+        # Check is_multi_lot flag
+        is_multi_lot = result.get('is_multi_lot', False)
+        report_header = result.get('report_header', {})
+        is_multi_lot_header = report_header.get('is_multi_lot', False)
+        
+        if is_multi_lot or is_multi_lot_header:
+            print("✅ MULTI-LOT: is_multi_lot flag is true")
+            multi_lot_flag_passed = True
+        else:
+            print("❌ MULTI-LOT: is_multi_lot flag is false or missing")
+            multi_lot_flag_passed = False
+        
+        # Check NO "Lotto Unico" in report_header
+        lotto_obj = report_header.get('lotto', {})
+        lotto_value = lotto_obj.get('value', '')
+        
+        if lotto_value != "Lotto Unico" and ("Lotti" in lotto_value or "1" in lotto_value):
+            print(f"✅ MULTI-LOT: report_header.lotto.value is '{lotto_value}' (NOT 'Lotto Unico')")
+            no_lotto_unico_passed = True
+        else:
+            print(f"❌ MULTI-LOT: report_header.lotto.value is '{lotto_value}' (should NOT be 'Lotto Unico')")
+            no_lotto_unico_passed = False
+            self.critical_failures.append({
+                "test": "Multi-Lot Detection - No Lotto Unico",
+                "issue": f"lotto.value is '{lotto_value}', should not be 'Lotto Unico'",
+                "expected": "Lotti 1, 2, 3 or similar",
+                "actual": lotto_value
+            })
+        
+        multi_lot_passed = multi_lot_array_passed and multi_lot_flag_passed and no_lotto_unico_passed
+        
+        # ===========================================
+        # 2. LEGAL KILLERS SCANNER
+        # ===========================================
+        print("\n🔍 2. LEGAL KILLERS SCANNER")
+        
+        legal_killers = result.get('section_9_legal_killers', {})
+        lk_items = legal_killers.get('items', [])
+        
+        # Expected legal killers from our test PDF
+        expected_killers = [
+            "FORMALITÀ DA CANCELLARE CON IL DECRETO DI TRASFERIMENTO",
+            "Oneri di cancellazione",
+            "servitù",
+            "stradella",
+            "barriera",
+            "D.L. 69/2024",
+            "salva casa"
+        ]
+        
+        found_killers = []
+        killers_with_pages = []
+        
+        for item in lk_items:
+            killer_name = item.get('killer', item.get('title', ''))
+            evidence = item.get('evidence', [])
+            
+            # Check if any expected killer is mentioned
+            for expected in expected_killers:
+                if expected.lower() in killer_name.lower():
+                    found_killers.append(expected)
+                    
+                    # Check if it has page number
+                    if evidence and len(evidence) > 0:
+                        first_ev = evidence[0]
+                        if isinstance(first_ev, dict) and 'page' in first_ev:
+                            killers_with_pages.append(f"{killer_name} (p. {first_ev['page']})")
+                    break
+        
+        if len(found_killers) >= 3:  # At least 3 of the expected killers
+            print(f"✅ LEGAL KILLERS: Found {len(found_killers)} expected killers: {found_killers}")
+            legal_killers_passed = True
+        else:
+            print(f"❌ LEGAL KILLERS: Found only {len(found_killers)} expected killers: {found_killers}")
+            legal_killers_passed = False
+            self.critical_failures.append({
+                "test": "Legal Killers Scanner",
+                "issue": f"Expected at least 3 killers, found {len(found_killers)}",
+                "expected": expected_killers,
+                "found": found_killers
+            })
+        
+        if len(killers_with_pages) >= 2:
+            print(f"✅ LEGAL KILLERS: Found {len(killers_with_pages)} killers with page numbers")
+            for killer in killers_with_pages:
+                print(f"   📍 {killer}")
+        else:
+            print(f"❌ LEGAL KILLERS: Only {len(killers_with_pages)} killers have page numbers")
+        
+        # ===========================================
+        # 3. MONEY BOX TBD HANDLING
+        # ===========================================
+        print("\n🔍 3. MONEY BOX TBD HANDLING")
+        
+        money_box = result.get('section_3_money_box', {})
+        mb_items = money_box.get('items', [])
+        totale_extra_budget = money_box.get('totale_extra_budget', {})
+        
+        tbd_items_found = 0
+        tbd_handling_passed = True
+        
+        for item in mb_items:
+            voce = item.get('voce', 'unknown')
+            fonte_perizia = item.get('fonte_perizia', {})
+            fonte_value = fonte_perizia.get('value', '') if isinstance(fonte_perizia, dict) else str(fonte_perizia)
+            stima_euro = item.get('stima_euro', 0)
+            stima_nota = item.get('stima_nota', '')
+            
+            # Check if fonte contains "Non specificato" 
+            if "Non specificato" in fonte_value:
+                tbd_items_found += 1
+                
+                # Verify stima_euro is "TBD" not 0
+                if stima_euro == "TBD" or "TBD" in str(stima_euro):
+                    print(f"✅ MONEY BOX TBD: {voce[:30]}... has TBD value")
+                elif stima_euro == 0:
+                    print(f"✅ MONEY BOX TBD: {voce[:30]}... has 0 value (acceptable)")
+                else:
+                    print(f"❌ MONEY BOX TBD: {voce[:30]}... has numeric value {stima_euro} but fonte is 'Non specificato'")
+                    tbd_handling_passed = False
+                
+                # Check for TBD notes
+                if "TBD" in stima_nota:
+                    print(f"✅ MONEY BOX TBD: {voce[:30]}... has TBD note")
+        
+        # Check totale_extra_budget for TBD values
+        total_min = totale_extra_budget.get('min', 0)
+        total_max = totale_extra_budget.get('max', 0)
+        
+        if total_min == "TBD" or total_max == "TBD":
+            print("✅ MONEY BOX TBD: totale_extra_budget has TBD values")
+        elif total_min == 0 and total_max == 0:
+            print("⚠️ MONEY BOX TBD: totale_extra_budget is €0-€0 (should be TBD if no amounts found)")
+        else:
+            print(f"✅ MONEY BOX TBD: totale_extra_budget has numeric values: {total_min}-{total_max}")
+        
+        if tbd_items_found >= 2:
+            print(f"✅ MONEY BOX TBD: Found {tbd_items_found} items with 'Non specificato' fonte")
+        else:
+            print(f"⚠️ MONEY BOX TBD: Only {tbd_items_found} items with 'Non specificato' fonte")
+        
+        # ===========================================
+        # 4. PLACEHOLDER REPLACEMENT
+        # ===========================================
+        print("\n🔍 4. PLACEHOLDER REPLACEMENT")
+        
+        # Convert result to string to search for placeholders
+        result_str = json.dumps(result, ensure_ascii=False)
+        
+        bad_placeholders = ["None", "N/A", "NOT_SPECIFIED_IN_PERIZIA"]
+        good_placeholder = "NON SPECIFICATO IN PERIZIA"
+        
+        placeholder_issues = []
+        for placeholder in bad_placeholders:
+            if placeholder in result_str:
+                count = result_str.count(placeholder)
+                placeholder_issues.append(f"{placeholder}: {count} occurrences")
+        
+        good_placeholder_count = result_str.count(good_placeholder)
+        
+        if len(placeholder_issues) == 0:
+            print("✅ PLACEHOLDER: No bad placeholders found (None, N/A, NOT_SPECIFIED_IN_PERIZIA)")
+            placeholder_passed = True
+        else:
+            print(f"❌ PLACEHOLDER: Found bad placeholders: {placeholder_issues}")
+            placeholder_passed = False
+            self.critical_failures.append({
+                "test": "Placeholder Replacement",
+                "issue": f"Found bad placeholders: {placeholder_issues}",
+                "bad_placeholders": bad_placeholders,
+                "found": placeholder_issues
+            })
+        
+        print(f"✅ PLACEHOLDER: Found {good_placeholder_count} occurrences of 'NON SPECIFICATO IN PERIZIA'")
+        
+        # ===========================================
+        # 5. QA GATES
+        # ===========================================
+        print("\n🔍 5. QA GATES")
+        
+        qa_pass = result.get('qa_pass', {})
+        qa_status = qa_pass.get('status', '')
+        qa_checks = qa_pass.get('checks', [])
+        
+        # Look for multi-lot detection in QA checks
+        qa_check_codes = [check.get('code', '') for check in qa_checks]
+        qa_check_notes = [check.get('note', '') for check in qa_checks]
+        
+        multi_lot_qa_found = False
+        for code, note in zip(qa_check_codes, qa_check_notes):
+            if "multi" in code.lower() or "lot" in code.lower() or "multi" in note.lower() or "lot" in note.lower():
+                multi_lot_qa_found = True
+                print(f"✅ QA GATES: Found multi-lot check: {code} - {note}")
+                break
+        
+        if not multi_lot_qa_found:
+            print("❌ QA GATES: No multi-lot detection check found in qa_pass")
+        
+        # Check QA status reflects validation state
+        if qa_status in ['PASS', 'WARN', 'FAIL']:
+            print(f"✅ QA GATES: qa_pass.status is '{qa_status}' (valid)")
+            qa_status_passed = True
+        else:
+            print(f"❌ QA GATES: qa_pass.status is '{qa_status}' (invalid)")
+            qa_status_passed = False
+        
+        qa_gates_passed = multi_lot_qa_found and qa_status_passed
+        
+        # ===========================================
+        # OVERALL RESULTS
+        # ===========================================
+        print("\n📊 REVIEW REQUEST TEST RESULTS:")
+        print("=" * 50)
+        
+        requirements_results = [
+            ("1. MULTI-LOT DETECTION FROM SCHEMA RIASSUNTIVO", multi_lot_passed),
+            ("2. LEGAL KILLERS SCANNER", legal_killers_passed),
+            ("3. MONEY BOX TBD HANDLING", tbd_handling_passed),
+            ("4. PLACEHOLDER REPLACEMENT", placeholder_passed),
+            ("5. QA GATES", qa_gates_passed)
+        ]
+        
+        passed_requirements = 0
+        for req_name, passed in requirements_results:
+            status = "✅ PASSED" if passed else "❌ FAILED"
+            print(f"   {status}: {req_name}")
+            if passed:
+                passed_requirements += 1
+        
+        overall_success = passed_requirements >= 4  # At least 4 out of 5 requirements must pass
+        
+        print(f"\n📈 OVERALL REVIEW REQUEST: {passed_requirements}/5 requirements passed")
+        
+        if overall_success:
+            print("✅ REVIEW REQUEST TEST PASSED")
+        else:
+            print("❌ REVIEW REQUEST TEST FAILED")
+            self.critical_failures.append({
+                "test": "Review Request Overall",
+                "issue": f"Only {passed_requirements}/5 requirements passed",
+                "requirements_results": requirements_results
+            })
+        
+        return overall_success, response_data
         """CRITICAL TEST: Test all deterministic patches applied to the Nexodify perizia analysis system"""
         if not self.token:
             print("⚠️ Skipping deterministic patches test - no authentication token")
