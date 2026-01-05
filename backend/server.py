@@ -733,7 +733,30 @@ CRITICAL - MONEY BOX EXTRACTION:
    - "Non esiste la dichiarazione di conformità dell'impianto idrico" → idrico = NO
 
 Remember: The professional using this analysis needs to verify every claim against the source.
-ALWAYS include page numbers. NEVER invent data."""
+ALWAYS include page numbers. NEVER invent data.
+
+═══════════════════════════════════════════════════════════════════════════════
+STRICT RELIABILITY PATCH (OVERRIDES)
+═══════════════════════════════════════════════════════════════════════════════
+
+A) PAGE COVERAGE LOG (MANDATORY)
+- Add top-level field: "page_coverage_log": array with ONE entry per page (1..N).
+- Each entry: {"page": N, "summary": "..."}.
+- If you cannot cover every page, set qa_pass.status="FAIL" and explain missing pages in qa_pass.checks.
+
+B) MULTI-LOT (MANDATORY)
+- Extract ALL occurrences of "Lotto N". Add top-level "lot_index": [{"lot":1,"page":X,"quote":"..."}, ...]
+- If 2+ lots exist, you are FORBIDDEN to output "Lotto Unico".
+
+C) EVIDENCE-LOCKED
+- Any SI/NO status requires evidence. Without evidence -> "NON_SPECIFICATO".
+
+D) MONEY BOX HONESTY
+- Never attach € amounts to items marked "Non specificato in Perizia". Use TBD.
+- If you add estimates, label clearly: "STIMA NEXODIFY (NON IN PERIZIA)".
+
+E) OUTPUT
+- Return ONLY valid JSON (no markdown)."""
 async def analyze_perizia_with_llm(pdf_text: str, pages: List[Dict], file_name: str, user: User, case_id: str, run_id: str, input_sha256: str) -> Dict:
     """Analyze perizia using LLM with comprehensive ROMA STANDARD prompt"""
     from emergentintegrations.llm.chat import LlmChat, UserMessage
