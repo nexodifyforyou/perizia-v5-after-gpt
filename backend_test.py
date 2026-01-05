@@ -1992,12 +1992,17 @@ def main():
         tester.test_auth_me_with_token(session_token)
         tester.test_dashboard_stats()
         
-        # MAIN FOCUS: DETERMINISTIC PATCHES TESTING
-        print("\n🎯 MAIN FOCUS: DETERMINISTIC PATCHES TESTING (CHANGES 1-6)...")
+        # MAIN FOCUS: DETERMINISTIC PATCHES TESTING FOR IMAGE FORENSICS AND ASSISTANT
+        print("\n🎯 MAIN FOCUS: DETERMINISTIC PATCHES TESTING - IMAGE FORENSICS & ASSISTANT...")
+        tester.test_image_forensics_deterministic_patches()
+        tester.test_assistant_deterministic_patches()
+        
+        # SECONDARY: Previous deterministic patches testing
+        print("\n🔄 SECONDARY: Previous Deterministic Patches Testing (CHANGES 1-6)...")
         tester.test_deterministic_patches_comprehensive()
         
-        # SECONDARY: Google Document AI OCR Integration Test
-        print("\n🔄 SECONDARY: Google Document AI OCR Integration Test...")
+        # TERTIARY: Google Document AI OCR Integration Test
+        print("\n🔄 TERTIARY: Google Document AI OCR Integration Test...")
         tester.test_google_docai_perizia_extraction()
         
         # DELETE ENDPOINTS TESTING
