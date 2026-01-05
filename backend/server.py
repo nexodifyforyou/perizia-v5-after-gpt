@@ -1087,17 +1087,57 @@ INIZIA L'ANALISI:"""
             result = json.loads(response_text)
         except json.JSONDecodeError as e:
             logger.error(f"PASS 1 JSON parse error: {e}")
-            return create_fallback_analysis(file_name, case_id, run_id, pages, pdf_text, detected_lots)
+            return create_fallback_analysis(file_name, case_id, run_id, pages, pdf_text, extracted_lots, detected_legal_killers)
         
         # ===========================================================================
-        # POST-PARSE DETERMINISTIC FIXES (CHANGE 2, 3, 4)
+        # POST-PARSE: INJECT DETERMINISTIC LOT DATA
         # ===========================================================================
         
-        # ---- CHANGE 2: Deterministic multi-lot override (no "Lotto Unico" lies) ----
-        lots = detected_lots.get("lots", [])
-        if isinstance(lots, list) and len(lots) >= 2:
-            # Ensure report_header exists
+        # Add extracted lots to result
+        result["lots"] = extracted_lots
+        result["lots_count"] = len(extracted_lots)
+        
+        # Update report_header with multi-lot info
+        if len(extracted_lots) >= 2:
             hdr = result.setdefault("report_header", {})
+            lot_nums = [str(lot["lot_number"]) for lot in extracted_lots]
+            hdr["lotto"] = {
+                "value": "Lotti " + ", ".join(lot_nums),
+                "evidence": [lot.get("evidence", {}).get("prezzo_base", [{}])[0] for lot in extracted_lots if lot.get("evidence", {}).get("prezzo_base")]
+            }
+            hdr["is_multi_lot"] = True
+        elif len(extracted_lots) == 1:
+            hdr = result.setdefault("report_header", {})
+            hdr["lotto"] = {
+                "value": f"Lotto {extracted_lots[0]['lot_number']}",
+                "evidence": extracted_lots[0].get("evidence", {}).get("prezzo_base", [])
+            }
+            hdr["is_multi_lot"] = False
+        
+        # Add deterministic legal killers
+        if detected_legal_killers:
+            lk_section = result.setdefault("section_9_legal_killers", {"items": []})
+            existing_titles = {item.get("killer", item.get("title", "")) for item in lk_section.get("items", [])}
+            for lk in detected_legal_killers:
+                if lk["title"] not in existing_titles:
+                    lk_section["items"].append({
+                        "killer": lk["title"],
+                        "status": "SI" if lk["severity"] == "ROSSO" else "GIALLO",
+                        "action": "Verifica obbligatoria",
+                        "evidence": [{"page": lk["page"], "quote": lk["quote"]}]
+                    })
+        
+        # ===========================================================================
+        # Enforce evidence-locked legal killers + placeholder cleanup
+        # ===========================================================================
+        lk = result.get("section_9_legal_killers", {})
+        items = lk.get("items", []) if isinstance(lk, dict) else []
+        for it in items:
+            status = str(it.get("status", "NON_SPECIFICATO")).upper()
+            ev = it.get("evidence", [])
+            if status in ("SI", "NO", "YES") and not has_evidence(ev):
+                it["status"] = "NON_SPECIFICATO"
+                it.setdefault("action", "Verifica obbligatoria")
             lotto_obj = hdr.setdefault("lotto", {"value": "Non specificato in Perizia", "evidence": []})
             lotto_obj["value"] = "Lotti " + ", ".join(str(x) for x in lots)
             lotto_obj["evidence"] = detected_lots.get("evidence", [])
