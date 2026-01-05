@@ -1510,16 +1510,16 @@ def create_fallback_analysis(file_name: str, case_id: str, run_id: str, pages: L
         },
         "money_box": {
             "items": [
-                {"code": "A", "label_it": "Regolarizzazione urbanistica", "label_en": "Urban regularization", "type": "NOT_SPECIFIED", "action_required_it": "Verificare con tecnico", "action_required_en": "Verify with technician"},
-                {"code": "B", "label_it": "Oneri tecnici / istruttoria", "label_en": "Technical fees", "type": "NEXODIFY_ESTIMATE", "range": {"min": 5000, "max": 25000}, "source": "NEXODIFY_ESTIMATE"},
-                {"code": "C", "label_it": "Rischio ripristini", "label_en": "Restoration risk", "type": "NEXODIFY_ESTIMATE", "range": {"min": 10000, "max": 40000}, "source": "NEXODIFY_ESTIMATE"},
-                {"code": "D", "label_it": "Allineamento catastale", "label_en": "Cadastral alignment", "type": "NEXODIFY_ESTIMATE", "range": {"min": 1000, "max": 2000}, "source": "NEXODIFY_ESTIMATE"},
-                {"code": "E", "label_it": "Spese condominiali arretrate", "label_en": "Condo arrears", "type": "NOT_SPECIFIED", "action_required_it": "Verificare con amministratore", "action_required_en": "Verify with administrator"},
-                {"code": "F", "label_it": "Costi procedura", "label_en": "Procedure costs", "type": "NOT_SPECIFIED", "action_required_it": "Verificare con delegato", "action_required_en": "Verify with delegate"},
-                {"code": "G", "label_it": "Cancellazione formalità", "label_en": "Formality cancellation", "type": "INFO_ONLY", "note_it": "Solitamente con decreto di trasferimento"},
-                {"code": "H", "label_it": "Costo liberazione", "label_en": "Liberation cost", "type": "NEXODIFY_ESTIMATE", "value": 1500, "source": "NEXODIFY_ESTIMATE"}
+                {"code": "A", "label_it": "Regolarizzazione urbanistica", "label_en": "Urban regularization", "type": "NOT_SPECIFIED", "stima_euro": 0, "stima_nota": "TBD (NON SPECIFICATO IN PERIZIA) — Verifica tecnico", "action_required_it": "Verificare con tecnico", "action_required_en": "Verify with technician"},
+                {"code": "B", "label_it": "Oneri tecnici / istruttoria", "label_en": "Technical fees", "type": "NOT_SPECIFIED", "stima_euro": 0, "stima_nota": "TBD (NON SPECIFICATO IN PERIZIA)", "source": "NOT_SPECIFIED"},
+                {"code": "C", "label_it": "Rischio ripristini", "label_en": "Restoration risk", "type": "NOT_SPECIFIED", "stima_euro": 0, "stima_nota": "TBD (NON SPECIFICATO IN PERIZIA)", "source": "NOT_SPECIFIED"},
+                {"code": "D", "label_it": "Allineamento catastale", "label_en": "Cadastral alignment", "type": "NOT_SPECIFIED", "stima_euro": 0, "stima_nota": "TBD (NON SPECIFICATO IN PERIZIA)", "source": "NOT_SPECIFIED"},
+                {"code": "E", "label_it": "Spese condominiali arretrate", "label_en": "Condo arrears", "type": "NOT_SPECIFIED", "stima_euro": 0, "stima_nota": "TBD (NON SPECIFICATO IN PERIZIA)", "action_required_it": "Verificare con amministratore", "action_required_en": "Verify with administrator"},
+                {"code": "F", "label_it": "Costi procedura", "label_en": "Procedure costs", "type": "NOT_SPECIFIED", "stima_euro": 0, "stima_nota": "TBD (NON SPECIFICATO IN PERIZIA)", "action_required_it": "Verificare con delegato", "action_required_en": "Verify with delegate"},
+                {"code": "G", "label_it": "Cancellazione formalità", "label_en": "Formality cancellation", "type": "INFO_ONLY", "stima_euro": 0, "stima_nota": "Solitamente con decreto di trasferimento"},
+                {"code": "H", "label_it": "Costo liberazione", "label_en": "Liberation cost", "type": "NOT_SPECIFIED", "stima_euro": 0, "stima_nota": "TBD (NON SPECIFICATO IN PERIZIA)", "source": "NOT_SPECIFIED"}
             ],
-            "total_extra_costs": {"range": {"min": 17500, "max": 68500}, "max_is_open": True}
+            "total_extra_costs": {"range": {"min": 0, "max": 0}, "max_is_open": True}
         },
         "dati_certi_del_lotto": {
             "prezzo_base_asta": {"value": prezzo_base, "formatted": f"€{prezzo_base:,.0f}" if prezzo_base else "NOT_SPECIFIED", "evidence": []},
