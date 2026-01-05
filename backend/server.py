@@ -2082,7 +2082,7 @@ app.include_router(api_router)
 FRONTEND_URL = os.environ.get('FRONTEND_URL', '')
 CORS_ORIGINS = [
     "http://localhost:3000",
-    "https://property-analyzer-10.preview.emergentagent.com",
+    "https://repo-setup-31.preview.emergentagent.com",
 ]
 # Add any additional origins from environment
 if FRONTEND_URL and FRONTEND_URL not in CORS_ORIGINS:

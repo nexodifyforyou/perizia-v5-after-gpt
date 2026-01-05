@@ -12,7 +12,7 @@ from datetime import datetime
 import subprocess
 
 class PeriziaExtractionTester:
-    def __init__(self, base_url="https://property-analyzer-10.preview.emergentagent.com"):
+    def __init__(self, base_url="https://repo-setup-31.preview.emergentagent.com"):
         self.base_url = base_url
         self.token = None
         self.test_results = []

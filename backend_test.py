@@ -10,7 +10,7 @@ from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.ttfonts import TTFont
 
 class NexodifyAPITester:
-    def __init__(self, base_url="https://property-analyzer-10.preview.emergentagent.com"):
+    def __init__(self, base_url="https://repo-setup-31.preview.emergentagent.com"):
         self.base_url = base_url
         self.token = None
         self.tests_run = 0
