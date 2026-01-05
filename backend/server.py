@@ -1653,6 +1653,15 @@ def create_fallback_analysis(file_name: str, case_id: str, run_id: str, pages: L
             except:
                 pass
     
+    # Find superficie
+    superficie = "NON SPECIFICATO IN PERIZIA"
+    if extracted_lots and extracted_lots[0].get("superficie_mq"):
+        superficie = extracted_lots[0]["superficie_mq"]
+    else:
+        sup_match = re.search(r'superficie[^\d]*(\d+[\d\.,]*)\s*mq', text_lower)
+        if sup_match:
+            superficie = f"{sup_match.group(1)} mq"
+    
     # Build legal killers from deterministic scan
     legal_killers_items = []
     for lk in detected_legal_killers:
