@@ -1992,11 +1992,15 @@ async def download_perizia_pdf(analysis_id: str, request: Request):
     )
 
 def generate_report_html(analysis: Dict, result: Dict) -> str:
-    """Generate HTML report from analysis - supports ROMA STANDARD format"""
+    """Generate HTML report from analysis - supports ROMA STANDARD format with multi-lot"""
     
     # Support both old and new format
     report_header = result.get("report_header", {})
     case_header = result.get("case_header", report_header)
+    
+    # Get lots for multi-lot support
+    lots = result.get("lots", [])
+    is_multi_lot = len(lots) > 1
     
     section1 = result.get("section_1_semaforo_generale", {})
     semaforo = result.get("semaforo_generale", section1)
@@ -2021,28 +2025,84 @@ def generate_report_html(analysis: Dict, result: Dict) -> str:
     
     summary = result.get("summary_for_client", {})
     
-    # Get values with fallbacks
+    # Get values with fallbacks - normalize placeholders
+    def normalize(val):
+        if val in [None, "None", "N/A", "NOT_SPECIFIED_IN_PERIZIA", "NOT_SPECIFIED", "UNKNOWN", ""]:
+            return "NON SPECIFICATO IN PERIZIA"
+        return val
+    
     procedure = case_header.get("procedure", {}).get("value") if isinstance(case_header.get("procedure"), dict) else case_header.get("procedure_id", "N/A")
     tribunale = case_header.get("tribunale", {}).get("value") if isinstance(case_header.get("tribunale"), dict) else case_header.get("tribunale", "N/A")
     lotto = case_header.get("lotto", {}).get("value") if isinstance(case_header.get("lotto"), dict) else case_header.get("lotto", "N/A")
     address = case_header.get("address", {}).get("value") if isinstance(case_header.get("address"), dict) else case_header.get("address", "N/A")
     
-    prezzo_base = dati.get("prezzo_base_asta", {})
-    prezzo_value = prezzo_base.get("formatted") or f"€{prezzo_base.get('value', 0):,}" if isinstance(prezzo_base, dict) else str(prezzo_base)
+    procedure = normalize(procedure)
+    tribunale = normalize(tribunale)
+    lotto = normalize(lotto)
+    address = normalize(address)
+    
+    # Handle prezzo base - for multi-lot, show all lots
+    if is_multi_lot:
+        prezzo_value = "MULTI-LOTTO"
+    else:
+        prezzo_base = dati.get("prezzo_base_asta", {})
+        prezzo_value = prezzo_base.get("formatted") or f"€{prezzo_base.get('value', 0):,}" if isinstance(prezzo_base, dict) else str(prezzo_base)
     
     semaforo_status = semaforo.get("status", "AMBER")
     semaforo_color = "#10b981" if semaforo_status == "GREEN" or semaforo_status == "VERDE" else "#f59e0b" if semaforo_status == "AMBER" or semaforo_status == "GIALLO" else "#ef4444"
     
-    # Build money box items HTML
+    # Build multi-lot table if applicable
+    lots_html = ""
+    if is_multi_lot:
+        lots_html = '<div class="section"><h2>📊 LOTTI</h2><table class="lots-table"><thead><tr><th>Lotto</th><th>Prezzo Base</th><th>Ubicazione</th><th>Superficie</th><th>Diritto</th></tr></thead><tbody>'
+        for lot in lots:
+            lots_html += f'''<tr>
+                <td style="color:#D4AF37;">Lotto {lot.get("lot_number", "?")}</td>
+                <td style="color:#10b981;">{lot.get("prezzo_base_eur", "TBD")}</td>
+                <td>{normalize(lot.get("ubicazione", ""))[:50]}</td>
+                <td>{lot.get("superficie_mq", "TBD")}</td>
+                <td>{normalize(lot.get("diritto_reale", ""))[:20]}</td>
+            </tr>'''
+        lots_html += '</tbody></table></div>'
+    
+    # Build money box items HTML - handle TBD values
     money_items_html = ""
+    money_total_min = 0
+    money_total_max = 0
+    all_tbd = True
+    
     for item in money_box.get("items", []):
         voce = item.get("voce") or item.get("label_it") or item.get("code", "")
         stima = item.get("stima_euro", 0)
         nota = item.get("stima_nota", "")
         fonte = item.get("fonte_perizia", {}).get("value", "") if isinstance(item.get("fonte_perizia"), dict) else ""
         
-        value_display = f"€{stima:,}" if stima else nota or "Verifica"
-        money_items_html += f'<div class="money-item"><span>{voce}</span><span class="page-ref">{fonte}</span><span style="color: #D4AF37;">{value_display}</span></div>'
+        # Handle TBD values
+        if stima == "TBD" or (isinstance(stima, str) and "TBD" in stima):
+            value_display = "TBD"
+            value_color = "#f59e0b"  # Amber for TBD
+        elif isinstance(stima, (int, float)) and stima > 0:
+            value_display = f"€{stima:,.0f}"
+            value_color = "#10b981"  # Green for real values
+            all_tbd = False
+            money_total_min += stima
+            money_total_max += stima
+        else:
+            value_display = nota if nota else "TBD"
+            value_color = "#f59e0b"
+        
+        money_items_html += f'<div class="money-item"><span>{voce}</span><span class="page-ref">{normalize(fonte)}</span><span style="color: {value_color}; font-weight: bold;">{value_display}</span></div>'
+    
+    # Build money total - handle TBD
+    money_total = money_box.get("totale_extra_budget", money_box.get("total_extra_costs", {}))
+    if all_tbd or money_total.get("min") == "TBD":
+        total_display = "TBD"
+        total_note = "Costi non quantificati in perizia — Verifica tecnico/legale obbligatoria"
+    else:
+        total_min = money_total.get("min", money_total_min) if isinstance(money_total.get("min"), (int, float)) else money_total_min
+        total_max = money_total.get("max", money_total_max) if isinstance(money_total.get("max"), (int, float)) else int(money_total_min * 1.2)
+        total_display = f"€{total_min:,.0f} - €{total_max:,.0f}"
+        total_note = money_total.get("nota", f"Costi extra stimati (min-max)")
     
     # Build legal killers HTML
     legal_items = legal_killers.get("items", []) if isinstance(legal_killers, dict) and "items" in legal_killers else []
@@ -2050,9 +2110,18 @@ def generate_report_html(analysis: Dict, result: Dict) -> str:
     for item in legal_items:
         killer = item.get("killer", "")
         status = item.get("status", "NON_SPECIFICATO")
-        action = item.get("action", "")
+        evidence = item.get("evidence", [])
+        page_ref = f"p. {evidence[0].get('page', '?')}" if evidence else ""
         status_color = "#ef4444" if status == "SI" or status == "YES" else "#10b981" if status == "NO" else "#f59e0b"
-        legal_html += f'<div class="legal-item"><span class="status-dot" style="background:{status_color}"></span><span>{killer}</span><span class="status">{status}</span></div>'
+        legal_html += f'<div class="legal-item"><span class="status-dot" style="background:{status_color}"></span><span>{killer}</span><span class="page-ref">{page_ref}</span><span class="status">{status}</span></div>'
+    
+    # If no legal killers from items, check legacy format
+    if not legal_html and isinstance(legal_killers, dict):
+        for key, value in legal_killers.items():
+            if key != "items" and isinstance(value, dict):
+                status = value.get("status", "NON_SPECIFICATO")
+                status_color = "#ef4444" if status == "SI" or status == "YES" else "#10b981" if status == "NO" else "#f59e0b"
+                legal_html += f'<div class="legal-item"><span class="status-dot" style="background:{status_color}"></span><span>{key.replace("_", " ").title()}</span><span class="status">{status}</span></div>'
     
     # Build checklist HTML
     checklist_items = checklist if isinstance(checklist, list) else []
