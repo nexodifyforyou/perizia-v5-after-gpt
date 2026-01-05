@@ -243,14 +243,18 @@ metadata:
 
 test_plan:
   current_focus:
-    - "ROMA STANDARD Format Display"
+    - "Deterministic Patches Testing"
+    - "Full-Document Coverage"
+    - "Multi-Lot Detection"
+    - "Evidence-Locked Legal Killers"
+    - "Money Box Honesty"
   stuck_tasks: []
   test_all: false
   test_priority: "high_first"
 
 agent_communication:
   - agent: "main"
-    message: "Previous agent implemented evidence display feature (P0) but never tested it. Please run end-to-end test: 1) Login via Google OAuth 2) Upload a sample PDF perizia 3) Verify the API response contains 'evidence' arrays with 'page' and 'quote' keys 4) Verify the frontend displays page numbers and quotes. Also test authentication persistence - check if user stays logged in after page refresh."
+    message: "CRITICAL DETERMINISTIC PATCHES APPLIED to backend. Changes include: 1) CHANGE 1 - Full-document coverage via per-page compression (character-budgeted) - no more truncation, 2) CHANGE 2 - Deterministic multi-lot detection preventing false 'Lotto Unico' outputs, 3) CHANGE 3 - Evidence-locked facts + tri-state legal killers (SI/NO only with evidence, otherwise NON_SPECIFICATO), 4) CHANGE 4 - Money Box honesty (no € with 'Non specificato' or empty evidence), 5) CHANGE 5 - Updated LLM system prompt with strict QA gates, 6) CHANGE 6 - Updated user prompt with enforceable constraints. ACCEPTANCE TEST REQUIRED: 1) Upload PDF with 80+ pages - verify page_coverage_log length == pages_total, 2) If document has multiple lots, verify lot_index lists all lots and report_header.lotto != 'Lotto Unico', 3) Verify Money Box has no € values in rows where fonte is 'Non specificato' or evidence empty, 4) Verify Legal killers have SI/NO only with evidence (otherwise NON_SPECIFICATO), 5) Verify qa_pass.status=FAIL if any above rules violated."
   - agent: "testing"
     message: "✅ BACKEND TESTING COMPLETE - All critical features working! Evidence display feature (P0) is fully functional. Created comprehensive test with Italian legal PDF content. LLM properly extracts evidence with page numbers and quotes for all fields. Authentication system working correctly. All backend APIs tested and functional. Ready for frontend testing or main agent can summarize and finish. Minor issues: Session auth returns 500 with invalid session_id (expected), file upload validation returns 422 instead of 401 without auth (minor validation order issue)."
   - agent: "testing"
