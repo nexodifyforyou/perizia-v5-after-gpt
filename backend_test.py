@@ -2392,7 +2392,7 @@ def create_test_user_and_session():
 
 def main():
     print("🚀 Starting Nexodify Forensic Engine API Tests")
-    print("🎯 FOCUS: DETERMINISTIC PATCHES Testing (CHANGES 1-6)")
+    print("🎯 FOCUS: MULTI-LOT and CORRECTNESS PATCHES Testing (Review Request)")
     print("=" * 60)
     
     # Create test user and session
@@ -2415,17 +2415,21 @@ def main():
         tester.test_auth_me_with_token(session_token)
         tester.test_dashboard_stats()
         
-        # MAIN FOCUS: DETERMINISTIC PATCHES TESTING FOR IMAGE FORENSICS AND ASSISTANT
-        print("\n🎯 MAIN FOCUS: DETERMINISTIC PATCHES TESTING - IMAGE FORENSICS & ASSISTANT...")
+        # MAIN FOCUS: REVIEW REQUEST TESTING - MULTI-LOT and CORRECTNESS PATCHES
+        print("\n🎯 MAIN FOCUS: REVIEW REQUEST - MULTI-LOT and CORRECTNESS PATCHES...")
+        tester.test_review_request_multi_lot_correctness_patches()
+        
+        # SECONDARY: DETERMINISTIC PATCHES TESTING FOR IMAGE FORENSICS AND ASSISTANT
+        print("\n🔄 SECONDARY: DETERMINISTIC PATCHES TESTING - IMAGE FORENSICS & ASSISTANT...")
         tester.test_image_forensics_deterministic_patches()
         tester.test_assistant_deterministic_patches()
         
-        # SECONDARY: Previous deterministic patches testing
-        print("\n🔄 SECONDARY: Previous Deterministic Patches Testing (CHANGES 1-6)...")
+        # TERTIARY: Previous deterministic patches testing
+        print("\n🔄 TERTIARY: Previous Deterministic Patches Testing (CHANGES 1-6)...")
         tester.test_deterministic_patches_comprehensive()
         
-        # TERTIARY: Google Document AI OCR Integration Test
-        print("\n🔄 TERTIARY: Google Document AI OCR Integration Test...")
+        # QUATERNARY: Google Document AI OCR Integration Test
+        print("\n🔄 QUATERNARY: Google Document AI OCR Integration Test...")
         tester.test_google_docai_perizia_extraction()
         
         # DELETE ENDPOINTS TESTING
