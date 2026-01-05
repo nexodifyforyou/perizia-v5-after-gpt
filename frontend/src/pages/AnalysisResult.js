@@ -662,11 +662,66 @@ const AnalysisResult = () => {
                 evidence={getEvidence(abusi.conformita_catastale)}
               />
               <DataValueWithEvidence 
+                label="Agibilità/Abitabilità" 
+                value={abusi.agibilita?.status || 'Non specificato'}
+                evidence={getEvidence(abusi.agibilita)}
+              />
+              <DataValueWithEvidence 
+                label="APE (Certificato Energetico)" 
+                value={abusi.ape?.status || 'Non specificato'}
+                evidence={getEvidence(abusi.ape)}
+              />
+              <DataValueWithEvidence 
                 label="Diritto Reale" 
                 value={dati.diritto_reale?.value || dati.diritto_reale}
                 evidence={getEvidence(dati.diritto_reale)}
               />
             </div>
+            
+            {/* Impianti Section */}
+            {abusi.impianti && (
+              <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-4">
+                <h3 className="text-sm font-semibold text-zinc-100 mb-3">Conformità Impianti</h3>
+                <div className="grid grid-cols-3 gap-4">
+                  <div className={`text-center p-3 rounded-lg ${
+                    abusi.impianti.elettrico?.conformita === 'SI' ? 'bg-emerald-500/10 border border-emerald-500/30' :
+                    abusi.impianti.elettrico?.conformita === 'NO' ? 'bg-red-500/10 border border-red-500/30' :
+                    'bg-amber-500/10 border border-amber-500/30'
+                  }`}>
+                    <p className="text-xs text-zinc-400 mb-1">⚡ Elettrico</p>
+                    <p className={`text-sm font-bold ${
+                      abusi.impianti.elettrico?.conformita === 'SI' ? 'text-emerald-400' :
+                      abusi.impianti.elettrico?.conformita === 'NO' ? 'text-red-400' :
+                      'text-amber-400'
+                    }`}>{abusi.impianti.elettrico?.conformita || 'NON RISULTA'}</p>
+                  </div>
+                  <div className={`text-center p-3 rounded-lg ${
+                    abusi.impianti.termico?.conformita === 'SI' ? 'bg-emerald-500/10 border border-emerald-500/30' :
+                    abusi.impianti.termico?.conformita === 'NO' ? 'bg-red-500/10 border border-red-500/30' :
+                    'bg-amber-500/10 border border-amber-500/30'
+                  }`}>
+                    <p className="text-xs text-zinc-400 mb-1">🔥 Termico</p>
+                    <p className={`text-sm font-bold ${
+                      abusi.impianti.termico?.conformita === 'SI' ? 'text-emerald-400' :
+                      abusi.impianti.termico?.conformita === 'NO' ? 'text-red-400' :
+                      'text-amber-400'
+                    }`}>{abusi.impianti.termico?.conformita || 'NON RISULTA'}</p>
+                  </div>
+                  <div className={`text-center p-3 rounded-lg ${
+                    abusi.impianti.idrico?.conformita === 'SI' ? 'bg-emerald-500/10 border border-emerald-500/30' :
+                    abusi.impianti.idrico?.conformita === 'NO' ? 'bg-red-500/10 border border-red-500/30' :
+                    'bg-amber-500/10 border border-amber-500/30'
+                  }`}>
+                    <p className="text-xs text-zinc-400 mb-1">💧 Idrico</p>
+                    <p className={`text-sm font-bold ${
+                      abusi.impianti.idrico?.conformita === 'SI' ? 'text-emerald-400' :
+                      abusi.impianti.idrico?.conformita === 'NO' ? 'text-red-400' :
+                      'text-amber-400'
+                    }`}>{abusi.impianti.idrico?.conformita || 'NON RISULTA'}</p>
+                  </div>
+                </div>
+              </div>
+            )}
             
             {/* Indice di Convenienza */}
             {(indice.all_in_light_min || indice.all_in_light_max || indice.prezzo_base) && (
