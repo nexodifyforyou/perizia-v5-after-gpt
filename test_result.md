@@ -150,7 +150,7 @@ backend:
     file: "/app/backend/server.py"
     stuck_count: 0
     priority: "medium"
-    needs_retesting: true
+    needs_retesting: false
     status_history:
       - working: "NA"
         agent: "main"
@@ -161,6 +161,9 @@ backend:
       - working: "NA"
         agent: "main"
         comment: "DETERMINISTIC PATCHES APPLIED: Added evidence-locked findings, confidence tracking (HIGH/MEDIUM/LOW), QA gates, honesty rules (NON_VERIFICABILE for uncertain findings), limitations disclosure. Schema updated to v2."
+      - working: true
+        agent: "testing"
+        comment: "✅ DETERMINISTIC PATCHES TEST PASSED: Image Forensics endpoint working correctly with evidence-locked responses. Schema version 'nexodify_image_forensics_v2' verified. All required fields present: findings array with confidence (HIGH/MEDIUM/LOW), evidence descriptions, severity including NON_VERIFICABILE option, overall_assessment with risk_level and confidence, limitations array, qa_pass with all 4 required checks (QA-ImageCount, QA-EvidenceLocked, QA-ConfidenceHonesty, QA-NoHallucination). Honest output verified: LOW confidence findings and NON_VERIFICABILE status appropriate for no real vision model. All 6/6 verification checks passed."
 
   - task: "Assistant Q&A"
     implemented: true
