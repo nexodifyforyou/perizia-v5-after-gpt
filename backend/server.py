@@ -2154,6 +2154,7 @@ def generate_report_html(analysis: Dict, result: Dict) -> str:
         .money-item {{ display: flex; justify-content: space-between; align-items: center; padding: 12px; background: #09090b; border-radius: 8px; margin-bottom: 8px; }}
         .total {{ background: #D4AF3720; border: 1px solid #D4AF3740; padding: 16px; border-radius: 8px; margin-top: 16px; }}
         .total-value {{ font-size: 24px; color: #D4AF37; font-weight: bold; }}
+        .total-tbd {{ font-size: 24px; color: #f59e0b; font-weight: bold; }}
         .legal-item {{ display: flex; align-items: center; gap: 12px; padding: 10px; background: #09090b; border-radius: 8px; margin-bottom: 6px; }}
         .status-dot {{ width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; }}
         .status {{ margin-left: auto; font-size: 12px; font-family: monospace; color: #a1a1aa; }}
@@ -2163,6 +2164,10 @@ def generate_report_html(analysis: Dict, result: Dict) -> str:
         .disclaimer {{ background: #27272a; padding: 16px; border-radius: 8px; margin-top: 40px; text-align: center; }}
         .disclaimer p {{ color: #71717a; font-size: 12px; }}
         .footer {{ text-align: center; margin-top: 40px; color: #52525b; font-size: 12px; }}
+        .lots-table {{ width: 100%; border-collapse: collapse; margin-top: 12px; }}
+        .lots-table th, .lots-table td {{ padding: 10px; text-align: left; border-bottom: 1px solid #27272a; }}
+        .lots-table th {{ color: #71717a; font-size: 11px; text-transform: uppercase; }}
+        .lots-table td {{ font-size: 14px; }}
         @media print {{ 
             body {{ background: white; color: black; padding: 20px; }} 
             .section {{ border-color: #e5e5e5; background: #f9f9f9; }} 
@@ -2201,6 +2206,8 @@ def generate_report_html(analysis: Dict, result: Dict) -> str:
             </div>
         </div>
         
+        {lots_html}
+        
         <div class="section">
             <h2>2. DECISIONE RAPIDA</h2>
             <p style="font-size: 18px; margin-bottom: 16px;">{decision.get('summary_it', 'Analisi completata')}</p>
@@ -2209,12 +2216,13 @@ def generate_report_html(analysis: Dict, result: Dict) -> str:
         
         <div class="section">
             <h2>3. PORTAFOGLIO COSTI (MONEY BOX)</h2>
-            {money_items_html or '<p style="color: #71717a;">Nessun dato disponibile</p>'}
+            {money_items_html or '<p style="color: #71717a;">Nessun dato sui costi disponibile - Verifica necessaria</p>'}
             <div class="total">
                 <div style="display: flex; justify-content: space-between; align-items: center;">
                     <span>TOTALE COSTI EXTRA STIMATI</span>
-                    <span class="total-value">€{money_box.get('totale_extra_budget', {}).get('min', money_box.get('total_extra_costs', {}).get('range', {}).get('min', 0)):,} - €{money_box.get('totale_extra_budget', {}).get('max', money_box.get('total_extra_costs', {}).get('range', {}).get('max', 0)):,}</span>
+                    <span class="{'total-tbd' if total_display == 'TBD' else 'total-value'}">{total_display}</span>
                 </div>
+                <p style="font-size: 12px; color: #71717a; margin-top: 8px;">{total_note}</p>
             </div>
         </div>
         
@@ -2227,7 +2235,7 @@ def generate_report_html(analysis: Dict, result: Dict) -> str:
                 </div>
                 <div class="field">
                     <div class="field-label">Superficie</div>
-                    <div class="field-value">{dati.get('superficie_catastale', {}).get('value', 'N/A') if isinstance(dati.get('superficie_catastale'), dict) else dati.get('superficie_catastale', 'N/A')}</div>
+                    <div class="field-value">{normalize(dati.get('superficie_catastale', {}).get('value', 'NON SPECIFICATO') if isinstance(dati.get('superficie_catastale'), dict) else dati.get('superficie_catastale', 'NON SPECIFICATO'))}</div>
                 </div>
                 <div class="field">
                     <div class="field-label">Composizione Lotto</div>
