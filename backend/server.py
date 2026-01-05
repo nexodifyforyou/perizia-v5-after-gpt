@@ -1590,7 +1590,13 @@ def create_fallback_analysis(file_name: str, case_id: str, run_id: str, pages: L
         "qa": {
             "status": "WARN",
             "reasons": [
-                {"code": "PARTIAL_EXTRACTION", "severity": "AMBER", "reason_it": "Estrazione automatica parziale", "reason_en": "Partial automatic extraction"}
+                {"code": "PARTIAL_EXTRACTION", "severity": "AMBER", "reason_it": "Estrazione automatica parziale - LLM fallback", "reason_en": "Partial automatic extraction - LLM fallback"},
+                {"code": "NO_EVIDENCE", "severity": "AMBER", "reason_it": "Nessuna evidence estratta - verifica manuale", "reason_en": "No evidence extracted - manual verification needed"}
+            ],
+            "checks": [
+                {"code": "QA-PageCoverage", "result": "WARN", "note": f"Fallback mode - page_coverage_log created with {len(pages)} placeholder entries"},
+                {"code": "QA-MoneyBox-Honesty", "result": "OK", "note": "All values set to TBD (no fake estimates)"},
+                {"code": "QA-Lotto", "result": "OK" if lots else "WARN", "note": f"Detected lots: {lots}" if lots else "No lots detected"}
             ]
         }
     }
