@@ -150,7 +150,7 @@ backend:
     file: "/app/backend/server.py"
     stuck_count: 0
     priority: "medium"
-    needs_retesting: false
+    needs_retesting: true
     status_history:
       - working: "NA"
         agent: "main"
@@ -158,6 +158,9 @@ backend:
       - working: true
         agent: "testing"
         comment: "✅ Image forensics endpoint functional. Returns proper JSON structure with findings array, schema version, and disclaimers. Quota system working correctly."
+      - working: "NA"
+        agent: "main"
+        comment: "DETERMINISTIC PATCHES APPLIED: Added evidence-locked findings, confidence tracking (HIGH/MEDIUM/LOW), QA gates, honesty rules (NON_VERIFICABILE for uncertain findings), limitations disclosure. Schema updated to v2."
 
   - task: "Assistant Q&A"
     implemented: true
@@ -165,7 +168,7 @@ backend:
     file: "/app/backend/server.py"
     stuck_count: 0
     priority: "medium"
-    needs_retesting: false
+    needs_retesting: true
     status_history:
       - working: "NA"
         agent: "main"
@@ -173,6 +176,9 @@ backend:
       - working: true
         agent: "testing"
         comment: "✅ Assistant Q&A working perfectly. Responds in both Italian and English with comprehensive real estate risk analysis. Includes proper disclaimers and safety warnings. LLM integration functional with context awareness."
+      - working: "NA"
+        agent: "main"
+        comment: "DETERMINISTIC PATCHES APPLIED: Added evidence-locked responses with source tracking, confidence tracking (HIGH/MEDIUM/LOW), tri-state answers (needs_more_info, out_of_scope), QA gates, enhanced perizia context extraction. Schema updated to v2."
 
   - task: "DELETE Endpoints for Nexodify Forensic Engine"
     implemented: true
