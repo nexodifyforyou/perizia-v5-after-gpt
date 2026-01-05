@@ -27,25 +27,50 @@ import { toast } from 'sonner';
 
 const API_URL = process.env.REACT_APP_BACKEND_URL;
 
-// Helper function to safely render any value
-const safeRender = (value, fallback = 'N/A') => {
-  if (value === null || value === undefined) return fallback;
-  if (typeof value === 'string') return value || fallback;
-  if (typeof value === 'number') return value.toString();
-  if (typeof value === 'boolean') return value ? 'Sì' : 'No';
-  if (Array.isArray(value)) {
-    if (value.length === 0) return fallback;
-    return value.map(v => safeRender(v, '')).filter(Boolean).join(', ') || fallback;
+// Helper function to normalize placeholder values
+const normalizePlaceholder = (value) => {
+  if (value === null || value === undefined) return 'NON SPECIFICATO IN PERIZIA';
+  if (typeof value === 'string') {
+    const upper = value.toUpperCase();
+    if (upper === 'NONE' || upper === 'N/A' || upper === 'NOT_SPECIFIED_IN_PERIZIA' || 
+        upper === 'NOT_SPECIFIED' || upper === 'UNKNOWN' || value === '') {
+      return 'NON SPECIFICATO IN PERIZIA';
+    }
   }
-  if (typeof value === 'object') {
-    if (value.value !== undefined) return safeRender(value.value, fallback);
-    if (value.status) return safeRender(value.status, fallback);
-    if (value.formatted) return safeRender(value.formatted, fallback);
-    if (value.label_it) return safeRender(value.label_it, fallback);
-    if (value.full) return safeRender(value.full, fallback);
+  return value;
+};
+
+// Helper function to safely render any value - replaces placeholders
+const safeRender = (value, fallback = 'NON SPECIFICATO IN PERIZIA') => {
+  const normalized = normalizePlaceholder(value);
+  if (normalized === 'NON SPECIFICATO IN PERIZIA') return fallback === 'N/A' ? 'NON SPECIFICATO IN PERIZIA' : fallback;
+  
+  if (typeof normalized === 'string') return normalized;
+  if (typeof normalized === 'number') return normalized.toString();
+  if (typeof normalized === 'boolean') return normalized ? 'Sì' : 'No';
+  if (Array.isArray(normalized)) {
+    if (normalized.length === 0) return fallback;
+    return normalized.map(v => safeRender(v, '')).filter(Boolean).join(', ') || fallback;
+  }
+  if (typeof normalized === 'object') {
+    if (normalized.value !== undefined) return safeRender(normalized.value, fallback);
+    if (normalized.status) return safeRender(normalized.status, fallback);
+    if (normalized.formatted) return safeRender(normalized.formatted, fallback);
+    if (normalized.label_it) return safeRender(normalized.label_it, fallback);
+    if (normalized.full) return safeRender(normalized.full, fallback);
     return fallback;
   }
-  return String(value) || fallback;
+  return String(normalized) || fallback;
+};
+
+// Format money value - handles TBD and numbers
+const formatMoney = (value) => {
+  if (value === 'TBD' || value === null || value === undefined) return 'TBD';
+  if (typeof value === 'number') return `€${value.toLocaleString()}`;
+  if (typeof value === 'string' && !isNaN(parseFloat(value))) {
+    return `€${parseFloat(value).toLocaleString()}`;
+  }
+  return value;
 };
 
 // Get evidence from an object that might have it
