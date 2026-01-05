@@ -88,12 +88,18 @@ const MoneyBoxItem = ({ item }) => {
   const hasEvidence = evidence.length > 0;
   const pages = hasEvidence ? [...new Set(evidence.map(e => e.page).filter(Boolean))] : [];
 
-  // Format value - handle new format (stima_euro) and old format (value/range)
+  // Format value - handle TBD, numbers, and old format
   const formatValue = () => {
+    // Handle TBD explicitly
+    if (item.stima_euro === 'TBD') return 'TBD';
+    
     // New ROMA STANDARD format
     if (item.stima_euro !== undefined && item.stima_euro !== null) {
       const val = typeof item.stima_euro === 'number' ? item.stima_euro : parseFloat(item.stima_euro);
-      return isNaN(val) || val === 0 ? item.stima_nota || 'Da verificare' : `€${val.toLocaleString()}`;
+      if (isNaN(val) || val === 0) {
+        return item.stima_nota?.includes('TBD') ? 'TBD' : (item.stima_nota || 'Da verificare');
+      }
+      return `€${val.toLocaleString()}`;
     }
     // Old format
     const type = safeRender(item.type, 'UNKNOWN');
@@ -111,6 +117,8 @@ const MoneyBoxItem = ({ item }) => {
   const label = item.voce || item.label_it || item.label || 'Item';
   const code = item.code || label.charAt(0);
   const source = item.fonte_perizia?.value || item.source || '';
+  const displayValue = formatValue();
+  const isTBD = displayValue === 'TBD' || displayValue.includes('TBD');
 
   return (
     <div className="p-4 bg-zinc-950/50 rounded-lg border border-zinc-800">
@@ -126,18 +134,19 @@ const MoneyBoxItem = ({ item }) => {
               </span>
             )}
           </div>
-          {source && <p className="text-xs text-zinc-500">{source}</p>}
+          {source && <p className="text-xs text-zinc-500">{normalizePlaceholder(source)}</p>}
         </div>
         <div className="text-right">
           <span className={`font-mono text-sm font-bold ${
+            isTBD ? 'text-amber-400' :
             source.toLowerCase().includes('perizia') ? 'text-emerald-400' : 
             item.type === 'NEXODIFY_ESTIMATE' || item.stima_nota ? 'text-gold' : 'text-zinc-400'
           }`}>
-            {formatValue()}
+            {displayValue}
           </span>
         </div>
       </div>
-      {item.stima_nota && item.stima_euro > 0 && (
+      {item.stima_nota && !isTBD && item.stima_euro > 0 && (
         <p className="text-xs text-amber-400 mt-1">{item.stima_nota}</p>
       )}
       {item.action_required_it && (
