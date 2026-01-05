@@ -1605,78 +1605,91 @@ def apply_deterministic_fixes(result: Dict, pdf_text: str, pages: List[Dict], de
     
     return result
 
-def create_fallback_analysis(file_name: str, case_id: str, run_id: str, pages: List[Dict], pdf_text: str, detected_lots: Dict = None) -> Dict:
+def create_fallback_analysis(file_name: str, case_id: str, run_id: str, pages: List[Dict], pdf_text: str, extracted_lots: List[Dict] = None, detected_legal_killers: List[Dict] = None) -> Dict:
     """Create fallback analysis when LLM fails - extract what we can deterministically"""
     import re
     
-    detected_lots = detected_lots or {"lots": [], "evidence": []}
+    extracted_lots = extracted_lots or []
+    detected_legal_killers = detected_legal_killers or []
     
     # Try to extract basic info from text
     text_lower = pdf_text.lower()
     
     # Find procedure ID
-    procedure_id = "NOT_SPECIFIED_IN_PERIZIA"
+    procedure_id = "NON SPECIFICATO IN PERIZIA"
     proc_match = re.search(r'(r\.?g\.?e\.?|e\.?i\.?|esecuzione\s+immobiliare|procedura)\s*n?\.?\s*(\d+[/\-]?\d*)', text_lower)
     if proc_match:
         procedure_id = proc_match.group(0).upper()
     
     # Find tribunal
-    tribunale = "NOT_SPECIFIED_IN_PERIZIA"
+    tribunale = "NON SPECIFICATO IN PERIZIA"
     trib_match = re.search(r'tribunale\s+(di\s+)?([a-z\s]+)', text_lower)
     if trib_match:
         tribunale = "TRIBUNALE DI " + trib_match.group(2).strip().upper()
     
-    # Determine lotto value based on detected lots (CHANGE 2 - no "Lotto Unico" lies)
-    lots = detected_lots.get("lots", [])
-    if isinstance(lots, list) and len(lots) >= 2:
-        lotto_value = "Lotti " + ", ".join(str(x) for x in lots)
-    elif isinstance(lots, list) and len(lots) == 1:
-        lotto_value = f"Lotto {lots[0]}"
+    # Determine lotto value based on extracted lots
+    if len(extracted_lots) >= 2:
+        lotto_value = "Lotti " + ", ".join(str(lot["lot_number"]) for lot in extracted_lots)
+        is_multi_lot = True
+    elif len(extracted_lots) == 1:
+        lotto_value = f"Lotto {extracted_lots[0]['lot_number']}"
+        is_multi_lot = False
     else:
-        lotto_value = "Non specificato in Perizia"
+        lotto_value = "NON SPECIFICATO IN PERIZIA"
+        is_multi_lot = False
     
     # Find prezzo base
     prezzo_base = 0
-    prezzo_match = re.search(r'prezzo\s+base[^\d]*(\d[\d\.,]+)', text_lower)
-    if not prezzo_match:
-        prezzo_match = re.search(r'€\s*(\d[\d\.,]+)', text_lower)
-    if prezzo_match:
-        try:
-            prezzo_str = prezzo_match.group(1).replace('.', '').replace(',', '.')
-            prezzo_base = float(prezzo_str)
-        except:
-            pass
+    if extracted_lots and extracted_lots[0].get("prezzo_base_value", 0) > 0:
+        prezzo_base = extracted_lots[0]["prezzo_base_value"]
+    else:
+        prezzo_match = re.search(r'prezzo\s+base[^\d]*(\d[\d\.,]+)', text_lower)
+        if not prezzo_match:
+            prezzo_match = re.search(r'€\s*(\d[\d\.,]+)', text_lower)
+        if prezzo_match:
+            try:
+                prezzo_str = prezzo_match.group(1).replace('.', '').replace(',', '.')
+                prezzo_base = float(prezzo_str)
+            except:
+                pass
     
-    # Find superficie
-    superficie = "NOT_SPECIFIED_IN_PERIZIA"
-    sup_match = re.search(r'(\d+[\.,]?\d*)\s*(mq|m²|metri\s*quadr)', text_lower)
-    if sup_match:
-        superficie = sup_match.group(1) + " mq"
+    # Build legal killers from deterministic scan
+    legal_killers_items = []
+    for lk in detected_legal_killers:
+        legal_killers_items.append({
+            "killer": lk["title"],
+            "status": "SI" if lk["severity"] == "ROSSO" else "GIALLO",
+            "action": "Verifica obbligatoria",
+            "evidence": [{"page": lk["page"], "quote": lk["quote"]}]
+        })
     
     return {
-        "schema_version": "nexodify_perizia_scan_v1",
+        "schema_version": "nexodify_perizia_scan_v2",
         "run": {
             "run_id": run_id,
             "generated_at_utc": datetime.now(timezone.utc).isoformat(),
             "input": {"source_type": "perizia_pdf", "file_name": file_name, "pages_total": len(pages)}
         },
+        "lots": extracted_lots,
+        "lots_count": len(extracted_lots),
+        "is_multi_lot": is_multi_lot,
         "case_header": {
             "procedure_id": procedure_id,
             "lotto": lotto_value,
             "tribunale": tribunale,
-            "address": {"street": "NOT_SPECIFIED_IN_PERIZIA", "city": "NOT_SPECIFIED_IN_PERIZIA", "full": "NOT_SPECIFIED_IN_PERIZIA"},
-            "deposit_date": "NOT_SPECIFIED_IN_PERIZIA"
+            "address": {"street": "NON SPECIFICATO IN PERIZIA", "city": "NON SPECIFICATO IN PERIZIA", "full": "NON SPECIFICATO IN PERIZIA"},
+            "deposit_date": "NON SPECIFICATO IN PERIZIA"
         },
         "report_header": {
             "title": "NEXODIFY INTELLIGENCE | Auction Scan",
             "procedure": {"value": procedure_id, "evidence": []},
-            "lotto": {"value": lotto_value, "evidence": detected_lots.get("evidence", [])},
+            "lotto": {"value": lotto_value, "evidence": []},
             "tribunale": {"value": tribunale, "evidence": []},
-            "address": {"value": "Non specificato in Perizia", "evidence": []},
+            "address": {"value": "NON SPECIFICATO IN PERIZIA", "evidence": []},
+            "is_multi_lot": is_multi_lot,
             "generated_at": datetime.now(timezone.utc).isoformat()
         },
-        "lot_index": [{"lot": lot_num, "page": ev_item.get("page", 0), "quote": ev_item.get("quote", "")} 
-                      for lot_num, ev_item in zip(lots, detected_lots.get("evidence", [{}]*len(lots)))] if lots else [],
+        "lot_index": [{"lot": lot["lot_number"], "prezzo": lot["prezzo_base_eur"], "ubicazione": lot["ubicazione"][:50]} for lot in extracted_lots],
         "page_coverage_log": [{"page": i+1, "summary": "Fallback - manual review required"} for i in range(len(pages))],
         "semaforo_generale": {
             "status": "AMBER",
