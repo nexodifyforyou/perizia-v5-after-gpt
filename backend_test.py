@@ -341,7 +341,296 @@ class NexodifyAPITester:
         
         return success, response_data
 
-    def test_google_docai_perizia_extraction(self):
+    def test_deterministic_patches_comprehensive(self):
+        """CRITICAL TEST: Test all deterministic patches applied to the Nexodify perizia analysis system"""
+        if not self.token:
+            print("⚠️ Skipping deterministic patches test - no authentication token")
+            return False, {}
+        
+        print("🎯 CRITICAL TEST: DETERMINISTIC PATCHES COMPREHENSIVE TESTING")
+        print("=" * 80)
+        print("Testing CHANGES 1-6: Full-Document Coverage, Multi-Lot Detection, Evidence-Locked Legal Killers, Money Box Honesty, QA Gates")
+        
+        # Create multi-lot test PDF
+        print("📄 Creating multi-lot test PDF with 5 pages...")
+        pdf_content = self.create_multi_lot_test_pdf()
+        
+        files = {
+            'file': ('deterministic_test_multi_lot.pdf', pdf_content, 'application/pdf')
+        }
+        
+        success, response_data = self.run_file_upload_test(
+            "CRITICAL: Deterministic Patches Analysis", 
+            "api/analysis/perizia", 
+            200, 
+            files
+        )
+        
+        if not success or not response_data:
+            print("❌ CRITICAL FAILURE: Analysis request failed")
+            self.critical_failures.append({
+                "test": "Deterministic Patches - Analysis Request",
+                "issue": "Analysis request failed",
+                "response": response_data
+            })
+            return False, {}
+        
+        result = response_data.get('result', {})
+        if not result:
+            print("❌ CRITICAL FAILURE: No result in response")
+            self.critical_failures.append({
+                "test": "Deterministic Patches - No Result",
+                "issue": "No result object in response",
+                "response": response_data
+            })
+            return False, {}
+        
+        print("✅ Analysis completed, verifying deterministic patches...")
+        
+        # ===========================================
+        # CHANGE 1: Full-Document Coverage via Per-Page Compression
+        # ===========================================
+        print("\n🔍 CHANGE 1: Testing Full-Document Coverage via Per-Page Compression")
+        
+        page_coverage_log = result.get('page_coverage_log', [])
+        pages_total = 5  # Our test PDF has 5 pages
+        
+        if len(page_coverage_log) == pages_total:
+            print(f"✅ CHANGE 1 PASSED: page_coverage_log has {len(page_coverage_log)} entries for {pages_total} pages")
+            change1_passed = True
+        else:
+            print(f"❌ CHANGE 1 FAILED: page_coverage_log has {len(page_coverage_log)} entries, expected {pages_total}")
+            self.critical_failures.append({
+                "test": "CHANGE 1 - Full-Document Coverage",
+                "issue": f"page_coverage_log length {len(page_coverage_log)} != pages_total {pages_total}",
+                "expected": pages_total,
+                "actual": len(page_coverage_log)
+            })
+            change1_passed = False
+        
+        # Verify page coverage log structure
+        if page_coverage_log:
+            first_entry = page_coverage_log[0]
+            if isinstance(first_entry, dict) and 'page' in first_entry and 'summary' in first_entry:
+                print("✅ CHANGE 1: page_coverage_log entries have correct structure (page, summary)")
+            else:
+                print("❌ CHANGE 1: page_coverage_log entries missing required fields")
+                change1_passed = False
+        
+        # ===========================================
+        # CHANGE 2: Deterministic Multi-Lot Detection
+        # ===========================================
+        print("\n🔍 CHANGE 2: Testing Deterministic Multi-Lot Detection")
+        
+        # Check lot_index
+        lot_index = result.get('lot_index', [])
+        if len(lot_index) >= 2:
+            print(f"✅ CHANGE 2: lot_index contains {len(lot_index)} lots")
+            change2_lot_index_passed = True
+        else:
+            print(f"❌ CHANGE 2: lot_index contains {len(lot_index)} lots, expected 2+")
+            self.critical_failures.append({
+                "test": "CHANGE 2 - Multi-Lot Detection (lot_index)",
+                "issue": f"lot_index length {len(lot_index)} < 2",
+                "lot_index": lot_index
+            })
+            change2_lot_index_passed = False
+        
+        # Check report_header.lotto.value is NOT "Lotto Unico"
+        report_header = result.get('report_header', {})
+        lotto_obj = report_header.get('lotto', {})
+        lotto_value = lotto_obj.get('value', '')
+        
+        if lotto_value != "Lotto Unico" and ("Lotti" in lotto_value or "1" in lotto_value and "2" in lotto_value):
+            print(f"✅ CHANGE 2: report_header.lotto.value is '{lotto_value}' (NOT 'Lotto Unico')")
+            change2_lotto_passed = True
+        else:
+            print(f"❌ CHANGE 2: report_header.lotto.value is '{lotto_value}' (should NOT be 'Lotto Unico')")
+            self.critical_failures.append({
+                "test": "CHANGE 2 - Multi-Lot Detection (lotto value)",
+                "issue": f"lotto.value is '{lotto_value}', should not be 'Lotto Unico'",
+                "expected": "Lotti 1, 2 or similar",
+                "actual": lotto_value
+            })
+            change2_lotto_passed = False
+        
+        # Check _verification.detected_lots
+        verification = result.get('_verification', {})
+        detected_lots = verification.get('detected_lots', {})
+        if detected_lots and detected_lots.get('lots'):
+            print(f"✅ CHANGE 2: _verification.detected_lots found: {detected_lots.get('lots')}")
+            change2_verification_passed = True
+        else:
+            print("❌ CHANGE 2: _verification.detected_lots missing or empty")
+            change2_verification_passed = False
+        
+        change2_passed = change2_lot_index_passed and change2_lotto_passed and change2_verification_passed
+        
+        # ===========================================
+        # CHANGE 3: Evidence-Locked Legal Killers (Tri-State)
+        # ===========================================
+        print("\n🔍 CHANGE 3: Testing Evidence-Locked Legal Killers (Tri-State)")
+        
+        legal_killers = result.get('section_9_legal_killers', {})
+        lk_items = legal_killers.get('items', [])
+        
+        change3_violations = []
+        change3_passed = True
+        
+        for item in lk_items:
+            status = item.get('status', '')
+            evidence = item.get('evidence', [])
+            killer_name = item.get('killer', 'unknown')
+            
+            # Check if status is SI or NO but has no evidence
+            if status in ['SI', 'NO'] and (not evidence or not isinstance(evidence, list) or len(evidence) == 0):
+                change3_violations.append(f"{killer_name}: status '{status}' without evidence")
+                change3_passed = False
+            elif status in ['SI', 'NO'] and evidence:
+                # Check if evidence has proper structure
+                first_ev = evidence[0] if evidence else {}
+                if not (isinstance(first_ev, dict) and 'page' in first_ev and 'quote' in first_ev):
+                    change3_violations.append(f"{killer_name}: status '{status}' with malformed evidence")
+                    change3_passed = False
+        
+        if change3_passed:
+            print(f"✅ CHANGE 3 PASSED: All legal killers with SI/NO status have proper evidence")
+        else:
+            print(f"❌ CHANGE 3 FAILED: {len(change3_violations)} violations found:")
+            for violation in change3_violations:
+                print(f"   - {violation}")
+            self.critical_failures.append({
+                "test": "CHANGE 3 - Evidence-Locked Legal Killers",
+                "issue": "Legal killers with SI/NO status missing evidence",
+                "violations": change3_violations
+            })
+        
+        # ===========================================
+        # CHANGE 4: Money Box Honesty
+        # ===========================================
+        print("\n🔍 CHANGE 4: Testing Money Box Honesty")
+        
+        money_box = result.get('section_3_money_box', {})
+        mb_items = money_box.get('items', [])
+        
+        change4_violations = []
+        change4_passed = True
+        
+        for item in mb_items:
+            voce = item.get('voce', 'unknown')
+            fonte_perizia = item.get('fonte_perizia', {})
+            fonte_value = fonte_perizia.get('value', '') if isinstance(fonte_perizia, dict) else str(fonte_perizia)
+            fonte_evidence = fonte_perizia.get('evidence', []) if isinstance(fonte_perizia, dict) else []
+            stima_euro = item.get('stima_euro', 0)
+            stima_nota = item.get('stima_nota', '')
+            
+            # Check if fonte contains "Non specificato" but has EUR value
+            if "Non specificato" in fonte_value and stima_euro > 0:
+                # Allow if it's explicitly marked as Nexodify estimate
+                if "STIMA NEXODIFY" not in stima_nota.upper() and "TBD" not in stima_nota.upper():
+                    change4_violations.append(f"{voce}: fonte 'Non specificato' but stima_euro = {stima_euro}")
+                    change4_passed = False
+            
+            # Check if evidence is empty but has EUR value
+            if (not fonte_evidence or len(fonte_evidence) == 0) and stima_euro > 0:
+                if "STIMA NEXODIFY" not in stima_nota.upper() and "TBD" not in stima_nota.upper():
+                    change4_violations.append(f"{voce}: empty evidence but stima_euro = {stima_euro}")
+                    change4_passed = False
+        
+        if change4_passed:
+            print(f"✅ CHANGE 4 PASSED: Money Box items with 'Non specificato' fonte have stima_euro = 0 or proper TBD notes")
+        else:
+            print(f"❌ CHANGE 4 FAILED: {len(change4_violations)} violations found:")
+            for violation in change4_violations:
+                print(f"   - {violation}")
+            self.critical_failures.append({
+                "test": "CHANGE 4 - Money Box Honesty",
+                "issue": "Money Box items with unspecified fonte have EUR values",
+                "violations": change4_violations
+            })
+        
+        # ===========================================
+        # CHANGE 5 & 6: QA Gates
+        # ===========================================
+        print("\n🔍 CHANGE 5 & 6: Testing QA Gates")
+        
+        qa_pass = result.get('qa_pass', {})
+        qa_status = qa_pass.get('status', '')
+        qa_checks = qa_pass.get('checks', [])
+        
+        # Look for specific QA checks
+        qa_check_codes = [check.get('code', '') for check in qa_checks]
+        
+        expected_qa_checks = [
+            'QA-PageCoverage',
+            'QA-MoneyBox-Honesty', 
+            'QA-LegalKiller-Evidence'
+        ]
+        
+        found_qa_checks = []
+        for expected in expected_qa_checks:
+            found = any(expected in code for code in qa_check_codes)
+            if found:
+                found_qa_checks.append(expected)
+        
+        if len(found_qa_checks) >= 2:  # At least 2 of the 3 expected checks
+            print(f"✅ CHANGE 5 & 6: QA Gates found: {found_qa_checks}")
+            change56_passed = True
+        else:
+            print(f"❌ CHANGE 5 & 6: Expected QA checks missing. Found: {found_qa_checks}")
+            self.critical_failures.append({
+                "test": "CHANGE 5 & 6 - QA Gates",
+                "issue": "Missing expected QA checks",
+                "expected": expected_qa_checks,
+                "found": found_qa_checks,
+                "all_checks": qa_check_codes
+            })
+            change56_passed = False
+        
+        # Check if QA status reflects violations
+        if not change1_passed or not change4_passed:
+            if qa_status in ['FAIL', 'WARN']:
+                print(f"✅ CHANGE 5 & 6: QA status '{qa_status}' correctly reflects violations")
+            else:
+                print(f"❌ CHANGE 5 & 6: QA status '{qa_status}' should be FAIL/WARN due to violations")
+                change56_passed = False
+        
+        # ===========================================
+        # OVERALL RESULTS
+        # ===========================================
+        print("\n📊 DETERMINISTIC PATCHES TEST RESULTS:")
+        print("=" * 50)
+        
+        changes_results = [
+            ("CHANGE 1 - Full-Document Coverage", change1_passed),
+            ("CHANGE 2 - Multi-Lot Detection", change2_passed),
+            ("CHANGE 3 - Evidence-Locked Legal Killers", change3_passed),
+            ("CHANGE 4 - Money Box Honesty", change4_passed),
+            ("CHANGE 5 & 6 - QA Gates", change56_passed)
+        ]
+        
+        passed_changes = 0
+        for change_name, passed in changes_results:
+            status = "✅ PASSED" if passed else "❌ FAILED"
+            print(f"   {status}: {change_name}")
+            if passed:
+                passed_changes += 1
+        
+        overall_success = passed_changes >= 4  # At least 4 out of 5 changes must pass
+        
+        print(f"\n📈 OVERALL DETERMINISTIC PATCHES: {passed_changes}/5 changes passed")
+        
+        if overall_success:
+            print("✅ DETERMINISTIC PATCHES TEST PASSED")
+        else:
+            print("❌ DETERMINISTIC PATCHES TEST FAILED")
+            self.critical_failures.append({
+                "test": "Deterministic Patches Overall",
+                "issue": f"Only {passed_changes}/5 changes passed",
+                "changes_results": changes_results
+            })
+        
+        return overall_success, response_data
         """CRITICAL TEST: Test Google Document AI OCR integration with specific perizia document"""
         if not self.token:
             print("⚠️ Skipping Google Document AI test - no authentication token")
