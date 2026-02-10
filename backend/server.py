@@ -15,6 +15,7 @@ import httpx
 from PyPDF2 import PdfReader
 import io
 import hashlib
+from openai import AsyncOpenAI
 
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
@@ -25,9 +26,22 @@ client = AsyncIOMotorClient(mongo_url)
 db = client[os.environ['DB_NAME']]
 
 # Environment variables
-EMERGENT_LLM_KEY = os.environ.get('EMERGENT_LLM_KEY')
-STRIPE_API_KEY = os.environ.get('STRIPE_API_KEY')
+OPENAI_API_KEY = os.environ.get('OPENAI_API_KEY')
+STRIPE_SECRET_KEY = os.environ.get('STRIPE_SECRET_KEY')
 MASTER_ADMIN_EMAIL = os.environ.get('MASTER_ADMIN_EMAIL', 'admin@nexodify.com')
+
+async def openai_chat_completion(system_message: str, user_message: str, model: str = "gpt-4o") -> str:
+    if not OPENAI_API_KEY:
+        raise RuntimeError("OPENAI_API_KEY not set")
+    client = AsyncOpenAI(api_key=OPENAI_API_KEY)
+    response = await client.chat.completions.create(
+        model=model,
+        messages=[
+            {"role": "system", "content": system_message},
+            {"role": "user", "content": user_message},
+        ],
+    )
+    return (response.choices[0].message.content or "").strip()
 
 # Create the main app
 app = FastAPI(title="Nexodify Forensic Engine API")
@@ -338,36 +352,41 @@ async def create_checkout(request: Request):
         raise HTTPException(status_code=400, detail="Invalid plan")
     
     plan = SUBSCRIPTION_PLANS[plan_id]
-    
-    from emergentintegrations.payments.stripe.checkout import StripeCheckout, CheckoutSessionRequest
-    
-    host_url = str(request.base_url)
-    webhook_url = f"{host_url}api/webhook/stripe"
-    
-    stripe_checkout = StripeCheckout(api_key=STRIPE_API_KEY, webhook_url=webhook_url)
+
+    if not STRIPE_SECRET_KEY:
+        raise HTTPException(status_code=503, detail="Stripe not configured")
+    import stripe
+    stripe.api_key = STRIPE_SECRET_KEY
     
     success_url = f"{origin_url}/billing?session_id={{CHECKOUT_SESSION_ID}}"
     cancel_url = f"{origin_url}/billing"
-    
-    checkout_request = CheckoutSessionRequest(
-        amount=plan.price,
-        currency=plan.currency,
+
+    session = stripe.checkout.Session.create(
+        mode="payment",
         success_url=success_url,
         cancel_url=cancel_url,
+        line_items=[
+            {
+                "price_data": {
+                    "currency": plan.currency,
+                    "product_data": {"name": plan.name},
+                    "unit_amount": int(plan.price * 100),
+                },
+                "quantity": 1,
+            }
+        ],
         metadata={
             "user_id": user.user_id,
             "plan_id": plan_id,
-            "email": user.email
-        }
+            "email": user.email,
+        },
     )
-    
-    session = await stripe_checkout.create_checkout_session(checkout_request)
     
     # Create payment transaction record
     transaction = PaymentTransaction(
         transaction_id=f"txn_{uuid.uuid4().hex[:12]}",
         user_id=user.user_id,
-        session_id=session.session_id,
+        session_id=session.id,
         plan_id=plan_id,
         amount=plan.price,
         currency=plan.currency,
@@ -378,20 +397,19 @@ async def create_checkout(request: Request):
     txn_dict["created_at"] = txn_dict["created_at"].isoformat()
     await db.payment_transactions.insert_one(txn_dict)
     
-    return {"url": session.url, "session_id": session.session_id}
+    return {"url": session.url, "session_id": session.id}
 
 @api_router.get("/checkout/status/{session_id}")
 async def get_checkout_status(session_id: str, request: Request):
     """Get checkout session status"""
     user = await require_auth(request)
-    
-    from emergentintegrations.payments.stripe.checkout import StripeCheckout
-    
-    host_url = str(request.base_url)
-    webhook_url = f"{host_url}api/webhook/stripe"
-    stripe_checkout = StripeCheckout(api_key=STRIPE_API_KEY, webhook_url=webhook_url)
-    
-    status = await stripe_checkout.get_checkout_status(session_id)
+
+    if not STRIPE_SECRET_KEY:
+        raise HTTPException(status_code=503, detail="Stripe not configured")
+    import stripe
+    stripe.api_key = STRIPE_SECRET_KEY
+
+    status = stripe.checkout.Session.retrieve(session_id)
     
     # Update transaction in database
     txn = await db.payment_transactions.find_one({"session_id": session_id, "user_id": user.user_id}, {"_id": 0})
@@ -422,32 +440,44 @@ async def get_checkout_status(session_id: str, request: Request):
 @api_router.post("/webhook/stripe")
 async def stripe_webhook(request: Request):
     """Handle Stripe webhooks"""
+    if not STRIPE_SECRET_KEY:
+        raise HTTPException(status_code=503, detail="Stripe not configured")
     body = await request.body()
     signature = request.headers.get("Stripe-Signature")
-    
-    from emergentintegrations.payments.stripe.checkout import StripeCheckout
-    
-    host_url = str(request.base_url)
-    webhook_url = f"{host_url}api/webhook/stripe"
-    stripe_checkout = StripeCheckout(api_key=STRIPE_API_KEY, webhook_url=webhook_url)
-    
+
+    import stripe
+    stripe.api_key = STRIPE_SECRET_KEY
+    webhook_secret = os.environ.get("STRIPE_WEBHOOK_SECRET")
+
     try:
-        webhook_response = await stripe_checkout.handle_webhook(body, signature)
-        
-        if webhook_response.payment_status == "paid":
-            user_id = webhook_response.metadata.get("user_id")
-            plan_id = webhook_response.metadata.get("plan_id")
+        if webhook_secret and signature:
+            event = stripe.Webhook.construct_event(payload=body, sig_header=signature, secret=webhook_secret)
+        else:
+            event = json.loads(body.decode("utf-8"))
+
+        data_object = event.get("data", {}).get("object", {})
+        event_type = event.get("type", "")
+
+        if event_type == "checkout.session.completed":
+            payment_status = data_object.get("payment_status")
+            metadata = data_object.get("metadata", {}) or {}
+            session_id = data_object.get("id")
+
+            if payment_status == "paid":
+                user_id = metadata.get("user_id")
+                plan_id = metadata.get("plan_id")
             
-            if user_id and plan_id and plan_id in SUBSCRIPTION_PLANS:
-                plan = SUBSCRIPTION_PLANS[plan_id]
-                await db.users.update_one(
-                    {"user_id": user_id},
-                    {"$set": {"plan": plan_id, "quota": plan.quota.copy()}}
-                )
-                await db.payment_transactions.update_one(
-                    {"session_id": webhook_response.session_id},
-                    {"$set": {"status": "complete", "payment_status": "paid"}}
-                )
+                if user_id and plan_id and plan_id in SUBSCRIPTION_PLANS:
+                    plan = SUBSCRIPTION_PLANS[plan_id]
+                    await db.users.update_one(
+                        {"user_id": user_id},
+                        {"$set": {"plan": plan_id, "quota": plan.quota.copy()}}
+                    )
+                    if session_id:
+                        await db.payment_transactions.update_one(
+                            {"session_id": session_id},
+                            {"$set": {"status": "complete", "payment_status": "paid"}}
+                        )
         
         return {"received": True}
     except Exception as e:
@@ -760,7 +790,6 @@ E) OUTPUT
 async def analyze_perizia_with_llm(pdf_text: str, pages: List[Dict], file_name: str, user: User, case_id: str, run_id: str, input_sha256: str) -> Dict:
     """Analyze perizia using LLM with comprehensive ROMA STANDARD prompt"""
     import re
-    from emergentintegrations.llm.chat import LlmChat, UserMessage
     
     # ===========================================================================
     # HELPER FUNCTIONS FOR FULL-DOCUMENT COVERAGE
@@ -965,12 +994,6 @@ async def analyze_perizia_with_llm(pdf_text: str, pages: List[Dict], file_name: 
     detected_legal_killers = scan_legal_killers(pages)
     logger.info(f"Deterministic extraction: {len(extracted_lots)} lots, {len(detected_legal_killers)} legal killers")
     
-    chat = LlmChat(
-        api_key=EMERGENT_LLM_KEY,
-        session_id=f"perizia_{run_id}",
-        system_message=PERIZIA_SYSTEM_PROMPT
-    ).with_model("openai", "gpt-4o")
-    
     # ===========================================================================
     # CHARACTER-BUDGETED PAGE CONTENT (no truncation)
     # ===========================================================================
@@ -1071,7 +1094,7 @@ INIZIA L'ANALISI:"""
         # PASS 1: Initial Extraction
         # ==========================================
         logger.info(f"PASS 1: Initial extraction for {file_name}")
-        response = await chat.send_message(UserMessage(text=prompt))
+        response = await openai_chat_completion(PERIZIA_SYSTEM_PROMPT, prompt, model="gpt-4o")
         
         # Parse JSON from response
         response_text = response.strip()
@@ -1270,7 +1293,7 @@ ISTRUZIONI DI VERIFICA:
 RESTITUISCI il JSON CORRETTO e COMPLETO con tutti i campi verificati.
 NON aggiungere commenti, solo JSON valido."""
 
-        verification_response = await chat.send_message(UserMessage(text=verification_prompt))
+        verification_response = await openai_chat_completion(PERIZIA_SYSTEM_PROMPT, verification_prompt, model="gpt-4o")
         
         # Parse verification response
         ver_text = verification_response.strip()
@@ -2376,14 +2399,6 @@ async def analyze_images(request: Request, files: List[UploadFile] = File(...)):
     qa_status = "PASS"
     
     try:
-        from emergentintegrations.llm.chat import LlmChat, UserMessage
-        
-        chat = LlmChat(
-            api_key=EMERGENT_LLM_KEY,
-            session_id=f"image_forensics_{run_id}",
-            system_message=IMAGE_FORENSICS_SYSTEM_PROMPT
-        ).with_model("openai", "gpt-4o")
-        
         # Build image descriptions (actual vision analysis would require multimodal model)
         image_info = f"Caricate {len(files)} immagini: " + ", ".join([f.filename for f in files])
         
@@ -2401,7 +2416,7 @@ Fornisci un'analisi con i seguenti vincoli:
 
 Output JSON secondo lo schema specificato."""
 
-        response = await chat.send_message(UserMessage(text=prompt))
+        response = await openai_chat_completion(IMAGE_FORENSICS_SYSTEM_PROMPT, prompt, model="gpt-4o")
         
         # Parse response
         response_text = response.strip()
@@ -2606,8 +2621,6 @@ async def assistant_qa(request: Request):
             }
         )
     
-    from emergentintegrations.llm.chat import LlmChat, UserMessage
-    
     run_id = f"qa_run_{uuid.uuid4().hex[:8]}"
     
     # Get context from user's analyzed perizie
@@ -2660,12 +2673,6 @@ ULTIMA PERIZIA ANALIZZATA (FONTE VERIFICABILE):
 NOTA: Se citi questi dati, indica "source": {{"type": "perizia", "reference": "{perizia_file}"}}
 """
     
-    chat = LlmChat(
-        api_key=EMERGENT_LLM_KEY,
-        session_id=f"assistant_{user.user_id}_{run_id}",
-        system_message=ASSISTANT_SYSTEM_PROMPT
-    ).with_model("openai", "gpt-4o")
-    
     # Enhanced prompt with evidence requirements
     prompt = f"""{context}
 
@@ -2681,7 +2688,7 @@ REGOLE PER LA RISPOSTA:
 Output JSON secondo lo schema specificato."""
     
     try:
-        response = await chat.send_message(UserMessage(text=prompt))
+        response = await openai_chat_completion(ASSISTANT_SYSTEM_PROMPT, prompt, model="gpt-4o")
         
         # Parse response
         response_text = response.strip()
