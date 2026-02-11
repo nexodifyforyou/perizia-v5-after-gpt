@@ -71,8 +71,13 @@ const AuthCallback = () => {
         // Refresh user to ensure state is synced
         await refreshUser();
         
-        // Navigate to dashboard
-        navigate('/dashboard', { replace: true });
+        // Navigate to last path if present, else dashboard
+        const lastPath = localStorage.getItem('last_path');
+        if (lastPath) {
+          navigate(lastPath, { replace: true });
+        } else {
+          navigate('/dashboard', { replace: true });
+        }
         
       } catch (error) {
         console.error('Auth callback error:', error);

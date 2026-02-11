@@ -208,6 +208,101 @@ async def require_auth(request: Request) -> User:
         raise HTTPException(status_code=401, detail="Not authenticated")
     return user
 
+async def require_master_admin(request: Request) -> User:
+    """Require master admin user with matching email"""
+    user = await require_auth(request)
+    if not user.is_master_admin:
+        raise HTTPException(status_code=403, detail="Forbidden")
+    if user.email.lower() != MASTER_ADMIN_EMAIL.lower():
+        raise HTTPException(status_code=403, detail="Forbidden")
+    return user
+
+def _now_iso() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+def _truncate(value: Optional[str], limit: int = 50) -> Optional[str]:
+    if value is None:
+        return None
+    if len(value) <= limit:
+        return value
+    return value[:limit]
+
+def _parse_dt(value: Any) -> Optional[datetime]:
+    if value is None:
+        return None
+    if isinstance(value, datetime):
+        if value.tzinfo is None:
+            return value.replace(tzinfo=timezone.utc)
+        return value
+    if isinstance(value, str):
+        try:
+            return datetime.fromisoformat(value.replace("Z", "+00:00"))
+        except ValueError:
+            return None
+    return None
+
+def _to_iso(value: Any) -> Optional[str]:
+    dt = _parse_dt(value)
+    if dt:
+        return dt.isoformat()
+    if isinstance(value, str):
+        return value
+    return None
+
+def _merge_query(base: Dict[str, Any], extra: Dict[str, Any]) -> Dict[str, Any]:
+    if not base:
+        return extra
+    if not extra:
+        return base
+    return {"$and": [base, extra]}
+
+def _date_range_query(field: str, date_from: Optional[str], date_to: Optional[str]) -> Dict[str, Any]:
+    conditions: List[Dict[str, Any]] = []
+    if date_from:
+        start_dt = datetime.fromisoformat(date_from).replace(tzinfo=timezone.utc)
+        start_iso = start_dt.isoformat()
+        conditions.append({"$or": [{field: {"$gte": start_dt}}, {field: {"$gte": start_iso}}]})
+    if date_to:
+        end_dt = datetime.fromisoformat(date_to).replace(tzinfo=timezone.utc) + timedelta(days=1) - timedelta(microseconds=1)
+        end_iso = end_dt.isoformat()
+        conditions.append({"$or": [{field: {"$lte": end_dt}}, {field: {"$lte": end_iso}}]})
+    if not conditions:
+        return {}
+    if len(conditions) == 1:
+        return conditions[0]
+    return {"$and": conditions}
+
+async def _write_admin_audit(
+    admin_user: User,
+    action: str,
+    target_user_id: Optional[str] = None,
+    target_email: Optional[str] = None,
+    meta: Optional[Dict[str, Any]] = None
+) -> None:
+    audit = {
+        "audit_id": f"audit_{uuid.uuid4().hex[:12]}",
+        "admin_user_id": admin_user.user_id,
+        "admin_email": admin_user.email,
+        "action": action,
+        "target_user_id": target_user_id,
+        "target_email": target_email,
+        "meta": meta or {},
+        "created_at": _now_iso()
+    }
+    try:
+        await db.admin_audit_log.insert_one(audit)
+    except Exception as e:
+        logger.warning(f"Admin audit log insert failed: {e}")
+
+async def _decrement_quota_if_applicable(user: User, field: str) -> bool:
+    if user.is_master_admin:
+        return False
+    await db.users.update_one(
+        {"user_id": user.user_id},
+        {"$inc": {f"quota.{field}": -1}}
+    )
+    return True
+
 # ===================
 # AUTH ENDPOINTS
 # ===================
@@ -293,6 +388,13 @@ async def create_session(request: Request, response: Response):
     session_dict["expires_at"] = session_dict["expires_at"].isoformat()
     session_dict["created_at"] = session_dict["created_at"].isoformat()
     await db.user_sessions.insert_one(session_dict)
+
+    if is_master:
+        await _write_admin_audit(
+            admin_user=user,
+            action="ADMIN_LOGIN",
+            meta={"event": "login"}
+        )
     
     # Set cookie
     response.set_cookie(
@@ -1969,11 +2071,7 @@ async def analyze_perizia(request: Request, file: UploadFile = File(...)):
     await db.perizia_analyses.insert_one(analysis_dict)
     
     # Decrement quota if not master admin
-    if not user.is_master_admin:
-        await db.users.update_one(
-            {"user_id": user.user_id},
-            {"$inc": {"quota.perizia_scans_remaining": -1}}
-        )
+    await _decrement_quota_if_applicable(user, "perizia_scans_remaining")
     
     return {
         "ok": True,
@@ -2532,12 +2630,8 @@ Output JSON secondo lo schema specificato."""
     forensics_dict["created_at"] = forensics_dict["created_at"].isoformat()
     await db.image_forensics.insert_one(forensics_dict)
     
-    # Decrement quota
-    if not user.is_master_admin:
-        await db.users.update_one(
-            {"user_id": user.user_id},
-            {"$inc": {"quota.image_scans_remaining": -1}}
-        )
+    # Decrement quota if not master admin
+    await _decrement_quota_if_applicable(user, "image_scans_remaining")
     
     return result
 
@@ -2803,14 +2897,635 @@ Output JSON secondo lo schema specificato."""
     qa_dict["created_at"] = qa_dict["created_at"].isoformat()
     await db.assistant_qa.insert_one(qa_dict)
     
-    # Decrement quota
-    if not user.is_master_admin:
-        await db.users.update_one(
-            {"user_id": user.user_id},
-            {"$inc": {"quota.assistant_messages_remaining": -1}}
-        )
+    # Decrement quota if not master admin
+    await _decrement_quota_if_applicable(user, "assistant_messages_remaining")
     
     return result
+
+# ===================
+# ADMIN API (MASTER ADMIN ONLY)
+# ===================
+
+async def _get_user_email_map(user_ids: List[str]) -> Dict[str, Dict[str, Any]]:
+    if not user_ids:
+        return {}
+    users = await db.users.find(
+        {"user_id": {"$in": user_ids}},
+        {"_id": 0, "user_id": 1, "email": 1, "name": 1, "plan": 1, "created_at": 1, "is_master_admin": 1, "quota": 1}
+    ).to_list(len(user_ids))
+    return {u.get("user_id"): u for u in users}
+
+async def _aggregate_usage(collection, user_ids: List[str], date_query: Optional[Dict[str, Any]] = None) -> Dict[str, Dict[str, Any]]:
+    if not user_ids:
+        return {}
+    match_query: Dict[str, Any] = {"user_id": {"$in": user_ids}}
+    if date_query:
+        match_query = _merge_query(match_query, date_query)
+    pipeline = [
+        {"$match": match_query},
+        {"$group": {"_id": "$user_id", "count": {"$sum": 1}, "last_active": {"$max": "$created_at"}}}
+    ]
+    results = await collection.aggregate(pipeline).to_list(len(user_ids))
+    return {r["_id"]: {"count": r.get("count", 0), "last_active": r.get("last_active")} for r in results}
+
+def _max_last_active(*values: Any) -> Optional[str]:
+    dts = [_parse_dt(v) for v in values if _parse_dt(v)]
+    if not dts:
+        return None
+    return max(dts).isoformat()
+
+@api_router.get("/admin/overview")
+async def admin_overview(request: Request):
+    admin_user = await require_master_admin(request)
+
+    totals = {
+        "users": await db.users.count_documents({}),
+        "perizie": await db.perizia_analyses.count_documents({}),
+        "images": await db.image_forensics.count_documents({}),
+        "assistant_qas": await db.assistant_qa.count_documents({}),
+        "transactions": await db.payment_transactions.count_documents({})
+    }
+
+    plan_counts = {"free": 0, "pro": 0, "enterprise": 0, "other": 0}
+    try:
+        plan_pipeline = [{"$group": {"_id": "$plan", "count": {"$sum": 1}}}]
+        plan_results = await db.users.aggregate(plan_pipeline).to_list(20)
+        for item in plan_results:
+            plan_id = item.get("_id") or "other"
+            if plan_id in plan_counts:
+                plan_counts[plan_id] = item.get("count", 0)
+            else:
+                plan_counts["other"] += item.get("count", 0)
+    except Exception as e:
+        logger.warning(f"Plan counts aggregation failed: {e}")
+
+    last30_date = (datetime.now(timezone.utc) - timedelta(days=30)).date().isoformat()
+    date_query = _date_range_query("created_at", last30_date, None)
+
+    perizie_30d = await db.perizia_analyses.count_documents(date_query or {})
+    images_30d = await db.image_forensics.count_documents(date_query or {})
+    assistant_30d = await db.assistant_qa.count_documents(date_query or {})
+
+    active_users_set = set()
+    try:
+        active_users_set.update(await db.perizia_analyses.distinct("user_id", date_query or {}))
+        active_users_set.update(await db.image_forensics.distinct("user_id", date_query or {}))
+        active_users_set.update(await db.assistant_qa.distinct("user_id", date_query or {}))
+    except Exception as e:
+        logger.warning(f"Active users aggregation failed: {e}")
+
+    paid_eur = 0.0
+    try:
+        payment_query = _merge_query({"currency": "eur"}, date_query or {})
+        payment_pipeline = [
+            {"$match": payment_query},
+            {"$group": {"_id": None, "total": {"$sum": "$amount"}}}
+        ]
+        payment_results = await db.payment_transactions.aggregate(payment_pipeline).to_list(1)
+        if payment_results:
+            paid_eur = float(payment_results[0].get("total") or 0.0)
+    except Exception as e:
+        logger.warning(f"Paid EUR aggregation failed: {e}")
+
+    user_ids = []
+    try:
+        perizie_map = await _aggregate_usage(db.perizia_analyses, await db.perizia_analyses.distinct("user_id", date_query or {}), date_query)
+        images_map = await _aggregate_usage(db.image_forensics, await db.image_forensics.distinct("user_id", date_query or {}), date_query)
+        assistant_map = await _aggregate_usage(db.assistant_qa, await db.assistant_qa.distinct("user_id", date_query or {}), date_query)
+        user_ids = list(set(list(perizie_map.keys()) + list(images_map.keys()) + list(assistant_map.keys())))
+    except Exception as e:
+        logger.warning(f"Top users aggregation failed: {e}")
+        perizie_map, images_map, assistant_map = {}, {}, {}
+
+    users_map = await _get_user_email_map(user_ids)
+    top_users = []
+    for user_id in user_ids:
+        perizie_count = perizie_map.get(user_id, {}).get("count", 0)
+        images_count = images_map.get(user_id, {}).get("count", 0)
+        assistant_count = assistant_map.get(user_id, {}).get("count", 0)
+        last_active = _max_last_active(
+            perizie_map.get(user_id, {}).get("last_active"),
+            images_map.get(user_id, {}).get("last_active"),
+            assistant_map.get(user_id, {}).get("last_active")
+        )
+        user_doc = users_map.get(user_id, {})
+        top_users.append({
+            "user_id": user_id,
+            "email": user_doc.get("email"),
+            "plan": user_doc.get("plan"),
+            "perizie": perizie_count,
+            "images": images_count,
+            "assistant_qas": assistant_count,
+            "last_active_at": last_active
+        })
+
+    top_users = sorted(top_users, key=lambda x: (x.get("perizie", 0) + x.get("images", 0) + x.get("assistant_qas", 0)), reverse=True)[:10]
+
+    await _write_admin_audit(admin_user, "ADMIN_API_VIEW", meta={"endpoint": "overview"})
+
+    return {
+        "totals": totals,
+        "plan_counts": plan_counts,
+        "last_30d": {
+            "perizie": perizie_30d,
+            "images": images_30d,
+            "assistant_qas": assistant_30d,
+            "active_users": len(active_users_set),
+            "paid_eur": paid_eur
+        },
+        "top_users_30d": top_users
+    }
+
+@api_router.get("/admin/users")
+async def admin_users(
+    request: Request,
+    q: Optional[str] = None,
+    plan: Optional[str] = None,
+    sort: Optional[str] = "created_at",
+    order: Optional[str] = "desc",
+    page: int = 1,
+    page_size: int = 20
+):
+    admin_user = await require_master_admin(request)
+
+    page = max(1, page)
+    page_size = max(1, min(100, page_size))
+    sort = sort or "created_at"
+    order = order or "desc"
+    sort_dir = -1 if order.lower() == "desc" else 1
+
+    query: Dict[str, Any] = {}
+    if plan:
+        query["plan"] = plan
+    if q:
+        regex = {"$regex": q, "$options": "i"}
+        query["$or"] = [{"email": regex}, {"name": regex}, {"user_id": regex}]
+
+    total = await db.users.count_documents(query)
+
+    requires_full_scan = sort in ["last_active_at", "usage_30d.perizie"]
+    users_list: List[Dict[str, Any]]
+
+    if requires_full_scan:
+        users_list = await db.users.find(query, {"_id": 0}).to_list(max(total, 0))
+    else:
+        users_list = await db.users.find(query, {"_id": 0}).sort("created_at", sort_dir).skip((page - 1) * page_size).limit(page_size).to_list(page_size)
+
+    user_ids = [u.get("user_id") for u in users_list if u.get("user_id")]
+    last30_date = (datetime.now(timezone.utc) - timedelta(days=30)).date().isoformat()
+    date_query = _date_range_query("created_at", last30_date, None)
+
+    perizie_30d_map = await _aggregate_usage(db.perizia_analyses, user_ids, date_query)
+    images_30d_map = await _aggregate_usage(db.image_forensics, user_ids, date_query)
+    assistant_30d_map = await _aggregate_usage(db.assistant_qa, user_ids, date_query)
+
+    perizie_all_map = await _aggregate_usage(db.perizia_analyses, user_ids, None)
+    images_all_map = await _aggregate_usage(db.image_forensics, user_ids, None)
+    assistant_all_map = await _aggregate_usage(db.assistant_qa, user_ids, None)
+
+    notes_docs = await db.admin_user_notes.find({"user_id": {"$in": user_ids}}, {"_id": 0}).to_list(len(user_ids))
+    notes_map = {n.get("user_id"): n for n in notes_docs}
+
+    enriched_users = []
+    for u in users_list:
+        user_id = u.get("user_id")
+        last_active = _max_last_active(
+            perizie_all_map.get(user_id, {}).get("last_active"),
+            images_all_map.get(user_id, {}).get("last_active"),
+            assistant_all_map.get(user_id, {}).get("last_active")
+        )
+        enriched_users.append({
+            "user_id": user_id,
+            "email": u.get("email"),
+            "name": u.get("name"),
+            "plan": u.get("plan"),
+            "is_master_admin": u.get("is_master_admin", False),
+            "created_at": _to_iso(u.get("created_at")),
+            "last_active_at": last_active,
+            "quota": {
+                "perizia_scans_remaining": u.get("quota", {}).get("perizia_scans_remaining", 0),
+                "image_scans_remaining": u.get("quota", {}).get("image_scans_remaining", 0),
+                "assistant_messages_remaining": u.get("quota", {}).get("assistant_messages_remaining", 0)
+            },
+            "usage_30d": {
+                "perizie": perizie_30d_map.get(user_id, {}).get("count", 0),
+                "images": images_30d_map.get(user_id, {}).get("count", 0),
+                "assistant_qas": assistant_30d_map.get(user_id, {}).get("count", 0)
+            },
+            "lifetime": {
+                "perizie": perizie_all_map.get(user_id, {}).get("count", 0),
+                "images": images_all_map.get(user_id, {}).get("count", 0),
+                "assistant_qas": assistant_all_map.get(user_id, {}).get("count", 0)
+            },
+            "notes": {
+                "internal_status": notes_map.get(user_id, {}).get("internal_status"),
+                "tags": notes_map.get(user_id, {}).get("tags", []),
+                "note": notes_map.get(user_id, {}).get("note", "")
+            } if notes_map.get(user_id) else None
+        })
+
+    if requires_full_scan:
+        if sort == "last_active_at":
+            enriched_users.sort(key=lambda x: _parse_dt(x.get("last_active_at")) or datetime.min.replace(tzinfo=timezone.utc), reverse=sort_dir == -1)
+        elif sort == "usage_30d.perizie":
+            enriched_users.sort(key=lambda x: x.get("usage_30d", {}).get("perizie", 0), reverse=sort_dir == -1)
+        start = (page - 1) * page_size
+        enriched_users = enriched_users[start:start + page_size]
+
+    await _write_admin_audit(admin_user, "ADMIN_API_VIEW", meta={
+        "endpoint": "users",
+        "q": _truncate(q, 50),
+        "plan": plan,
+        "page": page
+    })
+
+    return {"items": enriched_users, "page": page, "page_size": page_size, "total": total}
+
+@api_router.get("/admin/users/{user_id}")
+async def admin_user_detail(user_id: str, request: Request):
+    admin_user = await require_master_admin(request)
+
+    user_doc = await db.users.find_one({"user_id": user_id}, {"_id": 0})
+    if not user_doc:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    notes_doc = await db.admin_user_notes.find_one({"user_id": user_id}, {"_id": 0})
+
+    last30_date = (datetime.now(timezone.utc) - timedelta(days=30)).date().isoformat()
+    date_query = _date_range_query("created_at", last30_date, None)
+
+    perizie_30d_map = await _aggregate_usage(db.perizia_analyses, [user_id], date_query)
+    images_30d_map = await _aggregate_usage(db.image_forensics, [user_id], date_query)
+    assistant_30d_map = await _aggregate_usage(db.assistant_qa, [user_id], date_query)
+
+    perizie_all_map = await _aggregate_usage(db.perizia_analyses, [user_id], None)
+    images_all_map = await _aggregate_usage(db.image_forensics, [user_id], None)
+    assistant_all_map = await _aggregate_usage(db.assistant_qa, [user_id], None)
+
+    last_active = _max_last_active(
+        perizie_all_map.get(user_id, {}).get("last_active"),
+        images_all_map.get(user_id, {}).get("last_active"),
+        assistant_all_map.get(user_id, {}).get("last_active")
+    )
+
+    perizie_recent = await db.perizia_analyses.find(
+        {"user_id": user_id},
+        {"_id": 0, "analysis_id": 1, "case_id": 1, "run_id": 1, "revision": 1, "created_at": 1, "result.semaforo_generale": 1, "result.section_1_semaforo_generale": 1}
+    ).sort("created_at", -1).limit(20).to_list(20)
+    images_recent = await db.image_forensics.find(
+        {"user_id": user_id},
+        {"_id": 0, "forensics_id": 1, "case_id": 1, "run_id": 1, "revision": 1, "created_at": 1, "image_count": 1}
+    ).sort("created_at", -1).limit(20).to_list(20)
+    assistant_recent = await db.assistant_qa.find(
+        {"user_id": user_id},
+        {"_id": 0, "qa_id": 1, "case_id": 1, "run_id": 1, "created_at": 1, "question": 1}
+    ).sort("created_at", -1).limit(20).to_list(20)
+
+    recent_activity = []
+    for item in perizie_recent:
+        semaforo = None
+        result = item.get("result", {})
+        semaforo = (result.get("semaforo_generale") or result.get("section_1_semaforo_generale") or {}).get("status")
+        recent_activity.append({
+            "type": "perizia",
+            "id": item.get("analysis_id"),
+            "case_id": item.get("case_id"),
+            "run_id": item.get("run_id"),
+            "revision": item.get("revision"),
+            "created_at": _to_iso(item.get("created_at")),
+            "summary": {"semaforo": semaforo}
+        })
+    for item in images_recent:
+        recent_activity.append({
+            "type": "image",
+            "id": item.get("forensics_id"),
+            "case_id": item.get("case_id"),
+            "run_id": item.get("run_id"),
+            "revision": item.get("revision"),
+            "created_at": _to_iso(item.get("created_at")),
+            "summary": {"image_count": item.get("image_count")}
+        })
+    for item in assistant_recent:
+        question = item.get("question", "")
+        recent_activity.append({
+            "type": "assistant",
+            "id": item.get("qa_id"),
+            "case_id": item.get("case_id"),
+            "run_id": item.get("run_id"),
+            "revision": None,
+            "created_at": _to_iso(item.get("created_at")),
+            "summary": {"question_preview": question[:120]}
+        })
+
+    recent_activity = sorted(
+        recent_activity,
+        key=lambda x: _parse_dt(x.get("created_at")) or datetime.min.replace(tzinfo=timezone.utc),
+        reverse=True
+    )[:20]
+
+    user_payload = {
+        "user_id": user_doc.get("user_id"),
+        "email": user_doc.get("email"),
+        "name": user_doc.get("name"),
+        "plan": user_doc.get("plan"),
+        "is_master_admin": user_doc.get("is_master_admin", False),
+        "created_at": _to_iso(user_doc.get("created_at")),
+        "last_active_at": last_active,
+        "quota": {
+            "perizia_scans_remaining": user_doc.get("quota", {}).get("perizia_scans_remaining", 0),
+            "image_scans_remaining": user_doc.get("quota", {}).get("image_scans_remaining", 0),
+            "assistant_messages_remaining": user_doc.get("quota", {}).get("assistant_messages_remaining", 0)
+        },
+        "usage_30d": {
+            "perizie": perizie_30d_map.get(user_id, {}).get("count", 0),
+            "images": images_30d_map.get(user_id, {}).get("count", 0),
+            "assistant_qas": assistant_30d_map.get(user_id, {}).get("count", 0)
+        },
+        "lifetime": {
+            "perizie": perizie_all_map.get(user_id, {}).get("count", 0),
+            "images": images_all_map.get(user_id, {}).get("count", 0),
+            "assistant_qas": assistant_all_map.get(user_id, {}).get("count", 0)
+        },
+        "notes": {
+            "internal_status": notes_doc.get("internal_status"),
+            "tags": notes_doc.get("tags", []),
+            "note": notes_doc.get("note", "")
+        } if notes_doc else None
+    }
+
+    return {"user": user_payload, "recent_activity": recent_activity}
+
+@api_router.patch("/admin/users/{user_id}")
+async def admin_user_update(user_id: str, request: Request):
+    admin_user = await require_master_admin(request)
+    payload = await request.json()
+
+    target_user = await db.users.find_one({"user_id": user_id}, {"_id": 0})
+    if not target_user:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    update_data: Dict[str, Any] = {}
+    plan = payload.get("plan")
+    quota = payload.get("quota") or {}
+
+    before_plan = target_user.get("plan")
+    before_quota = target_user.get("quota", {}).copy()
+
+    if plan:
+        if plan not in SUBSCRIPTION_PLANS:
+            raise HTTPException(status_code=400, detail="Invalid plan")
+        if target_user.get("email", "").lower() == MASTER_ADMIN_EMAIL.lower() and plan != "enterprise":
+            raise HTTPException(status_code=400, detail="Cannot downgrade master admin plan")
+        update_data["plan"] = plan
+
+    quota_updates: Dict[str, int] = {}
+    for key, value in quota.items():
+        if not isinstance(value, int) or value < 0:
+            raise HTTPException(status_code=400, detail="Quota values must be int >= 0")
+        quota_updates[key] = value
+
+    if quota_updates:
+        new_quota = target_user.get("quota", {}).copy()
+        new_quota.update(quota_updates)
+        update_data["quota"] = new_quota
+
+    if update_data:
+        await db.users.update_one({"user_id": user_id}, {"$set": update_data})
+
+    target_email = target_user.get("email")
+    if plan and plan != before_plan:
+        await _write_admin_audit(
+            admin_user,
+            "USER_SET_PLAN",
+            target_user_id=user_id,
+            target_email=target_email,
+            meta={"before": before_plan, "after": plan}
+        )
+    if quota_updates:
+        await _write_admin_audit(
+            admin_user,
+            "USER_SET_QUOTA",
+            target_user_id=user_id,
+            target_email=target_email,
+            meta={"before": {k: before_quota.get(k) for k in quota_updates.keys()}, "after": quota_updates}
+        )
+
+    updated = await db.users.find_one({"user_id": user_id}, {"_id": 0})
+    updated["created_at"] = _to_iso(updated.get("created_at"))
+    return {"ok": True, "user": updated}
+
+@api_router.put("/admin/users/{user_id}/notes")
+async def admin_user_notes(user_id: str, request: Request):
+    admin_user = await require_master_admin(request)
+    payload = await request.json()
+
+    note = payload.get("note", "")
+    tags = payload.get("tags", []) or []
+    internal_status = payload.get("internal_status", "OK")
+
+    existing = await db.admin_user_notes.find_one({"user_id": user_id}, {"_id": 0})
+    created_at = existing.get("created_at") if existing else _now_iso()
+
+    doc = {
+        "user_id": user_id,
+        "note": note,
+        "tags": tags,
+        "internal_status": internal_status,
+        "updated_by_admin_email": admin_user.email,
+        "updated_at": _now_iso(),
+        "created_at": created_at
+    }
+
+    await db.admin_user_notes.update_one({"user_id": user_id}, {"$set": doc}, upsert=True)
+
+    await _write_admin_audit(
+        admin_user,
+        "USER_NOTE_UPSERT",
+        target_user_id=user_id,
+        target_email=None,
+        meta={"internal_status": internal_status, "tags": tags}
+    )
+
+    return {"ok": True, "notes": doc}
+
+@api_router.get("/admin/perizie")
+async def admin_perizie(
+    request: Request,
+    q: Optional[str] = None,
+    date_from: Optional[str] = None,
+    date_to: Optional[str] = None,
+    page: int = 1,
+    page_size: int = 20
+):
+    await require_master_admin(request)
+    page = max(1, page)
+    page_size = max(1, min(100, page_size))
+
+    query: Dict[str, Any] = {}
+    if q:
+        regex = {"$regex": q, "$options": "i"}
+        query["$or"] = [{"case_id": regex}, {"run_id": regex}, {"analysis_id": regex}, {"file_name": regex}, {"user_id": regex}]
+
+    date_query = _date_range_query("created_at", date_from, date_to)
+    query = _merge_query(query, date_query) if date_query else query
+
+    total = await db.perizia_analyses.count_documents(query)
+    items = await db.perizia_analyses.find(
+        query,
+        {"_id": 0, "analysis_id": 1, "user_id": 1, "case_id": 1, "run_id": 1, "revision": 1, "created_at": 1, "file_name": 1, "result.semaforo_generale": 1, "result.section_1_semaforo_generale": 1}
+    ).sort("created_at", -1).skip((page - 1) * page_size).limit(page_size).to_list(page_size)
+
+    user_ids = [i.get("user_id") for i in items if i.get("user_id")]
+    users_map = await _get_user_email_map(user_ids)
+    rows = []
+    for item in items:
+        result = item.get("result", {})
+        semaforo = (result.get("semaforo_generale") or result.get("section_1_semaforo_generale") or {}).get("status")
+        rows.append({
+            "analysis_id": item.get("analysis_id") or item.get("id"),
+            "user_id": item.get("user_id"),
+            "email": users_map.get(item.get("user_id"), {}).get("email"),
+            "case_id": item.get("case_id"),
+            "run_id": item.get("run_id"),
+            "revision": item.get("revision"),
+            "created_at": _to_iso(item.get("created_at")),
+            "semaforo": semaforo,
+            "file_name": item.get("file_name")
+        })
+
+    return {"items": rows, "page": page, "page_size": page_size, "total": total}
+
+@api_router.get("/admin/images")
+async def admin_images(
+    request: Request,
+    q: Optional[str] = None,
+    date_from: Optional[str] = None,
+    date_to: Optional[str] = None,
+    page: int = 1,
+    page_size: int = 20
+):
+    await require_master_admin(request)
+    page = max(1, page)
+    page_size = max(1, min(100, page_size))
+
+    query: Dict[str, Any] = {}
+    if q:
+        regex = {"$regex": q, "$options": "i"}
+        query["$or"] = [{"case_id": regex}, {"run_id": regex}, {"forensics_id": regex}, {"user_id": regex}]
+
+    date_query = _date_range_query("created_at", date_from, date_to)
+    query = _merge_query(query, date_query) if date_query else query
+
+    total = await db.image_forensics.count_documents(query)
+    items = await db.image_forensics.find(
+        query,
+        {"_id": 0, "forensics_id": 1, "user_id": 1, "case_id": 1, "run_id": 1, "revision": 1, "created_at": 1, "image_count": 1}
+    ).sort("created_at", -1).skip((page - 1) * page_size).limit(page_size).to_list(page_size)
+
+    user_ids = [i.get("user_id") for i in items if i.get("user_id")]
+    users_map = await _get_user_email_map(user_ids)
+    rows = []
+    for item in items:
+        rows.append({
+            "forensics_id": item.get("forensics_id"),
+            "user_id": item.get("user_id"),
+            "email": users_map.get(item.get("user_id"), {}).get("email"),
+            "case_id": item.get("case_id"),
+            "run_id": item.get("run_id"),
+            "revision": item.get("revision"),
+            "created_at": _to_iso(item.get("created_at")),
+            "image_count": item.get("image_count", 0)
+        })
+
+    return {"items": rows, "page": page, "page_size": page_size, "total": total}
+
+@api_router.get("/admin/assistant")
+async def admin_assistant(
+    request: Request,
+    q: Optional[str] = None,
+    date_from: Optional[str] = None,
+    date_to: Optional[str] = None,
+    page: int = 1,
+    page_size: int = 20
+):
+    await require_master_admin(request)
+    page = max(1, page)
+    page_size = max(1, min(100, page_size))
+
+    query: Dict[str, Any] = {}
+    if q:
+        regex = {"$regex": q, "$options": "i"}
+        query["$or"] = [{"case_id": regex}, {"run_id": regex}, {"qa_id": regex}, {"question": regex}, {"user_id": regex}]
+
+    date_query = _date_range_query("created_at", date_from, date_to)
+    query = _merge_query(query, date_query) if date_query else query
+
+    total = await db.assistant_qa.count_documents(query)
+    items = await db.assistant_qa.find(
+        query,
+        {"_id": 0, "qa_id": 1, "user_id": 1, "case_id": 1, "run_id": 1, "created_at": 1, "question": 1}
+    ).sort("created_at", -1).skip((page - 1) * page_size).limit(page_size).to_list(page_size)
+
+    user_ids = [i.get("user_id") for i in items if i.get("user_id")]
+    users_map = await _get_user_email_map(user_ids)
+    rows = []
+    for item in items:
+        question = item.get("question", "")
+        rows.append({
+            "qa_id": item.get("qa_id"),
+            "user_id": item.get("user_id"),
+            "email": users_map.get(item.get("user_id"), {}).get("email"),
+            "case_id": item.get("case_id"),
+            "run_id": item.get("run_id"),
+            "created_at": _to_iso(item.get("created_at")),
+            "question_preview": question[:120]
+        })
+
+    return {"items": rows, "page": page, "page_size": page_size, "total": total}
+
+@api_router.get("/admin/transactions")
+async def admin_transactions(
+    request: Request,
+    q: Optional[str] = None,
+    status: Optional[str] = None,
+    page: int = 1,
+    page_size: int = 20
+):
+    await require_master_admin(request)
+    page = max(1, page)
+    page_size = max(1, min(100, page_size))
+
+    query: Dict[str, Any] = {}
+    if status:
+        query["status"] = status
+    if q:
+        regex = {"$regex": q, "$options": "i"}
+        query["$or"] = [{"session_id": regex}, {"transaction_id": regex}, {"user_id": regex}, {"plan_id": regex}]
+
+    total = await db.payment_transactions.count_documents(query)
+    items = await db.payment_transactions.find(
+        query,
+        {"_id": 0, "transaction_id": 1, "session_id": 1, "user_id": 1, "plan_id": 1, "status": 1, "payment_status": 1, "amount": 1, "currency": 1, "created_at": 1}
+    ).sort("created_at", -1).skip((page - 1) * page_size).limit(page_size).to_list(page_size)
+
+    user_ids = [i.get("user_id") for i in items if i.get("user_id")]
+    users_map = await _get_user_email_map(user_ids)
+    rows = []
+    for item in items:
+        rows.append({
+            "transaction_id": item.get("transaction_id"),
+            "session_id": item.get("session_id"),
+            "user_id": item.get("user_id"),
+            "email": users_map.get(item.get("user_id"), {}).get("email"),
+            "plan_id": item.get("plan_id"),
+            "status": item.get("status"),
+            "payment_status": item.get("payment_status"),
+            "amount": item.get("amount"),
+            "currency": item.get("currency"),
+            "created_at": _to_iso(item.get("created_at"))
+        })
+
+    return {"items": rows, "page": page, "page_size": page_size, "total": total}
 
 # ===================
 # HISTORY ENDPOINTS
@@ -3010,7 +3725,6 @@ app.include_router(api_router)
 FRONTEND_URL = os.environ.get('FRONTEND_URL', '')
 CORS_ORIGINS = [
     "http://localhost:3000",
-    "https://repo-setup-31.preview.emergentagent.com",
 ]
 # Add any additional origins from environment
 if FRONTEND_URL and FRONTEND_URL not in CORS_ORIGINS:
@@ -3024,6 +3738,39 @@ app.add_middleware(
     allow_headers=["*"],
     expose_headers=["*"],
 )
+
+@app.on_event("startup")
+async def ensure_indexes():
+    index_specs = [
+        (db.users, "email"),
+        (db.users, "plan"),
+        (db.users, "created_at"),
+        (db.perizia_analyses, "user_id"),
+        (db.perizia_analyses, "created_at"),
+        (db.perizia_analyses, "case_id"),
+        (db.perizia_analyses, "run_id"),
+        (db.image_forensics, "user_id"),
+        (db.image_forensics, "created_at"),
+        (db.image_forensics, "case_id"),
+        (db.image_forensics, "run_id"),
+        (db.assistant_qa, "user_id"),
+        (db.assistant_qa, "created_at"),
+        (db.assistant_qa, "case_id"),
+        (db.assistant_qa, "run_id"),
+        (db.payment_transactions, "user_id"),
+        (db.payment_transactions, "created_at"),
+        (db.payment_transactions, "status"),
+        (db.admin_user_notes, "user_id"),
+        (db.admin_audit_log, "created_at"),
+        (db.admin_audit_log, "admin_email"),
+        (db.admin_audit_log, "action"),
+        (db.admin_audit_log, "target_user_id"),
+    ]
+    for collection, field in index_specs:
+        try:
+            await collection.create_index(field)
+        except Exception as e:
+            logger.warning(f"Index creation failed for {collection.name}.{field}: {e}")
 
 @app.on_event("shutdown")
 async def shutdown_db_client():

@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useEffect } from "react";
 import { BrowserRouter, Routes, Route, useLocation, Navigate } from "react-router-dom";
 import { Toaster } from "./components/ui/sonner";
 
@@ -13,6 +13,13 @@ import History from "./pages/History";
 import Billing from "./pages/Billing";
 import Profile from "./pages/Profile";
 import AuthCallback from "./pages/AuthCallback";
+import AdminOverview from "./pages/admin/AdminOverview";
+import AdminUsers from "./pages/admin/AdminUsers";
+import AdminUserDetail from "./pages/admin/AdminUserDetail";
+import AdminPerizie from "./pages/admin/AdminPerizie";
+import AdminImages from "./pages/admin/AdminImages";
+import AdminAssistant from "./pages/admin/AdminAssistant";
+import AdminTransactions from "./pages/admin/AdminTransactions";
 
 // Context
 import { AuthProvider, useAuth } from "./context/AuthContext";
@@ -40,14 +47,48 @@ const ProtectedRoute = ({ children }) => {
   return children;
 };
 
+const AdminRoute = ({ children }) => {
+  const { user, loading } = useAuth();
+  const location = useLocation();
+
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-[#09090b] flex items-center justify-center">
+        <div className="text-center">
+          <div className="w-12 h-12 border-4 border-gold border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
+          <p className="text-zinc-400 font-mono text-sm">Authenticating...</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (!user) {
+    return <Navigate to="/" state={{ from: location }} replace />;
+  }
+
+  if (!user?.is_master_admin) {
+    return <Navigate to="/dashboard" replace />;
+  }
+
+  return children;
+};
+
 // App Router Component
 function AppRouter() {
   const location = useLocation();
+  const { user } = useAuth();
   
   // REMINDER: DO NOT HARDCODE THE URL, OR ADD ANY FALLBACKS OR REDIRECT URLS, THIS BREAKS THE AUTH
   // Check URL fragment OR query params for session_id (Emergent Auth callback)
   const hasSessionInHash = location.hash?.includes('session_id=');
   const hasSessionInSearch = location.search?.includes('session_id=');
+
+  useEffect(() => {
+    if (user?.is_master_admin) {
+      const path = location.pathname + location.search;
+      localStorage.setItem('last_path', path);
+    }
+  }, [location.pathname, location.search, user]);
   
   if (hasSessionInHash || hasSessionInSearch) {
     return <AuthCallback />;
@@ -79,6 +120,27 @@ function AppRouter() {
       } />
       <Route path="/profile" element={
         <ProtectedRoute><Profile /></ProtectedRoute>
+      } />
+      <Route path="/admin" element={
+        <AdminRoute><AdminOverview /></AdminRoute>
+      } />
+      <Route path="/admin/users" element={
+        <AdminRoute><AdminUsers /></AdminRoute>
+      } />
+      <Route path="/admin/users/:userId" element={
+        <AdminRoute><AdminUserDetail /></AdminRoute>
+      } />
+      <Route path="/admin/perizie" element={
+        <AdminRoute><AdminPerizie /></AdminRoute>
+      } />
+      <Route path="/admin/images" element={
+        <AdminRoute><AdminImages /></AdminRoute>
+      } />
+      <Route path="/admin/assistant" element={
+        <AdminRoute><AdminAssistant /></AdminRoute>
+      } />
+      <Route path="/admin/transactions" element={
+        <AdminRoute><AdminTransactions /></AdminRoute>
       } />
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>

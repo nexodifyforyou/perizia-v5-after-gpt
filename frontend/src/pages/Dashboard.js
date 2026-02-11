@@ -15,7 +15,9 @@ import {
   ChevronRight,
   AlertTriangle,
   CheckCircle,
-  Clock
+  Clock,
+  Shield,
+  Users
 } from 'lucide-react';
 import axios from 'axios';
 import { toast } from 'sonner';
@@ -34,6 +36,14 @@ const Sidebar = ({ user, logout }) => {
     { icon: <History className="w-5 h-5" />, label: 'Storico', path: '/history' },
     { icon: <CreditCard className="w-5 h-5" />, label: 'Abbonamento', path: '/billing' },
     { icon: <User className="w-5 h-5" />, label: 'Profilo', path: '/profile' },
+  ];
+  const adminItems = [
+    { icon: <Shield className="w-5 h-5" />, label: 'Overview', path: '/admin' },
+    { icon: <Users className="w-5 h-5" />, label: 'Utenti', path: '/admin/users' },
+    { icon: <FileText className="w-5 h-5" />, label: 'Perizie', path: '/admin/perizie' },
+    { icon: <Image className="w-5 h-5" />, label: 'Immagini', path: '/admin/images' },
+    { icon: <MessageSquare className="w-5 h-5" />, label: 'Assistente', path: '/admin/assistant' },
+    { icon: <CreditCard className="w-5 h-5" />, label: 'Transazioni', path: '/admin/transactions' },
   ];
 
   return (
@@ -54,7 +64,7 @@ const Sidebar = ({ user, logout }) => {
             to={item.path}
             data-testid={`nav-${item.path.replace(/\//g, '-').replace(/^-/, '')}`}
             className={`flex items-center gap-3 px-4 py-3 rounded-lg text-sm font-medium transition-all ${
-              window.location.pathname === item.path
+              window.location.pathname === item.path || window.location.pathname.startsWith(item.path + '/')
                 ? 'bg-gold/10 text-gold'
                 : 'text-zinc-400 hover:text-zinc-100 hover:bg-zinc-900'
             }`}
@@ -63,6 +73,25 @@ const Sidebar = ({ user, logout }) => {
             {item.label}
           </Link>
         ))}
+        {user?.is_master_admin && (
+          <div className="pt-6">
+            <p className="px-4 text-xs font-mono text-zinc-500 uppercase tracking-wider mb-2">Admin</p>
+            {adminItems.map((item) => (
+              <Link
+                key={item.path}
+                to={item.path}
+                className={`flex items-center gap-3 px-4 py-3 rounded-lg text-sm font-medium transition-all ${
+                  window.location.pathname === item.path || window.location.pathname.startsWith(item.path + '/')
+                    ? 'bg-gold/10 text-gold'
+                    : 'text-zinc-400 hover:text-zinc-100 hover:bg-zinc-900'
+                }`}
+              >
+                {item.icon}
+                {item.label}
+              </Link>
+            ))}
+          </div>
+        )}
       </nav>
       
       {/* User Info */}
