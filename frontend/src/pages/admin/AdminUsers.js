@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import axios from 'axios';
 import AdminLayout from './AdminLayout';
 import { Button } from '../../components/ui/button';
@@ -27,7 +27,7 @@ const AdminUsers = () => {
   const [notesStatus, setNotesStatus] = useState('OK');
   const navigate = useNavigate();
 
-  const fetchUsers = async () => {
+  const fetchUsers = useCallback(async () => {
     setLoading(true);
     try {
       const response = await axios.get(`${API_URL}/api/admin/users`, {
@@ -41,11 +41,11 @@ const AdminUsers = () => {
     } finally {
       setLoading(false);
     }
-  };
+  }, [q, plan, sort, order, page, pageSize]);
 
   useEffect(() => {
     fetchUsers();
-  }, [q, plan, sort, order, page]);
+  }, [fetchUsers]);
 
   const openEditModal = (user) => {
     setEditingUser(user);

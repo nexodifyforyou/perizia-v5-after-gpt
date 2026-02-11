@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import axios from 'axios';
 import AdminLayout from './AdminLayout';
 import { Input } from '../../components/ui/input';
@@ -16,7 +16,7 @@ const AdminTransactions = () => {
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
 
-  const fetchData = async () => {
+  const fetchData = useCallback(async () => {
     setLoading(true);
     try {
       const response = await axios.get(`${API_URL}/api/admin/transactions`, {
@@ -30,11 +30,11 @@ const AdminTransactions = () => {
     } finally {
       setLoading(false);
     }
-  };
+  }, [q, status, page, pageSize]);
 
   useEffect(() => {
     fetchData();
-  }, [q, status, page]);
+  }, [fetchData]);
 
   const totalPages = Math.max(1, Math.ceil(total / pageSize));
 
