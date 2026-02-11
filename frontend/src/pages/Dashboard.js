@@ -75,7 +75,7 @@ const Sidebar = ({ user, logout }) => {
         ))}
         {user?.is_master_admin && (
           <div className="pt-6">
-            <p className="px-4 text-xs font-mono text-zinc-500 uppercase tracking-wider mb-2">Admin</p>
+            <p className="px-4 text-xs font-mono text-zinc-500 uppercase tracking-wider mb-2">ADMIN</p>
             {adminItems.map((item) => (
               <Link
                 key={item.path}

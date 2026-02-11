@@ -8,7 +8,7 @@ import { toast } from 'sonner';
 const API_URL = process.env.REACT_APP_BACKEND_URL;
 
 const AdminUserDetail = () => {
-  const { userId } = useParams();
+  const { user_id } = useParams();
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const navigate = useNavigate();
@@ -16,7 +16,7 @@ const AdminUserDetail = () => {
   useEffect(() => {
     const fetchDetail = async () => {
       try {
-        const response = await axios.get(`${API_URL}/api/admin/users/${userId}`, { withCredentials: true });
+        const response = await axios.get(`${API_URL}/api/admin/users/${user_id}`, { withCredentials: true });
         setData(response.data);
       } catch (error) {
         toast.error('Errore nel caricamento utente');
@@ -25,7 +25,7 @@ const AdminUserDetail = () => {
       }
     };
     fetchDetail();
-  }, [userId]);
+  }, [user_id]);
 
   const user = data?.user || {};
 

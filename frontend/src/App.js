@@ -127,7 +127,7 @@ function AppRouter() {
       <Route path="/admin/users" element={
         <AdminRoute><AdminUsers /></AdminRoute>
       } />
-      <Route path="/admin/users/:userId" element={
+      <Route path="/admin/users/:user_id" element={
         <AdminRoute><AdminUserDetail /></AdminRoute>
       } />
       <Route path="/admin/perizie" element={

@@ -303,6 +303,9 @@ async def _decrement_quota_if_applicable(user: User, field: str) -> bool:
     )
     return True
 
+ADMIN_NOTE_STATUSES = {"OK", "WATCH", "BLOCKED"}
+ADMIN_QUOTA_FIELDS = {"perizia_scans_remaining", "image_scans_remaining", "assistant_messages_remaining"}
+
 # ===================
 # AUTH ENDPOINTS
 # ===================
@@ -3053,6 +3056,8 @@ async def admin_users(
     sort = sort or "created_at"
     order = order or "desc"
     sort_dir = -1 if order.lower() == "desc" else 1
+    if sort not in {"created_at", "last_active_at", "usage_30d.perizie"}:
+        sort = "created_at"
 
     query: Dict[str, Any] = {}
     if plan:
@@ -3069,7 +3074,7 @@ async def admin_users(
     if requires_full_scan:
         users_list = await db.users.find(query, {"_id": 0}).to_list(max(total, 0))
     else:
-        users_list = await db.users.find(query, {"_id": 0}).sort("created_at", sort_dir).skip((page - 1) * page_size).limit(page_size).to_list(page_size)
+        users_list = await db.users.find(query, {"_id": 0}).sort(sort, sort_dir).skip((page - 1) * page_size).limit(page_size).to_list(page_size)
 
     user_ids = [u.get("user_id") for u in users_list if u.get("user_id")]
     last30_date = (datetime.now(timezone.utc) - timedelta(days=30)).date().isoformat()
@@ -3253,6 +3258,8 @@ async def admin_user_detail(user_id: str, request: Request):
         } if notes_doc else None
     }
 
+    await _write_admin_audit(admin_user, "ADMIN_API_VIEW", meta={"endpoint": "users_detail", "user_id": user_id})
+
     return {"user": user_payload, "recent_activity": recent_activity}
 
 @api_router.patch("/admin/users/{user_id}")
@@ -3280,6 +3287,8 @@ async def admin_user_update(user_id: str, request: Request):
 
     quota_updates: Dict[str, int] = {}
     for key, value in quota.items():
+        if key not in ADMIN_QUOTA_FIELDS:
+            raise HTTPException(status_code=400, detail=f"Unsupported quota key: {key}")
         if not isinstance(value, int) or value < 0:
             raise HTTPException(status_code=400, detail="Quota values must be int >= 0")
         quota_updates[key] = value
@@ -3322,6 +3331,13 @@ async def admin_user_notes(user_id: str, request: Request):
     note = payload.get("note", "")
     tags = payload.get("tags", []) or []
     internal_status = payload.get("internal_status", "OK")
+    if not isinstance(note, str):
+        raise HTTPException(status_code=400, detail="note must be a string")
+    if not isinstance(tags, list) or any(not isinstance(tag, str) for tag in tags):
+        raise HTTPException(status_code=400, detail="tags must be an array of strings")
+    internal_status = str(internal_status).upper()
+    if internal_status not in ADMIN_NOTE_STATUSES:
+        raise HTTPException(status_code=400, detail="internal_status must be one of: OK, WATCH, BLOCKED")
 
     existing = await db.admin_user_notes.find_one({"user_id": user_id}, {"_id": 0})
     created_at = existing.get("created_at") if existing else _now_iso()
@@ -3357,7 +3373,7 @@ async def admin_perizie(
     page: int = 1,
     page_size: int = 20
 ):
-    await require_master_admin(request)
+    admin_user = await require_master_admin(request)
     page = max(1, page)
     page_size = max(1, min(100, page_size))
 
@@ -3393,6 +3409,12 @@ async def admin_perizie(
             "file_name": item.get("file_name")
         })
 
+    await _write_admin_audit(admin_user, "ADMIN_API_VIEW", meta={
+        "endpoint": "perizie",
+        "q": _truncate(q, 50),
+        "page": page
+    })
+
     return {"items": rows, "page": page, "page_size": page_size, "total": total}
 
 @api_router.get("/admin/images")
@@ -3404,7 +3426,7 @@ async def admin_images(
     page: int = 1,
     page_size: int = 20
 ):
-    await require_master_admin(request)
+    admin_user = await require_master_admin(request)
     page = max(1, page)
     page_size = max(1, min(100, page_size))
 
@@ -3437,6 +3459,12 @@ async def admin_images(
             "image_count": item.get("image_count", 0)
         })
 
+    await _write_admin_audit(admin_user, "ADMIN_API_VIEW", meta={
+        "endpoint": "images",
+        "q": _truncate(q, 50),
+        "page": page
+    })
+
     return {"items": rows, "page": page, "page_size": page_size, "total": total}
 
 @api_router.get("/admin/assistant")
@@ -3448,7 +3476,7 @@ async def admin_assistant(
     page: int = 1,
     page_size: int = 20
 ):
-    await require_master_admin(request)
+    admin_user = await require_master_admin(request)
     page = max(1, page)
     page_size = max(1, min(100, page_size))
 
@@ -3481,6 +3509,12 @@ async def admin_assistant(
             "question_preview": question[:120]
         })
 
+    await _write_admin_audit(admin_user, "ADMIN_API_VIEW", meta={
+        "endpoint": "assistant",
+        "q": _truncate(q, 50),
+        "page": page
+    })
+
     return {"items": rows, "page": page, "page_size": page_size, "total": total}
 
 @api_router.get("/admin/transactions")
@@ -3491,7 +3525,7 @@ async def admin_transactions(
     page: int = 1,
     page_size: int = 20
 ):
-    await require_master_admin(request)
+    admin_user = await require_master_admin(request)
     page = max(1, page)
     page_size = max(1, min(100, page_size))
 
@@ -3524,6 +3558,13 @@ async def admin_transactions(
             "currency": item.get("currency"),
             "created_at": _to_iso(item.get("created_at"))
         })
+
+    await _write_admin_audit(admin_user, "ADMIN_API_VIEW", meta={
+        "endpoint": "transactions",
+        "q": _truncate(q, 50),
+        "status": status,
+        "page": page
+    })
 
     return {"items": rows, "page": page, "page_size": page_size, "total": total}
 
