@@ -17,6 +17,7 @@ logger = logging.getLogger(__name__)
 GOOGLE_CLOUD_PROJECT = os.environ.get('GOOGLE_CLOUD_PROJECT', 'emergent-perizia')
 GOOGLE_CLOUD_LOCATION = os.environ.get('GOOGLE_CLOUD_LOCATION', 'eu')
 DOCUMENT_AI_PROCESSOR_ID = os.environ.get('DOCUMENT_AI_PROCESSOR_ID', '675530c0dde80224')
+DOC_AI_TIMEOUT_SECONDS = int(os.environ.get('DOC_AI_TIMEOUT_SECONDS', '30'))
 
 # Page limit for Document AI (15 pages per request for non-imageless mode)
 MAX_PAGES_PER_REQUEST = 15
@@ -136,7 +137,7 @@ class GoogleDocumentAIExtractor:
                 )
                 
                 # Process document
-                response = self.client.process_document(request=request)
+                response = self.client.process_document(request=request, timeout=DOC_AI_TIMEOUT_SECONDS)
                 document = response.document
                 
                 logger.info(f"Chunk {chunk_idx + 1}: {len(document.pages)} pages, {len(document.text)} chars")
