@@ -13,6 +13,7 @@ import uuid
 from datetime import datetime, timezone, timedelta
 import json
 import httpx
+import ipaddress
 from fastapi.openapi.utils import get_openapi
 from PyPDF2 import PdfReader
 import io
@@ -35,6 +36,9 @@ DOC_AI_TIMEOUT_SECONDS = int(os.environ.get('DOC_AI_TIMEOUT_SECONDS', '30'))
 LLM_TIMEOUT_SECONDS = int(os.environ.get('LLM_TIMEOUT_SECONDS', '45'))
 PIPELINE_TIMEOUT_SECONDS = int(os.environ.get('PIPELINE_TIMEOUT_SECONDS', '120'))
 OFFLINE_QA_ENV = os.environ.get('OFFLINE_QA', '0').lower() in {"1", "true", "yes"}
+ALLOW_OFFLINE_QA_ENV = os.environ.get("ALLOW_OFFLINE_QA", "0").strip() == "1"
+OFFLINE_QA_TOKEN = os.environ.get("OFFLINE_QA_TOKEN", "").strip()
+EVIDENCE_OFFSET_MODE = "PAGE_LOCAL"
 
 OFFLINE_QA_FIXTURE_PATH = os.environ.get(
     "OFFLINE_QA_FIXTURE_PATH",
@@ -225,8 +229,7 @@ async def get_current_user(request: Request) -> Optional[User]:
 
 async def require_auth(request: Request) -> User:
     """Require authenticated user"""
-    offline_header = str(request.headers.get("X-OFFLINE-QA", "0")).lower()
-    if OFFLINE_QA_ENV or offline_header in {"1", "true", "yes"}:
+    if await is_offline_qa_request(request):
         return User(
             user_id="offline_qa",
             email="offline@local",
@@ -278,9 +281,51 @@ def _has_evidence(ev) -> bool:
     e0 = ev[0]
     return isinstance(e0, dict) and "page" in e0 and "quote" in e0 and str(e0.get("quote","")).strip() != ""
 
-def _is_offline_qa(request: Request) -> bool:
-    header_val = str(request.headers.get("X-OFFLINE-QA", "")).strip().lower()
-    return OFFLINE_QA_ENV or header_val in {"1", "true", "yes"}
+def _is_loopback_client(request: Request) -> bool:
+    host = (request.client.host if request and request.client else "") or ""
+    try:
+        ip = ipaddress.ip_address(host)
+        return ip.is_loopback
+    except Exception:
+        return False
+
+async def _audit_offline_qa_rejection(request: Request, reason: str) -> None:
+    client_ip = (request.client.host if request and request.client else None)
+    logger.warning(f"offline_qa_rejected reason={reason} client_ip={client_ip} path={request.url.path}")
+    try:
+        await db.security_audit_log.insert_one({
+            "event": "OFFLINE_QA_REJECTED",
+            "reason": reason,
+            "client_ip": client_ip,
+            "path": request.url.path,
+            "method": request.method,
+            "created_at": datetime.now(timezone.utc).isoformat()
+        })
+    except Exception:
+        # Logging must never break request auth flow
+        pass
+
+async def is_offline_qa_request(request: Request) -> bool:
+    offline_header = str(request.headers.get("X-OFFLINE-QA", "")).strip()
+    if offline_header != "1":
+        return False
+
+    # Header was attempted, evaluate strict gating and audit rejections.
+    if not ALLOW_OFFLINE_QA_ENV:
+        await _audit_offline_qa_rejection(request, "ALLOW_OFFLINE_QA_DISABLED")
+        return False
+    if not OFFLINE_QA_TOKEN:
+        await _audit_offline_qa_rejection(request, "OFFLINE_QA_TOKEN_MISSING")
+        return False
+    if not _is_loopback_client(request):
+        await _audit_offline_qa_rejection(request, "CLIENT_NOT_LOOPBACK")
+        return False
+
+    token_header = str(request.headers.get("X-OFFLINE-QA-TOKEN", "")).strip()
+    if not token_header or token_header != OFFLINE_QA_TOKEN:
+        await _audit_offline_qa_rejection(request, "OFFLINE_QA_TOKEN_INVALID")
+        return False
+    return True
 
 def _load_offline_fixture() -> Dict[str, Any]:
     try:
@@ -291,12 +336,15 @@ def _load_offline_fixture() -> Dict[str, Any]:
 
 def _build_evidence(page_text: str, page_num: int, start: int, end: int) -> Dict[str, Any]:
     snippet = page_text[start:end].strip()
+    page_text_hash = hashlib.sha256(page_text.encode("utf-8")).hexdigest()
     return {
         "page": page_num,
         "quote": snippet[:200],
         "start_offset": start,
         "end_offset": end,
-        "bbox": None
+        "bbox": None,
+        "offset_mode": EVIDENCE_OFFSET_MODE,
+        "page_text_hash": page_text_hash
     }
 
 def _find_regex_in_pages(pages_in: List[Dict], pattern: str, flags=0) -> Optional[Dict[str, Any]]:
@@ -639,6 +687,140 @@ def enforce_evidence_or_low_confidence(result: Dict[str, Any]) -> Dict[str, Any]
             if key in indice:
                 indice[key] = "TBD"
     return result
+
+def _normalize_evidence_offsets(result: Dict[str, Any], pages: List[Dict[str, Any]]) -> None:
+    page_text_by_num: Dict[int, str] = {}
+    page_hash_by_num: Dict[int, str] = {}
+    for p in pages:
+        page_num = int(p.get("page_number", 0) or 0)
+        page_text = str(p.get("text", "") or "")
+        page_text_by_num[page_num] = page_text
+        page_hash_by_num[page_num] = hashlib.sha256(page_text.encode("utf-8")).hexdigest()
+
+    def _normalize_entry(ev: Dict[str, Any]) -> None:
+        page = int(ev.get("page", 0) or 0)
+        quote = str(ev.get("quote", "") or "").strip()
+        page_text = page_text_by_num.get(page, "")
+        if "start_offset" not in ev or "end_offset" not in ev:
+            if quote and page_text:
+                idx = page_text.find(quote)
+                if idx >= 0:
+                    ev["start_offset"] = idx
+                    ev["end_offset"] = idx + len(quote)
+                else:
+                    ev["start_offset"] = 0
+                    ev["end_offset"] = min(len(page_text), len(quote))
+            else:
+                ev["start_offset"] = 0
+                ev["end_offset"] = 0
+        try:
+            ev["start_offset"] = int(ev.get("start_offset", 0) or 0)
+            ev["end_offset"] = int(ev.get("end_offset", 0) or 0)
+        except Exception:
+            ev["start_offset"] = 0
+            ev["end_offset"] = 0
+        ev["offset_mode"] = EVIDENCE_OFFSET_MODE
+        if page in page_hash_by_num:
+            ev["page_text_hash"] = page_hash_by_num[page]
+        ev.setdefault("bbox", None)
+
+    def _walk(obj: Any) -> None:
+        if isinstance(obj, dict):
+            for k, v in obj.items():
+                if k == "evidence" and isinstance(v, list):
+                    for ev in v:
+                        if isinstance(ev, dict):
+                            _normalize_entry(ev)
+                else:
+                    _walk(v)
+        elif isinstance(obj, list):
+            for item in obj:
+                _walk(item)
+
+    _walk(result)
+    result["offset_mode"] = EVIDENCE_OFFSET_MODE
+
+def _normalize_legal_killers(result: Dict[str, Any], pages: List[Dict[str, Any]]) -> None:
+    section = result.setdefault("section_9_legal_killers", {})
+    items = section.get("items", [])
+    if not isinstance(items, list):
+        section["items"] = []
+        return
+
+    status_map = {
+        "VERDE": "VERDE",
+        "GREEN": "VERDE",
+        "GIALLO": "GIALLO",
+        "YELLOW": "GIALLO",
+        "ROSSO": "ROSSO",
+        "RED": "ROSSO",
+        "DA_VERIFICARE": "DA_VERIFICARE",
+        "SI": "ROSSO",
+        "YES": "ROSSO",
+        "TRUE": "ROSSO",
+        "NO": "VERDE",
+        "FALSE": "VERDE",
+    }
+    status_it_map = {
+        "VERDE": "OK",
+        "GIALLO": "ATTENZIONE",
+        "ROSSO": "CRITICO",
+        "DA_VERIFICARE": "DA VERIFICARE",
+    }
+
+    dedup: Dict[str, Dict[str, Any]] = {}
+    all_pages = [int(p.get("page_number", 0) or 0) for p in pages]
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        killer = str(item.get("killer") or item.get("title") or "KILLER_NON_SPECIFICATO").strip()
+        key = killer.lower()
+        raw_status = str(item.get("status", "") or "").strip().upper()
+        norm_status = status_map.get(raw_status, "DA_VERIFICARE")
+        evidence = item.get("evidence", [])
+        if not isinstance(evidence, list):
+            evidence = []
+        if key not in dedup:
+            dedup[key] = {
+                "killer": killer,
+                "status": norm_status,
+                "status_it": status_it_map[norm_status],
+                "reason_it": str(item.get("reason_it", "") or "").strip() or f"Rilevata criticita: {killer}",
+                "evidence": [],
+                "searched_in": item.get("searched_in") if isinstance(item.get("searched_in"), dict) else None
+            }
+        else:
+            # Keep most severe status: ROSSO > GIALLO > DA_VERIFICARE > VERDE
+            sev_rank = {"ROSSO": 3, "GIALLO": 2, "DA_VERIFICARE": 1, "VERDE": 0}
+            if sev_rank[norm_status] > sev_rank[dedup[key]["status"]]:
+                dedup[key]["status"] = norm_status
+                dedup[key]["status_it"] = status_it_map[norm_status]
+        for ev in evidence:
+            if isinstance(ev, dict):
+                dedup[key]["evidence"].append(ev)
+
+    normalized = []
+    for it in dedup.values():
+        seen = set()
+        merged = []
+        for ev in it.get("evidence", []):
+            sig = (ev.get("page"), ev.get("start_offset"), ev.get("end_offset"), ev.get("quote"))
+            if sig not in seen:
+                seen.add(sig)
+                merged.append(ev)
+        it["evidence"] = merged
+        if not it["evidence"]:
+            it["status"] = "DA_VERIFICARE"
+            it["status_it"] = status_it_map["DA_VERIFICARE"]
+            it["searched_in"] = it.get("searched_in") or {
+                "pages": all_pages,
+                "keywords": [it["killer"]],
+                "sections": ["section_9_legal_killers"]
+            }
+            it["reason_it"] = it.get("reason_it") or f"Elemento da verificare: {it['killer']}"
+        normalized.append(it)
+
+    section["items"] = normalized
 
 def _to_iso(value: Any) -> Optional[str]:
     dt = _parse_dt(value)
@@ -2476,7 +2658,7 @@ async def analyze_perizia(request: Request, file: UploadFile = File(...)):
     case_id = f"case_{uuid.uuid4().hex[:8]}"
     run_id = f"run_{uuid.uuid4().hex[:8]}"
     analysis_id = f"analysis_{uuid.uuid4().hex[:12]}"
-    offline_qa = _is_offline_qa(request)
+    offline_qa = user.user_id == "offline_qa"
 
     async def run_pipeline():
         logger.info(f"[{request_id}] pipeline_start analysis_id={analysis_id} offline_qa={offline_qa}")
@@ -2608,6 +2790,8 @@ async def analyze_perizia(request: Request, file: UploadFile = File(...)):
         )
         raise HTTPException(status_code=504, detail={"error": "PIPELINE_TIMEOUT", "message": f"Pipeline exceeded {PIPELINE_TIMEOUT_SECONDS}s", "retry": True})
 
+    _normalize_legal_killers(result, pages)
+    _normalize_evidence_offsets(result, pages)
     logger.info(f"[{request_id}] assemble_output analysis_id={analysis_id}")
 
     # Create analysis record
@@ -4392,8 +4576,8 @@ app.add_middleware(
 
 @app.on_event("startup")
 async def ensure_indexes():
-    if OFFLINE_QA_ENV:
-        logger.info("OFFLINE_QA enabled: skipping index creation")
+    if ALLOW_OFFLINE_QA_ENV and OFFLINE_QA_TOKEN:
+        logger.info("Offline QA mode enabled: skipping index creation")
         return
     index_specs = [
         (db.users, "email"),
