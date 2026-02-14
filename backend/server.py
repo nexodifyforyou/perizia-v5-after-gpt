@@ -8,7 +8,7 @@ import asyncio
 import logging
 from pathlib import Path
 from pydantic import BaseModel, Field, ConfigDict
-from typing import List, Optional, Dict, Any
+from typing import List, Optional, Dict, Any, Tuple
 import uuid
 from datetime import datetime, timezone, timedelta
 import json
@@ -35,6 +35,9 @@ MASTER_ADMIN_EMAIL = os.environ.get('MASTER_ADMIN_EMAIL', 'admin@nexodify.com')
 DOC_AI_TIMEOUT_SECONDS = int(os.environ.get('DOC_AI_TIMEOUT_SECONDS', '30'))
 LLM_TIMEOUT_SECONDS = int(os.environ.get('LLM_TIMEOUT_SECONDS', '45'))
 PIPELINE_TIMEOUT_SECONDS = int(os.environ.get('PIPELINE_TIMEOUT_SECONDS', '120'))
+LLM_SUMMARY_TIMEOUT_SECONDS = int(os.environ.get('LLM_SUMMARY_TIMEOUT_SECONDS', '8'))
+PDF_TEXT_MIN_PAGE_CHARS = int(os.environ.get("PDF_TEXT_MIN_PAGE_CHARS", "40"))
+PDF_TEXT_MIN_COVERAGE_RATIO = float(os.environ.get("PDF_TEXT_MIN_COVERAGE_RATIO", "0.6"))
 OFFLINE_QA_ENV = os.environ.get('OFFLINE_QA', '0').lower() in {"1", "true", "yes"}
 ALLOW_OFFLINE_QA_ENV = os.environ.get("ALLOW_OFFLINE_QA", "0").strip() == "1"
 OFFLINE_QA_TOKEN = os.environ.get("OFFLINE_QA_TOKEN", "").strip()
@@ -2624,6 +2627,159 @@ def create_fallback_analysis(file_name: str, case_id: str, run_id: str, pages: L
     }
     return enforce_evidence_or_low_confidence(result)
 
+
+def _build_full_text_from_pages(pages: List[Dict]) -> str:
+    full_text = ""
+    for page_data in pages:
+        page_num = page_data.get("page_number", 0)
+        page_text = page_data.get("text", "") or ""
+        tables = page_data.get("tables", []) or []
+        table_text = ""
+        for table in tables:
+            table_text += "\n[TABELLA]\n"
+            for row in table.get("header_rows", []):
+                table_text += " | ".join(row) + "\n"
+            table_text += "-" * 40 + "\n"
+            for row in table.get("body_rows", []):
+                table_text += " | ".join(row) + "\n"
+            table_text += "[/TABELLA]\n"
+        combined_text = page_text
+        if table_text:
+            combined_text += "\n" + table_text
+        full_text += f"\n\n{'='*60}\nPAGINA {page_num}\n{'='*60}\n{combined_text}"
+    return full_text
+
+
+def _extract_pdf_text_digital(contents: bytes) -> Dict[str, Any]:
+    """Primary deterministic extraction path from embedded PDF text (non-OCR)."""
+    try:
+        reader = PdfReader(io.BytesIO(contents))
+        pages: List[Dict[str, Any]] = []
+        covered_pages = 0
+        for idx, page in enumerate(reader.pages, start=1):
+            page_text = (page.extract_text() or "").strip()
+            if len(page_text) >= PDF_TEXT_MIN_PAGE_CHARS:
+                covered_pages += 1
+            pages.append({
+                "page_number": idx,
+                "text": page_text,
+                "tables": [],
+                "form_fields": [],
+                "char_count": len(page_text)
+            })
+        total_pages = len(pages)
+        coverage_ratio = (covered_pages / total_pages) if total_pages else 0.0
+        full_text = _build_full_text_from_pages(pages)
+        return {
+            "success": True,
+            "pages": pages,
+            "full_text": full_text,
+            "total_pages": total_pages,
+            "covered_pages": covered_pages,
+            "coverage_ratio": coverage_ratio,
+            "error": None
+        }
+    except Exception as e:
+        return {
+            "success": False,
+            "pages": [],
+            "full_text": "",
+            "total_pages": 0,
+            "covered_pages": 0,
+            "coverage_ratio": 0.0,
+            "error": str(e)
+        }
+
+
+async def _extract_with_docai(contents: bytes, mime_type: str, request_id: str) -> Tuple[List[Dict], str, Optional[str]]:
+    """OCR fallback path. Returns (pages, full_text, error_message)."""
+    try:
+        from document_ai import extract_pdf_with_google_docai
+        logger.info(f"[{request_id}] docai_start timeout={DOC_AI_TIMEOUT_SECONDS}s")
+        docai_result = await asyncio.wait_for(
+            asyncio.to_thread(extract_pdf_with_google_docai, contents, mime_type),
+            timeout=DOC_AI_TIMEOUT_SECONDS
+        )
+    except ImportError as e:
+        return [], "", f"Document AI not available: {e}"
+    except asyncio.TimeoutError:
+        return [], "", "Document AI timed out"
+    except Exception as e:
+        return [], "", f"Document AI failed: {e}"
+
+    if not docai_result.get("success"):
+        return [], "", (docai_result.get("error") or "Document AI failed")
+
+    pages = docai_result.get("pages", []) or []
+    full_text = _build_full_text_from_pages(pages)
+    logger.info(f"[{request_id}] docai_end pages={len(pages)} chars={len(full_text)}")
+    return pages, full_text, None
+
+
+async def _enrich_summary_with_optional_llm(result: Dict[str, Any], file_name: str, full_text: str, request_id: str) -> None:
+    """
+    Optional LLM summary generation.
+    Fail-open by design: on timeout/error keep deterministic report and only mark summary/QA warning.
+    """
+    qa = result.setdefault("qa_pass", {"status": "WARN", "checks": []})
+    qa_checks = qa.setdefault("checks", [])
+    summary = result.setdefault("summary_for_client", {})
+    if not isinstance(summary, dict):
+        summary = {}
+        result["summary_for_client"] = summary
+
+    prompt = f"""Genera SOLO JSON valido con campi:
+{{
+  "summary_it": "...",
+  "summary_en": "..."
+}}
+Regole:
+- Riassunto cliente breve (max 70 parole per lingua)
+- Nessun numero inventato
+- Tono prudente
+
+FILE: {file_name}
+TESTO (estratto): {full_text[:12000]}
+"""
+    try:
+        response = await asyncio.wait_for(
+            openai_chat_completion("Sei un assistente che produce solo JSON valido.", prompt, model="gpt-4o", timeout_seconds=LLM_SUMMARY_TIMEOUT_SECONDS),
+            timeout=LLM_SUMMARY_TIMEOUT_SECONDS
+        )
+        payload = response.strip()
+        if payload.startswith("```json"):
+            payload = payload[7:]
+        if payload.startswith("```"):
+            payload = payload[3:]
+        if payload.endswith("```"):
+            payload = payload[:-3]
+        parsed = json.loads(payload.strip())
+        if isinstance(parsed, dict):
+            if parsed.get("summary_it"):
+                summary["summary_it"] = str(parsed["summary_it"])[:1500]
+            if parsed.get("summary_en"):
+                summary["summary_en"] = str(parsed["summary_en"])[:1500]
+        qa_checks.append({
+            "code": "QA-LLM-Summary",
+            "result": "OK",
+            "note": "Optional LLM summary generated"
+        })
+    except Exception as e:
+        logger.warning(f"[{request_id}] llm_summary_fail_open {e}")
+        summary["assistant_summary_error"] = {
+            "code": "LLM_SUMMARY_UNAVAILABLE",
+            "message": str(e)
+        }
+        qa_checks.append({
+            "code": "QA-LLM-Summary",
+            "result": "WARN",
+            "note": f"Optional summary unavailable: {str(e)[:180]}"
+        })
+        if qa.get("status") == "PASS":
+            qa["status"] = "WARN"
+    result["qa"] = qa
+
+
 @api_router.post("/analysis/perizia")
 async def analyze_perizia(request: Request, file: UploadFile = File(...)):
     """Analyze uploaded perizia PDF"""
@@ -2670,7 +2826,7 @@ async def analyze_perizia(request: Request, file: UploadFile = File(...)):
             if mime_type == "image/jpg":
                 mime_type = "image/jpeg"
 
-        # OCR / extraction stage
+        # Extraction stage (digital text first, OCR only if coverage is low)
         if offline_qa:
             logger.info(f"[{request_id}] offline_fixture_load path={OFFLINE_QA_FIXTURE_PATH}")
             fixture = _load_offline_fixture()
@@ -2678,104 +2834,47 @@ async def analyze_perizia(request: Request, file: UploadFile = File(...)):
             full_text = fixture.get("full_text", "")
             logger.info(f"[{request_id}] offline_fixture_loaded pages={len(pages)} chars={len(full_text)}")
         else:
-            try:
-                from document_ai import extract_pdf_with_google_docai
-                logger.info(f"[{request_id}] docai_start timeout={DOC_AI_TIMEOUT_SECONDS}s")
-                docai_result = await asyncio.wait_for(
-                    asyncio.to_thread(extract_pdf_with_google_docai, contents, mime_type),
-                    timeout=DOC_AI_TIMEOUT_SECONDS
-                )
-            except ImportError as e:
-                logger.error(f"[{request_id}] docai_import_error {e}")
-                raise DocAIUnavailable("Document AI not available") from e
-            except asyncio.TimeoutError as e:
-                logger.error(f"[{request_id}] docai_timeout")
-                raise DocAIUnavailable("Document AI timed out") from e
-            except Exception as e:
-                logger.error(f"[{request_id}] docai_error {e}")
-                raise DocAIUnavailable("Document AI failed") from e
+            digital = await asyncio.to_thread(_extract_pdf_text_digital, contents)
+            pages = digital.get("pages", []) or []
+            full_text = digital.get("full_text", "") or ""
+            coverage_ratio = float(digital.get("coverage_ratio", 0.0) or 0.0)
+            logger.info(
+                f"[{request_id}] digital_extract pages={len(pages)} chars={len(full_text)} "
+                f"coverage={coverage_ratio:.2f} threshold={PDF_TEXT_MIN_COVERAGE_RATIO:.2f}"
+            )
 
-            if not docai_result.get("success"):
-                logger.error(f"[{request_id}] docai_failed {docai_result.get('error')}")
-                raise DocAIUnavailable(docai_result.get("error") or "Document AI failed")
+            needs_ocr_fallback = (
+                not full_text.strip()
+                or coverage_ratio < PDF_TEXT_MIN_COVERAGE_RATIO
+            )
+            if needs_ocr_fallback:
+                logger.info(f"[{request_id}] docai_fallback_needed")
+                docai_pages, docai_text, docai_error = await _extract_with_docai(contents, mime_type, request_id)
+                if docai_error:
+                    logger.warning(f"[{request_id}] docai_fallback_failed {docai_error}")
+                elif docai_text.strip():
+                    pages = docai_pages
+                    full_text = docai_text
+                    logger.info(f"[{request_id}] docai_fallback_used pages={len(pages)} chars={len(full_text)}")
 
-            pages = docai_result.get("pages", [])
-            full_text = ""
-            for page_data in pages:
-                page_num = page_data.get("page_number", 0)
-                page_text = page_data.get("text", "")
-                tables = page_data.get("tables", [])
-                table_text = ""
-                for table in tables:
-                    table_text += "\n[TABELLA]\n"
-                    for row in table.get("header_rows", []):
-                        table_text += " | ".join(row) + "\n"
-                    table_text += "-" * 40 + "\n"
-                    for row in table.get("body_rows", []):
-                        table_text += " | ".join(row) + "\n"
-                    table_text += "[/TABELLA]\n"
-                combined_text = page_text
-                if table_text:
-                    combined_text += "\n" + table_text
-                full_text += f"\n\n{'='*60}\nPAGINA {page_num}\n{'='*60}\n{combined_text}"
-
-            logger.info(f"[{request_id}] docai_end pages={len(pages)} chars={len(full_text)}")
-
-        if not full_text.strip():
-            raise HTTPException(status_code=400, detail="Impossibile estrarre testo dal PDF. Il file potrebbe essere scansionato o protetto. / Could not extract text from PDF. File may be scanned or protected.")
+        if not pages:
+            pages = [{"page_number": 1, "text": "", "tables": [], "form_fields": [], "char_count": 0}]
 
         # Analysis stage
-        if offline_qa:
-            logger.info(f"[{request_id}] offline_analysis_start")
-            extracted_lots = _extract_lots_from_schema_riassuntivo(pages)
-            detected_legal_killers = _scan_legal_killers(pages)
-            result = create_fallback_analysis(file.filename, case_id, run_id, pages, full_text, extracted_lots, detected_legal_killers)
-            logger.info(f"[{request_id}] offline_analysis_end")
-        else:
-            logger.info(f"[{request_id}] llm_start timeout={LLM_TIMEOUT_SECONDS}s")
-            try:
-                result = await asyncio.wait_for(
-                    analyze_perizia_with_llm(full_text, pages, file.filename, user, case_id, run_id, input_sha256),
-                    timeout=LLM_TIMEOUT_SECONDS
-                )
-            except asyncio.TimeoutError as e:
-                logger.error(f"[{request_id}] llm_timeout")
-                raise LLMUnavailable("LLM timed out") from e
-            except Exception as e:
-                logger.error(f"[{request_id}] llm_error {e}")
-                raise LLMUnavailable("LLM failed") from e
-            logger.info(f"[{request_id}] llm_end")
+        logger.info(f"[{request_id}] deterministic_analysis_start")
+        extracted_lots = _extract_lots_from_schema_riassuntivo(pages)
+        detected_legal_killers = _scan_legal_killers(pages)
+        result = create_fallback_analysis(file.filename, case_id, run_id, pages, full_text, extracted_lots, detected_legal_killers)
+        logger.info(f"[{request_id}] deterministic_analysis_end")
+
+        # Optional summary generation, fail-open by design
+        if not offline_qa:
+            await _enrich_summary_with_optional_llm(result, file.filename, full_text, request_id)
 
         return result, pages, full_text
 
     try:
         result, pages, full_text = await asyncio.wait_for(run_pipeline(), timeout=PIPELINE_TIMEOUT_SECONDS)
-    except DocAIUnavailable as e:
-        await _persist_failed_analysis(
-            analysis_id=analysis_id,
-            user=user,
-            case_id=case_id,
-            run_id=run_id,
-            file_name=file.filename,
-            input_sha256=input_sha256,
-            pages_count=0,
-            error_code="DOC_AI_UNAVAILABLE",
-            error_message=str(e)
-        )
-        raise HTTPException(status_code=503, detail={"error": "DOC_AI_UNAVAILABLE", "message": str(e), "retry": True})
-    except LLMUnavailable as e:
-        await _persist_failed_analysis(
-            analysis_id=analysis_id,
-            user=user,
-            case_id=case_id,
-            run_id=run_id,
-            file_name=file.filename,
-            input_sha256=input_sha256,
-            pages_count=0,
-            error_code="LLM_UNAVAILABLE",
-            error_message=str(e)
-        )
-        raise HTTPException(status_code=503, detail={"error": "LLM_UNAVAILABLE", "message": str(e), "retry": True})
     except asyncio.TimeoutError:
         await _persist_failed_analysis(
             analysis_id=analysis_id,
@@ -2842,31 +2941,55 @@ async def analyze_perizia(request: Request, file: UploadFile = File(...)):
 
 @api_router.get("/analysis/perizia/{analysis_id}/pdf")
 async def download_perizia_pdf(analysis_id: str, request: Request):
-    """Generate and download PDF report for analysis"""
+    """Generate and download PDF report for analysis (real PDF bytes)"""
     user = await require_auth(request)
-    
+
     analysis = await db.perizia_analyses.find_one(
         {"analysis_id": analysis_id, "user_id": user.user_id},
         {"_id": 0}
     )
-    
     if not analysis:
         raise HTTPException(status_code=404, detail="Analysis not found")
-    
-    result = analysis.get("result", {})
-    
-    # Generate HTML for PDF
-    html_content = generate_report_html(analysis, result)
-    
-    # Return as downloadable HTML (can be converted to PDF client-side or via print)
+
+    result = analysis.get("result", {}) or {}
+
+    # Deterministic PDF from stored JSON. No LLM here.
+    from pdf_report import build_perizia_pdf_bytes
+    pdf_bytes = build_perizia_pdf_bytes(analysis, result)
+
     return Response(
-        content=html_content,
-        media_type="text/html",
+        content=pdf_bytes,
+        media_type="application/pdf",
         headers={
-            "Content-Disposition": f'attachment; filename="nexodify_report_{analysis_id}.html"'
+            "Content-Disposition": f'attachment; filename="nexodify_report_{analysis_id}.pdf"',
+            "Cache-Control": "no-store"
         }
     )
 
+
+@api_router.get("/analysis/perizia/{analysis_id}/html")
+async def download_perizia_html(analysis_id: str, request: Request):
+    """Generate and download HTML report for analysis"""
+    user = await require_auth(request)
+
+    analysis = await db.perizia_analyses.find_one(
+        {"analysis_id": analysis_id, "user_id": user.user_id},
+        {"_id": 0}
+    )
+    if not analysis:
+        raise HTTPException(status_code=404, detail="Analysis not found")
+
+    result = analysis.get("result", {}) or {}
+    html = generate_report_html(analysis, result)
+
+    return Response(
+        content=html,
+        media_type="text/html; charset=utf-8",
+        headers={
+            "Content-Disposition": f'attachment; filename="nexodify_report_{analysis_id}.html"',
+            "Cache-Control": "no-store"
+        }
+    )
 def generate_report_html(analysis: Dict, result: Dict) -> str:
     """Generate HTML report from analysis - supports ROMA STANDARD format with multi-lot"""
     
