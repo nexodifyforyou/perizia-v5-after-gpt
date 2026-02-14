@@ -113,3 +113,11 @@ android-sdk/ -e
 # Environment files
 *.env
 *.env.*
+
+# Local backups / junk
+*.bak*
+backend/*.bak*
+*_bak_*
+
+# Runtime uploads (never commit)
+uploads/
