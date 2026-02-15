@@ -5,6 +5,7 @@ import { Sidebar, SemaforoBadge } from './Dashboard';
 import { Button } from '../components/ui/button';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '../components/ui/tabs';
 import { EvidenceBadge, EvidenceDetail, DataValueWithEvidence } from '../components/EvidenceDisplay';
+import HeadlineVerifyModal from '../components/HeadlineVerifyModal';
 import { 
   FileText, 
   AlertTriangle, 
@@ -340,6 +341,7 @@ const AnalysisResult = () => {
   const [showDeleteModal, setShowDeleteModal] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
   const [selectedLotIndex, setSelectedLotIndex] = useState(0);
+  const [headlineModal, setHeadlineModal] = useState({ open: false, fieldKey: null });
 
   const fetchAnalysis = async () => {
     try {
@@ -358,6 +360,14 @@ const AnalysisResult = () => {
     fetchAnalysis();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [analysisId]);
+
+  const openHeadlineModal = (fieldKey) => {
+    setHeadlineModal({ open: true, fieldKey });
+  };
+
+  const closeHeadlineModal = () => {
+    setHeadlineModal({ open: false, fieldKey: null });
+  };
 
   const handleDownloadPDF = async () => {
     setDownloading(true);
@@ -478,6 +488,38 @@ const AnalysisResult = () => {
                     (Array.isArray(result.checklist_pre_offerta) ? result.checklist_pre_offerta : []);
   const summary = summaryData;
   const qa = qaPass.status ? qaPass : (result.qa || {});
+  const fieldStates = result.field_states || {};
+
+  const getHeadlineStatus = (fieldKey) => fieldStates?.[fieldKey]?.status;
+  const isNeedsVerification = (status) => status === 'LOW_CONFIDENCE' || status === 'NOT_FOUND';
+
+  const getHeadlineSourceValue = (fieldKey) => {
+    switch (fieldKey) {
+      case 'procedura':
+        return caseHeader.procedure?.value || caseHeader.procedure_id;
+      case 'lotto':
+        return caseHeader.lotto?.value || caseHeader.lotto;
+      case 'tribunale':
+        return caseHeader.tribunale?.value || caseHeader.tribunale;
+      case 'address':
+        return caseHeader.address?.value || caseHeader.address?.full || caseHeader.address;
+      default:
+        return null;
+    }
+  };
+
+  const getHeadlineDisplayValue = (fieldKey, fallbackValue) => {
+    const status = getHeadlineStatus(fieldKey);
+    if (status === 'LOW_CONFIDENCE') return 'DA VERIFICARE';
+    if (status === 'NOT_FOUND') return 'NON SPECIFICATO IN PERIZIA';
+    return safeRender(fallbackValue, 'NON SPECIFICATO IN PERIZIA');
+  };
+
+  const activeHeadlineKey = headlineModal.fieldKey;
+  const activeHeadlineState = activeHeadlineKey ? fieldStates?.[activeHeadlineKey] : null;
+  const activeHeadlineDisplay = activeHeadlineKey
+    ? getHeadlineDisplayValue(activeHeadlineKey, getHeadlineSourceValue(activeHeadlineKey))
+    : '';
 
   // Get money box items - support both old and new format
   const moneyBoxItems = Array.isArray(moneyBox.items) ? moneyBox.items : [];
@@ -507,6 +549,93 @@ const AnalysisResult = () => {
     console.log('Dati certi:', dati);
     console.log('Semaforo:', semaforo);
   }
+
+  const HeadlineInlineField = ({ label, fieldKey, value, evidence, className = '' }) => {
+    const status = getHeadlineStatus(fieldKey);
+    const displayValue = getHeadlineDisplayValue(fieldKey, value);
+    const needsVerification = isNeedsVerification(status);
+    const isConfirmed = status === 'USER_PROVIDED';
+    const shouldRender = value !== undefined && value !== null && value !== '' || status;
+
+    if (!shouldRender) return null;
+
+    return (
+      <p className={`text-sm flex flex-wrap items-center gap-2 ${className}`}>
+        {label && <span>{label}:</span>}
+        <span>{displayValue}</span>
+        <EvidenceBadge evidence={evidence} />
+        {needsVerification && (
+          <span className="px-2 py-0.5 rounded-full text-[10px] font-mono bg-amber-500/20 text-amber-300">
+            DA VERIFICARE
+          </span>
+        )}
+        {isConfirmed && (
+          <span className="px-2 py-0.5 rounded-full text-[10px] font-mono bg-emerald-500/20 text-emerald-300">
+            Confermato
+          </span>
+        )}
+        {needsVerification && (
+          <button
+            type="button"
+            onClick={() => openHeadlineModal(fieldKey)}
+            className="text-xs text-gold hover:underline"
+          >
+            Correggi
+          </button>
+        )}
+      </p>
+    );
+  };
+
+  const HeadlineFieldCard = ({ label, fieldKey, value, evidence }) => {
+    const status = getHeadlineStatus(fieldKey);
+    const displayValue = getHeadlineDisplayValue(fieldKey, value);
+    const hasEvidence = evidence && Array.isArray(evidence) && evidence.length > 0;
+    const pages = hasEvidence ? [...new Set(evidence.map(e => e.page).filter(Boolean))].sort((a, b) => a - b) : [];
+    const needsVerification = isNeedsVerification(status);
+    const isConfirmed = status === 'USER_PROVIDED';
+
+    return (
+      <div className="p-4 bg-zinc-950 rounded-lg">
+        <div className="flex items-center justify-between mb-1">
+          <p className="text-xs font-mono text-zinc-500">{label}</p>
+          {hasEvidence && (
+            <span className="text-xs font-mono text-gold flex items-center gap-1">
+              <FileText className="w-3 h-3" />
+              p. {pages.join(', ')}
+            </span>
+          )}
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          <p className="font-medium text-zinc-100">{displayValue}</p>
+          {needsVerification && (
+            <span className="px-2 py-0.5 rounded-full text-[10px] font-mono bg-amber-500/20 text-amber-300">
+              DA VERIFICARE
+            </span>
+          )}
+          {isConfirmed && (
+            <span className="px-2 py-0.5 rounded-full text-[10px] font-mono bg-emerald-500/20 text-emerald-300">
+              Confermato
+            </span>
+          )}
+          {needsVerification && (
+            <button
+              type="button"
+              onClick={() => openHeadlineModal(fieldKey)}
+              className="text-xs text-gold hover:underline"
+            >
+              Correggi
+            </button>
+          )}
+        </div>
+        {hasEvidence && evidence[0]?.quote && (
+          <p className="text-xs text-zinc-500 mt-2 italic border-l-2 border-gold/30 pl-2">
+            "{evidence[0].quote.substring(0, 150)}{evidence[0].quote.length > 150 ? '...' : ''}"
+          </p>
+        )}
+      </div>
+    );
+  };
 
   return (
     <div className="min-h-screen bg-[#09090b]">
@@ -589,6 +718,16 @@ const AnalysisResult = () => {
             </div>
           </div>
         )}
+
+        <HeadlineVerifyModal
+          open={headlineModal.open}
+          onClose={closeHeadlineModal}
+          analysisId={analysisId}
+          fieldKey={headlineModal.fieldKey}
+          fieldState={activeHeadlineState}
+          currentDisplayValue={activeHeadlineDisplay}
+          onSaved={fetchAnalysis}
+        />
         
         {/* Multi-Lot Selector - show if multiple lots */}
         {isMultiLot && (
@@ -622,24 +761,25 @@ const AnalysisResult = () => {
               
               {/* Case Header with Evidence - support both formats */}
               <div className="mt-4 space-y-1">
-                {(caseHeader.procedure || caseHeader.procedure_id) && (
-                  <p className="text-sm text-gold flex items-center gap-2">
-                    Procedura: {safeRender(caseHeader.procedure?.value || caseHeader.procedure_id)}
-                    <EvidenceBadge evidence={getEvidence(caseHeader.procedure || caseHeader.procedure_id)} />
-                  </p>
-                )}
-                {(caseHeader.tribunale) && (
-                  <p className="text-sm text-zinc-400 flex items-center gap-2">
-                    {safeRender(caseHeader.tribunale?.value || caseHeader.tribunale)}
-                    <EvidenceBadge evidence={getEvidence(caseHeader.tribunale)} />
-                  </p>
-                )}
-                {(caseHeader.address) && (
-                  <p className="text-sm text-zinc-400 flex items-center gap-2">
-                    {safeRender(caseHeader.address?.value || caseHeader.address)}
-                    <EvidenceBadge evidence={getEvidence(caseHeader.address)} />
-                  </p>
-                )}
+                <HeadlineInlineField
+                  label="Procedura"
+                  fieldKey="procedura"
+                  value={caseHeader.procedure?.value || caseHeader.procedure_id}
+                  evidence={getEvidence(caseHeader.procedure || caseHeader.procedure_id)}
+                  className="text-gold"
+                />
+                <HeadlineInlineField
+                  fieldKey="tribunale"
+                  value={caseHeader.tribunale?.value || caseHeader.tribunale}
+                  evidence={getEvidence(caseHeader.tribunale)}
+                  className="text-zinc-400"
+                />
+                <HeadlineInlineField
+                  fieldKey="address"
+                  value={caseHeader.address?.value || caseHeader.address?.full || caseHeader.address}
+                  evidence={getEvidence(caseHeader.address)}
+                  className="text-zinc-400"
+                />
               </div>
             </div>
             <div className="text-right">
@@ -963,23 +1103,27 @@ const AnalysisResult = () => {
             <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-6">
               <h2 className="text-xl font-serif font-bold text-zinc-100 mb-4">Dati Procedura</h2>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <DataValueWithEvidence 
-                  label="Procedura" 
+                <HeadlineFieldCard
+                  label="Procedura"
+                  fieldKey="procedura"
                   value={caseHeader.procedure?.value || caseHeader.procedure_id}
                   evidence={getEvidence(caseHeader.procedure || caseHeader.procedure_id)}
                 />
-                <DataValueWithEvidence 
-                  label="Lotto" 
+                <HeadlineFieldCard
+                  label="Lotto"
+                  fieldKey="lotto"
                   value={caseHeader.lotto?.value || caseHeader.lotto}
                   evidence={getEvidence(caseHeader.lotto)}
                 />
-                <DataValueWithEvidence 
-                  label="Tribunale" 
+                <HeadlineFieldCard
+                  label="Tribunale"
+                  fieldKey="tribunale"
                   value={caseHeader.tribunale?.value || caseHeader.tribunale}
                   evidence={getEvidence(caseHeader.tribunale)}
                 />
-                <DataValueWithEvidence 
-                  label="Indirizzo" 
+                <HeadlineFieldCard
+                  label="Indirizzo"
+                  fieldKey="address"
                   value={caseHeader.address?.value || caseHeader.address?.full || caseHeader.address}
                   evidence={getEvidence(caseHeader.address)}
                 />
