@@ -6,6 +6,7 @@ from motor.motor_asyncio import AsyncIOMotorClient
 import os
 import asyncio
 import logging
+import re
 from pathlib import Path
 from pydantic import BaseModel, Field, ConfigDict
 from typing import List, Optional, Dict, Any, Tuple
@@ -165,6 +166,13 @@ class AssistantQA(BaseModel):
     question: str
     result: Dict[str, Any]
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+class HeadlineOverrideRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    tribunale: Optional[str] = None
+    procedura: Optional[str] = None
+    lotto: Optional[str] = None
+    address: Optional[str] = None
 
 # Subscription Plans
 SUBSCRIPTION_PLANS = {
@@ -358,6 +366,462 @@ def _find_regex_in_pages(pages_in: List[Dict], pattern: str, flags=0) -> Optiona
         if m:
             return _build_evidence(text, int(p.get("page_number", 0) or 0), m.start(), m.end())
     return None
+
+def _clean_field_value(val: Any) -> str:
+    if isinstance(val, dict):
+        preferred = val.get("value")
+        if preferred:
+            return _clean_field_value(preferred)
+        if val.get("full"):
+            return _clean_field_value(val.get("full"))
+        if val.get("street") or val.get("city"):
+            parts = []
+            if val.get("street"):
+                parts.append(str(val.get("street")).strip())
+            if val.get("city"):
+                parts.append(str(val.get("city")).strip())
+            joined = ", ".join([p for p in parts if p])
+            return joined if joined else "NON SPECIFICATO IN PERIZIA"
+        return "NON SPECIFICATO IN PERIZIA"
+    if isinstance(val, list):
+        items = [str(x).strip() for x in val if str(x).strip()]
+        return ", ".join(items) if items else "NON SPECIFICATO IN PERIZIA"
+    if val is None:
+        return "NON SPECIFICATO IN PERIZIA"
+    s = str(val).strip()
+    if s in {"", "{}", "N/A", "NOT_SPECIFIED_IN_PERIZIA", "NOT_SPECIFIED", "UNKNOWN", "None"}:
+        return "NON SPECIFICATO IN PERIZIA"
+    if s.startswith("{") and s.endswith("}"):
+        return "NON SPECIFICATO IN PERIZIA"
+    return s
+
+def _search_proof(pages_in: List[Dict[str, Any]], keywords: List[str], snippets: Optional[List[Dict[str, Any]]] = None) -> List[Dict[str, Any]]:
+    pages_checked = [int(p.get("page_number", i + 1) or (i + 1)) for i, p in enumerate(pages_in)]
+    hit_count = 0
+    lowered_keywords = [k.lower() for k in keywords]
+    for p in pages_in:
+        txt = str(p.get("text", "") or "").lower()
+        for k in lowered_keywords:
+            hit_count += txt.count(k)
+    proof = {
+        "pages_checked": pages_checked,
+        "keywords": keywords,
+        "hit_count": hit_count
+    }
+    if snippets:
+        proof["snippets"] = snippets
+    return [proof]
+
+def _extract_confidence(value_obj: Any, status: str) -> Optional[float]:
+    if status == "USER_PROVIDED":
+        return 1.0
+    if status == "FOUND":
+        return 0.9
+    if status == "LOW_CONFIDENCE":
+        return 0.45
+    if status == "NOT_FOUND":
+        return 0.0
+    if isinstance(value_obj, dict):
+        conf = value_obj.get("confidence")
+        if isinstance(conf, (int, float)):
+            return max(0.0, min(1.0, float(conf)))
+    return None
+
+def _collapse_spaced_letters(tokens: List[str]) -> List[str]:
+    collapsed: List[str] = []
+    buffer: List[str] = []
+    for token in tokens:
+        if len(token) == 1 and token.isalpha():
+            buffer.append(token)
+            continue
+        if buffer:
+            collapsed.append("".join(buffer))
+            buffer = []
+        collapsed.append(token)
+    if buffer:
+        collapsed.append("".join(buffer))
+    return collapsed
+
+def _normalize_headline_text(text: str) -> str:
+    tokens = text.replace("\n", " ").split()
+    tokens = _collapse_spaced_letters(tokens)
+    return re.sub(r"\s{2,}", " ", " ".join(tokens)).strip()
+
+def _headline_display_value(state: Dict[str, Any]) -> str:
+    status = state.get("status")
+    value = state.get("value")
+    if status in {"FOUND", "USER_PROVIDED"} and value:
+        return str(value).strip()
+    if status == "LOW_CONFIDENCE":
+        return "DA VERIFICARE"
+    return "NON SPECIFICATO IN PERIZIA"
+
+def _build_headline_state_from_existing(
+    *,
+    report_obj: Any,
+    case_obj: Any,
+    evidence: List[Dict[str, Any]],
+    searched_in: List[Dict[str, Any]],
+    prompt_if_low_conf: bool = False
+) -> Dict[str, Any]:
+    report_val = _clean_field_value(report_obj)
+    case_val = _clean_field_value(case_obj)
+    chosen = report_val if report_val != "NON SPECIFICATO IN PERIZIA" else case_val
+    status = "FOUND"
+    if chosen == "DA VERIFICARE":
+        status = "LOW_CONFIDENCE"
+    elif chosen == "NON SPECIFICATO IN PERIZIA":
+        status = "NOT_FOUND"
+        chosen = None
+    prompt = None
+    if status == "LOW_CONFIDENCE" and prompt_if_low_conf:
+        prompt = "Dato non affidabile. Controlla la perizia (vedi pagine suggerite) e inserisci il valore corretto."
+    return {
+        "value": chosen,
+        "status": status,
+        "confidence": _extract_confidence(report_obj, status),
+        "evidence": evidence if isinstance(evidence, list) else [],
+        "searched_in": searched_in,
+        "user_prompt_it": prompt,
+    }
+
+def _collect_keyword_snippets(pages: List[Dict[str, Any]], keywords: List[str], max_snippets: int = 3) -> List[Dict[str, Any]]:
+    snippets: List[Dict[str, Any]] = []
+    lowered = [k.lower() for k in keywords]
+    for p in pages:
+        if len(snippets) >= max_snippets:
+            break
+        text = str(p.get("text", "") or "")
+        text_lower = text.lower()
+        for k in lowered:
+            if k in text_lower:
+                idx = text_lower.find(k)
+                start = max(0, idx - 40)
+                end = min(len(text), idx + 80)
+                snippets.append({
+                    "page": int(p.get("page_number", 0) or 0),
+                    "quote": text[start:end].replace("\n", " ").strip()
+                })
+                break
+    return snippets
+
+def _extract_tribunale_state(pages: List[Dict[str, Any]]) -> Dict[str, Any]:
+    keywords = ["tribunale", "tribunale di"]
+    evidence: List[Dict[str, Any]] = []
+    value: Optional[str] = None
+    status = "NOT_FOUND"
+    location_found = False
+
+    word_t = r"t\\s*r\\s*i\\s*b\\s*u\\s*n\\s*a\\s*l\\s*e"
+    word_d = r"d\\s*i"
+    pattern_full = re.compile(rf"{word_t}\\s+{word_d}\\s+([A-ZÀ-Ù][A-ZÀ-Ù'\\s\\.\\-]{{2,80}})", re.I)
+    pattern_word = re.compile(rf"{word_t}", re.I)
+
+    for p in pages:
+        text = str(p.get("text", "") or "")
+        match = pattern_full.search(text)
+        if match:
+            start, end = match.start(), match.end()
+            evidence.append(_build_evidence(text, int(p.get("page_number", 0) or 0), start, end))
+            raw = match.group(0)
+            cleaned = _normalize_headline_text(raw)
+            cleaned = re.split(r"\bSEZ", cleaned, flags=re.I)[0].strip()
+            value = cleaned
+            location_found = True
+            status = "FOUND"
+            break
+    if not location_found:
+        for p in pages:
+            text = str(p.get("text", "") or "")
+            match = pattern_word.search(text)
+            if match:
+                start, end = match.start(), match.end()
+                evidence.append(_build_evidence(text, int(p.get("page_number", 0) or 0), start, end))
+                value = _normalize_headline_text(text[start:end])
+                status = "LOW_CONFIDENCE"
+                break
+
+    snippets = _collect_keyword_snippets(pages, keywords)
+    searched_in = _search_proof(pages, keywords, snippets)
+    prompt = None
+    if status in {"LOW_CONFIDENCE", "NOT_FOUND"}:
+        prompt = "Verifica il tribunale indicato nella perizia (in intestazione o nei dati procedura)."
+    return {
+        "value": value,
+        "status": status,
+        "confidence": _extract_confidence(value, status),
+        "evidence": evidence,
+        "searched_in": searched_in,
+        "user_prompt_it": prompt,
+    }
+
+def _extract_procedura_state(pages: List[Dict[str, Any]]) -> Dict[str, Any]:
+    keywords = ["r.g.e", "rge", "procedura", "esecuzione immobiliare", "esecuzione"]
+    evidence: List[Dict[str, Any]] = []
+    value: Optional[str] = None
+    status = "NOT_FOUND"
+
+    patterns = [
+        re.compile(r"(Esecuzione\\s+Immobiliare\\s+\\d+\\s*/\\s*\\d+\\s+del\\s+R\\.?\\s*G\\.?\\s*E\\.?\\s*\\d*\\s*/?\\s*\\d*)", re.I),
+        re.compile(r"(R\\.?\\s*G\\.?\\s*E\\.?\\s*\\d+\\s*/\\s*\\d+)", re.I),
+        re.compile(r"(Esecuzione\\s+Immobiliare\\s+(?:n\\.?\\s*)?\\d+\\s*/\\s*\\d+)", re.I),
+        re.compile(r"(Procedura\\s+(?:n\\.?\\s*)?\\d+\\s*/\\s*\\d+)", re.I),
+    ]
+    fallback_patterns = [
+        re.compile(r"R\\.?\\s*G\\.?\\s*E\\.?", re.I),
+        re.compile(r"Esecuzione\\s+Immobiliare", re.I),
+    ]
+
+    for p in pages:
+        text = str(p.get("text", "") or "")
+        for pat in patterns:
+            match = pat.search(text)
+            if match:
+                start, end = match.start(), match.end()
+                evidence.append(_build_evidence(text, int(p.get("page_number", 0) or 0), start, end))
+                value = _normalize_headline_text(match.group(0))
+                status = "FOUND"
+                break
+        if status == "FOUND":
+            break
+
+    if status != "FOUND":
+        for p in pages:
+            text = str(p.get("text", "") or "")
+            for pat in fallback_patterns:
+                match = pat.search(text)
+                if match:
+                    start, end = match.start(), match.end()
+                    evidence.append(_build_evidence(text, int(p.get("page_number", 0) or 0), start, end))
+                    value = _normalize_headline_text(match.group(0))
+                    status = "LOW_CONFIDENCE"
+                    break
+            if status == "LOW_CONFIDENCE":
+                break
+
+    snippets = _collect_keyword_snippets(pages, keywords)
+    searched_in = _search_proof(pages, keywords, snippets)
+    prompt = None
+    if status in {"LOW_CONFIDENCE", "NOT_FOUND"}:
+        prompt = "Verifica il numero di procedura/R.G.E. indicato in perizia."
+    return {
+        "value": value,
+        "status": status,
+        "confidence": _extract_confidence(value, status),
+        "evidence": evidence,
+        "searched_in": searched_in,
+        "user_prompt_it": prompt,
+    }
+
+def _extract_lotto_state(pages: List[Dict[str, Any]], lots: List[Dict[str, Any]]) -> Dict[str, Any]:
+    keywords = ["lotto", "lotti", "lotto unico"]
+    evidence: List[Dict[str, Any]] = []
+    value: Optional[str] = None
+    status = "NOT_FOUND"
+
+    lot_numbers = []
+    for lot in lots or []:
+        try:
+            lot_numbers.append(int(lot.get("lot_number")))
+        except Exception:
+            continue
+        ev_list = lot.get("evidence", {}).get("lotto", []) if isinstance(lot.get("evidence"), dict) else []
+        evidence.extend(ev_list)
+
+    if lot_numbers:
+        lot_numbers = sorted(set(lot_numbers))
+        if len(lot_numbers) >= 2:
+            value = "Lotti " + ", ".join(str(n) for n in lot_numbers)
+        else:
+            lot_num = lot_numbers[0]
+            unico_match = _find_regex_in_pages(pages, r"\\bLOTTO\\s+UNICO\\b", re.I)
+            value = "Lotto Unico" if unico_match else f"Lotto {lot_num}"
+            if unico_match:
+                evidence.append(unico_match)
+        status = "FOUND" if evidence else "LOW_CONFIDENCE"
+
+    if status == "NOT_FOUND":
+        match = _find_regex_in_pages(pages, r"\\bLOTTO\\s+UNICO\\b|\\bLOTTO\\s+\\d+\\b", re.I)
+        if match:
+            evidence.append(match)
+            value = _normalize_headline_text(match.get("quote", ""))
+            status = "FOUND"
+        else:
+            match = _find_regex_in_pages(pages, r"\\bLOTTO\\b", re.I)
+            if match:
+                evidence.append(match)
+                value = "Lotto"
+                status = "LOW_CONFIDENCE"
+
+    snippets = _collect_keyword_snippets(pages, keywords)
+    searched_in = _search_proof(pages, keywords, snippets)
+    prompt = None
+    if status in {"LOW_CONFIDENCE", "NOT_FOUND"}:
+        prompt = "Verifica il lotto indicato nella perizia (schema riassuntivo)."
+    return {
+        "value": value,
+        "status": status,
+        "confidence": _extract_confidence(value, status),
+        "evidence": evidence,
+        "searched_in": searched_in,
+        "user_prompt_it": prompt,
+    }
+
+def _extract_address_state(pages: List[Dict[str, Any]], lots: List[Dict[str, Any]]) -> Dict[str, Any]:
+    keywords = ["via", "viale", "piazza", "corso", "strada", "indirizzo", "ubicazione", "comune"]
+    evidence: List[Dict[str, Any]] = []
+    value: Optional[str] = None
+    status = "NOT_FOUND"
+
+    if lots:
+        for lot in lots:
+            ubic = str(lot.get("ubicazione", "") or "").strip()
+            if ubic and ubic.upper() != "NON SPECIFICATO IN PERIZIA":
+                value = ubic
+                ev_list = lot.get("evidence", {}).get("ubicazione", []) if isinstance(lot.get("evidence"), dict) else []
+                if ev_list:
+                    evidence.extend(ev_list)
+                status = "FOUND"
+                break
+
+    if status == "NOT_FOUND":
+        match = _find_regex_in_pages(pages, r"Ubicazione[:\\s]*([^\\n]{5,120})", re.I)
+        if match:
+            evidence.append(match)
+            value = _normalize_headline_text(match.get("quote", ""))
+            status = "FOUND"
+        else:
+            match = _find_regex_in_pages(pages, r"\\b(Via|Viale|Piazza|Corso|Strada|Vicolo|Largo|Localit[aà])\\b[^\\n]{5,120}", re.I)
+            if match:
+                evidence.append(match)
+                value = _normalize_headline_text(match.get("quote", ""))
+                status = "LOW_CONFIDENCE"
+
+    if value:
+        has_street = re.search(r"\\b(via|viale|piazza|corso|strada|vicolo|largo|localit[aà])\\b", value, re.I)
+        if len(value) < 10 and status == "FOUND":
+            status = "LOW_CONFIDENCE"
+        elif not has_street and status == "FOUND":
+            status = "LOW_CONFIDENCE"
+
+    snippets = _collect_keyword_snippets(pages, keywords)
+    searched_in = _search_proof(pages, keywords, snippets)
+    prompt = None
+    if status in {"LOW_CONFIDENCE", "NOT_FOUND"}:
+        prompt = "Verifica l'indirizzo completo (via/piazza e comune) indicato nella perizia."
+    return {
+        "value": value,
+        "status": status,
+        "confidence": _extract_confidence(value, status),
+        "evidence": evidence,
+        "searched_in": searched_in,
+        "user_prompt_it": prompt,
+    }
+
+def _apply_headline_states_to_headers(result: Dict[str, Any], states: Dict[str, Any]) -> None:
+    report_header = result.get("report_header", {}) if isinstance(result.get("report_header"), dict) else {}
+    case_header = result.get("case_header", {}) if isinstance(result.get("case_header"), dict) else {}
+
+    report_header["procedure"] = {
+        "value": _headline_display_value(states["procedura"]),
+        "evidence": states["procedura"].get("evidence", [])
+    }
+    report_header["tribunale"] = {
+        "value": _headline_display_value(states["tribunale"]),
+        "evidence": states["tribunale"].get("evidence", [])
+    }
+    report_header["lotto"] = {
+        "value": _headline_display_value(states["lotto"]),
+        "evidence": states["lotto"].get("evidence", [])
+    }
+    report_header["address"] = {
+        "value": _headline_display_value(states["address"]),
+        "evidence": states["address"].get("evidence", [])
+    }
+
+    case_header["procedure_id"] = _headline_display_value(states["procedura"])
+    case_header["tribunale"] = _headline_display_value(states["tribunale"])
+    case_header["lotto"] = _headline_display_value(states["lotto"])
+    case_header["address"] = _headline_display_value(states["address"])
+
+    result["report_header"] = report_header
+    result["case_header"] = case_header
+
+def _apply_headline_field_states(result: Dict[str, Any], pages: List[Dict[str, Any]]) -> None:
+    has_text = any(str(p.get("text", "") or "").strip() for p in pages)
+    report_header = result.get("report_header", {}) if isinstance(result.get("report_header"), dict) else {}
+    case_header = result.get("case_header", {}) if isinstance(result.get("case_header"), dict) else {}
+
+    if has_text:
+        lots = result.get("lots") or []
+        states = {
+            "tribunale": _extract_tribunale_state(pages),
+            "procedura": _extract_procedura_state(pages),
+            "lotto": _extract_lotto_state(pages, lots),
+            "address": _extract_address_state(pages, lots),
+        }
+    else:
+        states = {
+            "tribunale": _build_headline_state_from_existing(
+                report_obj=report_header.get("tribunale"),
+                case_obj=case_header.get("tribunale"),
+                evidence=(report_header.get("tribunale", {}).get("evidence", []) if isinstance(report_header.get("tribunale"), dict) else []),
+                searched_in=_search_proof(pages, ["tribunale", "tribunale di"]),
+            ),
+            "procedura": _build_headline_state_from_existing(
+                report_obj=report_header.get("procedure"),
+                case_obj=case_header.get("procedure_id"),
+                evidence=(report_header.get("procedure", {}).get("evidence", []) if isinstance(report_header.get("procedure"), dict) else []),
+                searched_in=_search_proof(pages, ["r.g.e", "rge", "procedura", "esecuzione immobiliare"]),
+            ),
+            "lotto": _build_headline_state_from_existing(
+                report_obj=report_header.get("lotto"),
+                case_obj=case_header.get("lotto"),
+                evidence=(report_header.get("lotto", {}).get("evidence", []) if isinstance(report_header.get("lotto"), dict) else []),
+                searched_in=_search_proof(pages, ["lotto", "lotti", "lotto unico"]),
+                prompt_if_low_conf=True,
+            ),
+            "address": _build_headline_state_from_existing(
+                report_obj=report_header.get("address"),
+                case_obj=case_header.get("address"),
+                evidence=(report_header.get("address", {}).get("evidence", []) if isinstance(report_header.get("address"), dict) else []),
+                searched_in=_search_proof(pages, ["via", "viale", "piazza", "corso", "indirizzo", "ubicazione"]),
+                prompt_if_low_conf=True,
+            ),
+        }
+
+    result["field_states"] = states
+    _apply_headline_states_to_headers(result, states)
+
+def _apply_headline_overrides(result: Dict[str, Any], overrides: Dict[str, Any]) -> None:
+    if not overrides:
+        return
+    if not isinstance(result.get("field_states"), dict):
+        _apply_headline_field_states(result, [])
+    states = result.get("field_states", {})
+    for field in ("tribunale", "procedura", "lotto", "address"):
+        if field not in overrides:
+            continue
+        value = overrides.get(field)
+        if value is None:
+            continue
+        cleaned = str(value).strip()
+        if not cleaned:
+            continue
+        state = states.get(field, {
+            "value": None,
+            "status": "NOT_FOUND",
+            "confidence": 0.0,
+            "evidence": [],
+            "searched_in": [],
+            "user_prompt_it": None,
+        })
+        state["value"] = cleaned
+        state["status"] = "USER_PROVIDED"
+        state["confidence"] = 1.0
+        states[field] = state
+    result["field_states"] = states
+    _apply_headline_states_to_headers(result, states)
 
 async def _persist_failed_analysis(
     *,
@@ -614,8 +1078,6 @@ def _extract_deprezzamenti(pages_in: List[Dict]) -> List[Dict[str, Any]]:
 def _apply_low_confidence(field: Dict[str, Any], field_key: str = "value") -> None:
     field["confidence"] = "LOW"
     field["note"] = "USER MUST VERIFY"
-    if field_key in field and field[field_key] in (None, "", "NON SPECIFICATO IN PERIZIA"):
-        field[field_key] = "LOW_CONFIDENCE"
 
 def enforce_evidence_or_low_confidence(result: Dict[str, Any]) -> Dict[str, Any]:
     def _strip_numeric_estimates(text: str) -> str:
@@ -634,18 +1096,6 @@ def enforce_evidence_or_low_confidence(result: Dict[str, Any]) -> Dict[str, Any]
         fld = hdr.get(key)
         if isinstance(fld, dict) and not _has_evidence(fld.get("evidence", [])):
             _apply_low_confidence(fld, "value")
-
-    # Case header (string-only)
-    case_hdr = result.get("case_header", {})
-    for key in ("procedure_id", "tribunale", "lotto"):
-        val = case_hdr.get(key)
-        if isinstance(val, str) and val and val != "NON SPECIFICATO IN PERIZIA":
-            case_hdr[key] = "LOW_CONFIDENCE — USER MUST VERIFY"
-    addr = case_hdr.get("address", {})
-    if isinstance(addr, dict):
-        for k in ("street", "city", "full"):
-            if addr.get(k) and addr.get(k) != "NON SPECIFICATO IN PERIZIA":
-                addr[k] = "LOW_CONFIDENCE — USER MUST VERIFY"
 
     # Dati certi
     dati = result.get("dati_certi_del_lotto", {})
@@ -2891,6 +3341,7 @@ async def analyze_perizia(request: Request, file: UploadFile = File(...)):
 
     _normalize_legal_killers(result, pages)
     _normalize_evidence_offsets(result, pages)
+    _apply_headline_field_states(result, pages)
     logger.info(f"[{request_id}] assemble_output analysis_id={analysis_id}")
 
     # Create analysis record
@@ -2939,7 +3390,16 @@ async def analyze_perizia(request: Request, file: UploadFile = File(...)):
 # PDF REPORT DOWNLOAD
 # ===================
 
-@api_router.get("/analysis/perizia/{analysis_id}/pdf")
+@api_router.get(
+    "/analysis/perizia/{analysis_id}/pdf",
+    response_class=Response,
+    responses={
+        200: {
+            "description": "PDF report",
+            "content": {"application/pdf": {}},
+        }
+    },
+)
 async def download_perizia_pdf(analysis_id: str, request: Request):
     """Generate and download PDF report for analysis (real PDF bytes)"""
     user = await require_auth(request)
@@ -2952,6 +3412,7 @@ async def download_perizia_pdf(analysis_id: str, request: Request):
         raise HTTPException(status_code=404, detail="Analysis not found")
 
     result = analysis.get("result", {}) or {}
+    _apply_headline_overrides(result, analysis.get("headline_overrides") or {})
 
     # Deterministic PDF from stored JSON. No LLM here.
     from pdf_report import build_perizia_pdf_bytes
@@ -2967,7 +3428,16 @@ async def download_perizia_pdf(analysis_id: str, request: Request):
     )
 
 
-@api_router.get("/analysis/perizia/{analysis_id}/html")
+@api_router.get(
+    "/analysis/perizia/{analysis_id}/html",
+    response_class=Response,
+    responses={
+        200: {
+            "description": "HTML report",
+            "content": {"text/html": {}},
+        }
+    },
+)
 async def download_perizia_html(analysis_id: str, request: Request):
     """Generate and download HTML report for analysis"""
     user = await require_auth(request)
@@ -2980,6 +3450,7 @@ async def download_perizia_html(analysis_id: str, request: Request):
         raise HTTPException(status_code=404, detail="Analysis not found")
 
     result = analysis.get("result", {}) or {}
+    _apply_headline_overrides(result, analysis.get("headline_overrides") or {})
     html = generate_report_html(analysis, result)
 
     return Response(
@@ -2990,6 +3461,37 @@ async def download_perizia_html(analysis_id: str, request: Request):
             "Cache-Control": "no-store"
         }
     )
+
+@api_router.patch("/analysis/perizia/{analysis_id}/headline")
+async def update_perizia_headline(analysis_id: str, payload: HeadlineOverrideRequest, request: Request):
+    """Update headline fields (tribunale/procedura/lotto/address) with user-provided overrides."""
+    user = await require_auth(request)
+    analysis, storage_mode, storage_path = await _get_perizia_analysis_for_user_with_storage(analysis_id, user)
+
+    overrides = analysis.get("headline_overrides", {}) or {}
+    updated = False
+    for field in ("tribunale", "procedura", "lotto", "address"):
+        value = getattr(payload, field)
+        if value is None:
+            continue
+        cleaned = str(value).strip()
+        if cleaned:
+            overrides[field] = cleaned
+        else:
+            overrides.pop(field, None)
+        updated = True
+    analysis["headline_overrides"] = overrides
+
+    if updated:
+        await _save_headline_overrides_for_analysis(
+            analysis_id=analysis_id,
+            user=user,
+            analysis=analysis,
+            storage_mode=storage_mode,
+            storage_path=storage_path
+        )
+
+    return {"analysis_id": analysis_id, "headline_overrides": overrides}
 def generate_report_html(analysis: Dict, result: Dict) -> str:
     """Generate HTML report from analysis - supports ROMA STANDARD format with multi-lot"""
     
@@ -3025,20 +3527,53 @@ def generate_report_html(analysis: Dict, result: Dict) -> str:
     summary = result.get("summary_for_client", {})
     
     # Get values with fallbacks - normalize placeholders
-    def normalize(val):
-        if val in [None, "None", "N/A", "NOT_SPECIFIED_IN_PERIZIA", "NOT_SPECIFIED", "UNKNOWN", ""]:
+    def norm_text(val):
+        if isinstance(val, dict):
+            val = val.get("value") if val.get("value") else ""
+            if isinstance(val, dict):
+                val = ""
+        if isinstance(val, list):
+            parts = []
+            for item in val:
+                if isinstance(item, dict):
+                    item = item.get("value") if item.get("value") else ""
+                    if isinstance(item, dict):
+                        item = ""
+                item_str = str(item).strip()
+                if item_str:
+                    parts.append(item_str)
+            val = ", ".join(parts)
+        if val in [None, "", "N/A", "NOT_SPECIFIED_IN_PERIZIA", "NOT_SPECIFIED", "UNKNOWN", "{}"]:
             return "NON SPECIFICATO IN PERIZIA"
-        return val
+        val_str = str(val).strip()
+        if "LOW_CONFIDENCE" in val_str.upper():
+            return "DA VERIFICARE"
+        return val_str
+
+    def norm_address(case_header):
+        address = case_header.get("address")
+        if isinstance(address, dict):
+            if address.get("value"):
+                address = address.get("value")
+            elif address.get("full"):
+                address = address.get("full")
+            else:
+                parts = []
+                street = address.get("street")
+                city = address.get("city")
+                if street:
+                    parts.append(str(street).strip())
+                if city:
+                    parts.append(str(city).strip())
+                address = ", ".join([p for p in parts if p])
+        elif address is None:
+            address = ""
+        return address if str(address).strip() else "NON SPECIFICATO IN PERIZIA"
     
-    procedure = case_header.get("procedure", {}).get("value") if isinstance(case_header.get("procedure"), dict) else case_header.get("procedure_id", "N/A")
-    tribunale = case_header.get("tribunale", {}).get("value") if isinstance(case_header.get("tribunale"), dict) else case_header.get("tribunale", "N/A")
-    lotto = case_header.get("lotto", {}).get("value") if isinstance(case_header.get("lotto"), dict) else case_header.get("lotto", "N/A")
-    address = case_header.get("address", {}).get("value") if isinstance(case_header.get("address"), dict) else case_header.get("address", "N/A")
-    
-    procedure = normalize(procedure)
-    tribunale = normalize(tribunale)
-    lotto = normalize(lotto)
-    address = normalize(address)
+    procedure = norm_text(case_header.get("procedure", {}).get("value") if isinstance(case_header.get("procedure"), dict) else case_header.get("procedure_id", "N/A"))
+    tribunale = norm_text(case_header.get("tribunale", {}).get("value") if isinstance(case_header.get("tribunale"), dict) else case_header.get("tribunale", "N/A"))
+    lotto = norm_text(case_header.get("lotto", {}).get("value") if isinstance(case_header.get("lotto"), dict) else case_header.get("lotto", "N/A"))
+    address = norm_text(norm_address(case_header))
     
     # Handle prezzo base - for multi-lot, show all lots
     if is_multi_lot:
@@ -3058,9 +3593,9 @@ def generate_report_html(analysis: Dict, result: Dict) -> str:
             lots_html += f'''<tr>
                 <td style="color:#D4AF37;">Lotto {lot.get("lot_number", "?")}</td>
                 <td style="color:#10b981;">{lot.get("prezzo_base_eur", "TBD")}</td>
-                <td>{normalize(lot.get("ubicazione", ""))[:50]}</td>
+                <td>{norm_text(lot.get("ubicazione", ""))[:50]}</td>
                 <td>{lot.get("superficie_mq", "TBD")}</td>
-                <td>{normalize(lot.get("diritto_reale", ""))[:20]}</td>
+                <td>{norm_text(lot.get("diritto_reale", ""))[:20]}</td>
             </tr>'''
         lots_html += '</tbody></table></div>'
     
@@ -3074,7 +3609,7 @@ def generate_report_html(analysis: Dict, result: Dict) -> str:
         voce = item.get("voce") or item.get("label_it") or item.get("code", "")
         stima = item.get("stima_euro", 0)
         nota = item.get("stima_nota", "")
-        fonte = item.get("fonte_perizia", {}).get("value", "") if isinstance(item.get("fonte_perizia"), dict) else ""
+        fonte = norm_text(item.get("fonte_perizia"))
         
         # Handle TBD values
         if stima == "TBD" or (isinstance(stima, str) and "TBD" in stima):
@@ -3090,7 +3625,7 @@ def generate_report_html(analysis: Dict, result: Dict) -> str:
             value_display = nota if nota else "TBD"
             value_color = "#f59e0b"
         
-        money_items_html += f'<div class="money-item"><span>{voce}</span><span class="page-ref">{normalize(fonte)}</span><span style="color: {value_color}; font-weight: bold;">{value_display}</span></div>'
+        money_items_html += f'<div class="money-item"><span>{voce}</span><span class="page-ref">{fonte}</span><span style="color: {value_color}; font-weight: bold;">{value_display}</span></div>'
     
     # Build money total - handle TBD
     money_total = money_box.get("totale_extra_budget", money_box.get("total_extra_costs", {}))
@@ -3234,7 +3769,7 @@ def generate_report_html(analysis: Dict, result: Dict) -> str:
                 </div>
                 <div class="field">
                     <div class="field-label">Superficie</div>
-                    <div class="field-value">{normalize(dati.get('superficie_catastale', {}).get('value', 'NON SPECIFICATO') if isinstance(dati.get('superficie_catastale'), dict) else dati.get('superficie_catastale', 'NON SPECIFICATO'))}</div>
+                    <div class="field-value">{norm_text(dati.get('superficie_catastale', {}).get('value', 'NON SPECIFICATO') if isinstance(dati.get('superficie_catastale'), dict) else dati.get('superficie_catastale', 'NON SPECIFICATO'))}</div>
                 </div>
                 <div class="field">
                     <div class="field-label">Composizione Lotto</div>
@@ -4461,20 +4996,97 @@ async def get_perizia_history(request: Request, limit: int = 20, skip: int = 0):
     
     return {"analyses": analyses, "total": total, "limit": limit, "skip": skip}
 
-@api_router.get("/history/perizia/{analysis_id}")
-async def get_perizia_detail(analysis_id: str, request: Request):
-    """Get specific perizia analysis"""
-    user = await require_auth(request)
-    
+def _load_offline_persisted_analysis(path: Path) -> Optional[Dict[str, Any]]:
+    if not path.exists():
+        return None
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        if isinstance(data, dict):
+            return data
+    except Exception:
+        return None
+    return None
+
+async def _get_perizia_analysis_for_user_with_storage(
+    analysis_id: str,
+    user: User
+) -> Tuple[Dict[str, Any], str, Optional[Path]]:
     analysis = await db.perizia_analyses.find_one(
         {"analysis_id": analysis_id, "user_id": user.user_id},
         {"_id": 0, "raw_text": 0}
     )
-    
-    if not analysis:
-        raise HTTPException(status_code=404, detail="Analysis not found")
-    
+    if analysis:
+        return analysis, "mongo", None
+
+    offline_path = Path("/tmp/perizia_qa_run/analysis.json")
+    offline_analysis = _load_offline_persisted_analysis(offline_path)
+    if offline_analysis and offline_analysis.get("analysis_id") == analysis_id:
+        offline_owner = str(offline_analysis.get("user_id", "") or "").strip()
+        if offline_owner and offline_owner != user.user_id:
+            raise HTTPException(status_code=404, detail="Analysis not found")
+        offline_analysis.pop("raw_text", None)
+        return offline_analysis, "offline_file", offline_path
+
+    raise HTTPException(status_code=404, detail="Analysis not found")
+
+def _persist_offline_analysis(path: Path, analysis: Dict[str, Any]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(analysis, f, ensure_ascii=False, indent=2)
+
+async def _save_headline_overrides_for_analysis(
+    *,
+    analysis_id: str,
+    user: User,
+    analysis: Dict[str, Any],
+    storage_mode: str,
+    storage_path: Optional[Path]
+) -> None:
+    if storage_mode == "mongo":
+        await db.perizia_analyses.update_one(
+            {"analysis_id": analysis_id, "user_id": user.user_id},
+            {"$set": {"headline_overrides": analysis.get("headline_overrides", {})}}
+        )
+        return
+    if storage_mode == "offline_file":
+        if storage_path is None:
+            raise HTTPException(status_code=500, detail="Offline analysis path not available")
+        existing = _load_offline_persisted_analysis(storage_path)
+        if not existing or existing.get("analysis_id") != analysis_id:
+            raise HTTPException(status_code=404, detail="Analysis not found")
+        existing_owner = str(existing.get("user_id", "") or "").strip()
+        if existing_owner and existing_owner != user.user_id:
+            raise HTTPException(status_code=404, detail="Analysis not found")
+        existing["headline_overrides"] = analysis.get("headline_overrides", {}) or {}
+        _persist_offline_analysis(storage_path, existing)
+        return
+    raise HTTPException(status_code=500, detail="Unsupported analysis storage mode")
+
+async def _get_perizia_analysis_for_user(analysis_id: str, user: User) -> Dict[str, Any]:
+    analysis, _storage_mode, _storage_path = await _get_perizia_analysis_for_user_with_storage(analysis_id, user)
+
+    result = analysis.get("result")
+    if isinstance(result, dict):
+        if not isinstance(result.get("field_states"), dict):
+            pages_hint = int(analysis.get("pages_count", 0) or 0)
+            pages_for_proof = [{"page_number": i + 1, "text": ""} for i in range(max(1, pages_hint))]
+            _apply_headline_field_states(result, pages_for_proof)
+        _apply_headline_overrides(result, analysis.get("headline_overrides") or {})
+        analysis["result"] = result
     return analysis
+
+@api_router.get("/history/perizia/{analysis_id}")
+async def get_perizia_detail(analysis_id: str, request: Request):
+    """Get specific perizia analysis"""
+    user = await require_auth(request)
+    return await _get_perizia_analysis_for_user(analysis_id, user)
+
+@api_router.get("/analysis/perizia/{analysis_id}")
+async def get_perizia_detail_alias(analysis_id: str, request: Request):
+    """Alias of history detail endpoint with identical auth and ownership checks."""
+    user = await require_auth(request)
+    return await _get_perizia_analysis_for_user(analysis_id, user)
 
 @api_router.get("/history/images")
 async def get_image_history(request: Request, limit: int = 20, skip: int = 0):
