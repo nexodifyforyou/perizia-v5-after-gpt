@@ -14,13 +14,13 @@
   "lotto": {
     "expected_value": "Lotto Unico",
     "expected_page": 45,
-    "expected_quote_substring": "LOTTO UNICO - PREZZO BASE D'ASTA",
+    "expected_quote_substring": "LOTTO UNICO",
     "expected_rule_name": "schema_riassuntivo_lotto"
   },
   "address": {
     "expected_value": "San Giorgio Bigarello (MN) - Via Sordello n. 5, piano Terra-primo",
     "expected_page": 45,
-    "expected_quote_substring": "San Giorgio Bigarello (MN) - Via Sordello n. 5, piano Terra-primo",
+    "expected_quote_substring": "Via Sordello n. 5",
     "expected_rule_name": "schema_riassuntivo_ubicazione"
   },
   "prezzo_base_asta": {

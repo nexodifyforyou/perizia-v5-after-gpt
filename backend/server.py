@@ -580,6 +580,15 @@ def _normalize_headline_text(text: str) -> str:
     tokens = _collapse_spaced_letters(tokens)
     return re.sub(r"\s{2,}", " ", " ".join(tokens)).strip()
 
+def _normalize_tribunale_value(value: Optional[str]) -> Optional[str]:
+    if not value:
+        return value
+    cleaned = _normalize_headline_text(str(value))
+    cleaned = re.split(r"S\s*E\s*Z", cleaned, flags=re.I)[0].strip()
+    cleaned = re.sub(r"TRIBUNALE\s*DI", "TRIBUNALE DI", cleaned, flags=re.I)
+    cleaned = re.sub(r"\bDI([A-ZÀ-Ù])", r"DI \1", cleaned)
+    return cleaned
+
 def _normalize_procedura_value(value: Optional[str]) -> Optional[str]:
     if not value:
         return value
@@ -592,6 +601,8 @@ def _normalize_address_value(value: Optional[str]) -> Optional[str]:
         return value
     cleaned = _normalize_headline_text(str(value))
     cleaned = re.sub(r"^Ubicazione[:\s]*", "", cleaned, flags=re.I).strip()
+    cleaned = re.sub(r"\b([A-ZÀ-Ù])\s+([a-zà-ù]{2,})\b", r"\1\2", cleaned)
+    cleaned = re.sub(r"\s*-\s*([a-zà-ù])", r"-\1", cleaned)
     return cleaned
 
 def _headline_display_value(state: Dict[str, Any]) -> str:
@@ -740,9 +751,9 @@ def _extract_tribunale_state(pages: List[Dict[str, Any]]) -> Dict[str, Any]:
     status = "NOT_FOUND"
     location_found = False
 
-    word_t = r"t\\s*r\\s*i\\s*b\\s*u\\s*n\\s*a\\s*l\\s*e"
-    word_d = r"d\\s*i"
-    pattern_full = re.compile(rf"{word_t}\\s+{word_d}\\s+([A-ZÀ-Ù][A-ZÀ-Ù'\\s\\.\\-]{{2,80}})", re.I)
+    word_t = r"t\s*r\s*i\s*b\s*u\s*n\s*a\s*l\s*e"
+    word_d = r"d\s*i"
+    pattern_full = re.compile(rf"{word_t}\s+{word_d}\s+([A-ZÀ-Ù][A-ZÀ-Ù'\s\.\-]{{2,80}})", re.I)
     pattern_word = re.compile(rf"{word_t}", re.I)
 
     for p in pages:
@@ -752,9 +763,7 @@ def _extract_tribunale_state(pages: List[Dict[str, Any]]) -> Dict[str, Any]:
             start, end = match.start(), match.end()
             evidence.append(_build_evidence(text, int(p.get("page_number", 0) or 0), start, end))
             raw = match.group(0)
-            cleaned = _normalize_headline_text(raw)
-            cleaned = re.split(r"\bSEZ", cleaned, flags=re.I)[0].strip()
-            value = cleaned
+            value = _normalize_tribunale_value(raw)
             location_found = True
             status = "FOUND"
             break
@@ -790,14 +799,14 @@ def _extract_procedura_state(pages: List[Dict[str, Any]]) -> Dict[str, Any]:
     status = "NOT_FOUND"
 
     patterns = [
-        re.compile(r"(Esecuzione\\s+Immobiliare\\s+\\d+\\s*/\\s*\\d+\\s+del\\s+R\\.?\\s*G\\.?\\s*E\\.?\\s*\\d*\\s*/?\\s*\\d*)", re.I),
-        re.compile(r"(R\\.?\\s*G\\.?\\s*E\\.?\\s*\\d+\\s*/\\s*\\d+)", re.I),
-        re.compile(r"(Esecuzione\\s+Immobiliare\\s+(?:n\\.?\\s*)?\\d+\\s*/\\s*\\d+)", re.I),
-        re.compile(r"(Procedura\\s+(?:n\\.?\\s*)?\\d+\\s*/\\s*\\d+)", re.I),
+        re.compile(r"(Esecuzione\s+Immobiliare\s+\d+\s*/\s*\d+\s+del\s+R\.?\s*G\.?\s*E\.?\s*\d*\s*/?\s*\d*)", re.I),
+        re.compile(r"(R\.?\s*G\.?\s*E\.?\s*\d+\s*/\s*\d+)", re.I),
+        re.compile(r"(Esecuzione\s+Immobiliare\s+(?:n\.?\s*)?\d+\s*/\s*\d+)", re.I),
+        re.compile(r"(Procedura\s+(?:n\.?\s*)?\d+\s*/\s*\d+)", re.I),
     ]
     fallback_patterns = [
-        re.compile(r"R\\.?\\s*G\\.?\\s*E\\.?", re.I),
-        re.compile(r"Esecuzione\\s+Immobiliare", re.I),
+        re.compile(r"R\.?\s*G\.?\s*E\.?", re.I),
+        re.compile(r"Esecuzione\s+Immobiliare", re.I),
     ]
 
     for p in pages:
@@ -936,13 +945,13 @@ def _extract_address_state(pages: List[Dict[str, Any]], lots: List[Dict[str, Any
                 break
 
     if status == "NOT_FOUND":
-        match = _find_regex_in_pages(pages, r"Ubicazione[:\\s]*([^\\n]{5,120})", re.I)
+        match = _find_regex_in_pages(pages, r"Ubicazione[:\s]*([^\n]{5,120})", re.I)
         if match:
             evidence.append(match)
             value = _normalize_address_value(match.get("quote", ""))
             status = "FOUND"
         else:
-            match = _find_regex_in_pages(pages, r"\\b(Via|Viale|Piazza|Corso|Strada|Vicolo|Largo|Localit[aà])\\b[^\\n]{5,120}", re.I)
+            match = _find_regex_in_pages(pages, r"\b(Via|Viale|Piazza|Corso|Strada|Vicolo|Largo|Localit[aà])\b[^\n]{5,120}", re.I)
             if match:
                 evidence.append(match)
                 value = _normalize_address_value(match.get("quote", ""))
@@ -950,7 +959,7 @@ def _extract_address_state(pages: List[Dict[str, Any]], lots: List[Dict[str, Any
 
     if value:
         value = _normalize_address_value(value)
-        has_street = re.search(r"\\b(via|viale|piazza|corso|strada|vicolo|largo|localit[aà])\\b", value, re.I)
+        has_street = re.search(r"\b(via|viale|piazza|corso|strada|vicolo|largo|localit[aà])\b", value, re.I)
         if len(value) < 10 and status == "FOUND":
             status = "LOW_CONFIDENCE"
         elif not has_street and status == "FOUND":
@@ -973,24 +982,31 @@ def _extract_address_state(pages: List[Dict[str, Any]], lots: List[Dict[str, Any
 def _extract_prezzo_base_asta_state(pages: List[Dict[str, Any]]) -> Dict[str, Any]:
     keywords = ["prezzo base", "prezzo base d'asta", "prezzo base d’asta", "prezzo base asta", "euro", "€"]
     patterns = [
-        re.compile(r"(Prezzo\\s+base(?:\\s+d['’]asta)?[^\\n]{0,60}?)(?:€|\\bEuro\\b)?\\s*([0-9]{1,3}(?:[\\.\\s][0-9]{3})*(?:,[0-9]{2})?)", re.I),
-        re.compile(r"(Prezzo\\s+base[^\\n]{0,60}?)(?:€|\\bEuro\\b)\\s*([0-9]{1,3}(?:[\\.\\s][0-9]{3})*(?:,[0-9]{2})?)", re.I),
+        re.compile(r"(Prezzo\s+base(?:\s+d['’]asta)?[^\n]{0,60}?)(?:€|\bEuro\b)?\s*([0-9]{1,3}(?:[.\s][0-9]{3})*(?:,[0-9]{2})?)", re.I),
+        re.compile(r"(Prezzo\s+base[^\n]{0,60}?)(?:€|\bEuro\b)\s*([0-9]{1,3}(?:[.\s][0-9]{3})*(?:,[0-9]{2})?)", re.I),
     ]
+    schema_pages = []
     for p in pages:
-        text = str(p.get("text", "") or "")
-        for pat in patterns:
-            m = pat.search(text)
-            if not m:
-                continue
-            value_raw = m.group(2)
-            value = _parse_euro_number(value_raw)
-            if value is None:
-                continue
-            start = m.start(1)
-            end = m.end(2)
-            evidence = [_build_evidence(text, int(p.get("page_number", 0) or 0), start, end)]
-            searched_in = _make_searched_in(pages, keywords, "FOUND")
-            return _build_field_state(value=value, status="FOUND", evidence=evidence, searched_in=searched_in)
+        text_upper = str(p.get("text", "") or "").upper()
+        if "SCHEMA RIASSUNTIVO" in text_upper:
+            schema_pages.append(p)
+    page_groups = [schema_pages, pages] if schema_pages else [pages]
+    for group in page_groups:
+        for p in group:
+            text = str(p.get("text", "") or "")
+            for pat in patterns:
+                m = pat.search(text)
+                if not m:
+                    continue
+                value_raw = m.group(2)
+                value = _parse_euro_number(value_raw)
+                if value is None:
+                    continue
+                start = m.start(1)
+                end = m.end(2)
+                evidence = [_build_evidence(text, int(p.get("page_number", 0) or 0), start, end)]
+                searched_in = _make_searched_in(pages, keywords, "FOUND")
+                return _build_field_state(value=value, status="FOUND", evidence=evidence, searched_in=searched_in)
     searched_in = _make_searched_in(pages, keywords, "NOT_FOUND")
     return _build_field_state(value=None, status="NOT_FOUND", evidence=[], searched_in=searched_in)
 
@@ -1001,37 +1017,67 @@ def _extract_superficie_state(pages: List[Dict[str, Any]], dati_certi: Optional[
     if isinstance(existing, dict):
         value = existing.get("value")
         evidence = existing.get("evidence", [])
+        if isinstance(value, str):
+            match = re.search(r"(\d{1,4}(?:[\.,]\d{1,2})?)", value)
+            if match:
+                raw = match.group(1).replace(".", "").replace(",", ".")
+                try:
+                    value = {"value": float(raw), "unit": "mq", "label": "Superficie"}
+                except Exception:
+                    value = existing.get("value")
         if value is not None and isinstance(evidence, list) and evidence:
             searched_in = _make_searched_in(pages, keywords, "FOUND")
             return _build_field_state(value=value, status="FOUND", evidence=evidence, searched_in=searched_in)
 
     pattern = re.compile(
-        r"(Superficie(?:\\s+catastale|\\s+commerciale)?[^\\n]{0,40}?)(\\d{1,4}(?:[\\.,]\\d{1,2})?)\\s*(m2|m²|mq)",
+        r"(Superficie(?:\s+catastale|\s+commerciale)?[^\n]{0,40}?)(\d{1,4}(?:[\.,]\d{1,2})?)\s*(m2|m²|mq)",
         re.I,
     )
+    schema_pages = []
     for p in pages:
-        text = str(p.get("text", "") or "")
-        m = pattern.search(text)
-        if not m:
-            continue
-        raw_num = m.group(2).replace(".", "").replace(",", ".")
-        try:
-            value_num = float(raw_num)
-        except Exception:
-            continue
-        unit = "mq"
-        start = m.start(1)
-        end = m.end(3)
-        evidence = [_build_evidence(text, int(p.get("page_number", 0) or 0), start, end)]
-        value = {"value": value_num, "unit": unit, "label": _normalize_headline_text(m.group(1))}
-        searched_in = _make_searched_in(pages, keywords, "FOUND")
-        return _build_field_state(value=value, status="FOUND", evidence=evidence, searched_in=searched_in)
+        text_upper = str(p.get("text", "") or "").upper()
+        if "SCHEMA RIASSUNTIVO" in text_upper or "TIPOLOGIA IMMOBILE" in text_upper:
+            schema_pages.append(p)
+    page_groups = [schema_pages, pages] if schema_pages else [pages]
+    for group in page_groups:
+        for p in group:
+            text = str(p.get("text", "") or "")
+            m = pattern.search(text)
+            if not m:
+                continue
+            raw_num = m.group(2).replace(".", "").replace(",", ".")
+            try:
+                value_num = float(raw_num)
+            except Exception:
+                continue
+            unit = "mq"
+            start = m.start(1)
+            end = m.end(3)
+            evidence = [_build_evidence(text, int(p.get("page_number", 0) or 0), start, end)]
+            value = {"value": value_num, "unit": unit, "label": _normalize_headline_text(m.group(1))}
+            searched_in = _make_searched_in(pages, keywords, "FOUND")
+            return _build_field_state(value=value, status="FOUND", evidence=evidence, searched_in=searched_in)
     searched_in = _make_searched_in(pages, keywords, "NOT_FOUND")
     return _build_field_state(value=None, status="NOT_FOUND", evidence=[], searched_in=searched_in)
 
 def _extract_diritto_reale_state(pages: List[Dict[str, Any]]) -> Dict[str, Any]:
     keywords = ["proprietà", "nuda proprietà", "usufrutto", "diritto di"]
-    pattern = re.compile(r"\\b(Nuda\\s+proprietà|Piena\\s+proprietà|Proprietà|Usufrutto|Diritto\\s+di\\s+[^\\n]{0,40})\\b", re.I)
+    pattern = re.compile(r"\b(Nuda\s+proprietà|Piena\s+proprietà|Proprietà|Usufrutto|Diritto\s+di\s+[^\n]{0,40})\b", re.I)
+    schema_pattern = re.compile(r"Diritto\s+reale[:\s]*([^\n]{3,60})", re.I)
+    schema_pages = []
+    for p in pages:
+        text_upper = str(p.get("text", "") or "").upper()
+        if "SCHEMA RIASSUNTIVO" in text_upper or "DIRITTO REALE" in text_upper:
+            schema_pages.append(p)
+    for p in (schema_pages or pages):
+        text = str(p.get("text", "") or "")
+        m = schema_pattern.search(text)
+        if m:
+            start, end = m.start(1), m.end(1)
+            evidence = [_build_evidence(text, int(p.get("page_number", 0) or 0), start, end)]
+            value = _normalize_headline_text(m.group(1))
+            searched_in = _make_searched_in(pages, keywords, "FOUND")
+            return _build_field_state(value=value, status="FOUND", evidence=evidence, searched_in=searched_in)
     for p in pages:
         text = str(p.get("text", "") or "")
         m = pattern.search(text)
@@ -1589,10 +1635,15 @@ def _extract_lots_from_schema_riassuntivo(pages_in: List[Dict]) -> List[Dict[str
     schema_pages = []
     for p in pages_in:
         text = str(p.get("text", "") or "")
-        if "SCHEMA RIASSUNTIVO" in text.upper() or ("LOTTO" in text.upper() and "PREZZO BASE" in text.upper()):
+        if "SCHEMA RIASSUNTIVO" in text.upper():
             schema_pages.append(p)
     if not schema_pages:
-        schema_pages = pages_in
+        for p in pages_in:
+            text = str(p.get("text", "") or "")
+            if "LOTTO" in text.upper() and "PREZZO BASE" in text.upper():
+                schema_pages.append(p)
+        if not schema_pages:
+            schema_pages = pages_in
 
     all_lot_numbers = set()
     for p in pages_in:

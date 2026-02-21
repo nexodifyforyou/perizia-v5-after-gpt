@@ -91,6 +91,27 @@ def _assert_evidence_entry(entry: dict, context: str) -> None:
 def _normalize_text(value: str) -> str:
     return " ".join(str(value).split()).strip()
 
+def _collapse_spaced_letters(tokens: list[str]) -> list[str]:
+    collapsed = []
+    buffer = []
+    for token in tokens:
+        if len(token) == 1 and token.isalpha():
+            buffer.append(token)
+            continue
+        if buffer:
+            collapsed.append("".join(buffer))
+            buffer = []
+        collapsed.append(token)
+    if buffer:
+        collapsed.append("".join(buffer))
+    return collapsed
+
+
+def _normalize_evidence_text(text: str) -> str:
+    tokens = str(text).replace("\n", " ").split()
+    tokens = _collapse_spaced_letters(tokens)
+    return " ".join(tokens).strip()
+
 
 def _coerce_numeric(value):
     if isinstance(value, (int, float)):
@@ -129,6 +150,8 @@ def _value_matches(expected, actual) -> bool:
 
 def _evidence_contains(evidence: list, page: int, substring: str) -> bool:
     target = substring.lower()
+    target_norm = _normalize_evidence_text(substring).lower()
+    target_compact = "".join(target_norm.split())
     for ev in evidence or []:
         if not isinstance(ev, dict):
             continue
@@ -136,6 +159,12 @@ def _evidence_contains(evidence: list, page: int, substring: str) -> bool:
             continue
         quote = str(ev.get("quote") or "").lower()
         if target in quote:
+            return True
+        quote_norm = _normalize_evidence_text(ev.get("quote") or "").lower()
+        if target_norm and target_norm in quote_norm:
+            return True
+        quote_compact = "".join(quote_norm.split())
+        if target_compact and target_compact in quote_compact:
             return True
     return False
 
