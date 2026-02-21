@@ -936,7 +936,7 @@ def _extract_address_state(pages: List[Dict[str, Any]], lots: List[Dict[str, Any
     if lots:
         for lot in lots:
             ubic = str(lot.get("ubicazione", "") or "").strip()
-            if ubic and ubic.upper() != "NON SPECIFICATO IN PERIZIA":
+            if ubic and ubic.upper() not in {"NON SPECIFICATO IN PERIZIA", "TBD"}:
                 value = ubic
                 ev_list = lot.get("evidence", {}).get("ubicazione", []) if isinstance(lot.get("evidence"), dict) else []
                 if ev_list:
@@ -1364,6 +1364,15 @@ def _apply_decision_states_to_result(result: Dict[str, Any], states: Dict[str, A
 def _apply_decision_field_states(result: Dict[str, Any], pages: List[Dict[str, Any]]) -> None:
     has_text = any(str(p.get("text", "") or "").strip() for p in pages)
     states = result.get("field_states", {}) if isinstance(result.get("field_states"), dict) else {}
+    lots = result.get("lots") or []
+    lot_index = result.get("lot_index", 0)
+    if not isinstance(lot_index, int):
+        try:
+            lot_index = int(lot_index)
+        except Exception:
+            lot_index = 0
+    if lot_index < 0 or lot_index >= (len(lots) if isinstance(lots, list) else 0):
+        lot_index = 0
     if has_text:
         dati = result.get("dati_certi_del_lotto", {}) if isinstance(result.get("dati_certi_del_lotto"), dict) else {}
         states.update({
@@ -1446,6 +1455,57 @@ def _apply_decision_field_states(result: Dict[str, Any], pages: List[Dict[str, A
         if not spese_state.get("searched_in"):
             spese_state["searched_in"] = _make_searched_in(pages, ["spese condominiali", "arretrate", "arretrati"], "NOT_FOUND")
         states["spese_condominiali_arretrate"] = spese_state
+
+    if isinstance(lots, list) and lots:
+        selected_lot = lots[lot_index] if lot_index < len(lots) else lots[0]
+        if isinstance(selected_lot, dict):
+            lot_evidence = selected_lot.get("evidence", {}) if isinstance(selected_lot.get("evidence"), dict) else {}
+
+            def _state_from_lot_value(raw_value: Any, evidence_key: str, keywords: List[str], value_builder=None) -> Dict[str, Any]:
+                evidence = lot_evidence.get(evidence_key, [])
+                value = raw_value
+                if value_builder:
+                    value = value_builder(raw_value)
+                if raw_value in (None, "", "TBD", "NON SPECIFICATO IN PERIZIA"):
+                    searched_in = _make_searched_in(pages, keywords, "NOT_FOUND")
+                    return _build_field_state(value=None, status="NOT_FOUND", evidence=[], searched_in=searched_in)
+                if not evidence:
+                    searched_in = _make_searched_in(pages, keywords, "LOW_CONFIDENCE")
+                    return _build_field_state(value=value, status="LOW_CONFIDENCE", evidence=[], searched_in=searched_in)
+                searched_in = _make_searched_in(pages, keywords, "FOUND")
+                return _build_field_state(value=value, status="FOUND", evidence=evidence, searched_in=searched_in)
+
+            states["prezzo_base_asta"] = _state_from_lot_value(
+                selected_lot.get("prezzo_base_value"),
+                "prezzo_base",
+                ["prezzo base", "prezzo base d'asta", "€"],
+            )
+
+            def _superficie_value(raw: Any) -> Any:
+                if isinstance(raw, (int, float)):
+                    return {"value": float(raw), "unit": "mq", "label": "Superficie"}
+                if isinstance(raw, str):
+                    match = re.search(r"(\d{1,4}(?:[\.,]\d{1,2})?)", raw)
+                    if match:
+                        raw_num = match.group(1).replace(".", "").replace(",", ".")
+                        try:
+                            return {"value": float(raw_num), "unit": "mq", "label": "Superficie"}
+                        except Exception:
+                            return raw
+                return raw
+
+            states["superficie"] = _state_from_lot_value(
+                selected_lot.get("superficie_mq"),
+                "superficie",
+                ["superficie", "mq", "m²"],
+                value_builder=_superficie_value,
+            )
+
+            states["diritto_reale"] = _state_from_lot_value(
+                selected_lot.get("diritto_reale"),
+                "diritto_reale",
+                ["proprietà", "nuda proprietà", "usufrutto", "diritto di"],
+            )
 
     result["field_states"] = states
     _apply_decision_states_to_result(result, states)
@@ -1662,13 +1722,20 @@ def _extract_lots_from_schema_riassuntivo(pages_in: List[Dict]) -> List[Dict[str
     for lot_num in sorted(all_lot_numbers):
         lot_data = {
             "lot_number": lot_num,
-            "prezzo_base_eur": "NON SPECIFICATO IN PERIZIA",
-            "prezzo_base_value": 0,
-            "ubicazione": "NON SPECIFICATO IN PERIZIA",
-            "diritto_reale": "NON SPECIFICATO IN PERIZIA",
-            "superficie_mq": "NON SPECIFICATO IN PERIZIA",
-            "tipologia": "NON SPECIFICATO IN PERIZIA",
-            "evidence": {}
+            "prezzo_base_eur": "TBD",
+            "prezzo_base_value": None,
+            "ubicazione": "TBD",
+            "diritto_reale": "TBD",
+            "superficie_mq": "TBD",
+            "tipologia": "TBD",
+            "evidence": {
+                "lotto": [],
+                "prezzo_base": [],
+                "ubicazione": [],
+                "superficie": [],
+                "diritto_reale": [],
+                "tipologia": [],
+            }
         }
         for p in schema_pages:
             text = str(p.get("text", "") or "")
@@ -1695,7 +1762,7 @@ def _extract_lots_from_schema_riassuntivo(pages_in: List[Dict]) -> List[Dict[str
                 r"PREZZO\s+BASE\s+D['']?ASTA[:\s]*€?\s*([\d.,]+)",
                 block, re.I
             )
-            if prezzo_match and lot_data["prezzo_base_eur"] == "NON SPECIFICATO IN PERIZIA":
+            if prezzo_match and lot_data["prezzo_base_eur"] == "TBD":
                 prezzo_str = prezzo_match.group(1).strip()
                 lot_data["prezzo_base_eur"] = f"€ {prezzo_str}"
                 try:
@@ -1707,27 +1774,27 @@ def _extract_lots_from_schema_riassuntivo(pages_in: List[Dict]) -> List[Dict[str
                 abs_end = block_start + prezzo_match.end()
                 lot_data["evidence"]["prezzo_base"] = [_build_evidence(text, page_num, abs_start, abs_end)]
 
-            if "lotto" not in lot_data["evidence"]:
+            if not lot_data["evidence"].get("lotto"):
                 lotto_match = re.search(r"\bLOTTO\s+UNICO\b|\bLOTTO\s+\d+\b", text, re.I)
                 if lotto_match:
                     lot_data["evidence"]["lotto"] = [_build_evidence(text, page_num, lotto_match.start(), lotto_match.end())]
 
             ubic_match = re.search(r"Ubicazione[:\s]*([^\n]+)", block, re.I)
-            if ubic_match and lot_data["ubicazione"] == "NON SPECIFICATO IN PERIZIA":
-                lot_data["ubicazione"] = ubic_match.group(1).strip()[:200]
+            if ubic_match and lot_data["ubicazione"] == "TBD":
+                lot_data["ubicazione"] = _normalize_address_value(ubic_match.group(1).strip()[:200])
                 abs_start = block_start + ubic_match.start()
                 abs_end = block_start + ubic_match.end()
                 lot_data["evidence"]["ubicazione"] = [_build_evidence(text, page_num, abs_start, abs_end)]
 
             diritto_match = re.search(r"Diritto\s+reale[:\s]*([^\n]+)", block, re.I)
-            if diritto_match and lot_data["diritto_reale"] == "NON SPECIFICATO IN PERIZIA":
-                lot_data["diritto_reale"] = diritto_match.group(1).strip()[:100]
+            if diritto_match and lot_data["diritto_reale"] == "TBD":
+                lot_data["diritto_reale"] = _normalize_headline_text(diritto_match.group(1).strip()[:100])
                 abs_start = block_start + diritto_match.start()
                 abs_end = block_start + diritto_match.end()
                 lot_data["evidence"]["diritto_reale"] = [_build_evidence(text, page_num, abs_start, abs_end)]
 
             sup_matches = list(re.finditer(r"Superficie[^\d\n]{0,40}([\d.,]+)\s*mq", block, re.I))
-            if sup_matches and lot_data["superficie_mq"] == "NON SPECIFICATO IN PERIZIA":
+            if sup_matches and lot_data["superficie_mq"] == "TBD":
                 best = None
                 best_val = -1
                 for sm in sup_matches:
@@ -1740,14 +1807,17 @@ def _extract_lots_from_schema_riassuntivo(pages_in: List[Dict]) -> List[Dict[str
                         best_val = val
                         best = sm
                 if best:
-                    lot_data["superficie_mq"] = f"{best.group(1)} mq"
+                    lot_data["superficie_mq"] = best_val
                     abs_start = block_start + best.start()
                     abs_end = block_start + best.end()
                     lot_data["evidence"]["superficie"] = [_build_evidence(text, page_num, abs_start, abs_end)]
 
             tipo_match = re.search(r"Tipologia[:\s]*([^\n]+)", block, re.I)
-            if tipo_match and lot_data["tipologia"] == "NON SPECIFICATO IN PERIZIA":
-                lot_data["tipologia"] = tipo_match.group(1).strip()[:100]
+            if tipo_match and lot_data["tipologia"] == "TBD":
+                lot_data["tipologia"] = _normalize_headline_text(tipo_match.group(1).strip()[:100])
+                abs_start = block_start + tipo_match.start()
+                abs_end = block_start + tipo_match.end()
+                lot_data["evidence"]["tipologia"] = [_build_evidence(text, page_num, abs_start, abs_end)]
 
         # Add per-field low confidence notes where evidence is missing
         for field_key, ev_key in (
