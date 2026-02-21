@@ -1462,6 +1462,47 @@ def _apply_decision_states_to_result(result: Dict[str, Any], states: Dict[str, A
     formalita["summary_evidence"] = form_state.get("evidence", [])
     result["formalita"] = formalita
 
+def _ensure_semaforo_top_blockers(result: Dict[str, Any], states: Dict[str, Any], pages: List[Dict[str, Any]]) -> None:
+    if not isinstance(states, dict):
+        return
+    semaforo = None
+    if isinstance(result.get("section_1_semaforo_generale"), dict):
+        semaforo = result.get("section_1_semaforo_generale")
+    elif isinstance(result.get("semaforo_generale"), dict):
+        semaforo = result.get("semaforo_generale")
+    if semaforo is None:
+        semaforo = {}
+        result["semaforo_generale"] = semaforo
+
+    key_config = {
+        "stato_occupativo": {"label_it": "Stato occupativo", "keywords": ["occupato", "libero", "detenuto", "locazione"]},
+        "regolarita_urbanistica": {"label_it": "Regolarità urbanistica", "keywords": ["conformità urbanistica", "abusi edilizi", "sanatoria", "condono"]},
+        "conformita_catastale": {"label_it": "Conformità catastale", "keywords": ["conformità catastale", "difformità", "planimetria"]},
+        "formalita_pregiudizievoli": {"label_it": "Formalità pregiudizievoli", "keywords": ["ipoteca", "pignoramento", "servitù", "vincolo"]},
+        "spese_condominiali_arretrate": {"label_it": "Spese condominiali arretrate", "keywords": ["spese condominiali", "arretrate", "arretrati"]},
+    }
+
+    blockers: List[Dict[str, Any]] = []
+    for key, cfg in key_config.items():
+        state = states.get(key) if isinstance(states.get(key), dict) else {}
+        status = state.get("status")
+        if status not in {"NOT_FOUND", "LOW_CONFIDENCE"}:
+            continue
+        evidence = state.get("evidence") if isinstance(state.get("evidence"), list) else []
+        searched_in = state.get("searched_in") if isinstance(state.get("searched_in"), list) else []
+        if not evidence and not searched_in:
+            searched_in = _make_searched_in(pages, cfg["keywords"], status or "NOT_FOUND")
+        blockers.append({
+            "key": key,
+            "label_it": cfg["label_it"],
+            "status": status,
+            "value": _field_state_display_value(state),
+            "evidence": evidence,
+            "searched_in": searched_in,
+        })
+
+    semaforo["top_blockers"] = blockers[:10]
+
 def _apply_decision_field_states(result: Dict[str, Any], pages: List[Dict[str, Any]]) -> None:
     has_text = any(str(p.get("text", "") or "").strip() for p in pages)
     states = result.get("field_states", {}) if isinstance(result.get("field_states"), dict) else {}
@@ -1562,12 +1603,20 @@ def _apply_decision_field_states(result: Dict[str, Any], pages: List[Dict[str, A
         if isinstance(selected_lot, dict):
             lot_evidence = selected_lot.get("evidence", {}) if isinstance(selected_lot.get("evidence"), dict) else {}
 
-            def _state_from_lot_value(raw_value: Any, evidence_key: str, keywords: List[str], value_builder=None) -> Dict[str, Any]:
+            def _state_from_lot_value(
+                raw_value: Any,
+                evidence_key: str,
+                keywords: List[str],
+                value_builder=None,
+                existing_state: Optional[Dict[str, Any]] = None,
+            ) -> Dict[str, Any]:
                 evidence = lot_evidence.get(evidence_key, [])
                 value = raw_value
                 if value_builder:
                     value = value_builder(raw_value)
-                if raw_value in (None, "", "TBD", "NON SPECIFICATO IN PERIZIA"):
+                if raw_value in (None, "", "TBD", "NON SPECIFICATO IN PERIZIA") and not evidence:
+                    if isinstance(existing_state, dict) and existing_state.get("status") in {"FOUND", "LOW_CONFIDENCE", "USER_PROVIDED"}:
+                        return existing_state
                     searched_in = _make_searched_in(pages, keywords, "NOT_FOUND")
                     return _build_field_state(value=None, status="NOT_FOUND", evidence=[], searched_in=searched_in)
                 if not evidence:
@@ -1580,6 +1629,7 @@ def _apply_decision_field_states(result: Dict[str, Any], pages: List[Dict[str, A
                 selected_lot.get("prezzo_base_value"),
                 "prezzo_base",
                 ["prezzo base", "prezzo base d'asta", "€"],
+                existing_state=states.get("prezzo_base_asta"),
             )
 
             def _superficie_value(raw: Any) -> Any:
@@ -1600,17 +1650,20 @@ def _apply_decision_field_states(result: Dict[str, Any], pages: List[Dict[str, A
                 "superficie",
                 ["superficie", "mq", "m²"],
                 value_builder=_superficie_value,
+                existing_state=states.get("superficie"),
             )
 
             states["diritto_reale"] = _state_from_lot_value(
                 selected_lot.get("diritto_reale"),
                 "diritto_reale",
                 ["proprietà", "nuda proprietà", "usufrutto", "diritto di"],
+                existing_state=states.get("diritto_reale"),
             )
 
     result["field_states"] = states
     _enforce_field_states_contract(result, pages)
     _apply_decision_states_to_result(result, result.get("field_states", states))
+    _ensure_semaforo_top_blockers(result, result.get("field_states", states), pages)
 
 def _apply_headline_field_states(result: Dict[str, Any], pages: List[Dict[str, Any]]) -> None:
     has_text = any(str(p.get("text", "") or "").strip() for p in pages)
@@ -1739,6 +1792,57 @@ def _apply_field_overrides(result: Dict[str, Any], overrides: Dict[str, Any], fi
     result["field_states"] = states
     _apply_headline_states_to_headers(result, states)
     _apply_decision_states_to_result(result, states)
+
+def _ensure_lot_contract(lot: Dict[str, Any], lot_number: int) -> Dict[str, Any]:
+    lot_obj = dict(lot) if isinstance(lot, dict) else {}
+    lot_obj.setdefault("lot_number", lot_number)
+    lot_obj.setdefault("prezzo_base_eur", "TBD")
+    lot_obj.setdefault("prezzo_base_value", None)
+    lot_obj.setdefault("ubicazione", "TBD")
+    lot_obj.setdefault("superficie_mq", "TBD")
+    lot_obj.setdefault("diritto_reale", "TBD")
+    evidence = lot_obj.get("evidence") if isinstance(lot_obj.get("evidence"), dict) else {}
+    for key in ("lotto", "prezzo_base", "ubicazione", "superficie", "diritto_reale"):
+        if not isinstance(evidence.get(key), list):
+            evidence[key] = []
+    lot_obj["evidence"] = evidence
+    return lot_obj
+
+def _build_fallback_lot_from_pages(pages: List[Dict[str, Any]]) -> Dict[str, Any]:
+    lot = _ensure_lot_contract({}, 1)
+    lotto_ev = _find_regex_in_pages(pages, r"\\bLOTTO\\s+UNICO\\b|\\bLOTTO\\s+1\\b", re.I)
+    if lotto_ev:
+        lot["evidence"]["lotto"] = [lotto_ev]
+    prezzo_ev = _find_regex_in_pages(pages, r"PREZZO\\s+BASE[^\\n]{0,60}?([0-9]{1,3}(?:[.\\s][0-9]{3})*(?:,[0-9]{2})?)", re.I)
+    if prezzo_ev:
+        lot["evidence"]["prezzo_base"] = [prezzo_ev]
+        parsed = _parse_euro_number(prezzo_ev.get("quote", ""))
+        if parsed is not None:
+            lot["prezzo_base_value"] = parsed
+            lot["prezzo_base_eur"] = f"€ {parsed:,.0f}".replace(\",\", \".\")
+    ubic_ev = _find_regex_in_pages(pages, r"Ubicazione[:\\s]*([^\\n]{5,120})", re.I)
+    if not ubic_ev:
+        ubic_ev = _find_regex_in_pages(pages, r"\\b(Via|Viale|Piazza|Corso|Strada|Vicolo|Largo|Localit[aà])\\b[^\\n]{5,120}", re.I)
+    if ubic_ev:
+        lot["evidence"]["ubicazione"] = [ubic_ev]
+        lot["ubicazione"] = _normalize_address_value(ubic_ev.get("quote", ""))
+    diritto_ev = _find_regex_in_pages(pages, r"Diritto\\s+reale[:\\s]*([^\\n]{3,60})", re.I)
+    if not diritto_ev:
+        diritto_ev = _find_regex_in_pages(pages, r"\\b(Nuda\\s+proprietà|Piena\\s+proprietà|Proprietà|Usufrutto|Diritto\\s+di\\s+[^\\n]{0,40})\\b", re.I)
+    if diritto_ev:
+        lot["evidence"]["diritto_reale"] = [diritto_ev]
+        lot["diritto_reale"] = _normalize_headline_text(diritto_ev.get("quote", ""))
+    sup_ev = _find_regex_in_pages(pages, r"Superficie[^\\d\\n]{0,40}([\\d.,]+)\\s*(m2|m²|mq)", re.I)
+    if sup_ev:
+        lot["evidence"]["superficie"] = [sup_ev]
+        match = re.search(r"(\\d{1,4}(?:[\\.,]\\d{1,2})?)", sup_ev.get("quote", ""))
+        if match:
+            raw = match.group(1).replace(".", "").replace(",", ".")
+            try:
+                lot["superficie_mq"] = float(raw)
+            except Exception:
+                pass
+    return lot
 
 def _apply_headline_overrides(result: Dict[str, Any], overrides: Dict[str, Any]) -> None:
     _apply_field_overrides(result, overrides, fields=["tribunale", "procedura", "lotto", "address"])
@@ -1935,7 +2039,7 @@ def _extract_lots_from_schema_riassuntivo(pages_in: List[Dict]) -> List[Dict[str
                     "confidence": "LOW",
                     "note": "USER MUST VERIFY"
                 }
-        lots.append(lot_data)
+        lots.append(_ensure_lot_contract(lot_data, lot_num))
     return lots
 
 def _scan_legal_killers(pages_in: List[Dict]) -> List[Dict[str, Any]]:
@@ -3768,6 +3872,14 @@ def create_fallback_analysis(file_name: str, case_id: str, run_id: str, pages: L
     
     extracted_lots = extracted_lots or []
     detected_legal_killers = detected_legal_killers or []
+
+    normalized_lots: List[Dict[str, Any]] = []
+    for idx, lot in enumerate(extracted_lots):
+        lot_num = lot.get("lot_number") if isinstance(lot, dict) and isinstance(lot.get("lot_number"), int) else (idx + 1)
+        normalized_lots.append(_ensure_lot_contract(lot, lot_num))
+    extracted_lots = normalized_lots
+    if not extracted_lots:
+        extracted_lots = [_build_fallback_lot_from_pages(pages)]
     
     # Try to extract basic info from text
     text_lower = pdf_text.lower()
