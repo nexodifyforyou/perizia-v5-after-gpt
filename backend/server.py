@@ -39,6 +39,7 @@ PIPELINE_TIMEOUT_SECONDS = int(os.environ.get('PIPELINE_TIMEOUT_SECONDS', '120')
 LLM_SUMMARY_TIMEOUT_SECONDS = int(os.environ.get('LLM_SUMMARY_TIMEOUT_SECONDS', '8'))
 PDF_TEXT_MIN_PAGE_CHARS = int(os.environ.get("PDF_TEXT_MIN_PAGE_CHARS", "40"))
 PDF_TEXT_MIN_COVERAGE_RATIO = float(os.environ.get("PDF_TEXT_MIN_COVERAGE_RATIO", "0.6"))
+PDF_TEXT_MAX_BLANK_PAGE_RATIO = float(os.environ.get("PDF_TEXT_MAX_BLANK_PAGE_RATIO", "0.3"))
 OFFLINE_QA_ENV = os.environ.get('OFFLINE_QA', '0').lower() in {"1", "true", "yes"}
 ALLOW_OFFLINE_QA_ENV = os.environ.get("ALLOW_OFFLINE_QA", "0").strip() == "1"
 OFFLINE_QA_TOKEN = os.environ.get("OFFLINE_QA_TOKEN", "").strip()
@@ -579,6 +580,20 @@ def _normalize_headline_text(text: str) -> str:
     tokens = _collapse_spaced_letters(tokens)
     return re.sub(r"\s{2,}", " ", " ".join(tokens)).strip()
 
+def _normalize_procedura_value(value: Optional[str]) -> Optional[str]:
+    if not value:
+        return value
+    cleaned = _normalize_headline_text(str(value))
+    match = re.search(r"\b(\d{1,6}/\d{2,4})\b", cleaned)
+    return match.group(1) if match else cleaned
+
+def _normalize_address_value(value: Optional[str]) -> Optional[str]:
+    if not value:
+        return value
+    cleaned = _normalize_headline_text(str(value))
+    cleaned = re.sub(r"^Ubicazione[:\s]*", "", cleaned, flags=re.I).strip()
+    return cleaned
+
 def _headline_display_value(state: Dict[str, Any]) -> str:
     status = state.get("status")
     value = state.get("value")
@@ -792,7 +807,7 @@ def _extract_procedura_state(pages: List[Dict[str, Any]]) -> Dict[str, Any]:
             if match:
                 start, end = match.start(), match.end()
                 evidence.append(_build_evidence(text, int(p.get("page_number", 0) or 0), start, end))
-                value = _normalize_headline_text(match.group(0))
+                value = _normalize_procedura_value(match.group(0))
                 status = "FOUND"
                 break
         if status == "FOUND":
@@ -806,7 +821,7 @@ def _extract_procedura_state(pages: List[Dict[str, Any]]) -> Dict[str, Any]:
                 if match:
                     start, end = match.start(), match.end()
                     evidence.append(_build_evidence(text, int(p.get("page_number", 0) or 0), start, end))
-                    value = _normalize_headline_text(match.group(0))
+                    value = _normalize_procedura_value(match.group(0))
                     status = "LOW_CONFIDENCE"
                     break
             if status == "LOW_CONFIDENCE":
@@ -924,16 +939,17 @@ def _extract_address_state(pages: List[Dict[str, Any]], lots: List[Dict[str, Any
         match = _find_regex_in_pages(pages, r"Ubicazione[:\\s]*([^\\n]{5,120})", re.I)
         if match:
             evidence.append(match)
-            value = _normalize_headline_text(match.get("quote", ""))
+            value = _normalize_address_value(match.get("quote", ""))
             status = "FOUND"
         else:
             match = _find_regex_in_pages(pages, r"\\b(Via|Viale|Piazza|Corso|Strada|Vicolo|Largo|Localit[aà])\\b[^\\n]{5,120}", re.I)
             if match:
                 evidence.append(match)
-                value = _normalize_headline_text(match.get("quote", ""))
+                value = _normalize_address_value(match.get("quote", ""))
                 status = "LOW_CONFIDENCE"
 
     if value:
+        value = _normalize_address_value(value)
         has_street = re.search(r"\\b(via|viale|piazza|corso|strada|vicolo|largo|localit[aà])\\b", value, re.I)
         if len(value) < 10 and status == "FOUND":
             status = "LOW_CONFIDENCE"
@@ -3801,8 +3817,11 @@ def _extract_pdf_text_digital(contents: bytes) -> Dict[str, Any]:
         reader = PdfReader(io.BytesIO(contents))
         pages: List[Dict[str, Any]] = []
         covered_pages = 0
+        blank_pages = 0
         for idx, page in enumerate(reader.pages, start=1):
             page_text = (page.extract_text() or "").strip()
+            if not page_text:
+                blank_pages += 1
             if len(page_text) >= PDF_TEXT_MIN_PAGE_CHARS:
                 covered_pages += 1
             pages.append({
@@ -3814,6 +3833,7 @@ def _extract_pdf_text_digital(contents: bytes) -> Dict[str, Any]:
             })
         total_pages = len(pages)
         coverage_ratio = (covered_pages / total_pages) if total_pages else 0.0
+        blank_ratio = (blank_pages / total_pages) if total_pages else 0.0
         full_text = _build_full_text_from_pages(pages)
         return {
             "success": True,
@@ -3822,6 +3842,8 @@ def _extract_pdf_text_digital(contents: bytes) -> Dict[str, Any]:
             "total_pages": total_pages,
             "covered_pages": covered_pages,
             "coverage_ratio": coverage_ratio,
+            "blank_pages": blank_pages,
+            "blank_ratio": blank_ratio,
             "error": None
         }
     except Exception as e:
@@ -3832,6 +3854,8 @@ def _extract_pdf_text_digital(contents: bytes) -> Dict[str, Any]:
             "total_pages": 0,
             "covered_pages": 0,
             "coverage_ratio": 0.0,
+            "blank_pages": 0,
+            "blank_ratio": 0.0,
             "error": str(e)
         }
 
@@ -3983,14 +4007,17 @@ async def analyze_perizia(request: Request, file: UploadFile = File(...)):
             pages = digital.get("pages", []) or []
             full_text = digital.get("full_text", "") or ""
             coverage_ratio = float(digital.get("coverage_ratio", 0.0) or 0.0)
+            blank_ratio = float(digital.get("blank_ratio", 0.0) or 0.0)
             logger.info(
                 f"[{request_id}] digital_extract pages={len(pages)} chars={len(full_text)} "
-                f"coverage={coverage_ratio:.2f} threshold={PDF_TEXT_MIN_COVERAGE_RATIO:.2f}"
+                f"coverage={coverage_ratio:.2f} threshold={PDF_TEXT_MIN_COVERAGE_RATIO:.2f} "
+                f"blank_ratio={blank_ratio:.2f} blank_threshold={PDF_TEXT_MAX_BLANK_PAGE_RATIO:.2f}"
             )
 
             needs_ocr_fallback = (
                 not full_text.strip()
                 or coverage_ratio < PDF_TEXT_MIN_COVERAGE_RATIO
+                or blank_ratio >= PDF_TEXT_MAX_BLANK_PAGE_RATIO
             )
             if needs_ocr_fallback:
                 logger.info(f"[{request_id}] docai_fallback_needed")

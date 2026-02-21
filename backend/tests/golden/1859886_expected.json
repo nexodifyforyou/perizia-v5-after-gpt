@@ -1,0 +1,44 @@
+{
+  "tribunale": {
+    "expected_value": "TRIBUNALE DI MANTOVA",
+    "expected_page": 1,
+    "expected_quote_substring": "TRIBUNALE DI MANTOVA",
+    "expected_rule_name": "headline_tribunale"
+  },
+  "procedura": {
+    "expected_value": "62/2024",
+    "expected_page": 1,
+    "expected_quote_substring": "Esecuzione Immobiliare 62/2024",
+    "expected_rule_name": "headline_procedura_rge"
+  },
+  "lotto": {
+    "expected_value": "Lotto Unico",
+    "expected_page": 45,
+    "expected_quote_substring": "LOTTO UNICO - PREZZO BASE D'ASTA",
+    "expected_rule_name": "schema_riassuntivo_lotto"
+  },
+  "address": {
+    "expected_value": "San Giorgio Bigarello (MN) - Via Sordello n. 5, piano Terra-primo",
+    "expected_page": 45,
+    "expected_quote_substring": "San Giorgio Bigarello (MN) - Via Sordello n. 5, piano Terra-primo",
+    "expected_rule_name": "schema_riassuntivo_ubicazione"
+  },
+  "prezzo_base_asta": {
+    "expected_value": 391849.0,
+    "expected_page": 45,
+    "expected_quote_substring": "€ 391.849,00",
+    "expected_rule_name": "schema_riassuntivo_prezzo_base"
+  },
+  "diritto_reale": {
+    "expected_value": "Proprietà",
+    "expected_page": 45,
+    "expected_quote_substring": "Proprietà",
+    "expected_rule_name": "schema_riassuntivo_diritto_reale"
+  },
+  "superficie": {
+    "expected_value": 116.39,
+    "expected_page": 45,
+    "expected_quote_substring": "116,39 mq",
+    "expected_rule_name": "schema_riassuntivo_superficie"
+  }
+}
