@@ -1819,7 +1819,7 @@ def _build_fallback_lot_from_pages(pages: List[Dict[str, Any]]) -> Dict[str, Any
         parsed = _parse_euro_number(prezzo_ev.get("quote", ""))
         if parsed is not None:
             lot["prezzo_base_value"] = parsed
-            lot["prezzo_base_eur"] = f"€ {parsed:,.0f}".replace(\",\", \".\")
+            lot["prezzo_base_eur"] = f"€ {parsed:,.0f}".replace(",", ".")
     ubic_ev = _find_regex_in_pages(pages, r"Ubicazione[:\\s]*([^\\n]{5,120})", re.I)
     if not ubic_ev:
         ubic_ev = _find_regex_in_pages(pages, r"\\b(Via|Viale|Piazza|Corso|Strada|Vicolo|Largo|Localit[aà])\\b[^\\n]{5,120}", re.I)
