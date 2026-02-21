@@ -87,6 +87,16 @@ def _assert_evidence_entry(entry: dict) -> None:
     if not isinstance(quote, str) or not quote.strip():
         _fail(f"evidence entry quote empty: {entry}")
 
+def _assert_searched_entries(entries: list, context: str) -> None:
+    if not isinstance(entries, list):
+        _fail(f"{context} searched_in is not a list: {type(entries)}")
+    if not entries:
+        _fail(f"{context} searched_in is empty")
+    for entry in entries:
+        if not isinstance(entry, dict):
+            _fail(f"{context} searched_in entry is not a dict: {entry}")
+        _assert_evidence_entry(entry)
+
 
 def _normalize_lotto_value(text: str) -> str | None:
     import re
@@ -176,11 +186,16 @@ def main() -> None:
             if not ev:
                 _fail(f"{key} FOUND without evidence")
             _assert_evidence_entry(ev[0])
+            searched = state.get("searched_in")
+            if searched != []:
+                _fail(f"{key} FOUND searched_in not empty list: {searched}")
         if status in {"NOT_FOUND", "LOW_CONFIDENCE"}:
-            searched = state.get("searched_in") or []
-            if not searched:
-                _fail(f"{key} {status} without searched_in")
-            _assert_evidence_entry(searched[0])
+            searched = state.get("searched_in")
+            _assert_searched_entries(searched, f"{key} {status}")
+        if status == "USER_PROVIDED":
+            searched = state.get("searched_in")
+            if searched != []:
+                _fail(f"{key} USER_PROVIDED searched_in not empty list: {searched}")
     _pass("field_states have valid statuses and evidence/search proofs")
 
     lotto_state = field_states.get("lotto") or {}
@@ -191,6 +206,9 @@ def main() -> None:
             normalized_val = _normalize_lotto_value(lotto_state.get("value"))
             if normalized_ev and normalized_val and normalized_ev != normalized_val:
                 _fail(f"lotto value mismatch: value={lotto_state.get('value')} evidence={ev[0].get('quote')}")
+            if "lotto unico" in str(ev[0].get("quote") or "").lower():
+                if "unico" not in str(lotto_state.get("value") or "").lower():
+                    _fail(f"lotto value missing 'Unico': value={lotto_state.get('value')} evidence={ev[0].get('quote')}")
     _pass("lotto value matches evidence normalization when FOUND")
 
     override_value = 123456
