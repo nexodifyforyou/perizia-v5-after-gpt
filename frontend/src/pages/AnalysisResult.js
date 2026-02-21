@@ -25,6 +25,7 @@ import {
 } from 'lucide-react';
 import axios from 'axios';
 import { toast } from 'sonner';
+import { downloadPdfBlob } from '../utils/pdfDownload';
 
 const API_URL = process.env.REACT_APP_BACKEND_URL;
 
@@ -376,15 +377,8 @@ const AnalysisResult = () => {
         withCredentials: true,
         responseType: 'blob'
       });
-      
-      const url = window.URL.createObjectURL(new Blob([response.data]));
-      const link = document.createElement('a');
-      link.href = url;
-      link.setAttribute('download', `nexodify_report_${analysisId}.html`);
-      document.body.appendChild(link);
-      link.click();
-      link.remove();
-      window.URL.revokeObjectURL(url);
+
+      downloadPdfBlob(response.data, analysisId);
       
       toast.success('Report scaricato!');
     } catch (error) {

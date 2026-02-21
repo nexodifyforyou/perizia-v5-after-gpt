@@ -518,10 +518,9 @@ def _max_page_number(pages_in: List[Dict[str, Any]]) -> int:
     return max(page_nums) if page_nums else 1
 
 def _build_synthetic_search_entry(pages_in: List[Dict[str, Any]], keywords: List[str]) -> Dict[str, Any]:
-    last_page = _max_page_number(pages_in)
     safe_keywords = [str(k).strip() for k in keywords if str(k).strip()]
     keyword_text = ", ".join(safe_keywords) if safe_keywords else "keyword"
-    quote = f"Ricerca eseguita: {keyword_text} (nessun match) su pagine 1-{last_page}"
+    quote = f"Ricerca eseguita: {keyword_text}. Nessuna occorrenza trovata nel documento."
     return {
         "page": 1,
         "quote": quote,
@@ -544,6 +543,99 @@ def _make_searched_in(
     if entries:
         return entries
     return [_build_synthetic_search_entry(pages_in, keywords)]
+
+
+def _sanitize_search_entry(entry: Any, fallback_keywords: Optional[List[str]] = None) -> Dict[str, Any]:
+    if not isinstance(entry, dict):
+        entry = {}
+    try:
+        page = int(entry.get("page", 1) or 1)
+    except Exception:
+        page = 1
+    if page <= 0:
+        page = 1
+    quote = str(entry.get("quote", "") or "").strip()
+    if not quote:
+        safe_keywords = [str(k).strip() for k in (fallback_keywords or []) if str(k).strip()]
+        keyword_text = ", ".join(safe_keywords) if safe_keywords else "keyword"
+        quote = f"Ricerca eseguita: {keyword_text}. Nessuna occorrenza trovata nel documento."
+    try:
+        start_offset = int(entry.get("start_offset", 0) or 0)
+    except Exception:
+        start_offset = 0
+    try:
+        end_offset = int(entry.get("end_offset", 0) or 0)
+    except Exception:
+        end_offset = 0
+    if start_offset < 0:
+        start_offset = 0
+    if end_offset < start_offset:
+        end_offset = start_offset
+    return {
+        "page": page,
+        "quote": quote,
+        "start_offset": start_offset,
+        "end_offset": end_offset,
+        "bbox": None,
+        "offset_mode": EVIDENCE_OFFSET_MODE,
+        "page_text_hash": entry.get("page_text_hash"),
+    }
+
+
+def _normalize_field_state_contract(field_key: str, state: Any, pages: List[Dict[str, Any]]) -> Dict[str, Any]:
+    st = state if isinstance(state, dict) else {}
+    status = str(st.get("status", "NOT_FOUND") or "NOT_FOUND")
+    value = st.get("value")
+    evidence = st.get("evidence") if isinstance(st.get("evidence"), list) else []
+    searched_in = st.get("searched_in") if isinstance(st.get("searched_in"), list) else []
+    prompt = st.get("user_prompt_it")
+
+    if field_key == "lotto" and evidence:
+        normalized_lotto = _normalize_lotto_value_from_evidence(evidence)
+        if normalized_lotto:
+            value = normalized_lotto
+
+    if status == "USER_PROVIDED":
+        evidence = []
+        searched_in = []
+    elif status == "FOUND":
+        if not evidence:
+            status = "LOW_CONFIDENCE" if value not in (None, "") else "NOT_FOUND"
+            if status == "LOW_CONFIDENCE" and not prompt:
+                prompt = "Verifica il valore indicato nella perizia e conferma il dato corretto."
+        if status == "FOUND":
+            searched_in = []
+    elif status in {"NOT_FOUND", "LOW_CONFIDENCE"}:
+        if not searched_in:
+            searched_in = _make_searched_in(pages, [field_key.replace("_", " ")], status)
+    else:
+        status = "NOT_FOUND"
+        searched_in = _make_searched_in(pages, [field_key.replace("_", " ")], "NOT_FOUND")
+
+    if status in {"NOT_FOUND", "LOW_CONFIDENCE"}:
+        if not searched_in:
+            searched_in = _make_searched_in(pages, [field_key.replace("_", " ")], status)
+        searched_in = [_sanitize_search_entry(item, [field_key.replace("_", " ")]) for item in searched_in]
+    else:
+        searched_in = []
+
+    return {
+        "value": value,
+        "status": status,
+        "confidence": _extract_confidence(value, status),
+        "evidence": evidence,
+        "searched_in": searched_in,
+        "user_prompt_it": prompt,
+    }
+
+
+def _enforce_field_states_contract(result: Dict[str, Any], pages: List[Dict[str, Any]]) -> None:
+    states = result.get("field_states")
+    if not isinstance(states, dict):
+        return
+    for key in list(states.keys()):
+        states[key] = _normalize_field_state_contract(key, states.get(key), pages)
+    result["field_states"] = states
 
 def _extract_confidence(value_obj: Any, status: str) -> Optional[float]:
     if status == "USER_PROVIDED":
@@ -853,19 +945,28 @@ def _extract_procedura_state(pages: List[Dict[str, Any]]) -> Dict[str, Any]:
 def _normalize_lotto_value_from_evidence(evidence: List[Dict[str, Any]]) -> Optional[str]:
     if not evidence:
         return None
-    quote = str(evidence[0].get("quote", "") or "").strip()
-    if not quote:
+    normalized_quotes = []
+    for ev in evidence:
+        quote = str((ev or {}).get("quote", "") or "").strip()
+        if quote:
+            normalized_quotes.append(_normalize_headline_text(quote))
+
+    if not normalized_quotes:
         return None
-    text = _normalize_headline_text(quote)
-    if re.search(r"\bLOTTO\s+UNICO\b", text, re.I):
-        return "Lotto Unico"
-    match = re.search(r"\bLOTTI?\s+([0-9]+(?:\s*[,/-]\s*[0-9]+)*)", text, re.I)
-    if match:
-        nums = re.findall(r"\d+", match.group(1))
+
+    for text in normalized_quotes:
+        if re.search(r"\bLOTTO\s+UNICO\b", text, re.I):
+            return "Lotto Unico"
+
+    for text in normalized_quotes:
+        match = re.search(r"\bLOTTI?\s+([0-9]+(?:\s*[,/-]\s*[0-9]+)*)", text, re.I)
+        if not match:
+            continue
+        nums = [int(n) for n in re.findall(r"\d+", match.group(1))]
         if len(nums) == 1:
             return f"Lotto {nums[0]}"
         if len(nums) > 1:
-            return "Lotti " + ", ".join(nums)
+            return f"Lotti {min(nums)}–{max(nums)}"
     return None
 
 def _extract_lotto_state(pages: List[Dict[str, Any]], lots: List[Dict[str, Any]]) -> Dict[str, Any]:
@@ -886,23 +987,23 @@ def _extract_lotto_state(pages: List[Dict[str, Any]], lots: List[Dict[str, Any]]
     if lot_numbers:
         lot_numbers = sorted(set(lot_numbers))
         if len(lot_numbers) >= 2:
-            value = "Lotti " + ", ".join(str(n) for n in lot_numbers)
+            value = f"Lotti {lot_numbers[0]}–{lot_numbers[-1]}"
         else:
             lot_num = lot_numbers[0]
-            unico_match = _find_regex_in_pages(pages, r"\\bLOTTO\\s+UNICO\\b", re.I)
+            unico_match = _find_regex_in_pages(pages, r"\bLOTTO\s+UNICO\b", re.I)
             value = "Lotto Unico" if unico_match else f"Lotto {lot_num}"
             if unico_match:
                 evidence.append(unico_match)
         status = "FOUND" if evidence else "LOW_CONFIDENCE"
 
     if status == "NOT_FOUND":
-        match = _find_regex_in_pages(pages, r"\\bLOTTO\\s+UNICO\\b|\\bLOTTO\\s+\\d+\\b", re.I)
+        match = _find_regex_in_pages(pages, r"\bLOTTO\s+UNICO\b|\bLOTTO\s+\d+\b", re.I)
         if match:
             evidence.append(match)
             value = _normalize_headline_text(match.get("quote", ""))
             status = "FOUND"
         else:
-            match = _find_regex_in_pages(pages, r"\\bLOTTO\\b", re.I)
+            match = _find_regex_in_pages(pages, r"\bLOTTO\b", re.I)
             if match:
                 evidence.append(match)
                 value = "Lotto"
@@ -1508,7 +1609,8 @@ def _apply_decision_field_states(result: Dict[str, Any], pages: List[Dict[str, A
             )
 
     result["field_states"] = states
-    _apply_decision_states_to_result(result, states)
+    _enforce_field_states_contract(result, pages)
+    _apply_decision_states_to_result(result, result.get("field_states", states))
 
 def _apply_headline_field_states(result: Dict[str, Any], pages: List[Dict[str, Any]]) -> None:
     has_text = any(str(p.get("text", "") or "").strip() for p in pages)
@@ -1558,7 +1660,8 @@ def _apply_headline_field_states(result: Dict[str, Any], pages: List[Dict[str, A
         }
 
     result["field_states"] = states
-    _apply_headline_states_to_headers(result, states)
+    _enforce_field_states_contract(result, pages)
+    _apply_headline_states_to_headers(result, result.get("field_states", states))
 
 def _normalize_override_value(field: str, value: Any) -> Any:
     if value is None:
@@ -6017,6 +6120,7 @@ async def _get_perizia_analysis_for_user(analysis_id: str, user: User) -> Dict[s
                 _apply_decision_field_states(result, pages_for_proof)
         _apply_headline_overrides(result, analysis.get("headline_overrides") or {})
         _apply_field_overrides(result, analysis.get("field_overrides") or {})
+        _enforce_field_states_contract(result, pages_for_proof)
         states = result.get("field_states")
         if isinstance(states, dict):
             if "superficie" not in states and "superficie_catastale" in states:
