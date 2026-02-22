@@ -42,6 +42,58 @@ const normalizePlaceholder = (value) => {
   return value;
 };
 
+const normalizeSpacedOCR = (value) => {
+  if (typeof value !== 'string') return value;
+  const tokens = value.split(/\s+/).filter(Boolean);
+  const out = [];
+  let buffer = [];
+  const flush = () => {
+    if (buffer.length > 0) {
+      out.push(buffer.join(''));
+      buffer = [];
+    }
+  };
+  tokens.forEach((token) => {
+    if (token.length === 1 && /[A-Z]/.test(token)) {
+      buffer.push(token);
+    } else {
+      flush();
+      out.push(token);
+    }
+  });
+  flush();
+  return out.join(' ').replace(/\s{2,}/g, ' ').trim();
+};
+
+const normalizeAnalysisResponse = (payload) => {
+  if (!payload || typeof payload !== 'object') return payload;
+  if (payload.result) return payload;
+
+  const candidates = [
+    payload.analysis,
+    payload.data,
+    payload.payload,
+    payload.analysis?.data,
+    payload.analysis?.payload,
+    payload.data?.analysis
+  ].filter(Boolean);
+
+  for (const candidate of candidates) {
+    if (candidate && typeof candidate === 'object' && candidate.result) {
+      return { ...payload, ...candidate, result: candidate.result };
+    }
+  }
+
+  if (payload.analysis && typeof payload.analysis === 'object') {
+    return { ...payload, ...payload.analysis };
+  }
+  if (payload.data && typeof payload.data === 'object') {
+    return { ...payload, ...payload.data };
+  }
+
+  return payload;
+};
+
 // Helper function to safely render any value - replaces placeholders
 const safeRender = (value, fallback = 'NON SPECIFICATO IN PERIZIA') => {
   const normalized = normalizePlaceholder(value);
@@ -349,7 +401,7 @@ const AnalysisResult = () => {
       const response = await axios.get(`${API_URL}/api/history/perizia/${analysisId}`, {
         withCredentials: true
       });
-      setAnalysis(response.data);
+      setAnalysis(normalizeAnalysisResponse(response.data));
     } catch (error) {
       toast.error('Impossibile caricare l\'analisi');
     } finally {
@@ -483,6 +535,32 @@ const AnalysisResult = () => {
   const summary = summaryData;
   const qa = qaPass.status ? qaPass : (result.qa || {});
   const fieldStates = result.field_states || {};
+  const datiAsta = result.dati_asta || result.dati_certi_del_lotto?.dati_asta || result.dati_certi?.dati_asta;
+
+  const getFieldState = (key) => fieldStates?.[key] || null;
+  const getFieldEvidence = (key, fallback) => {
+    const state = getFieldState(key);
+    if (state && Array.isArray(state.evidence) && state.evidence.length > 0) return state.evidence;
+    return getEvidence(fallback);
+  };
+  const getFieldValue = (key, fallback) => {
+    const state = getFieldState(key);
+    if (state && state.value !== undefined && state.value !== null && state.value !== '') {
+      return state.value;
+    }
+    if (key === 'tribunale') return normalizeSpacedOCR(fallback);
+    return fallback;
+  };
+  const formatFieldStateDisplay = (key, fallback) => {
+    const state = getFieldState(key);
+    if (key === 'spese_condominiali_arretrate' && state?.status === 'NOT_FOUND') {
+      const searchNote = (state.searched_in || []).find((item) => item?.quote?.includes('Nessuna occorrenza'));
+      if (searchNote) return 'Non presenti';
+    }
+    return safeRender(getFieldValue(key, fallback), 'NON SPECIFICATO IN PERIZIA');
+  };
+
+  const beni = (selectedLot && selectedLot.beni) || result.beni || [];
 
   const getHeadlineStatus = (fieldKey) => fieldStates?.[fieldKey]?.status;
   const isNeedsVerification = (status) => status === 'LOW_CONFIDENCE' || status === 'NOT_FOUND';
@@ -517,6 +595,7 @@ const AnalysisResult = () => {
 
   // Get money box items - support both old and new format
   const moneyBoxItems = Array.isArray(moneyBox.items) ? moneyBox.items : [];
+  const moneyBoxItemA = moneyBoxItems.find((item) => item.code === 'A' || item.voce === 'A' || item.label_it?.toLowerCase().includes('regolarizzazione'));
   
   // Get money box total - support both old and new format, handle TBD
   const moneyBoxTotal = moneyBox.totale_extra_budget || moneyBox.total_extra_costs;
@@ -764,7 +843,7 @@ const AnalysisResult = () => {
                 />
                 <HeadlineInlineField
                   fieldKey="tribunale"
-                  value={caseHeader.tribunale?.value || caseHeader.tribunale}
+                  value={normalizeSpacedOCR(caseHeader.tribunale?.value || caseHeader.tribunale)}
                   evidence={getEvidence(caseHeader.tribunale)}
                   className="text-zinc-400"
                 />
@@ -898,6 +977,58 @@ const AnalysisResult = () => {
                 <p>📌 {safeRender(summary.disclaimer_it, 'Documento informativo. Non costituisce consulenza legale.')}</p>
               </div>
             </div>
+
+            {/* Case Summary - Principal Facts */}
+            <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-6">
+              <h2 className="text-xl font-serif font-bold text-zinc-100 mb-4">Case Summary</h2>
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                <DataValueWithEvidence
+                  label="Tribunale"
+                  value={formatFieldStateDisplay('tribunale', caseHeader.tribunale?.value || caseHeader.tribunale)}
+                  evidence={getFieldEvidence('tribunale', caseHeader.tribunale)}
+                />
+                <DataValueWithEvidence
+                  label="Procedura"
+                  value={formatFieldStateDisplay('procedura', caseHeader.procedure?.value || caseHeader.procedure_id)}
+                  evidence={getFieldEvidence('procedura', caseHeader.procedure || caseHeader.procedure_id)}
+                />
+                <DataValueWithEvidence
+                  label="Lotto"
+                  value={formatFieldStateDisplay('lotto', caseHeader.lotto?.value || caseHeader.lotto)}
+                  evidence={getFieldEvidence('lotto', caseHeader.lotto)}
+                />
+                <DataValueWithEvidence
+                  label="Stato Occupativo"
+                  value={formatFieldStateDisplay('stato_occupativo', occupativo.status_it || occupativo.status)}
+                  evidence={getFieldEvidence('stato_occupativo', occupativo)}
+                />
+                <DataValueWithEvidence
+                  label="Spese Condominiali Arretrate"
+                  value={formatFieldStateDisplay('spese_condominiali_arretrate', result.spese_condominiali_arretrate || result.spese_condominiali)}
+                  evidence={getFieldEvidence('spese_condominiali_arretrate', result.spese_condominiali_arretrate || result.spese_condominiali)}
+                />
+                <DataValueWithEvidence
+                  label="APE"
+                  value={safeRender(getFieldValue('ape', abusi.ape?.status || result.ape), 'NON SPECIFICATO IN PERIZIA')}
+                  evidence={getFieldEvidence('ape', abusi.ape || result.ape)}
+                />
+                {datiAsta && (
+                  <DataValueWithEvidence
+                    label="Dati Asta"
+                    value={safeRender(datiAsta?.data || datiAsta?.value || datiAsta)}
+                    evidence={getEvidence(datiAsta)}
+                  />
+                )}
+              </div>
+            </div>
+
+            {/* Money Box A Highlight */}
+            {moneyBoxItemA && (
+              <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-6">
+                <h2 className="text-lg font-serif font-bold text-zinc-100 mb-4">Money Box A</h2>
+                <MoneyBoxItem item={moneyBoxItemA} />
+              </div>
+            )}
             
             {/* Key Data Grid with Evidence */}
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
@@ -1112,7 +1243,7 @@ const AnalysisResult = () => {
                 <HeadlineFieldCard
                   label="Tribunale"
                   fieldKey="tribunale"
-                  value={caseHeader.tribunale?.value || caseHeader.tribunale}
+                  value={normalizeSpacedOCR(caseHeader.tribunale?.value || caseHeader.tribunale)}
                   evidence={getEvidence(caseHeader.tribunale)}
                 />
                 <HeadlineFieldCard
@@ -1122,6 +1253,42 @@ const AnalysisResult = () => {
                   evidence={getEvidence(caseHeader.address)}
                 />
               </div>
+            </div>
+
+            {/* Beni Section */}
+            <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-6">
+              <h2 className="text-xl font-serif font-bold text-zinc-100 mb-4">Beni del Lotto</h2>
+              {Array.isArray(beni) && beni.length > 0 ? (
+                <div className="space-y-3">
+                  {beni.map((bene, idx) => (
+                    <div key={bene.bene_number || idx} className="p-4 bg-zinc-950 rounded-lg border border-zinc-800">
+                      <div className="flex items-start justify-between gap-4">
+                        <div className="space-y-1">
+                          <p className="text-sm font-semibold text-zinc-100">
+                            {bene.bene_number ? `Bene ${bene.bene_number}` : `Bene ${idx + 1}`} - {safeRender(bene.tipologia, 'Tipologia non specificata')}
+                          </p>
+                          {bene.note && (
+                            <p className="text-xs text-zinc-500">{safeRender(bene.note, '')}</p>
+                          )}
+                          {bene.catasto && (
+                            <p className="text-xs text-zinc-400">
+                              Catasto: {safeRender(bene.catasto)}
+                            </p>
+                          )}
+                        </div>
+                        {getEvidence(bene).length > 0 && (
+                          <EvidenceBadge evidence={getEvidence(bene)} />
+                        )}
+                      </div>
+                      {getEvidence(bene).length > 0 && (
+                        <EvidenceDetail evidence={getEvidence(bene)} />
+                      )}
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <p className="text-zinc-500">Beni non disponibili nell'estrazione corrente.</p>
+              )}
             </div>
             
             {/* Abusi Edilizi / Conformità - Section 5 */}
