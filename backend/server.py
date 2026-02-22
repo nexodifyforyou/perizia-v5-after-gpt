@@ -686,7 +686,14 @@ def _normalize_procedura_value(value: Optional[str]) -> Optional[str]:
         return value
     cleaned = _normalize_headline_text(str(value))
     match = re.search(r"\b(\d{1,6}/\d{2,4})\b", cleaned)
-    return match.group(1) if match else cleaned
+    if not match:
+        return cleaned
+    proc_num = match.group(1)
+    if re.search(r"esecuzione\s+immobiliare", cleaned, re.I):
+        return f"Esecuzione Immobiliare {proc_num} R.G.E."
+    if re.search(r"R\.?\s*G\.?\s*E\.?", cleaned, re.I):
+        return f"R.G.E. {proc_num}"
+    return proc_num
 
 def _normalize_address_value(value: Optional[str]) -> Optional[str]:
     if not value:
@@ -1196,6 +1203,7 @@ def _extract_stato_occupativo_state(pages: List[Dict[str, Any]]) -> Dict[str, An
     keywords = ["occupato", "libero", "detenuto", "contratto di locazione", "rilascio"]
     ambiguous_markers = ["si presume", "non è noto", "non e' noto", "non risulta", "da verificare", "da accertare", "presumibilmente", "non è dato sapere", "non e' dato sapere"]
     patterns = [
+        (re.compile(r"\\boccupato\\s+da[^\\n]{0,80}\\bdebitore\\b", re.I), "OCCUPATO DAL DEBITORE"),
         (re.compile(r"\\b(non\\s+occupato|libero|libera\\s+disponibilit[aà])\\b", re.I), "LIBERO"),
         (re.compile(r"\\b(occupato|detenuto|locato|locazione|contratto\\s+di\\s+locazione|inquilino)\\b", re.I), "OCCUPATO"),
     ]
@@ -1268,12 +1276,12 @@ def _extract_conformita_catastale_state(pages: List[Dict[str, Any]]) -> Dict[str
 
 def _extract_spese_condominiali_state(pages: List[Dict[str, Any]]) -> Dict[str, Any]:
     keywords = ["spese condominiali", "arretrate", "arretrati", "oneri condominiali", "morosità"]
-    positive = re.compile(r"(nessun\\s+arretrato|non\\s+risultano\\s+arretrati|in\\s+regola\\s+con\\s+i\\s+pagamenti)", re.I)
+    positive = re.compile(r"(nessun\\s+arretrato|non\\s+risultano\\s+arretrati|in\\s+regola\\s+con\\s+i\\s+pagamenti|spese\\s+condominiali\\s+non\\s+presenti|incidenza\\s+condominiale[:\\s]*0[,\\.]?0*)", re.I)
     negative = re.compile(r"(spese\\s+condominiali\\s+arretrate|arretrati\\s+condominiali|morosit[aà]|oneri\\s+condominiali\\s+insoluti)", re.I)
     ambiguous = re.compile(r"(da\\s+verificare|non\\s+è\\s+noto|non\\s+e'\\s+noto|da\\s+accertare|si\\s+presume|presumibilmente)", re.I)
     for p in pages:
         text = str(p.get("text", "") or "")
-        for pat, label in ((positive, "NON RISULTANO ARRETRATI"), (negative, "PRESENTI ARRETRATI")):
+        for pat, label in ((positive, "NON PRESENTI"), (negative, "PRESENTI ARRETRATI")):
             m = pat.search(text)
             if not m:
                 continue
@@ -1411,12 +1419,14 @@ def _apply_decision_states_to_result(result: Dict[str, Any], states: Dict[str, A
     status_it_map = {
         "LIBERO": "Libero",
         "OCCUPATO": "Occupato",
+        "OCCUPATO DAL DEBITORE": "Occupato dal debitore",
         "DA VERIFICARE": "Da verificare",
         "NON SPECIFICATO IN PERIZIA": "Non specificato in perizia",
     }
     status_en_map = {
         "LIBERO": "Free",
         "OCCUPATO": "Occupied",
+        "OCCUPATO DAL DEBITORE": "Occupied by debtor",
         "DA VERIFICARE": "To verify",
         "NON SPECIFICATO IN PERIZIA": "Not specified in appraisal",
     }
@@ -2041,6 +2051,105 @@ def _extract_lots_from_schema_riassuntivo(pages_in: List[Dict]) -> List[Dict[str
                 }
         lots.append(_ensure_lot_contract(lot_data, lot_num))
     return lots
+
+def _extract_beni_from_pages(pages_in: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    import re
+    beni_by_num: Dict[int, Dict[str, Any]] = {}
+    current_num: Optional[int] = None
+
+    def ensure_bene(num: int) -> Dict[str, Any]:
+        bene = beni_by_num.get(num)
+        if bene is None:
+            bene = {
+                "bene_number": num,
+                "tipologia": None,
+                "catasto": {},
+                "note": [],
+                "evidence": {"tipologia": [], "catasto": [], "note": []},
+            }
+            beni_by_num[num] = bene
+        return bene
+
+    for p in pages_in:
+        text = str(p.get("text", "") or "")
+        page_num = int(p.get("page_number", 0) or 0)
+
+        # Bene headings
+        for m in re.finditer(r"\\bBene\\s*N[°o]\\s*(\\d+)\\s*-\\s*([^\\n]+)", text, re.I):
+            try:
+                num = int(m.group(1))
+            except Exception:
+                continue
+            current_num = num
+            bene = ensure_bene(num)
+            heading = m.group(2).strip()
+            tip_m = re.search(r"^([A-Za-zÀ-Ù'\\s]+?)\\s+ubicat[oa]", heading, re.I)
+            if tip_m:
+                tipologia = _normalize_headline_text(tip_m.group(1).strip())
+            else:
+                tipologia = _normalize_headline_text(heading.split(",")[0])
+            if tipologia and not bene.get("tipologia"):
+                bene["tipologia"] = tipologia
+                bene["evidence"]["tipologia"] = [_build_evidence(text, page_num, m.start(), m.end())]
+
+        # Catasto lines linked to current bene
+        for m in re.finditer(r"Identificato\\s+al\\s+catasto[^\\n]*", text, re.I):
+            if current_num is None:
+                continue
+            bene = ensure_bene(current_num)
+            line_start, line_end = _line_bounds(text, m.start(), m.end())
+            line = text[line_start:line_end]
+            catasto = bene.get("catasto", {})
+
+            def _set_if(key: str, val: Optional[str]) -> None:
+                if val and not catasto.get(key):
+                    catasto[key] = val
+
+            foglio = re.search(r"(?:Fg\\.?|Foglio)\\s*(\\d+)", line, re.I)
+            particella = re.search(r"(?:Part\\.?|Particella)\\s*([0-9]+)", line, re.I)
+            sub = re.search(r"(?:Sub\\.?|Subalterno)\\s*([0-9]+)", line, re.I)
+            categoria = re.search(r"Categoria\\s*([A-Z]\\s*/?\\s*\\d+)", line, re.I)
+            _set_if("foglio", foglio.group(1) if foglio else None)
+            _set_if("particella", particella.group(1) if particella else None)
+            _set_if("sub", sub.group(1) if sub else None)
+            if categoria:
+                _set_if("categoria", _normalize_headline_text(categoria.group(1)))
+
+            bene["catasto"] = catasto
+            bene["evidence"]["catasto"] = [_build_evidence(text, page_num, line_start, line_end)]
+
+        # Consistenza / Rendita
+        for m in re.finditer(r"(Consistenza[^\\n]{0,120}|Rendita\\s+Catastale[^\\n]{0,120})", text, re.I):
+            if current_num is None:
+                continue
+            bene = ensure_bene(current_num)
+            line_start, line_end = _line_bounds(text, m.start(), m.end())
+            line = text[line_start:line_end]
+            catasto = bene.get("catasto", {})
+            cons_m = re.search(r"Consistenza\\s*([^,\\n]+)", line, re.I)
+            rend_m = re.search(r"Rendita\\s+Catastale[^€]*€\\s*([\\d\\.,]+)", line, re.I)
+            if cons_m and not catasto.get("consistenza"):
+                catasto["consistenza"] = _normalize_headline_text(cons_m.group(1))
+            if rend_m and not catasto.get("rendita"):
+                catasto["rendita"] = f"€ {rend_m.group(1).strip()}"
+            bene["catasto"] = catasto
+            if cons_m or rend_m:
+                bene["evidence"]["catasto"] = [_build_evidence(text, page_num, line_start, line_end)]
+
+        # Agibilità notes
+        for m in re.finditer(r"(non\\s+è\\s+presente\\s+l'?abitabilit[aà]|non\\s+risulta\\s+agibile|risulta\\s+agibile)", text, re.I):
+            if current_num is None:
+                continue
+            bene = ensure_bene(current_num)
+            line_start, line_end = _line_bounds(text, m.start(), m.end())
+            line = text[line_start:line_end].strip()
+            note = _normalize_headline_text(line)
+            if note and note not in bene.get("note", []):
+                bene.setdefault("note", []).append(note)
+                bene["evidence"]["note"] = [_build_evidence(text, page_num, line_start, line_end)]
+
+    beni = [beni_by_num[k] for k in sorted(beni_by_num.keys())]
+    return beni
 
 def _scan_legal_killers(pages_in: List[Dict]) -> List[Dict[str, Any]]:
     import re
@@ -3721,7 +3830,20 @@ def apply_deterministic_fixes(result: Dict, pdf_text: str, pages: List[Dict], de
         result["section_5_abusi_conformita"] = abusi
     if "abusi_edilizi_conformita" in result:
         result["abusi_edilizi_conformita"] = abusi
-    
+
+    # Ensure APE evidence when present
+    ape_ev = _find_regex_in_pages(
+        pages,
+        r"(Non\\s+esiste\\s+il\\s+certificato\\s+energetico[^\\n]*|APE\\s+non\\s+presente|Attestato\\s+di\\s+prestazione\\s+energetica\\s+non\\s+presente)",
+        re.I,
+    )
+    if ape_ev:
+        abusi["ape"] = {"status": "ASSENTE", "evidence": [ape_ev]}
+        if "section_5_abusi_conformita" in result:
+            result["section_5_abusi_conformita"] = abusi
+        if "abusi_edilizi_conformita" in result:
+            result["abusi_edilizi_conformita"] = abusi
+
     # ==========================================
     # FIX 3: Extract EUR values from text if missing
     # ==========================================
@@ -3736,6 +3858,54 @@ def apply_deterministic_fixes(result: Dict, pdf_text: str, pages: List[Dict], de
         matches = re.findall(pattern, text_lower, re.IGNORECASE)
         if matches:
             logger.info(f"Found deprezzamento value: {matches}")
+
+    # Sanatoria estimate -> Money Box A (regolarizzazione urbanistica)
+    sanatoria_ev = _find_regex_in_pages(
+        pages,
+        r"(spese\\s+di\\s+massima\\s+presunte\\s*[:\\s]*€\\s*[\\d\\.,]+|spesa\\s+stimata[^\\n]{0,40}€\\s*[\\d\\.,]+)",
+        re.I,
+    )
+    if sanatoria_ev:
+        amount = _parse_euro_number(sanatoria_ev.get("quote", ""))
+        if amount is not None:
+            for box_key in ("section_3_money_box", "money_box"):
+                box = result.get(box_key) if isinstance(result.get(box_key), dict) else None
+                if not box:
+                    continue
+                items = box.get("items", [])
+                if not isinstance(items, list):
+                    continue
+                for item in items:
+                    label = str(item.get("label_it", "") or item.get("voce", "") or "")
+                    if item.get("code") == "A" or "Regolarizzazione urbanistica" in label:
+                        item["stima_euro"] = amount
+                        item["type"] = item.get("type") if item.get("type") not in {"TBD", None} else "ESTIMATE"
+                        item["stima_nota"] = "Perizia: sanatoria stimata"
+                        item["fonte_perizia"] = {"value": "Perizia", "evidence": [sanatoria_ev]}
+                        break
+                result[box_key] = box
+
+    # Beni list for Lotto Unico
+    beni = _extract_beni_from_pages(pages)
+    if beni:
+        result["beni"] = beni
+        if isinstance(result.get("lots"), list) and result["lots"]:
+            lot0 = result["lots"][0]
+            if isinstance(lot0, dict) and not lot0.get("beni"):
+                lot0["beni"] = beni
+
+    # Dati asta (data + ora)
+    if "dati_asta" not in result:
+        for p in pages:
+            text = str(p.get("text", "") or "")
+            m = re.search(r"(\\d{1,2}/\\d{1,2}/\\d{4}).{0,80}?ore\\s+(\\d{1,2}:\\d{2})", text, re.I)
+            if not m:
+                continue
+            start, end = m.start(), m.end()
+            line_start, line_end = _line_bounds(text, start, end)
+            evidence = [_build_evidence(text, int(p.get("page_number", 0) or 0), line_start, line_end)]
+            result["dati_asta"] = {"data": m.group(1), "ora": m.group(2), "evidence": evidence}
+            break
     
     # ==========================================
     # FIX 4: Ensure Checklist Pre-Offerta
