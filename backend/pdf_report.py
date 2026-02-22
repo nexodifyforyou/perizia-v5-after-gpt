@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from io import BytesIO
 from typing import Any, Dict, List, Optional, Tuple
+import re
 
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.units import mm
@@ -94,6 +95,60 @@ def _evidence_lines(evs: Any, max_lines: int = 3) -> List[str]:
     return out
 
 
+def _map_risk_level_it(value: Any) -> str:
+    raw = str(value or "").strip().upper()
+    mapping = {
+        "LOW_RISK": "RISCHIO BASSO",
+        "MEDIUM_RISK": "RISCHIO MEDIO",
+        "HIGH_RISK": "RISCHIO ALTO",
+        "LOW": "RISCHIO BASSO",
+        "MEDIUM": "RISCHIO MEDIO",
+        "HIGH": "RISCHIO ALTO",
+        "GREEN": "RISCHIO BASSO",
+        "AMBER": "RISCHIO MEDIO",
+        "RED": "RISCHIO ALTO",
+    }
+    return mapping.get(raw, str(value or "").strip())
+
+
+def parse_money_value(value: Any) -> Optional[float]:
+    if value is None:
+        return None
+    if isinstance(value, (int, float)):
+        return float(value)
+    text = str(value).strip()
+    if not text:
+        return None
+    if "TBD" in text.upper():
+        return None
+    cleaned = re.sub(r"[€\s]", "", text)
+    cleaned = cleaned.replace("EUR", "").replace("euro", "")
+    cleaned = cleaned.strip()
+    if not cleaned:
+        return None
+    if "," in cleaned and "." in cleaned:
+        if cleaned.rfind(",") > cleaned.rfind("."):
+            cleaned = cleaned.replace(".", "").replace(",", ".")
+        else:
+            cleaned = cleaned.replace(",", "")
+    elif "," in cleaned:
+        cleaned = cleaned.replace(",", ".")
+    elif "." in cleaned:
+        parts = cleaned.split(".")
+        if len(parts) > 1 and all(p.isdigit() for p in parts):
+            if len(parts[-1]) == 3:
+                cleaned = "".join(parts)
+    try:
+        return float(cleaned)
+    except Exception:
+        return None
+
+
+def _format_euro_value(value: float) -> str:
+    formatted = f"{value:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+    return f"€ {formatted}"
+
+
 def build_perizia_pdf_bytes(analysis: Dict[str, Any], result: Dict[str, Any]) -> bytes:
     font = _try_register_font()
     styles = getSampleStyleSheet()
@@ -170,14 +225,33 @@ def build_perizia_pdf_bytes(analysis: Dict[str, Any], result: Dict[str, Any]) ->
         story.append(Paragraph(line, small))
 
     # Decisione rapida
-    decision = result.get("section_2_decisione_rapida", {}) or result.get("decision_rapida_client", {}) or {}
+    decision = result.get("decision_rapida_client", {}) or result.get("section_2_decisione_rapida", {}) or {}
     story.append(Paragraph("Decisione Rapida", h2))
     if isinstance(decision, dict):
-        story.append(Paragraph(_normalize(decision.get("value") or decision.get("text") or decision.get("summary") or ""), base))
-        for line in _evidence_lines(decision.get("evidence", [])):
-            story.append(Paragraph(line, small))
+        def _decision_text(val: Any) -> str:
+            if val is None:
+                return ""
+            normalized = _normalize(val)
+            if normalized == "NON SPECIFICATO IN PERIZIA":
+                return ""
+            return str(val).strip()
+
+        risk_it = _decision_text(decision.get("risk_level_it") or _map_risk_level_it(decision.get("risk_level")))
+        risk_en = _decision_text(decision.get("risk_level_en"))
+        summary_it = _decision_text(decision.get("summary_it") or decision.get("summary") or decision.get("value") or decision.get("text"))
+        summary_en = _decision_text(decision.get("summary_en"))
+        if risk_it:
+            story.append(Paragraph(f"RISCHIO: <b>{escape(risk_it)}</b>", base))
+        if risk_en:
+            story.append(Paragraph(escape(risk_en), small))
+        if summary_it:
+            story.append(Paragraph(escape(summary_it), base))
+        if summary_en:
+            story.append(Paragraph(escape(summary_en), small))
     else:
-        story.append(Paragraph(_normalize(decision), base))
+        decision_text = str(decision).strip()
+        if decision_text:
+            story.append(Paragraph(escape(decision_text), base))
 
     # Multi-lot summary if present
     lots = result.get("lots", []) or []
@@ -224,23 +298,26 @@ def build_perizia_pdf_bytes(analysis: Dict[str, Any], result: Dict[str, Any]) ->
     items = money_box.get("items", []) if isinstance(money_box, dict) else []
     rows = [["Voce", "Stima (€)", "Fonte (Perizia)"]]
     total = 0.0
+    any_missing_or_tbd = False
+    has_item = False
     for it in items:
         if not isinstance(it, dict):
             continue
+        has_item = True
         voce = it.get("voce") or it.get("label_it") or it.get("code") or ""
-        stima = it.get("stima_euro", 0)
+        stima = it.get("stima_euro")
         fonte = it.get("fonte_perizia", {})
         fonte_val = _get_value(fonte, "")
-        stima_val = 0.0
-        stima_disp = "0"
-        if isinstance(stima, (int, float)):
-            stima_val = float(stima)
-            stima_disp = f"{stima_val:,.0f}"
-        elif isinstance(stima, str) and "TBD" in stima.upper():
+        stima_val = parse_money_value(stima)
+        if stima_val is None:
+            any_missing_or_tbd = True
             stima_disp = "TBD"
-        total += stima_val
+        else:
+            total += stima_val
+            stima_disp = _format_euro_value(stima_val)
         rows.append([_normalize(voce), stima_disp, _normalize(fonte_val)])
-    rows.append(["Totale (min)", f"{total:,.0f}", ""])
+    total_disp = _format_euro_value(total) if has_item and not any_missing_or_tbd else "TBD"
+    rows.append(["Totale (min)", total_disp, ""])
     rows2 = []
     for i, r in enumerate(rows):
         if i == 0:
@@ -263,16 +340,17 @@ def build_perizia_pdf_bytes(analysis: Dict[str, Any], result: Dict[str, Any]) ->
     story.append(tbl)
 
     # Legal killers
-    lk = result.get("section_9_legal_killers", {}) or result.get("legal_killers_checklist", {}) or {}
+    lk = result.get("section_9_legal_killers", {}) or {}
     story.append(Paragraph("Legal Killers", h2))
     lk_items = lk.get("items", []) if isinstance(lk, dict) else []
     lk_rows = [["Item", "Status", "Azione", "Evidence (estratto)"]]
     for it in lk_items:
         if not isinstance(it, dict):
             continue
-        label = _normalize(it.get("label_it") or it.get("label") or it.get("code") or "")
-        st = _normalize(it.get("status") or "DA_VERIFICARE")
-        action = _normalize(it.get("action") or "")
+        label = _normalize(it.get("killer") or it.get("label_it") or it.get("label") or it.get("code") or "")
+        st = _normalize(it.get("status_it") or it.get("status") or "DA_VERIFICARE")
+        action_raw = it.get("reason_it") or it.get("action_required_it") or "NON SPECIFICATO IN PERIZIA"
+        action = _normalize(action_raw)
         ev = " | ".join(_evidence_lines(it.get("evidence", []), max_lines=2))
         lk_rows.append([label, st, action, ev])
     lk_rows2 = []
