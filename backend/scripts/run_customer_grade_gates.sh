@@ -9,6 +9,12 @@ ESTRATTO_PDF="${ESTRATTO_PDF:-/srv/perizia/app/uploads/estratto_agency.pdf}"
 BASE_URL="${BASE_URL:-https://api-periziascan.nexodify.com}"
 SESSION_TOKEN="${SESSION_TOKEN:-${session_token:-}}"
 OFFLINE_QA="${OFFLINE_QA:-0}"
+
+# Safety: if running against localhost, never skip step2-4
+if [[ "$BASE_URL" =~ ^http://(127\.0\.0\.1|localhost)(:|/|$) ]]; then
+  OFFLINE_QA=0
+fi
+
 OFFLINE_QA_TOKEN="${OFFLINE_QA_TOKEN:-}"
 
 if [[ -z "$SESSION_TOKEN" ]]; then
