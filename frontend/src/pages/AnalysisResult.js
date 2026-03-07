@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { useParams, Link, useNavigate } from 'react-router-dom';
+import { useParams, Link, useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { Sidebar, SemaforoBadge } from './Dashboard';
 import { Button } from '../components/ui/button';
@@ -67,7 +67,7 @@ const normalizeSpacedOCR = (value) => {
 
 const normalizeAnalysisResponse = (payload) => {
   if (!payload || typeof payload !== 'object') return payload;
-  if (payload.result) return payload;
+  if (payload.result) return { ...payload, __result_path: 'result' };
 
   const candidates = [
     payload.analysis,
@@ -80,15 +80,23 @@ const normalizeAnalysisResponse = (payload) => {
 
   for (const candidate of candidates) {
     if (candidate && typeof candidate === 'object' && candidate.result) {
-      return { ...payload, ...candidate, result: candidate.result };
+      const resultPath =
+        candidate === payload.analysis ? 'analysis.result' :
+        candidate === payload.data ? 'data.result' :
+        candidate === payload.payload ? 'payload.result' :
+        candidate === payload.analysis?.data ? 'analysis.data.result' :
+        candidate === payload.analysis?.payload ? 'analysis.payload.result' :
+        candidate === payload.data?.analysis ? 'data.analysis.result' :
+        'unknown.result';
+      return { ...payload, ...candidate, result: candidate.result, __result_path: resultPath };
     }
   }
 
   if (payload.analysis && typeof payload.analysis === 'object') {
-    return { ...payload, ...payload.analysis };
+    return { ...payload, ...payload.analysis, __result_path: 'analysis' };
   }
   if (payload.data && typeof payload.data === 'object') {
-    return { ...payload, ...payload.data };
+    return { ...payload, ...payload.data, __result_path: 'data' };
   }
 
   return payload;
@@ -386,6 +394,7 @@ const MultiLotSelector = ({ lots, selectedLot, onSelectLot }) => {
 
 const AnalysisResult = () => {
   const { analysisId } = useParams();
+  const location = useLocation();
   const navigate = useNavigate();
   const { user, logout } = useAuth();
   const [analysis, setAnalysis] = useState(null);
@@ -397,6 +406,12 @@ const AnalysisResult = () => {
   const [headlineModal, setHeadlineModal] = useState({ open: false, fieldKey: null });
 
   const fetchAnalysis = async () => {
+    const params = new URLSearchParams(location.search);
+    if (params.get('debug') === '1' && typeof window !== 'undefined' && window.__DEBUG_ANALYSIS_PAYLOAD__) {
+      setAnalysis(normalizeAnalysisResponse(window.__DEBUG_ANALYSIS_PAYLOAD__));
+      setLoading(false);
+      return;
+    }
     try {
       const response = await axios.get(`${API_URL}/api/history/perizia/${analysisId}`, {
         withCredentials: true
@@ -536,6 +551,7 @@ const AnalysisResult = () => {
   const qa = qaPass.status ? qaPass : (result.qa || {});
   const fieldStates = result.field_states || {};
   const datiAsta = result.dati_asta || result.dati_certi_del_lotto?.dati_asta || result.dati_certi?.dati_asta;
+  const resultPathUsed = analysis?.__result_path || (analysis?.result ? 'result' : null);
 
   const getFieldState = (key) => fieldStates?.[key] || null;
   const getFieldEvidence = (key, fallback) => {
@@ -553,10 +569,7 @@ const AnalysisResult = () => {
   };
   const formatFieldStateDisplay = (key, fallback) => {
     const state = getFieldState(key);
-    if (key === 'spese_condominiali_arretrate' && state?.status === 'NOT_FOUND') {
-      const searchNote = (state.searched_in || []).find((item) => item?.quote?.includes('Nessuna occorrenza'));
-      if (searchNote) return 'Non presenti';
-    }
+    if (state?.status === 'NOT_FOUND') return 'NOT_FOUND (vedi searched_in)';
     return safeRender(getFieldValue(key, fallback), 'NON SPECIFICATO IN PERIZIA');
   };
 
@@ -621,6 +634,48 @@ const AnalysisResult = () => {
     console.log('LegalKillers:', Object.keys(legalKillersObj).length, legalKillersObj);
     console.log('Dati certi:', dati);
     console.log('Semaforo:', semaforo);
+  }
+
+  const uiDisplayedFields = {
+    tribunale: formatFieldStateDisplay('tribunale', caseHeader.tribunale?.value || caseHeader.tribunale),
+    procedure_id: formatFieldStateDisplay('procedura', caseHeader.procedure?.value || caseHeader.procedure_id),
+    occupancy: formatFieldStateDisplay('stato_occupativo', occupativo.status_it || occupativo.status),
+    beni_count: Array.isArray(beni) ? beni.length : 0,
+    beni_summary: Array.isArray(beni) ? beni.map((b, i) => ({
+      idx: i + 1,
+      bene_number: b?.bene_number ?? null,
+      tipologia: safeRender(b?.tipologia, ''),
+      note: safeRender(b?.note, '')
+    })) : [],
+    ape_status: safeRender(getFieldValue('ape', abusi.ape?.status || result.ape), 'NON SPECIFICATO IN PERIZIA'),
+    spese_condominiali_arretrate: formatFieldStateDisplay('spese_condominiali_arretrate', result.spese_condominiali_arretrate || result.spese_condominiali),
+    sanatoria_estimate: moneyBoxItemA?.stima_euro ?? result?.sanatoria_estimate ?? null,
+    prezzo_base: safeRender(dati.prezzo_base_asta?.formatted || dati.prezzo_base_asta?.value || dati.prezzo_base_asta, 'NON SPECIFICATO IN PERIZIA'),
+    dati_asta: safeRender(datiAsta?.data || datiAsta?.value || datiAsta, 'NON SPECIFICATO IN PERIZIA'),
+    decisione_rapida_it: safeRender(decision.summary_it, 'Analisi completata'),
+    decisione_rapida_en: safeRender(decision.summary_en, ''),
+    semaforo_status: safeRender(semaforo.status, 'AMBER'),
+    semaforo_blockers: Array.isArray(decision.driver_rosso)
+      ? decision.driver_rosso.map((d) => safeRender(d?.headline_it, '')).filter(Boolean)
+      : []
+  };
+
+  const params = new URLSearchParams(location.search);
+  if (params.get('debug') === '1' && typeof window !== 'undefined') {
+    window.__UI_SNAPSHOT__ = {
+      analysis_id: analysisId,
+      result_path_used: resultPathUsed,
+      raw_api_shape_keys: {
+        analysis_top_keys: analysis ? Object.keys(analysis) : [],
+        result_top_keys: result ? Object.keys(result) : []
+      },
+      displayed_fields: uiDisplayedFields,
+      raw_keys_used: {
+        case_header_keys: caseHeader ? Object.keys(caseHeader) : [],
+        field_state_keys: fieldStates ? Object.keys(fieldStates) : [],
+        money_box_item_codes: moneyBoxItems.map((i) => i?.code || i?.voce || i?.label_it || 'UNKNOWN')
+      }
+    };
   }
 
   const HeadlineInlineField = ({ label, fieldKey, value, evidence, className = '' }) => {
