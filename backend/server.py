@@ -26,6 +26,7 @@ from openai import AsyncOpenAI
 from candidate_miner import run_candidate_miner_for_analysis
 from section_builder import build_estratto_quality
 from evidence_utils import normalize_evidence_quote
+from narrator import build_decisione_rapida_narration
 
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
@@ -5677,6 +5678,21 @@ async def analyze_perizia(request: Request, file: UploadFile = File(...)):
             },
         }
     result["user_messages"] = _build_user_messages(result, extraction_payload, analysis_id=analysis_id)
+    narrator_enabled = os.environ.get("NARRATOR_ENABLED", "0").strip() == "1"
+    narrator_model = str(os.environ.get("NARRATOR_MODEL") or "").strip() or None
+    narrated_payload, narrator_meta = await build_decisione_rapida_narration(
+        result=result,
+        request_id=request_id,
+        enabled=narrator_enabled,
+        model=narrator_model,
+        api_key=OPENAI_API_KEY,
+    )
+    result["narrator_meta"] = narrator_meta
+    if narrated_payload:
+        result["decision_rapida_narrated"] = narrated_payload
+    else:
+        result.pop("decision_rapida_narrated", None)
+    logger.info(f"[{request_id}] narrator status={narrator_meta.get('status')} enabled={narrator_meta.get('enabled')}")
     result["debug"] = debug_obj
     logger.info(f"[{request_id}] assemble_output analysis_id={analysis_id}")
 
