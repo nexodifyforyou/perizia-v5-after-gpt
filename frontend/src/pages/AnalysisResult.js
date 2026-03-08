@@ -433,7 +433,7 @@ const AnalysisResult = () => {
       return;
     }
     try {
-      const response = await axios.get(`${API_URL}/api/history/perizia/${analysisId}`, {
+      const response = await axios.get(`${API_URL}/api/analysis/perizia/${analysisId}`, {
         withCredentials: true
       });
       setAnalysis(normalizeAnalysisResponse(response.data));
@@ -460,14 +460,62 @@ const AnalysisResult = () => {
   const handleDownloadPDF = async () => {
     setDownloading(true);
     try {
-      const response = await axios.get(`${API_URL}/api/analysis/perizia/${analysisId}/pdf`, {
-        withCredentials: true,
-        responseType: 'blob'
-      });
+      const downloadJson = async () => {
+        let payload = analysis;
+        try {
+          const jsonResponse = await axios.get(`${API_URL}/api/analysis/perizia/${analysisId}`, {
+            withCredentials: true
+          });
+          payload = jsonResponse.data;
+        } catch (jsonError) {
+          if (!payload) throw jsonError;
+        }
 
-      downloadPdfBlob(response.data, analysisId);
-      
-      toast.success('Report scaricato!');
+        const jsonBlob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json;charset=utf-8' });
+        const url = window.URL.createObjectURL(jsonBlob);
+        const link = document.createElement('a');
+        link.href = url;
+        link.setAttribute('download', `perizia_${analysisId}.json`);
+        document.body.appendChild(link);
+        link.click();
+        link.remove();
+        window.URL.revokeObjectURL(url);
+      };
+
+      let pdfBlob = null;
+      let contentType = '';
+
+      try {
+        const response = await axios.get(`${API_URL}/api/analysis/perizia/${analysisId}/pdf`, {
+          withCredentials: true,
+          responseType: 'blob'
+        });
+        pdfBlob = response.data;
+        contentType = (response.headers?.['content-type'] || '').toLowerCase();
+      } catch (pdfError) {
+        pdfBlob = null;
+      }
+
+      let hasPdfHeader = false;
+      if (pdfBlob instanceof Blob) {
+        try {
+          const signatureBuffer = await pdfBlob.slice(0, 4).arrayBuffer();
+          const signatureBytes = new Uint8Array(signatureBuffer);
+          hasPdfHeader = String.fromCharCode(...signatureBytes) === '%PDF';
+        } catch (signatureError) {
+          hasPdfHeader = false;
+        }
+      }
+
+      if (contentType.includes('application/pdf') && hasPdfHeader) {
+        downloadPdfBlob(pdfBlob, analysisId);
+        toast.success('Report scaricato!');
+        return;
+      }
+
+      console.info(`[DownloadFallback] Invalid PDF response for ${analysisId}; downloading JSON fallback.`);
+      toast.info('PDF non disponibile: scarico JSON. / PDF unavailable: downloading JSON.');
+      await downloadJson();
     } catch (error) {
       toast.error('Errore durante il download');
     } finally {
