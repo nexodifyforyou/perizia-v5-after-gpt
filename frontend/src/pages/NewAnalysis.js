@@ -1,20 +1,39 @@
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useRef, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { Sidebar } from './Dashboard';
 import { Button } from '../components/ui/button';
-import { Progress } from '../components/ui/progress';
 import { 
   Upload, 
   FileText, 
   AlertCircle,
-  CheckCircle,
-  Loader2
+  CheckCircle
 } from 'lucide-react';
 import axios from 'axios';
-import { toast } from 'sonner';
 
 const API_URL = process.env.REACT_APP_BACKEND_URL;
+const TIMELINE_STAGES = [
+  { key: 'RECEIVED', icon: '✅', it: 'Documento ricevuto', en: 'Document received' },
+  { key: 'READ', icon: '📄', it: 'Lettura PDF', en: 'Reading PDF' },
+  { key: 'QUALITY', icon: '🔍', it: 'Controllo qualità', en: 'Quality check' },
+  { key: 'INDEX', icon: '🧾', it: 'Indicizzazione importi e date', en: 'Indexing amounts and dates' },
+  { key: 'SECTIONS', icon: '🧩', it: 'Sezioni con evidenze', en: 'Building evidence-backed sections' },
+  { key: 'RISKS', icon: '⚠️', it: 'Rischi e verifiche', en: 'Risks and checks' },
+  { key: 'DECISION', icon: '✍️', it: 'Decisione rapida', en: 'Quick decision' },
+  { key: 'FINALIZE', icon: '✅', it: 'Finalizzazione report', en: 'Finalizing report' },
+  { key: 'DONE', icon: '🎉', it: 'Report pronto', en: 'Report ready' }
+];
+
+const STAGE_INDEX = TIMELINE_STAGES.reduce((acc, stage, index) => {
+  acc[stage.key] = index;
+  return acc;
+}, {});
+
+const formatElapsed = (elapsedSec) => {
+  const minutes = Math.floor(elapsedSec / 60);
+  const seconds = elapsedSec % 60;
+  return `${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
+};
 
 const NewAnalysis = () => {
   const { user, logout } = useAuth();
@@ -22,8 +41,29 @@ const NewAnalysis = () => {
   const [file, setFile] = useState(null);
   const [dragging, setDragging] = useState(false);
   const [uploading, setUploading] = useState(false);
-  const [progress, setProgress] = useState(0);
+  const [currentStage, setCurrentStage] = useState(STAGE_INDEX.RECEIVED);
+  const [elapsedSec, setElapsedSec] = useState(0);
+  const [awaitingResponse, setAwaitingResponse] = useState(false);
   const [error, setError] = useState(null);
+  const elapsedIntervalRef = useRef(null);
+  const stageIntervalRef = useRef(null);
+
+  const clearUploadTimers = useCallback(() => {
+    if (elapsedIntervalRef.current) {
+      clearInterval(elapsedIntervalRef.current);
+      elapsedIntervalRef.current = null;
+    }
+    if (stageIntervalRef.current) {
+      clearInterval(stageIntervalRef.current);
+      stageIntervalRef.current = null;
+    }
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      clearUploadTimers();
+    };
+  }, [clearUploadTimers]);
 
   const handleDragOver = useCallback((e) => {
     e.preventDefault();
@@ -55,18 +95,33 @@ const NewAnalysis = () => {
     
     // Check if PDF
     if (!selectedFile.name.toLowerCase().endsWith('.pdf')) {
-      setError('Solo file PDF sono accettati / Only PDF files are accepted');
+      setError({
+        titleIt: 'File non valido',
+        titleEn: 'Invalid file',
+        bodyIt: 'Solo file PDF sono accettati.',
+        bodyEn: 'Only PDF files are accepted.'
+      });
       return;
     }
     
     if (selectedFile.type !== 'application/pdf') {
-      setError('Solo file PDF sono accettati / Only PDF files are accepted');
+      setError({
+        titleIt: 'File non valido',
+        titleEn: 'Invalid file',
+        bodyIt: 'Solo file PDF sono accettati.',
+        bodyEn: 'Only PDF files are accepted.'
+      });
       return;
     }
     
     // Check file size (max 50MB)
     if (selectedFile.size > 50 * 1024 * 1024) {
-      setError('File troppo grande. Massimo 50MB / File too large. Maximum 50MB');
+      setError({
+        titleIt: 'File troppo grande',
+        titleEn: 'File too large',
+        bodyIt: 'Massimo 50MB.',
+        bodyEn: 'Maximum 50MB.'
+      });
       return;
     }
     
@@ -76,24 +131,39 @@ const NewAnalysis = () => {
   const handleUpload = async () => {
     if (!file) return;
     
+    clearUploadTimers();
     setUploading(true);
-    setProgress(0);
+    setCurrentStage(STAGE_INDEX.RECEIVED);
+    setElapsedSec(0);
+    setAwaitingResponse(true);
     setError(null);
     
     const formData = new FormData();
     formData.append('file', file);
+    const startTime = Date.now();
     
     try {
-      // Slower progress animation - at least 20 seconds before reaching 90%
-      // Increment by 4% every 1 second = 22.5 seconds to reach 90%
-      const progressInterval = setInterval(() => {
-        setProgress(prev => {
-          if (prev < 90) {
-            return Math.min(prev + 4, 90);
+      elapsedIntervalRef.current = setInterval(() => {
+        setElapsedSec(Math.floor((Date.now() - startTime) / 1000));
+      }, 1000);
+
+      stageIntervalRef.current = setInterval(() => {
+        setCurrentStage((prev) => {
+          if (prev < STAGE_INDEX.DECISION) {
+            return prev + 1;
+          }
+          if (prev === STAGE_INDEX.DECISION) {
+            return STAGE_INDEX.SECTIONS;
+          }
+          if (prev === STAGE_INDEX.SECTIONS) {
+            return STAGE_INDEX.RISKS;
+          }
+          if (prev === STAGE_INDEX.RISKS) {
+            return STAGE_INDEX.DECISION;
           }
           return prev;
         });
-      }, 1000);
+      }, 1200);
       
       const response = await axios.post(`${API_URL}/api/analysis/perizia`, formData, {
         withCredentials: true,
@@ -102,29 +172,25 @@ const NewAnalysis = () => {
         },
         timeout: 300000 // 5 minute timeout for large documents
       });
-      
-      clearInterval(progressInterval);
-      
-      // Smooth completion animation
-      setProgress(95);
-      await new Promise(resolve => setTimeout(resolve, 500));
-      setProgress(100);
-      
-      toast.success('Analisi completata!');
-      
-      // Navigate to results after brief delay
-      setTimeout(() => {
-        navigate(`/analysis/${response.data.analysis_id}`);
-      }, 1000);
+
+      clearUploadTimers();
+      setAwaitingResponse(false);
+      setCurrentStage(STAGE_INDEX.FINALIZE);
+      await new Promise((resolve) => setTimeout(resolve, 700));
+      setCurrentStage(STAGE_INDEX.DONE);
+      await new Promise((resolve) => setTimeout(resolve, 300));
+      navigate(`/analysis/${response.data.analysis_id}`);
       
     } catch (err) {
       console.error('Upload error:', err);
-      const errorMessage = err.response?.data?.detail?.message_it || 
-                          err.response?.data?.detail || 
-                          'Errore durante l\'analisi';
-      setError(errorMessage);
-      toast.error(errorMessage);
-    } finally {
+      clearUploadTimers();
+      setAwaitingResponse(false);
+      setError({
+        titleIt: 'Errore durante l’analisi',
+        titleEn: 'Error during analysis',
+        bodyIt: 'Non è stato possibile completare l’upload o l’elaborazione. Riprova tra poco.',
+        bodyEn: 'Could not complete the upload or processing. Please try again shortly.'
+      });
       setUploading(false);
     }
   };
@@ -192,13 +258,69 @@ const NewAnalysis = () => {
                 </p>
                 
                 {uploading ? (
-                  <div className="space-y-4">
-                    <Progress value={progress} className="h-2" />
-                    <div className="flex items-center justify-center gap-2 text-gold">
-                      <Loader2 className="w-5 h-5 animate-spin" />
-                      <span className="font-mono text-sm">
-                        {progress < 90 ? 'Analisi in corso...' : 'Elaborazione risultati...'}
-                      </span>
+                  <div className="space-y-6 text-left max-w-xl mx-auto">
+                    <div className="relative">
+                      <div className="absolute left-[19px] top-0 bottom-0 w-px bg-zinc-800" />
+                      <div className="space-y-4">
+                        {TIMELINE_STAGES.map((stage, index) => {
+                          const completed = index < currentStage;
+                          const isCurrent = index === currentStage;
+                          return (
+                            <div key={stage.key} className={`relative flex items-start gap-4 ${index > currentStage ? 'opacity-45' : 'opacity-100'}`}>
+                              <div className={`relative z-10 flex h-10 w-10 items-center justify-center rounded-full border text-sm ${
+                                isCurrent
+                                  ? 'border-gold bg-gold/15 shadow-[0_0_0_3px_rgba(214,178,64,0.15)]'
+                                  : completed
+                                  ? 'border-emerald-400/50 bg-emerald-400/10 text-emerald-300'
+                                  : 'border-zinc-700 bg-zinc-900 text-zinc-400'
+                              }`}>
+                                {completed ? '✓' : stage.icon}
+                              </div>
+                              <div className="pt-0.5">
+                                <p className={`text-sm ${isCurrent ? 'text-zinc-100 font-semibold' : 'text-zinc-300'}`}>{stage.it}</p>
+                                <p className="text-xs text-zinc-500">{stage.en}</p>
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+
+                    <div className="space-y-2 border border-zinc-800 bg-zinc-900/60 rounded-lg p-4">
+                      <p className="text-sm text-zinc-200">
+                        Tempo trascorso: <span className="font-mono text-gold">{formatElapsed(elapsedSec)}</span>
+                      </p>
+                      <p className="text-xs text-zinc-500">Elapsed: {formatElapsed(elapsedSec)}</p>
+                      <p className="text-sm text-zinc-300">Tempo tipico: 45–120s</p>
+                      <p className="text-xs text-zinc-500">Typical time: 45–120s</p>
+                      {awaitingResponse && elapsedSec > 120 ? (
+                        <>
+                          <p className="text-sm text-amber-300">
+                            Sta richiedendo più del solito. Documento complesso o server occupato.
+                          </p>
+                          <p className="text-xs text-amber-200/80">
+                            Taking longer than usual. Complex document or server busy.
+                          </p>
+                        </>
+                      ) : (
+                        <>
+                          <p className="text-sm text-zinc-300">
+                            La durata dipende da pagine, qualità del PDF e carico del server.
+                          </p>
+                          <p className="text-xs text-zinc-500">
+                            Duration depends on pages, PDF quality, and server load.
+                          </p>
+                        </>
+                      )}
+                    </div>
+
+                    <div className="text-center">
+                      <p className="text-sm text-zinc-300">
+                        Stiamo elaborando il documento. Non chiudere questa pagina.
+                      </p>
+                      <p className="text-xs text-zinc-500">
+                        We are processing the document. Do not close this page.
+                      </p>
                     </div>
                   </div>
                 ) : (
@@ -225,9 +347,22 @@ const NewAnalysis = () => {
           
           {/* Error Display */}
           {error && (
-            <div className="mt-4 p-4 bg-red-500/10 border border-red-500/30 rounded-lg flex items-center gap-3">
-              <AlertCircle className="w-5 h-5 text-red-400 flex-shrink-0" />
-              <p className="text-red-400 text-sm">{error}</p>
+            <div className="mt-4 p-4 bg-red-500/10 border border-red-500/30 rounded-lg flex items-start gap-3">
+              <AlertCircle className="w-5 h-5 text-red-400 flex-shrink-0 mt-0.5" />
+              <div className="space-y-1">
+                <p className="text-red-300 text-sm font-semibold">
+                  {error.titleIt}
+                </p>
+                <p className="text-red-200/90 text-xs">
+                  {error.titleEn}
+                </p>
+                <p className="text-red-300 text-sm">
+                  {error.bodyIt}
+                </p>
+                <p className="text-red-200/80 text-xs">
+                  {error.bodyEn}
+                </p>
+              </div>
             </div>
           )}
           
