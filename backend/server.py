@@ -25,6 +25,7 @@ import hashlib
 from openai import AsyncOpenAI
 from candidate_miner import run_candidate_miner_for_analysis
 from section_builder import build_estratto_quality
+from evidence_utils import normalize_evidence_quote
 
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
@@ -378,17 +379,24 @@ def _load_offline_fixture() -> Dict[str, Any]:
         raise RuntimeError(f"Offline QA fixture load failed: {e}")
 
 def _build_evidence(page_text: str, page_num: int, start: int, end: int) -> Dict[str, Any]:
-    snippet = page_text[start:end].strip()
-    page_text_hash = hashlib.sha256(page_text.encode("utf-8")).hexdigest()
-    return {
+    text = page_text or ""
+    text_len = len(text)
+    s = max(0, min(int(start), text_len))
+    e = max(s, min(int(end), text_len))
+    quote, search_hint = normalize_evidence_quote(text, s, e, max_len=520)
+    page_text_hash = hashlib.sha256(text.encode("utf-8")).hexdigest()
+    payload = {
         "page": page_num,
-        "quote": snippet[:200],
-        "start_offset": start,
-        "end_offset": end,
+        "quote": quote,
+        "start_offset": s,
+        "end_offset": e,
         "bbox": None,
         "offset_mode": EVIDENCE_OFFSET_MODE,
         "page_text_hash": page_text_hash
     }
+    if search_hint:
+        payload["search_hint"] = search_hint
+    return payload
 
 def _build_search_entry(
     page_text: str,
@@ -412,18 +420,27 @@ def _build_search_entry(
         quote = "Ricerca keyword"
         start = 0
         end = max(1, len(quote))
-    if len(quote) > 200:
-        quote = quote[:200]
+    normalized_quote, search_hint = normalize_evidence_quote(
+        text if text else quote,
+        start if text else 0,
+        end if text else len(quote),
+        max_len=520,
+    )
+    if not normalized_quote:
+        normalized_quote = quote[:520]
     page_text_hash = hashlib.sha256(text.encode("utf-8")).hexdigest() if text else None
-    return {
+    payload = {
         "page": page_num,
-        "quote": quote,
+        "quote": normalized_quote,
         "start_offset": start,
         "end_offset": end,
         "bbox": None,
         "offset_mode": EVIDENCE_OFFSET_MODE,
         "page_text_hash": page_text_hash,
     }
+    if search_hint:
+        payload["search_hint"] = search_hint
+    return payload
 
 def _find_regex_in_pages(pages_in: List[Dict], pattern: str, flags=0) -> Optional[Dict[str, Any]]:
     import re
@@ -4848,7 +4865,13 @@ def _normalize_user_message_evidence(evidence: Any, max_items: int = 1) -> List[
         quote = str(item.get("quote") or "").strip()
         if page is None or not quote:
             continue
-        out.append({"page": page, "quote": quote[:180]})
+        normalized_quote, search_hint = normalize_evidence_quote(quote, 0, len(quote), max_len=220)
+        if not normalized_quote:
+            continue
+        payload = {"page": page, "quote": normalized_quote}
+        if search_hint:
+            payload["search_hint"] = search_hint
+        out.append(payload)
         if len(out) >= max_items:
             break
     return out
@@ -5144,7 +5167,12 @@ def _build_user_messages(result: Dict[str, Any], extraction_payload: Dict[str, A
             page_row = next((r for r in pages_raw if isinstance(r, dict) and _to_int(r.get("page")) == first_page), None)
             page_text = str(page_row.get("text") or "").strip() if isinstance(page_row, dict) else ""
             if page_text:
-                evidence = [{"page": first_page, "quote": page_text[:180]}]
+                quote, search_hint = normalize_evidence_quote(page_text, 0, min(len(page_text), 180), max_len=220)
+                if quote:
+                    snippet = {"page": first_page, "quote": quote}
+                    if search_hint:
+                        snippet["search_hint"] = search_hint
+                    evidence = [snippet]
         _append_user_message(
             messages,
             seen_codes,

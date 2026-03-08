@@ -4,6 +4,8 @@ import re
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Set, Tuple
 
+from evidence_utils import normalize_evidence_quote
+
 RUNS_ROOT = Path("/srv/perizia/_qa/runs")
 
 REQUIRED_HEADINGS = [
@@ -84,7 +86,13 @@ def _evidence_from_candidate(item: Dict[str, Any]) -> List[Dict[str, Any]]:
     quote = _clean_quote(item.get("quote"))
     if not isinstance(page, int) or not quote:
         return []
-    return [{"page": page, "quote": quote}]
+    normalized_quote, search_hint = normalize_evidence_quote(quote, 0, len(quote), max_len=520)
+    if not normalized_quote:
+        return []
+    payload = {"page": page, "quote": normalized_quote}
+    if search_hint:
+        payload["search_hint"] = search_hint
+    return [payload]
 
 
 def _add_item(
@@ -235,13 +243,15 @@ def _build_page_local_evidence(page_row: Dict[str, Any], start: int, end: int) -
     text_len = len(text)
     s = max(0, min(int(start), text_len))
     e = max(s, min(int(end), text_len))
+    normalized_quote, search_hint = normalize_evidence_quote(text, s, e, max_len=520)
     return {
         "page": int(page_row["page"]),
-        "quote": text[s:e].strip(),
+        "quote": normalized_quote,
         "start_offset": s,
         "end_offset": e,
         "page_text_hash": page_row["page_text_hash"],
         "offset_mode": "PAGE_LOCAL",
+        "search_hint": search_hint,
     }
 
 
@@ -404,10 +414,16 @@ def _integrate_money_box_cost_items(result: Dict[str, Any], money_candidates: Li
         quote = _clean_quote(cand.get("quote"))
         if not isinstance(page, int) or not quote:
             continue
+        normalized_quote, search_hint = normalize_evidence_quote(quote, 0, len(quote), max_len=520)
+        if not normalized_quote:
+            continue
         key = (amount, int(page), quote[:120])
         if key in existing_pairs:
             continue
         existing_pairs.add(key)
+        evidence_payload = {"page": page, "quote": normalized_quote}
+        if search_hint:
+            evidence_payload["search_hint"] = search_hint
         items.append(
             {
                 "code": f"S3C{idx:02d}",
@@ -418,7 +434,7 @@ def _integrate_money_box_cost_items(result: Dict[str, Any], money_candidates: Li
                 "stima_nota": "Deterministic candidate-based cost",
                 "fonte_perizia": {
                     "value": "Perizia",
-                    "evidence": [{"page": page, "quote": quote}],
+                    "evidence": [evidence_payload],
                 },
                 "action_required_it": "Verifica documentale",
                 "action_required_en": "Document check",
