@@ -27,6 +27,7 @@ from candidate_miner import run_candidate_miner_for_analysis
 from section_builder import build_estratto_quality
 from evidence_utils import normalize_evidence_quote
 from narrator import build_decisione_rapida_narration
+from cost_market_ranges import market_range_for_item
 
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
@@ -1658,6 +1659,91 @@ def _synthesize_decisione_rapida(result: Dict[str, Any], states: Dict[str, Any])
     section2["summary_it"] = summary_it
     section2["summary_en"] = summary_en
     result["section_2_decisione_rapida"] = section2
+
+
+def _as_float_or_none(value: Any) -> Optional[float]:
+    if isinstance(value, (int, float)):
+        return float(value)
+    if isinstance(value, str):
+        cleaned = value.strip().replace("€", "").replace(" ", "").replace(".", "").replace(",", ".")
+        if not cleaned:
+            return None
+        try:
+            return float(cleaned)
+        except Exception:
+            return None
+    return None
+
+
+def _detect_occupancy_status_for_market(result: Dict[str, Any]) -> str:
+    states = result.get("field_states", {}) if isinstance(result.get("field_states"), dict) else {}
+    occ_state = states.get("stato_occupativo") if isinstance(states.get("stato_occupativo"), dict) else {}
+    raw = str(occ_state.get("value") or "").strip()
+    if raw:
+        return raw.upper()
+    occ = result.get("stato_occupativo", {}) if isinstance(result.get("stato_occupativo"), dict) else {}
+    return str(occ.get("status") or occ.get("status_it") or "").upper()
+
+
+def _detect_spese_status_for_market(result: Dict[str, Any]) -> str:
+    states = result.get("field_states", {}) if isinstance(result.get("field_states"), dict) else {}
+    spese_state = states.get("spese_condominiali_arretrate") if isinstance(states.get("spese_condominiali_arretrate"), dict) else {}
+    raw = str(spese_state.get("value") or "").strip()
+    return raw.upper()
+
+
+def _apply_market_ranges_to_money_box(result: Dict[str, Any]) -> None:
+    money_box = result.get("money_box", {}) if isinstance(result.get("money_box"), dict) else {}
+    items = money_box.get("items", [])
+    if not isinstance(items, list):
+        return
+
+    occ_status = _detect_occupancy_status_for_market(result)
+    spese_status = _detect_spese_status_for_market(result)
+    known_total = 0.0
+    market_min_total = 0.0
+    market_max_total = 0.0
+
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        stima_val = _as_float_or_none(item.get("stima_euro"))
+        if stima_val is not None:
+            known_total += stima_val
+            continue
+
+        code = str(item.get("code") or item.get("voce") or "").strip().upper()
+        market = market_range_for_item(code=code, occupancy_status=occ_status, spese_status=spese_status)
+        if not market:
+            continue
+        market_min = float(market.get("min", 0.0))
+        market_max = float(market.get("max", 0.0))
+        item["market_range_eur"] = {
+            "min": market_min,
+            "max": market_max,
+            "basis_it": "Stima indicativa di mercato (non presente in perizia)",
+            "basis_en": "Indicative market estimate (not present in the appraisal)",
+        }
+        if not item.get("source"):
+            item["source"] = "MARKET_ESTIMATE"
+        elif str(item.get("source")) != "MARKET_ESTIMATE":
+            item["source_market"] = "MARKET_ESTIMATE"
+        nota = str(item.get("stima_nota") or "").strip()
+        market_note = "Stima indicativa di mercato (non presente in perizia)"
+        if market_note.lower() not in nota.lower():
+            item["stima_nota"] = f"{nota} — {market_note}" if nota else market_note
+        market_min_total += market_min
+        market_max_total += market_max
+
+    money_box["total_extra_costs_range"] = {
+        "min_eur": round(known_total + market_min_total, 2),
+        "max_eur": round(known_total + market_max_total, 2),
+        "includes_market_estimates": True,
+    }
+    result["money_box"] = money_box
+    section3 = result.get("section_3_money_box")
+    if isinstance(section3, dict):
+        section3["total_extra_costs_range"] = money_box["total_extra_costs_range"]
 
 def _apply_decision_field_states(result: Dict[str, Any], pages: List[Dict[str, Any]]) -> None:
     has_text = any(str(p.get("text", "") or "").strip() for p in pages)
@@ -5627,6 +5713,7 @@ async def analyze_perizia(request: Request, file: UploadFile = File(...)):
     _normalize_legal_killers(result, pages)
     _apply_headline_field_states(result, pages)
     _apply_decision_field_states(result, pages)
+    _apply_market_ranges_to_money_box(result)
     _normalize_evidence_offsets(result, pages)
 
     document_quality = extraction_payload.get("document_quality", {})

@@ -199,7 +199,13 @@ const MoneyBoxItem = ({ item }) => {
   const hasEvidence = evidence.length > 0;
   const label = item.label_it || item.voce || item.label || 'Voce';
   const euroValue = parseNumericEuro(item.stima_euro);
-  const displayValue = euroValue === null ? safeRender(item.stima_euro, 'TBD') : `€${euroValue.toLocaleString()}`;
+  const marketRange = item?.market_range_eur && typeof item.market_range_eur === 'object'
+    ? item.market_range_eur
+    : null;
+  const hasMarketRange = marketRange && typeof marketRange.min === 'number' && typeof marketRange.max === 'number';
+  const displayValue = euroValue !== null
+    ? `€${euroValue.toLocaleString()}`
+    : (hasMarketRange ? `€${marketRange.min.toLocaleString()} - €${marketRange.max.toLocaleString()}` : 'Non disponibile');
   const shortNota = getShortText(item.stima_nota, 95);
   const firstEvidence = evidence[0];
 
@@ -208,19 +214,28 @@ const MoneyBoxItem = ({ item }) => {
       <div className="flex items-start justify-between gap-3 mb-2">
         <div className="flex-1">
           <p className="text-sm font-medium text-zinc-100">{label}</p>
+          {hasMarketRange && euroValue === null && (
+            <span className="inline-block mt-1 text-[10px] px-2 py-0.5 rounded border border-amber-500/40 text-amber-300">
+              stima di mercato
+            </span>
+          )}
           {shortNota && <p className="text-xs text-zinc-500 mt-1">{shortNota}</p>}
         </div>
         <div className="text-right">
           <span className="font-mono text-sm font-bold text-gold">{displayValue}</span>
         </div>
       </div>
-      {hasEvidence && (
+      {hasEvidence ? (
         <div className="mt-2 p-2 bg-zinc-900 rounded border-l-2 border-gold/30">
           <p className="text-xs text-zinc-400 italic">
             {firstEvidence?.page ? `p.${firstEvidence.page} — ` : ''}
             {safeRender(firstEvidence?.quote, 'Evidenza disponibile')}
           </p>
         </div>
+      ) : (
+        hasMarketRange && (
+          <p className="text-xs text-zinc-500 italic mt-2">(non presente in perizia)</p>
+        )
       )}
     </div>
   );
@@ -531,6 +546,23 @@ const AnalysisResult = () => {
   const caseHeader = reportHeader.procedure ? reportHeader : (result.case_header || {});
   const semaforo = section1.status ? section1 : (result.semaforo_generale || {});
   const decision = section2.summary_it ? section2 : (result.decision_rapida_client || {});
+  const narratedDecision = (result.decision_rapida_narrated && typeof result.decision_rapida_narrated === 'object')
+    ? result.decision_rapida_narrated
+    : null;
+  const hasNarratedDecision = Boolean(narratedDecision && (narratedDecision.it || narratedDecision.en));
+  const decisionSourceLabel = hasNarratedDecision ? 'Narrated' : 'Deterministic';
+  const decisionIt = hasNarratedDecision
+    ? safeRender(narratedDecision.it, 'Analisi completata')
+    : safeRender(decision.summary_it, 'Analisi completata');
+  const decisionEn = hasNarratedDecision
+    ? safeRender(narratedDecision.en, '')
+    : safeRender(decision.summary_en, '');
+  const decisionBulletsIt = hasNarratedDecision && Array.isArray(narratedDecision.bullets_it)
+    ? narratedDecision.bullets_it.filter((b) => typeof b === 'string' && b.trim())
+    : [];
+  const decisionBulletsEn = hasNarratedDecision && Array.isArray(narratedDecision.bullets_en)
+    ? narratedDecision.bullets_en.filter((b) => typeof b === 'string' && b.trim())
+    : [];
   const moneyBox = section3.items ? section3 : (result.money_box || {});
   const estrattoQuality = result.estratto_quality || {};
   
@@ -622,17 +654,23 @@ const AnalysisResult = () => {
       const type = safeRender(item?.type, '').toUpperCase();
       const label = `${safeRender(item?.label_it, '')} ${safeRender(item?.voce, '')}`.toLowerCase();
       const stima = parseNumericEuro(item?.stima_euro);
+      const hasMarketRange = typeof item?.market_range_eur?.min === 'number' && typeof item?.market_range_eur?.max === 'number';
       const isEstimate = type === 'ESTIMATE' || type === 'NEXODIFY_ESTIMATE';
       const isAuctionBaseLabel = label.includes('prezzo base') || label.includes("base d'asta") || label.includes("valore finale di stima");
       const isAuctionBaseValue = auctionBaseValue !== null && stima !== null && Math.abs(stima - auctionBaseValue) < 0.01;
       const isAuctionBase = isAuctionBaseLabel || isAuctionBaseValue;
-      return isEstimate && stima !== null && !isAuctionBase;
+      return isEstimate && (stima !== null || hasMarketRange) && !isAuctionBase;
     })
-    .sort((a, b) => (parseNumericEuro(b?.stima_euro) || 0) - (parseNumericEuro(a?.stima_euro) || 0));
+    .sort((a, b) => {
+      const aVal = parseNumericEuro(a?.stima_euro) ?? a?.market_range_eur?.max ?? 0;
+      const bVal = parseNumericEuro(b?.stima_euro) ?? b?.market_range_eur?.max ?? 0;
+      return bVal - aVal;
+    });
   const moneyBoxItemA = moneyBoxItems.find((item) => item.code === 'A' || item.voce === 'A' || item.label_it?.toLowerCase().includes('regolarizzazione'));
   
   // Get money box total - support both old and new format, handle TBD
   const moneyBoxTotal = moneyBox.totale_extra_budget || moneyBox.total_extra_costs;
+  const moneyBoxTotalRange = moneyBox.total_extra_costs_range;
   const moneyBoxTotalMin = moneyBoxTotal?.min;
   const moneyBoxTotalMax = moneyBoxTotal?.max;
   const isTotalTBD = moneyBoxTotalMin === 'TBD' || moneyBoxTotalMax === 'TBD';
@@ -673,8 +711,9 @@ const AnalysisResult = () => {
     sanatoria_estimate: moneyBoxItemA?.stima_euro ?? result?.sanatoria_estimate ?? null,
     prezzo_base: safeRender(dati.prezzo_base_asta?.formatted || dati.prezzo_base_asta?.value || dati.prezzo_base_asta, 'NON SPECIFICATO IN PERIZIA'),
     dati_asta: safeRender(datiAsta?.data || datiAsta?.value || datiAsta, 'NON SPECIFICATO IN PERIZIA'),
-    decisione_rapida_it: safeRender(decision.summary_it, 'Analisi completata'),
-    decisione_rapida_en: safeRender(decision.summary_en, ''),
+    decisione_rapida_it: decisionIt,
+    decisione_rapida_en: decisionEn,
+    decision_source: decisionSourceLabel,
     semaforo_status: safeRender(semaforo.status, 'AMBER'),
     semaforo_blockers: Array.isArray(decision.driver_rosso)
       ? decision.driver_rosso.map((d) => safeRender(d?.headline_it, '')).filter(Boolean)
@@ -1024,9 +1063,28 @@ const AnalysisResult = () => {
           
           {/* Quick Decision with Evidence */}
           <div className="mt-6 p-4 bg-zinc-950 rounded-lg border border-zinc-800">
-            <p className="text-xs font-mono uppercase text-zinc-500 mb-2">Decisione Rapida</p>
-            <p className="text-lg font-semibold text-zinc-100">{safeRender(decision.summary_it, 'Analisi completata')}</p>
-            <p className="text-sm text-zinc-500 mt-1">{safeRender(decision.summary_en, '')}</p>
+            <div className="flex items-center justify-between gap-3 mb-2">
+              <p className="text-xs font-mono uppercase text-zinc-500">Decisione Rapida</p>
+              <span className="text-[10px] px-2 py-1 rounded border border-zinc-700 text-zinc-400 uppercase tracking-wide">
+                {decisionSourceLabel}
+              </span>
+            </div>
+            <p className="text-lg font-semibold text-zinc-100">{decisionIt}</p>
+            <p className="text-sm text-zinc-500 mt-1">{decisionEn}</p>
+            {decisionBulletsIt.length > 0 && (
+              <ul className="mt-3 space-y-1 text-sm text-zinc-300 list-disc pl-5">
+                {decisionBulletsIt.slice(0, 5).map((item, idx) => (
+                  <li key={`it-bullet-${idx}`}>{safeRender(item, '')}</li>
+                ))}
+              </ul>
+            )}
+            {decisionBulletsEn.length > 0 && (
+              <ul className="mt-2 space-y-1 text-xs text-zinc-500 list-disc pl-5">
+                {decisionBulletsEn.slice(0, 5).map((item, idx) => (
+                  <li key={`en-bullet-${idx}`}>{safeRender(item, '')}</li>
+                ))}
+              </ul>
+            )}
             
             {/* Mutuabilità if available */}
             {semaforo.mutuabilita_stimata && (
@@ -1358,6 +1416,14 @@ const AnalysisResult = () => {
                 <span className="text-emerald-400">Verde</span> = dal documento | 
                 <span className="text-gold ml-2">Oro</span> = stima Nexodify
               </p>
+              {moneyBoxTotalRange && typeof moneyBoxTotalRange.min_eur === 'number' && typeof moneyBoxTotalRange.max_eur === 'number' && (
+                <div className="mb-5 p-4 bg-zinc-950 rounded-lg border border-zinc-800">
+                  <p className="text-sm font-semibold text-zinc-100">
+                    Totale costi extra stimati: €{moneyBoxTotalRange.min_eur.toLocaleString()} - €{moneyBoxTotalRange.max_eur.toLocaleString()}
+                  </p>
+                  <p className="text-xs text-zinc-500 mt-1">Include stime di mercato per voci non presenti in perizia.</p>
+                </div>
+              )}
               
               {moneyBoxItems.length > 0 ? (
                 <div className="space-y-3">
@@ -1370,13 +1436,13 @@ const AnalysisResult = () => {
               )}
               
               {/* Total - support TBD and numeric totals */}
-              {(moneyBoxTotal || moneyBox.total_extra_costs) && (
+              {(moneyBoxTotal || moneyBox.total_extra_costs) && !moneyBoxTotalRange && (
                 <div className="mt-6 p-4 bg-gold/10 border border-gold/30 rounded-lg">
                   <div className="flex items-center justify-between">
                     <span className="text-lg font-semibold text-zinc-100">Totale Costi Extra Stimati</span>
                     <span className={`text-2xl font-mono font-bold ${isTotalTBD ? 'text-amber-400' : 'text-gold'}`}>
                       {isTotalTBD ? (
-                        'TBD'
+                        'Non disponibile'
                       ) : moneyBoxTotal?.min !== undefined ? (
                         `€${(typeof moneyBoxTotal.min === 'number' ? moneyBoxTotal.min : 0).toLocaleString()} - €${(typeof moneyBoxTotal.max === 'number' ? moneyBoxTotal.max : 0).toLocaleString()}`
                       ) : (
