@@ -193,44 +193,142 @@ const normalizeEstrattoSections = (estrattoQuality) => {
   });
 };
 
+const getSemaforoLabels = (statusRaw) => {
+  const status = safeRender(statusRaw, 'AMBER').toUpperCase();
+  if (status === 'GREEN') return { it: 'BASSO RISCHIO', en: 'LOW RISK' };
+  if (status === 'RED') return { it: 'ALTO RISCHIO', en: 'HIGH RISK' };
+  return { it: 'ATTENZIONE', en: 'CAUTION' };
+};
+
+const getInjectedMessageStyle = (severityRaw) => {
+  const severity = safeRender(severityRaw, 'INFO').toUpperCase();
+  if (severity === 'WARNING' || severity === 'BLOCKER') {
+    return {
+      severity,
+      badgeClass: 'bg-amber-500/20 text-amber-300 border-amber-500/40',
+      cardClass: 'border-amber-500/40 bg-amber-500/5'
+    };
+  }
+  return {
+    severity,
+    badgeClass: 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40',
+    cardClass: 'border-emerald-500/40 bg-emerald-500/5'
+  };
+};
+
+const MessageInjectionCard = ({ msg }) => {
+  if (!msg || typeof msg !== 'object') return null;
+  const style = getInjectedMessageStyle(msg?.severity);
+  const evidence = Array.isArray(msg?.evidence) ? msg.evidence : [];
+  const nextStepsIt = Array.isArray(msg?.next_steps_it) ? msg.next_steps_it : [];
+  const nextStepsEn = Array.isArray(msg?.next_steps_en) ? msg.next_steps_en : [];
+  const firstEvidence = evidence[0];
+
+  return (
+    <div className={`mb-4 p-4 rounded-lg border ${style.cardClass}`}>
+      <div className="flex items-center justify-between gap-3 mb-2">
+        <p className="text-sm font-semibold text-zinc-100">{safeRender(msg?.title_it, 'Messaggio')}</p>
+        <span className={`px-2 py-0.5 text-[10px] font-mono rounded border ${style.badgeClass}`}>{style.severity}</span>
+      </div>
+      <p className="text-sm text-zinc-300">{safeRender(msg?.body_it, '')}</p>
+      <p className="text-xs text-zinc-500 mt-1">{safeRender(msg?.title_en, '')}</p>
+      <p className="text-xs text-zinc-500">{safeRender(msg?.body_en, '')}</p>
+      {nextStepsIt.length > 0 && (
+        <ul className="list-disc list-inside text-sm text-zinc-300 mt-3 space-y-1">
+          {nextStepsIt.map((step, stepIdx) => (
+            <li key={`it_${safeRender(msg?.code, 'MSG')}_${stepIdx}`}>{safeRender(step, '')}</li>
+          ))}
+        </ul>
+      )}
+      {nextStepsEn.length > 0 && (
+        <ul className="list-disc list-inside text-xs text-zinc-500 mt-2 space-y-1">
+          {nextStepsEn.map((step, stepIdx) => (
+            <li key={`en_${safeRender(msg?.code, 'MSG')}_${stepIdx}`}>{safeRender(step, '')}</li>
+          ))}
+        </ul>
+      )}
+      {firstEvidence?.page && firstEvidence?.quote && (
+        <p className="text-xs text-zinc-500 mt-3 italic border-l-2 border-gold/30 pl-2">
+          p.{firstEvidence.page} — {safeRender(firstEvidence.quote, '')}
+        </p>
+      )}
+    </div>
+  );
+};
+
 // Money Box Item Component with Evidence - supports both old and ROMA STANDARD formats
 const MoneyBoxItem = ({ item }) => {
+  const [expandedEvidence, setExpandedEvidence] = useState(false);
   const evidence = getItemEvidence(item);
   const hasEvidence = evidence.length > 0;
   const label = item.label_it || item.voce || item.label || 'Voce';
+  const code = safeRender(item.code || item.voce, '');
   const euroValue = parseNumericEuro(item.stima_euro);
   const marketRange = item?.market_range_eur && typeof item.market_range_eur === 'object'
     ? item.market_range_eur
     : null;
   const hasMarketRange = marketRange && typeof marketRange.min === 'number' && typeof marketRange.max === 'number';
+  const source = safeRender(item?.source, '').toUpperCase();
+  const isVerde = hasEvidence || source === 'PERIZIA' || source === 'STEP3_CANDIDATES' || safeRender(code, '').toUpperCase().startsWith('S3C');
+  const isOro = hasMarketRange || source === 'MARKET_ESTIMATE';
   const displayValue = euroValue !== null
     ? `€${euroValue.toLocaleString()}`
     : (hasMarketRange ? `€${marketRange.min.toLocaleString()} - €${marketRange.max.toLocaleString()}` : 'Non disponibile');
-  const shortNota = getShortText(item.stima_nota, 95);
+  const shortNota = getShortText(item.stima_nota, 110);
   const firstEvidence = evidence[0];
+  const firstEvidenceQuote = safeRender(firstEvidence?.quote, '');
+  const evidencePreview = firstEvidenceQuote.length > 180 ? `${firstEvidenceQuote.slice(0, 180)}...` : firstEvidenceQuote;
+  const evidenceText = expandedEvidence ? firstEvidenceQuote : evidencePreview;
+  const cardToneClass = isOro
+    ? 'border-gold/40 bg-gold/5'
+    : (isVerde ? 'border-emerald-500/35 bg-emerald-500/5' : 'border-zinc-800 bg-zinc-950/50');
+  const amountClass = isOro ? 'text-gold' : (isVerde ? 'text-emerald-300' : 'text-zinc-300');
 
   return (
-    <div className="p-4 bg-zinc-950/50 rounded-lg border border-zinc-800">
+    <div className={`p-4 rounded-lg border ${cardToneClass}`}>
       <div className="flex items-start justify-between gap-3 mb-2">
         <div className="flex-1">
-          <p className="text-sm font-medium text-zinc-100">{label}</p>
+          <p className="text-sm font-medium text-zinc-100">
+            {code ? `${code} · ` : ''}{label}
+          </p>
+          <div className="mt-1 flex items-center gap-2">
+            {isVerde && !isOro && (
+              <span className="inline-block text-[10px] px-2 py-0.5 rounded border border-emerald-500/40 text-emerald-300">
+                Verde
+              </span>
+            )}
+            {isOro && (
+              <span className="inline-block text-[10px] px-2 py-0.5 rounded border border-gold/40 text-gold">
+                Oro
+              </span>
+            )}
+          </div>
           {hasMarketRange && euroValue === null && (
-            <span className="inline-block mt-1 text-[10px] px-2 py-0.5 rounded border border-amber-500/40 text-amber-300">
-              stima di mercato
+            <span className="inline-block mt-1 text-[10px] px-2 py-0.5 rounded border border-gold/40 text-gold">
+              Stima Nexodify
             </span>
           )}
           {shortNota && <p className="text-xs text-zinc-500 mt-1">{shortNota}</p>}
         </div>
         <div className="text-right">
-          <span className="font-mono text-sm font-bold text-gold">{displayValue}</span>
+          <span className={`font-mono text-sm font-bold ${amountClass}`}>{displayValue}</span>
         </div>
       </div>
       {hasEvidence ? (
         <div className="mt-2 p-2 bg-zinc-900 rounded border-l-2 border-gold/30">
-          <p className="text-xs text-zinc-400 italic">
+          <p className="text-xs text-zinc-400 italic whitespace-pre-wrap">
             {firstEvidence?.page ? `p.${firstEvidence.page} — ` : ''}
-            {safeRender(firstEvidence?.quote, 'Evidenza disponibile')}
+            {evidenceText || 'Evidenza disponibile'}
           </p>
+          {firstEvidenceQuote.length > 180 && (
+            <button
+              type="button"
+              onClick={() => setExpandedEvidence((prev) => !prev)}
+              className="mt-1 text-[11px] text-gold hover:underline"
+            >
+              {expandedEvidence ? 'Mostra meno' : 'Mostra evidenza completa'}
+            </button>
+          )}
         </div>
       ) : (
         hasMarketRange && (
@@ -640,6 +738,16 @@ const AnalysisResult = () => {
   const resultPathUsed = analysis?.__result_path || (analysis?.result ? 'result' : null);
   const estrattoSections = normalizeEstrattoSections(estrattoQuality);
   const userMessages = Array.isArray(result.user_messages) ? result.user_messages : [];
+  const userMessagesByCode = userMessages.reduce((acc, msg) => {
+    const code = safeRender(msg?.code, '').toUpperCase();
+    if (!code) return acc;
+    if (!acc[code]) acc[code] = [];
+    acc[code].push(msg);
+    return acc;
+  }, {});
+  const docTextOkMessage = (userMessagesByCode.DOC_TEXT_OK || [])[0] || null;
+  const semaforoStatus = safeRender(semaforo.status || result?.semaforo?.status, 'AMBER').toUpperCase();
+  const semaforoLabels = getSemaforoLabels(semaforoStatus);
 
   const getFieldState = (key) => fieldStates?.[key] || null;
   const getFieldEvidence = (key, fallback) => {
@@ -693,22 +801,9 @@ const AnalysisResult = () => {
   const activeHeadlineDisplay = activeHeadlineKey
     ? getHeadlineDisplayValue(activeHeadlineKey, getHeadlineSourceValue(activeHeadlineKey))
     : '';
-  const auctionBaseValue = parseNumericEuro(dati?.prezzo_base_asta?.value ?? dati?.prezzo_base_asta?.formatted ?? dati?.prezzo_base_asta);
-
-  // Get money box items - keep only estimate items with numeric stima_euro, excluding auction base price
+  // Get money box items - render all items from backend without caps
   const rawMoneyBoxItems = Array.isArray(moneyBox.items) ? moneyBox.items : [];
   const moneyBoxItems = rawMoneyBoxItems
-    .filter((item) => {
-      const type = safeRender(item?.type, '').toUpperCase();
-      const label = `${safeRender(item?.label_it, '')} ${safeRender(item?.voce, '')}`.toLowerCase();
-      const stima = parseNumericEuro(item?.stima_euro);
-      const hasMarketRange = typeof item?.market_range_eur?.min === 'number' && typeof item?.market_range_eur?.max === 'number';
-      const isEstimate = type === 'ESTIMATE' || type === 'NEXODIFY_ESTIMATE';
-      const isAuctionBaseLabel = label.includes('prezzo base') || label.includes("base d'asta") || label.includes("valore finale di stima");
-      const isAuctionBaseValue = auctionBaseValue !== null && stima !== null && Math.abs(stima - auctionBaseValue) < 0.01;
-      const isAuctionBase = isAuctionBaseLabel || isAuctionBaseValue;
-      return isEstimate && (stima !== null || hasMarketRange) && !isAuctionBase;
-    })
     .sort((a, b) => {
       const aVal = parseNumericEuro(a?.stima_euro) ?? a?.market_range_eur?.max ?? 0;
       const bVal = parseNumericEuro(b?.stima_euro) ?? b?.market_range_eur?.max ?? 0;
@@ -909,15 +1004,6 @@ const AnalysisResult = () => {
               <Trash2 className="w-4 h-4 mr-2" />
               Elimina
             </Button>
-            <Button 
-              onClick={handleDownloadPDF}
-              disabled={downloading}
-              data-testid="download-pdf-btn"
-              className="bg-gold text-zinc-950 hover:bg-gold-dim"
-            >
-              <FileDown className="w-4 h-4 mr-2" />
-              {downloading ? 'Scaricando...' : 'Scarica Report'}
-            </Button>
           </div>
         </div>
 
@@ -989,68 +1075,24 @@ const AnalysisResult = () => {
           />
         )}
 
-        {userMessages.length > 0 && (
-          <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-6 mb-8">
-            <div className="flex items-center gap-2 mb-4">
-              <h2 className="text-lg font-semibold text-zinc-100">Messaggi / Messages</h2>
-              <span className="text-xs font-mono text-zinc-500">{userMessages.length}</span>
-            </div>
-            <div className="space-y-4">
-              {userMessages.map((msg, idx) => {
-                const severity = safeRender(msg?.severity, 'INFO').toUpperCase();
-                const badgeClass = severity === 'BLOCKER'
-                  ? 'bg-red-500/20 text-red-300 border-red-500/40'
-                  : severity === 'WARNING'
-                    ? 'bg-amber-500/20 text-amber-300 border-amber-500/40'
-                    : 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40';
-                const evidence = Array.isArray(msg?.evidence) ? msg.evidence : [];
-                const nextStepsIt = Array.isArray(msg?.next_steps_it) ? msg.next_steps_it : [];
-                const nextStepsEn = Array.isArray(msg?.next_steps_en) ? msg.next_steps_en : [];
-
-                return (
-                  <div key={`${safeRender(msg?.code, 'MSG')}_${idx}`} className="p-4 bg-zinc-950 rounded-lg border border-zinc-800">
-                    <div className="flex items-center justify-between gap-3 mb-2">
-                      <p className="text-sm font-semibold text-zinc-100">{safeRender(msg?.title_it, 'Messaggio')}</p>
-                      <span className={`px-2 py-0.5 text-[10px] font-mono rounded border ${badgeClass}`}>{severity}</span>
-                    </div>
-                    <p className="text-sm text-zinc-300">{safeRender(msg?.body_it, '')}</p>
-                    <p className="text-xs text-zinc-500 mt-1">{safeRender(msg?.title_en, '')}</p>
-                    <p className="text-xs text-zinc-500">{safeRender(msg?.body_en, '')}</p>
-
-                    {nextStepsIt.length > 0 && (
-                      <ul className="list-disc list-inside text-sm text-zinc-300 mt-3 space-y-1">
-                        {nextStepsIt.map((step, stepIdx) => (
-                          <li key={`it_${idx}_${stepIdx}`}>{safeRender(step, '')}</li>
-                        ))}
-                      </ul>
-                    )}
-                    {nextStepsEn.length > 0 && (
-                      <ul className="list-disc list-inside text-xs text-zinc-500 mt-2 space-y-1">
-                        {nextStepsEn.map((step, stepIdx) => (
-                          <li key={`en_${idx}_${stepIdx}`}>{safeRender(step, '')}</li>
-                        ))}
-                      </ul>
-                    )}
-
-                    {evidence.length > 0 && evidence[0]?.page && evidence[0]?.quote && (
-                      <p className="text-xs text-zinc-500 mt-3 italic border-l-2 border-gold/30 pl-2">
-                        p.{evidence[0].page} — {safeRender(evidence[0].quote, '')}
-                      </p>
-                    )}
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-        )}
-        
         {/* Header with Semaforo */}
         <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-6 mb-8">
-          <div className="flex items-start justify-between">
+          <div className="flex items-start justify-between gap-6">
             <div>
               <h1 className="text-2xl font-serif font-bold text-zinc-100 mb-2">
                 {safeRender(analysis.case_title || analysis.file_name, 'Analisi Perizia')}
               </h1>
+              <div className="flex items-center gap-2 mb-3">
+                <span className="text-[10px] px-2 py-1 rounded border border-zinc-700 text-zinc-300 uppercase tracking-wide">
+                  {semaforoLabels.it}
+                </span>
+                <span className="text-[10px] text-zinc-500 uppercase tracking-wide">{semaforoLabels.en}</span>
+                {docTextOkMessage && (
+                  <span className="text-[10px] px-2 py-1 rounded border border-emerald-500/40 text-emerald-300 bg-emerald-500/10">
+                    Documento leggibile / Document readable
+                  </span>
+                )}
+              </div>
               <div className="flex items-center gap-4 text-sm text-zinc-500">
                 <span className="font-mono">Case: {safeRender(analysis.case_id)}</span>
                 <span>•</span>
@@ -1088,11 +1130,34 @@ const AnalysisResult = () => {
                 />
               </div>
             </div>
-            <div className="text-right">
-              <SemaforoBadge status={safeRender(semaforo.status, 'AMBER')} />
-              <p className="text-sm text-zinc-400 mt-2 max-w-xs">
-                {safeRender(semaforo.status_label || semaforo.reason_it || semaforo.status_it, '')}
+            <div className="text-right space-y-2">
+              <Button
+                onClick={handleDownloadPDF}
+                disabled={downloading}
+                data-testid="download-pdf-btn"
+                className="bg-gold text-zinc-950 hover:bg-gold-dim"
+              >
+                <FileDown className="w-4 h-4 mr-2" />
+                {downloading ? 'Scaricando...' : 'Scarica Report'}
+              </Button>
+              <div className="flex justify-end">
+                <SemaforoBadge status={semaforoStatus} />
+              </div>
+              <p className="text-xs text-zinc-400 max-w-xs ml-auto">
+                Sintesi operativa: priorità alle verifiche indicate.
               </p>
+              <p className="text-[11px] text-zinc-500 max-w-xs ml-auto">
+                Operational summary: prioritize the checks listed.
+              </p>
+            </div>
+          </div>
+          <p className="text-sm text-zinc-400 mt-3">
+            {safeRender(semaforo.status_label || semaforo.reason_it || semaforo.status_it, '')}
+          </p>
+          <p className="text-xs text-zinc-500 mt-1">
+            {safeRender(semaforo.reason_en || semaforo.status_en, '')}
+          </p>
+          <div className="text-right">
               {/* Show driver/reason for semaforo */}
               {semaforo.driver?.value && (
                 <p className="text-xs text-amber-400 mt-1">
@@ -1107,7 +1172,6 @@ const AnalysisResult = () => {
                 </p>
               )}
             </div>
-          </div>
           
           {/* Quick Decision with Evidence */}
           <div className="mt-6 p-4 bg-zinc-950 rounded-lg border border-zinc-800">
@@ -1465,11 +1529,15 @@ const AnalysisResult = () => {
                 <span className="text-gold ml-2">Oro</span> = stima Nexodify
               </p>
               {moneyBoxTotalRange && typeof moneyBoxTotalRange.min_eur === 'number' && typeof moneyBoxTotalRange.max_eur === 'number' && (
-                <div className="mb-5 p-4 bg-zinc-950 rounded-lg border border-zinc-800">
-                  <p className="text-sm font-semibold text-zinc-100">
+                <div className="mb-5 p-4 bg-zinc-950 rounded-lg border border-gold/30">
+                  <p className="text-lg font-semibold text-zinc-100">
                     Totale costi extra stimati: €{moneyBoxTotalRange.min_eur.toLocaleString()} - €{moneyBoxTotalRange.max_eur.toLocaleString()}
                   </p>
-                  <p className="text-xs text-zinc-500 mt-1">Include stime di mercato per voci non presenti in perizia.</p>
+                  {moneyBoxTotalRange.includes_market_estimates ? (
+                    <p className="text-xs text-zinc-500 mt-1">Include stime di mercato per voci non presenti in perizia.</p>
+                  ) : (
+                    <p className="text-xs text-zinc-500 mt-1">Calcolato solo su importi rilevati dalla perizia.</p>
+                  )}
                 </div>
               )}
               
@@ -1607,6 +1675,12 @@ const AnalysisResult = () => {
             {/* Abusi Edilizi / Conformità - Section 5 */}
             <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-6">
               <h2 className="text-xl font-serif font-bold text-zinc-100 mb-4">Abusi Edilizi / Conformità</h2>
+              {(userMessagesByCode.ACTION_VERIFY_CATASTO || []).map((msg, idx) => (
+                <MessageInjectionCard key={`catasto_msg_${idx}`} msg={msg} />
+              ))}
+              {(userMessagesByCode.RISK_NON_AGIBILE || []).map((msg, idx) => (
+                <MessageInjectionCard key={`non_agibile_msg_${idx}`} msg={msg} />
+              ))}
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <DataValueWithEvidence 
                   label="Conformità Urbanistica" 
@@ -1681,6 +1755,9 @@ const AnalysisResult = () => {
             
             {/* Stato Conservativo - Section 7 */}
             <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-6">
+              {(userMessagesByCode.INFO_IMPIANTI_PRESENT || []).map((msg, idx) => (
+                <MessageInjectionCard key={`impianti_msg_${idx}`} msg={msg} />
+              ))}
               <h2 className="text-xl font-serif font-bold text-zinc-100 mb-4">Stato Conservativo / Impianti</h2>
               <p className="text-zinc-300">{safeRender(conservativo.condizione_generale || conservativo.general_condition_it, 'Nessuna nota disponibile')}</p>
               
@@ -1792,6 +1869,17 @@ const AnalysisResult = () => {
             
             {/* Checklist Pre-Offerta */}
             <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-6">
+              <h2 className="text-xl font-serif font-bold text-zinc-100 mb-4">Dati Asta</h2>
+              {(userMessagesByCode.ACTION_VERIFY_DATO_ASTA || []).map((msg, idx) => (
+                <MessageInjectionCard key={`dati_asta_msg_${idx}`} msg={msg} />
+              ))}
+              <div className="mb-4">
+                <DataValueWithEvidence
+                  label="Dati Asta"
+                  value={safeRender(datiAsta?.data || datiAsta?.value || datiAsta, 'NON SPECIFICATO IN PERIZIA')}
+                  evidence={getEvidence(datiAsta)}
+                />
+              </div>
               <h2 className="text-xl font-serif font-bold text-zinc-100 mb-4">Checklist Pre-Offerta</h2>
               {checklist.length > 0 ? (
                 <div className="space-y-2">
