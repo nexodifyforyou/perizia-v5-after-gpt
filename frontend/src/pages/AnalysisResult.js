@@ -31,12 +31,12 @@ const API_URL = process.env.REACT_APP_BACKEND_URL;
 
 // Helper function to normalize placeholder values
 const normalizePlaceholder = (value) => {
-  if (value === null || value === undefined) return 'NON SPECIFICATO IN PERIZIA';
+  if (value === null || value === undefined) return 'Non specificato in perizia';
   if (typeof value === 'string') {
     const upper = value.toUpperCase();
     if (upper === 'NONE' || upper === 'N/A' || upper === 'NOT_SPECIFIED_IN_PERIZIA' || 
         upper === 'NOT_SPECIFIED' || upper === 'UNKNOWN' || value === '') {
-      return 'NON SPECIFICATO IN PERIZIA';
+      return 'Non specificato in perizia';
     }
   }
   return value;
@@ -103,9 +103,9 @@ const normalizeAnalysisResponse = (payload) => {
 };
 
 // Helper function to safely render any value - replaces placeholders
-const safeRender = (value, fallback = 'NON SPECIFICATO IN PERIZIA') => {
+const safeRender = (value, fallback = 'Non specificato in perizia') => {
   const normalized = normalizePlaceholder(value);
-  if (normalized === 'NON SPECIFICATO IN PERIZIA') return fallback === 'N/A' ? 'NON SPECIFICATO IN PERIZIA' : fallback;
+  if (normalized === 'Non specificato in perizia') return fallback === 'N/A' ? 'Non specificato in perizia' : fallback;
   
   if (typeof normalized === 'string') return normalized;
   if (typeof normalized === 'number') return normalized.toString();
@@ -341,7 +341,7 @@ const MoneyBoxItem = ({ item }) => {
 
 // Legal Killer Item Component with Evidence - supports both old and ROMA STANDARD formats
 const LegalKillerItem = ({ name, data }) => {
-  const status = safeRender(data?.status, 'NOT_SPECIFIED');
+  const status = safeRender(data?.status, 'Non specificato in perizia');
   const evidence = getEvidence(data);
   const hasEvidence = evidence.length > 0;
   const pages = hasEvidence ? [...new Set(evidence.map(e => e.page).filter(Boolean))] : [];
@@ -520,7 +520,6 @@ const AnalysisResult = () => {
   const [isDeleting, setIsDeleting] = useState(false);
   const [selectedLotIndex, setSelectedLotIndex] = useState(0);
   const [headlineModal, setHeadlineModal] = useState({ open: false, fieldKey: null });
-  const [estrattoOpen, setEstrattoOpen] = useState({});
   const [estrattoShowAll, setEstrattoShowAll] = useState({});
 
   const fetchAnalysis = async () => {
@@ -737,6 +736,21 @@ const AnalysisResult = () => {
   const datiAsta = result.dati_asta || result.dati_certi_del_lotto?.dati_asta || result.dati_certi?.dati_asta;
   const resultPathUsed = analysis?.__result_path || (analysis?.result ? 'result' : null);
   const estrattoSections = normalizeEstrattoSections(estrattoQuality);
+  const estrattoSectionMap = estrattoSections.reduce((acc, section) => {
+    const key = safeRender(section?.heading_key || section?.__key, '').toLowerCase();
+    if (key) acc[key] = section;
+    return acc;
+  }, {});
+  const estrattoSectionDefs = [
+    { key: 'occupancy', headingIt: 'Stato occupativo', headingEn: 'Occupancy status' },
+    { key: 'ape', headingIt: 'APE', headingEn: 'Energy certificate' },
+    { key: 'abusi_agibilita', headingIt: 'Abusi/Agibilità', headingEn: 'Building issues/Habitability' },
+    { key: 'impianti', headingIt: 'Stato Conservativo/Impianti', headingEn: 'Condition/Systems' },
+    { key: 'catasto', headingIt: 'Catasto', headingEn: 'Cadastral details' },
+    { key: 'formalita', headingIt: 'Formalità', headingEn: 'Liens and encumbrances' },
+    { key: 'dati_asta', headingIt: 'Dati asta', headingEn: 'Auction data' }
+  ];
+  const estrattoLegalSection = estrattoSectionMap.legal || null;
   const userMessages = Array.isArray(result.user_messages) ? result.user_messages : [];
   const userMessagesByCode = userMessages.reduce((acc, msg) => {
     const code = safeRender(msg?.code, '').toUpperCase();
@@ -765,14 +779,29 @@ const AnalysisResult = () => {
   };
   const formatFieldStateDisplay = (key, fallback) => {
     const state = getFieldState(key);
-    if (state?.status === 'NOT_FOUND') return 'NOT_FOUND (vedi searched_in)';
-    return safeRender(getFieldValue(key, fallback), 'NON SPECIFICATO IN PERIZIA');
+    if (state?.status === 'NOT_FOUND') return 'Non specificato in perizia';
+    return safeRender(getFieldValue(key, fallback), 'Non specificato in perizia');
   };
 
   const beni = (selectedLot && selectedLot.beni) || result.beni || [];
 
   const getHeadlineStatus = (fieldKey) => fieldStates?.[fieldKey]?.status;
   const isNeedsVerification = (status) => status === 'LOW_CONFIDENCE' || status === 'NOT_FOUND';
+
+  const getSearchedInPatterns = (fieldKey) => {
+    const state = getFieldState(fieldKey);
+    const searchedIn = Array.isArray(state?.searched_in) ? state.searched_in : [];
+    const patterns = searchedIn.flatMap((entry) => {
+      if (typeof entry === 'string') return [entry];
+      if (!entry || typeof entry !== 'object') return [];
+      if (Array.isArray(entry.patterns)) return entry.patterns.filter(Boolean);
+      if (entry.pattern) return [entry.pattern];
+      if (entry.query) return [entry.query];
+      if (entry.quote) return [getShortText(entry.quote, 55)];
+      return [];
+    }).filter(Boolean);
+    return [...new Set(patterns)].slice(0, 4);
+  };
 
   const getHeadlineSourceValue = (fieldKey) => {
     switch (fieldKey) {
@@ -792,8 +821,40 @@ const AnalysisResult = () => {
   const getHeadlineDisplayValue = (fieldKey, fallbackValue) => {
     const status = getHeadlineStatus(fieldKey);
     if (status === 'LOW_CONFIDENCE') return 'DA VERIFICARE';
-    if (status === 'NOT_FOUND') return 'NON SPECIFICATO IN PERIZIA';
-    return safeRender(fallbackValue, 'NON SPECIFICATO IN PERIZIA');
+    if (status === 'NOT_FOUND') return 'Non specificato in perizia';
+    return safeRender(fallbackValue, 'Non specificato in perizia');
+  };
+
+  const MissingStateRationale = ({ fieldKey, forceMissing = false }) => {
+    const state = getFieldState(fieldKey);
+    const missing = forceMissing || state?.status === 'NOT_FOUND' || state?.status === 'LOW_CONFIDENCE';
+    if (!missing) return null;
+    const patterns = getSearchedInPatterns(fieldKey);
+    if (patterns.length > 0) {
+      return (
+        <div className="mt-2">
+          <p className="text-xs text-zinc-500">Cercato nel documento: {patterns.join(', ')}</p>
+          <p className="text-[11px] text-zinc-600">Searched in document: {patterns.join(', ')}</p>
+        </div>
+      );
+    }
+    return (
+      <div className="mt-2">
+        <p className="text-xs text-zinc-500">Nessuna evidenza trovata nel documento.</p>
+        <p className="text-[11px] text-zinc-600">No evidence found in the document.</p>
+      </div>
+    );
+  };
+
+  const getEstrattoItemDisplayValue = (item) => {
+    const explicit = safeRender(item?.value_it ?? item?.__value, '').trim();
+    if (explicit) return explicit;
+    const amount = parseNumericEuro(item?.amount_eur);
+    if (amount !== null) return `€${amount.toLocaleString()}`;
+    const dateValue = safeRender(item?.date || item?.data || item?.date_it, '').trim();
+    const timeValue = safeRender(item?.time || item?.ora || item?.time_it, '').trim();
+    if (dateValue || timeValue) return `${dateValue}${dateValue && timeValue ? ' ' : ''}${timeValue}`.trim();
+    return '';
   };
 
   const activeHeadlineKey = headlineModal.fieldKey;
@@ -849,11 +910,11 @@ const AnalysisResult = () => {
       tipologia: safeRender(b?.tipologia, ''),
       note: safeRender(b?.note, '')
     })) : [],
-    ape_status: safeRender(getFieldValue('ape', abusi.ape?.status || result.ape), 'NON SPECIFICATO IN PERIZIA'),
+    ape_status: safeRender(getFieldValue('ape', abusi.ape?.status || result.ape), 'Non specificato in perizia'),
     spese_condominiali_arretrate: formatFieldStateDisplay('spese_condominiali_arretrate', result.spese_condominiali_arretrate || result.spese_condominiali),
     sanatoria_estimate: moneyBoxItemA?.stima_euro ?? result?.sanatoria_estimate ?? null,
-    prezzo_base: safeRender(dati.prezzo_base_asta?.formatted || dati.prezzo_base_asta?.value || dati.prezzo_base_asta, 'NON SPECIFICATO IN PERIZIA'),
-    dati_asta: safeRender(datiAsta?.data || datiAsta?.value || datiAsta, 'NON SPECIFICATO IN PERIZIA'),
+    prezzo_base: safeRender(dati.prezzo_base_asta?.formatted || dati.prezzo_base_asta?.value || dati.prezzo_base_asta, 'Non specificato in perizia'),
+    dati_asta: safeRender(datiAsta?.data || datiAsta?.value || datiAsta, 'Non specificato in perizia'),
     decisione_rapida_it: decisionIt,
     decisione_rapida_en: decisionEn,
     decision_source: decisionSourceLabel,
@@ -877,7 +938,7 @@ const AnalysisResult = () => {
       raw_keys_used: {
         case_header_keys: caseHeader ? Object.keys(caseHeader) : [],
         field_state_keys: fieldStates ? Object.keys(fieldStates) : [],
-        money_box_item_codes: moneyBoxItems.map((i) => i?.code || i?.voce || i?.label_it || 'UNKNOWN')
+        money_box_item_codes: moneyBoxItems.map((i) => i?.code || i?.voce || i?.label_it || 'NON_SPECIFICATO_IN_PERIZIA')
       },
       user_messages: {
         count: userMessages.length,
@@ -969,6 +1030,7 @@ const AnalysisResult = () => {
             "{evidence[0].quote.substring(0, 150)}{evidence[0].quote.length > 150 ? '...' : ''}"
           </p>
         )}
+        <MissingStateRationale fieldKey={fieldKey} forceMissing={!hasEvidence && needsVerification} />
       </div>
     );
   };
@@ -1325,7 +1387,7 @@ const AnalysisResult = () => {
                 />
                 <DataValueWithEvidence
                   label="APE"
-                  value={safeRender(getFieldValue('ape', abusi.ape?.status || result.ape), 'NON SPECIFICATO IN PERIZIA')}
+                  value={safeRender(getFieldValue('ape', abusi.ape?.status || result.ape), 'Non specificato in perizia')}
                   evidence={getFieldEvidence('ape', abusi.ape || result.ape)}
                 />
                 {datiAsta && (
@@ -1338,64 +1400,29 @@ const AnalysisResult = () => {
               </div>
             </div>
 
-            {/* Money Box A Highlight */}
-            {moneyBoxItemA && (
-              <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-6">
-                <h2 className="text-lg font-serif font-bold text-zinc-100 mb-4">Money Box A</h2>
-                <MoneyBoxItem item={moneyBoxItemA} />
-              </div>
-            )}
-
+            {/* Riepilogo Costi / Cost Summary */}
             <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-6">
-              <h2 className="text-xl font-serif font-bold text-zinc-100 mb-4">Estratto (qualità agenzia)</h2>
-              {estrattoSections.length > 0 ? (
-                <div className="space-y-3">
-                  {estrattoSections.map((section, sectionIdx) => {
-                    const open = estrattoOpen[section.__key] !== undefined ? !!estrattoOpen[section.__key] : sectionIdx < 2;
-                    const showAll = !!estrattoShowAll[section.__key];
-                    const items = section.__items || [];
-                    const visibleItems = showAll ? items : items.slice(0, 12);
-                    return (
-                      <div key={section.__key} className="rounded-lg border border-zinc-800 bg-zinc-950/50">
-                        <button
-                          type="button"
-                          onClick={() => setEstrattoOpen((prev) => ({ ...prev, [section.__key]: !open }))}
-                          className="w-full px-4 py-3 text-left flex items-center justify-between"
-                        >
-                          <span className="text-sm font-semibold text-zinc-100">{section.__title}</span>
-                          <span className="text-xs text-zinc-500">{open ? 'Nascondi' : 'Mostra'}</span>
-                        </button>
-                        {open && (
-                          <div className="px-4 pb-4 space-y-2">
-                            {visibleItems.map((item, idx) => (
-                              <div key={`${section.__key}_${idx}`} className="p-3 rounded border border-zinc-800 bg-zinc-900">
-                                <p className="text-sm text-zinc-100">
-                                  <span className="font-medium">{item.__label}:</span> {safeRender(item.__value, 'NON SPECIFICATO IN PERIZIA')}
-                                </p>
-                                {(item.__evidence || []).map((ev, evIdx) => (
-                                  <p key={`${section.__key}_${idx}_ev_${evIdx}`} className="text-xs text-zinc-500 mt-1">
-                                    {`p.${safeRender(ev.page, '?')} — ${safeRender(ev.quote, 'Evidenza disponibile')}`}
-                                  </p>
-                                ))}
-                              </div>
-                            ))}
-                            {items.length > 12 && (
-                              <button
-                                type="button"
-                                onClick={() => setEstrattoShowAll((prev) => ({ ...prev, [section.__key]: !showAll }))}
-                                className="text-xs text-gold hover:underline"
-                              >
-                                {showAll ? 'Show less' : `Show more (${items.length - 12})`}
-                              </button>
-                            )}
-                          </div>
-                        )}
-                      </div>
-                    );
-                  })}
-                </div>
+              <h2 className="text-lg font-serif font-bold text-zinc-100 mb-3">Riepilogo Costi / Cost Summary</h2>
+              {moneyBoxTotalRange && typeof moneyBoxTotalRange.min_eur === 'number' && typeof moneyBoxTotalRange.max_eur === 'number' ? (
+                <>
+                  <p className="text-base font-semibold text-zinc-100">
+                    Costi extra stimati: € {moneyBoxTotalRange.min_eur.toLocaleString()} - € {moneyBoxTotalRange.max_eur.toLocaleString()}
+                  </p>
+                  <p className="text-sm text-zinc-400 mt-1">
+                    Estimated extra costs: € {moneyBoxTotalRange.min_eur.toLocaleString()} - € {moneyBoxTotalRange.max_eur.toLocaleString()}
+                  </p>
+                  {moneyBoxTotalRange.includes_market_estimates && (
+                    <>
+                      <p className="text-xs text-zinc-500 mt-2">Include stime Nexodify per voci non presenti in perizia.</p>
+                      <p className="text-[11px] text-zinc-600">Includes Nexodify estimates for items not present in the appraisal.</p>
+                    </>
+                  )}
+                </>
               ) : (
-                <p className="text-zinc-500">Nessuna sezione estratto_quality disponibile.</p>
+                <>
+                  <p className="text-sm text-zinc-400">Costi extra: non disponibili</p>
+                  <p className="text-xs text-zinc-500 mt-1">Extra costs: unavailable</p>
+                </>
               )}
             </div>
             
@@ -1600,6 +1627,43 @@ const AnalysisResult = () => {
               ) : (
                 <p className="text-zinc-500 text-center py-8">Checklist legal killers non disponibile</p>
               )}
+
+              {estrattoLegalSection && Array.isArray(estrattoLegalSection.__items) && estrattoLegalSection.__items.length > 0 && (
+                <div className="mt-6 p-4 rounded-lg border border-zinc-800 bg-zinc-950/60">
+                  <h3 className="text-sm font-semibold text-zinc-100">Dettagli dal documento / Document details</h3>
+                  <div className="space-y-3 mt-3">
+                    {(!!estrattoShowAll.legal_doc ? estrattoLegalSection.__items : estrattoLegalSection.__items.slice(0, 12)).map((item, idx) => {
+                      const labelIt = safeRender(item?.label_it || item?.__label, 'Voce');
+                      const labelEn = safeRender(item?.label_en, '');
+                      const displayValue = getEstrattoItemDisplayValue(item);
+                      const evidence = Array.isArray(item?.__evidence) ? item.__evidence : [];
+                      return (
+                        <div key={`legal_doc_${idx}`} className="p-3 rounded border border-zinc-800 bg-zinc-900">
+                          <p className="text-sm text-zinc-100">
+                            <span className="font-medium">{labelIt}</span>
+                            {displayValue ? `: ${displayValue}` : ''}
+                          </p>
+                          {labelEn && <p className="text-xs text-zinc-500 mt-1">{labelEn}</p>}
+                          {evidence.length > 0 && (
+                            <div className="mt-2">
+                              <EvidenceDetail evidence={evidence} />
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+                    {estrattoLegalSection.__items.length > 12 && (
+                      <button
+                        type="button"
+                        onClick={() => setEstrattoShowAll((prev) => ({ ...prev, legal_doc: !prev.legal_doc }))}
+                        className="text-xs text-gold hover:underline"
+                      >
+                        {estrattoShowAll.legal_doc ? 'Mostra meno / Show less' : `Mostra altri / Show more (${estrattoLegalSection.__items.length - 12})`}
+                      </button>
+                    )}
+                  </div>
+                </div>
+              )}
             </div>
           </TabsContent>
           
@@ -1671,6 +1735,63 @@ const AnalysisResult = () => {
                 <p className="text-zinc-500">Beni non disponibili nell'estrazione corrente.</p>
               )}
             </div>
+
+            {/* Estratto sections mapped to Dettagli */}
+            <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-6">
+              <h2 className="text-xl font-serif font-bold text-zinc-100 mb-4">Dettagli dal documento</h2>
+              <div className="space-y-4">
+                {estrattoSectionDefs.map((def) => {
+                  const section = estrattoSectionMap[def.key];
+                  const sectionItems = Array.isArray(section?.__items) ? section.__items : [];
+                  const showAll = !!estrattoShowAll[`details_${def.key}`];
+                  const visibleItems = showAll ? sectionItems : sectionItems.slice(0, 10);
+                  const headingIt = safeRender(section?.heading_it || section?.__title, def.headingIt);
+                  const headingEn = safeRender(section?.heading_en, def.headingEn);
+
+                  return (
+                    <div key={`details_section_${def.key}`} className="p-4 rounded-lg border border-zinc-800 bg-zinc-950/60">
+                      <h3 className="text-sm font-semibold text-zinc-100">{headingIt}</h3>
+                      <p className="text-xs text-zinc-500 mb-3">{headingEn}</p>
+                      {visibleItems.length > 0 ? (
+                        <div className="space-y-3">
+                          {visibleItems.map((item, idx) => {
+                            const labelIt = safeRender(item?.label_it || item?.__label, 'Voce');
+                            const labelEn = safeRender(item?.label_en, '');
+                            const displayValue = getEstrattoItemDisplayValue(item);
+                            const evidence = Array.isArray(item?.__evidence) ? item.__evidence : [];
+                            return (
+                              <div key={`details_${def.key}_${idx}`} className="p-3 rounded border border-zinc-800 bg-zinc-900">
+                                <p className="text-sm text-zinc-100">
+                                  <span className="font-medium">{labelIt}</span>
+                                  {displayValue ? `: ${displayValue}` : ''}
+                                </p>
+                                {labelEn && <p className="text-xs text-zinc-500 mt-1">{labelEn}</p>}
+                                {evidence.length > 0 && (
+                                  <div className="mt-2">
+                                    <EvidenceDetail evidence={evidence} />
+                                  </div>
+                                )}
+                              </div>
+                            );
+                          })}
+                          {sectionItems.length > 10 && (
+                            <button
+                              type="button"
+                              onClick={() => setEstrattoShowAll((prev) => ({ ...prev, [`details_${def.key}`]: !showAll }))}
+                              className="text-xs text-gold hover:underline"
+                            >
+                              {showAll ? 'Mostra meno / Show less' : `Mostra altri / Show more (${sectionItems.length - 10})`}
+                            </button>
+                          )}
+                        </div>
+                      ) : (
+                        <p className="text-xs text-zinc-500">Nessuna voce estratta per questa sezione.</p>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
             
             {/* Abusi Edilizi / Conformità - Section 5 */}
             <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-6">
@@ -1700,7 +1821,7 @@ const AnalysisResult = () => {
                 />
                 <DataValueWithEvidence 
                   label="Condono Presente" 
-                  value={abusi.condono?.presente || abusi.condono?.present}
+                  value={safeRender(abusi.condono?.presente || abusi.condono?.present, 'Non specificato in perizia')}
                   evidence={getEvidence(abusi.condono)}
                 />
                 {(abusi.condono?.anno || abusi.condono?.pratica) && (
@@ -1712,7 +1833,7 @@ const AnalysisResult = () => {
                 )}
                 <DataValueWithEvidence 
                   label="Agibilità/Abitabilità" 
-                  value={abusi.agibilita?.status || abusi.agibilita}
+                  value={safeRender(abusi.agibilita?.status || abusi.agibilita, 'Non specificato in perizia')}
                   evidence={getEvidence(abusi.agibilita)}
                 />
                 <DataValueWithEvidence 
@@ -1760,6 +1881,26 @@ const AnalysisResult = () => {
               ))}
               <h2 className="text-xl font-serif font-bold text-zinc-100 mb-4">Stato Conservativo / Impianti</h2>
               <p className="text-zinc-300">{safeRender(conservativo.condizione_generale || conservativo.general_condition_it, 'Nessuna nota disponibile')}</p>
+
+              {estrattoSectionMap.impianti && Array.isArray(estrattoSectionMap.impianti.__items) && estrattoSectionMap.impianti.__items.length > 0 ? (
+                <div className="mt-4 p-4 bg-zinc-950 rounded-lg border border-zinc-800">
+                  <p className="text-xs text-zinc-500 mb-3">Impianti estratti dal documento</p>
+                  <ul className="space-y-3">
+                    {estrattoSectionMap.impianti.__items.map((item, idx) => (
+                      <li key={`estratto_impianti_${idx}`} className="text-sm text-zinc-300">
+                        <span className="text-zinc-100">• {safeRender(item.__label, 'Impianti')}</span>: {safeRender(item.__value, 'Non specificato in perizia')}
+                        {Array.isArray(item.__evidence) && item.__evidence.length > 0 && (
+                          <div className="mt-1">
+                            <EvidenceDetail evidence={item.__evidence} />
+                          </div>
+                        )}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              ) : (
+                <MissingStateRationale fieldKey="impianti" forceMissing={true} />
+              )}
               
               {/* Carenze */}
               {conservativo.carenze && (
@@ -1831,7 +1972,7 @@ const AnalysisResult = () => {
               ) : (
                 <DataValueWithEvidence 
                   label="Ipoteca" 
-                  value={formalita.ipoteca?.status || 'Non specificato'}
+                  value={safeRender(formalita.ipoteca?.status, 'Non specificato in perizia')}
                   evidence={getEvidence(formalita.ipoteca)}
                 />
               )}
@@ -1876,11 +2017,14 @@ const AnalysisResult = () => {
               <div className="mb-4">
                 <DataValueWithEvidence
                   label="Dati Asta"
-                  value={safeRender(datiAsta?.data || datiAsta?.value || datiAsta, 'NON SPECIFICATO IN PERIZIA')}
+                  value={safeRender(datiAsta?.data || datiAsta?.value || datiAsta, 'Non specificato in perizia')}
                   evidence={getEvidence(datiAsta)}
                 />
+                <MissingStateRationale fieldKey="dati_asta" forceMissing={!datiAsta} />
               </div>
               <h2 className="text-xl font-serif font-bold text-zinc-100 mb-4">Checklist Pre-Offerta</h2>
+              <p className="text-xs text-zinc-500 mb-1">Legenda: P0 = obbligatorio prima dell’offerta; P1 = consigliato.</p>
+              <p className="text-[11px] text-zinc-600 mb-3">Legend: P0 = must-do before bidding; P1 = recommended.</p>
               {checklist.length > 0 ? (
                 <div className="space-y-2">
                   {checklist.map((item, i) => {
@@ -1888,6 +2032,12 @@ const AnalysisResult = () => {
                     const itemText = typeof item === 'string' ? item : (item.item_it || item.task_it || item.text || JSON.stringify(item));
                     const priority = typeof item === 'object' ? item.priority : null;
                     const status = typeof item === 'object' ? item.status : null;
+                    const priorityLabel = priority === 'P0' ? 'Obbligatorio' : priority === 'P1' ? 'Consigliato' : priority;
+                    const priorityTooltip = priority === 'P0'
+                      ? 'Obbligatorio prima dell’offerta'
+                      : priority === 'P1'
+                        ? 'Consigliato prima/dopo l’offerta'
+                        : '';
                     
                     return (
                       <div key={i} className="flex items-center gap-3 p-3 bg-zinc-950 rounded-lg">
@@ -1900,11 +2050,16 @@ const AnalysisResult = () => {
                         )}
                         <span className="text-zinc-300 text-sm flex-1">{itemText}</span>
                         {priority && (
-                          <span className={`text-xs px-2 py-1 rounded ${
+                          <span
+                            title={priorityTooltip}
+                            className={`text-xs px-2 py-1 rounded ${
                             priority === 'P0' ? 'bg-red-500/20 text-red-400' :
                             priority === 'P1' ? 'bg-amber-500/20 text-amber-400' :
                             'bg-zinc-700 text-zinc-400'
-                          }`}>{priority}</span>
+                            }`}
+                          >
+                            {priorityLabel}
+                          </span>
                         )}
                       </div>
                     );
