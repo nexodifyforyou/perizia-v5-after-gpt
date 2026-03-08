@@ -4854,6 +4854,237 @@ def _normalize_user_message_evidence(evidence: Any, max_items: int = 1) -> List[
     return out
 
 
+def _normalize_token(value: Any) -> str:
+    text = str(value or "").strip().lower()
+    return (
+        text.replace("à", "a")
+        .replace("á", "a")
+        .replace("è", "e")
+        .replace("é", "e")
+        .replace("ì", "i")
+        .replace("ò", "o")
+        .replace("ó", "o")
+        .replace("ù", "u")
+    )
+
+
+def _first_evidence_from_row(row: Any) -> List[Dict[str, Any]]:
+    if not isinstance(row, dict):
+        return []
+    return _normalize_user_message_evidence(
+        [{"page": row.get("page"), "quote": row.get("quote")}],
+        max_items=1,
+    )
+
+
+def _score_quote(quote: Any, kind: str) -> int:
+    text = str(quote or "").strip()
+    if not text:
+        return -1000
+    lower = _normalize_token(text)
+    score = 0
+
+    # Common penalties for boilerplate/TOC-like snippets.
+    if "pubblicazione eseguita" in lower or "pdg" in lower:
+        score -= 100
+    if "....." in text or "sommario" in lower or "indice" in lower:
+        score -= 100
+
+    if kind == "catasto":
+        for term in (
+            "corrispondenza catastale",
+            "planimetr",
+            "difform",
+            "tipo mappale",
+            "visura",
+            "foglio",
+            "particella",
+            "sub",
+            "rendita",
+        ):
+            if term in lower:
+                score += 20
+    elif kind == "asta":
+        for term in ("vendita", "asta", "delegato", "avra luogo", "ore", "giorno"):
+            if term in lower:
+                score += 20
+        if re.search(r"\b\d{1,2}:\d{2}\b", text):
+            score += 25
+    return score
+
+
+def _is_valid_asta_evidence(quote: Any) -> bool:
+    text = str(quote or "").strip()
+    if not text:
+        return False
+    lower = _normalize_token(text)
+    if "pdg" in lower or "pubblicazione eseguita" in lower:
+        return False
+    has_date = bool(re.search(r"\b\d{2}/\d{2}/\d{4}\b", text))
+    has_time = bool(re.search(r"\b(?:ore\s*)?\d{1,2}:\d{2}\b", lower))
+    has_keyword = any(term in lower for term in ("vendita", "asta", "delegato", "avra luogo", "alle ore"))
+    return has_date and has_time and has_keyword
+
+
+def _collect_normalized_evidence_candidates(entry: Dict[str, Any]) -> List[Dict[str, Any]]:
+    out: List[Dict[str, Any]] = []
+    for ev in _normalize_user_message_evidence(entry.get("evidence", []), max_items=8):
+        out.append(ev)
+    fonte = entry.get("fonte_perizia")
+    if isinstance(fonte, dict):
+        for ev in _normalize_user_message_evidence(fonte.get("evidence", []), max_items=8):
+            out.append(ev)
+    return out
+
+
+def _best_scored_evidence(candidates: List[Dict[str, Any]], kind: str) -> List[Dict[str, Any]]:
+    best: Optional[Tuple[int, int, int, Dict[str, Any]]] = None
+    for idx, ev in enumerate(candidates):
+        if not isinstance(ev, dict):
+            continue
+        quote = str(ev.get("quote") or "").strip()
+        page = _to_int(ev.get("page"))
+        if page is None or not quote:
+            continue
+        score = _score_quote(quote, kind)
+        candidate = (score, -page, -idx, {"page": page, "quote": quote})
+        if best is None or candidate > best:
+            best = candidate
+    if best is None or best[0] < 0:
+        return []
+    return _normalize_user_message_evidence([best[3]], max_items=1)
+
+
+def _best_scored_valid_asta_evidence(candidates: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    best: Optional[Tuple[int, int, int, Dict[str, Any]]] = None
+    for idx, ev in enumerate(candidates):
+        if not isinstance(ev, dict):
+            continue
+        quote = str(ev.get("quote") or "").strip()
+        page = _to_int(ev.get("page"))
+        if page is None or not quote or not _is_valid_asta_evidence(quote):
+            continue
+        score = _score_quote(quote, kind="asta")
+        candidate = (score, -page, -idx, {"page": page, "quote": quote})
+        if best is None or candidate > best:
+            best = candidate
+    if best is None:
+        return []
+    return _normalize_user_message_evidence([best[3]], max_items=1)
+
+
+def _quality_section_best_evidence(result: Dict[str, Any], heading_terms: List[str], kind: str) -> List[Dict[str, Any]]:
+    quality = result.get("estratto_quality", {}) if isinstance(result.get("estratto_quality"), dict) else {}
+    sections = quality.get("sections", [])
+    if not isinstance(sections, list):
+        return []
+    normalized_terms = [_normalize_token(term) for term in heading_terms if str(term or "").strip()]
+    candidates: List[Dict[str, Any]] = []
+    for section in sections:
+        if not isinstance(section, dict):
+            continue
+        heading_key = _normalize_token(section.get("heading_key"))
+        if not any(term in heading_key for term in normalized_terms):
+            continue
+        candidates.extend(_collect_normalized_evidence_candidates(section))
+        items = section.get("items", [])
+        if not isinstance(items, list):
+            continue
+        for item in items:
+            if not isinstance(item, dict):
+                continue
+            candidates.extend(_collect_normalized_evidence_candidates(item))
+    return _best_scored_evidence(candidates, kind=kind)
+
+
+def _load_step2_candidates(analysis_id: str, file_name: str) -> List[Dict[str, Any]]:
+    aid = str(analysis_id or "").strip()
+    if not aid:
+        return []
+    candidate_path = Path("/srv/perizia/_qa/runs") / aid / "candidates" / file_name
+    try:
+        with open(candidate_path, "r", encoding="utf-8") as f:
+            payload = json.load(f)
+    except Exception:
+        return []
+    return payload if isinstance(payload, list) else []
+
+
+def _select_catasto_evidence_for_message(result: Dict[str, Any], analysis_id: str) -> List[Dict[str, Any]]:
+    # 1) estratto_quality sections with catasto/conformita heading key
+    ev = _quality_section_best_evidence(result, ["catasto", "conformita"], kind="catasto")
+    if ev:
+        return ev
+
+    # 2) step2 trigger candidates family=catasto
+    candidates: List[Dict[str, Any]] = []
+    for row in _load_step2_candidates(analysis_id, "candidates_triggers.json"):
+        if not isinstance(row, dict):
+            continue
+        if _normalize_token(row.get("family")) != "catasto":
+            continue
+        candidates.extend(_first_evidence_from_row(row))
+    ev = _best_scored_evidence(candidates, kind="catasto")
+    if ev:
+        return ev
+
+    # 3) no acceptable snippet
+    return []
+
+
+def _select_dati_asta_evidence_for_message(result: Dict[str, Any], analysis_id: str) -> List[Dict[str, Any]]:
+    # 1) structured dati_asta evidence
+    dati_asta = result.get("dati_asta", {}) if isinstance(result.get("dati_asta"), dict) else {}
+    ev = _best_scored_valid_asta_evidence(_normalize_user_message_evidence(dati_asta.get("evidence", []), max_items=8))
+    if ev:
+        return ev
+
+    # 2) estratto_quality sections related to dati_asta/asta/vendita
+    quality = result.get("estratto_quality", {}) if isinstance(result.get("estratto_quality"), dict) else {}
+    sections = quality.get("sections", [])
+    normalized_terms = [_normalize_token(x) for x in ("dati_asta", "asta", "vendita")]
+    quality_candidates: List[Dict[str, Any]] = []
+    if isinstance(sections, list):
+        for section in sections:
+            if not isinstance(section, dict):
+                continue
+            heading_key = _normalize_token(section.get("heading_key"))
+            if not any(term in heading_key for term in normalized_terms):
+                continue
+            quality_candidates.extend(_collect_normalized_evidence_candidates(section))
+            items = section.get("items", [])
+            if not isinstance(items, list):
+                continue
+            for item in items:
+                if not isinstance(item, dict):
+                    continue
+                quality_candidates.extend(_collect_normalized_evidence_candidates(item))
+    ev = _best_scored_valid_asta_evidence(quality_candidates)
+    if ev:
+        return ev
+
+    # 3) step2 date candidates HIGH relevance + asta-like context + no PDG
+    candidates: List[Dict[str, Any]] = []
+    for row in _load_step2_candidates(analysis_id, "candidates_dates.json"):
+        if not isinstance(row, dict):
+            continue
+        if _normalize_token(row.get("relevance")) != "high":
+            continue
+        context = _normalize_token(row.get("context"))
+        quote = _normalize_token(row.get("quote"))
+        if "pdg" in context or "pdg" in quote:
+            continue
+        if not any(term in context for term in ("vendita", "asta", "delegato")):
+            continue
+        candidates.extend(_first_evidence_from_row(row))
+    ev = _best_scored_valid_asta_evidence(candidates)
+    if ev:
+        return ev
+
+    # 4) no acceptable snippet
+    return []
+
+
 def _append_user_message(messages: List[Dict[str, Any]], seen_codes: set, payload: Dict[str, Any], max_messages: int = 6) -> None:
     code = str(payload.get("code") or "").strip()
     if not code or code in seen_codes or len(messages) >= max_messages:
@@ -4888,7 +5119,7 @@ def _has_blocker_for_field(result: Dict[str, Any], field_key: str, label_it: str
     return False
 
 
-def _build_user_messages(result: Dict[str, Any], extraction_payload: Dict[str, Any]) -> List[Dict[str, Any]]:
+def _build_user_messages(result: Dict[str, Any], extraction_payload: Dict[str, Any], analysis_id: str = "") -> List[Dict[str, Any]]:
     messages: List[Dict[str, Any]] = []
     seen_codes: set = set()
 
@@ -4984,6 +5215,8 @@ def _build_user_messages(result: Dict[str, Any], extraction_payload: Dict[str, A
     cat_state = states.get("conformita_catastale") if isinstance(states.get("conformita_catastale"), dict) else {}
     cat_flagged = str(cat_state.get("status") or "").upper() in {"NOT_FOUND", "LOW_CONFIDENCE"} or _has_blocker_for_field(result, "conformita_catastale", "Conformità catastale")
     if cat_flagged:
+        catasto_evidence = _select_catasto_evidence_for_message(result, analysis_id)
+        catasto_has_evidence = bool(catasto_evidence)
         _append_user_message(
             messages,
             seen_codes,
@@ -4991,24 +5224,34 @@ def _build_user_messages(result: Dict[str, Any], extraction_payload: Dict[str, A
                 "code": "ACTION_VERIFY_CATASTO",
                 "severity": "WARNING",
                 "title_it": "Verifica conformità catastale",
-                "body_it": "La conformità catastale risulta assente o a bassa confidenza nei dati estratti.",
+                "body_it": (
+                    "Nel documento risultano elementi da verificare sulla conformità catastale."
+                    if catasto_has_evidence
+                    else "La conformità catastale risulta assente o a bassa confidenza nei dati estratti."
+                ),
                 "next_steps_it": [
                     "Controlla planimetria, visura e stato di fatto con un tecnico.",
                     "Conferma eventuali difformità prima della partecipazione all'asta.",
                 ],
                 "title_en": "Verify cadastral compliance",
-                "body_en": "Cadastral compliance is missing or low-confidence in extracted data.",
+                "body_en": (
+                    "The document contains cadastral-compliance elements that require verification."
+                    if catasto_has_evidence
+                    else "Cadastral compliance is missing or low-confidence in extracted data."
+                ),
                 "next_steps_en": [
                     "Check floor plan, cadastral record, and actual property state with a technician.",
                     "Confirm any mismatch before bidding.",
                 ],
-                "evidence": cat_state.get("evidence", []) if isinstance(cat_state.get("evidence"), list) else [],
+                "evidence": catasto_evidence,
             },
         )
 
     dati_asta_state = states.get("dati_asta") if isinstance(states.get("dati_asta"), dict) else {}
     dati_asta_flagged = str(dati_asta_state.get("status") or "").upper() in {"NOT_FOUND", "LOW_CONFIDENCE"} or _has_blocker_for_field(result, "dati_asta", "Dati asta")
     if dati_asta_flagged:
+        dati_asta_evidence = _select_dati_asta_evidence_for_message(result, analysis_id)
+        dati_asta_has_evidence = bool(dati_asta_evidence)
         _append_user_message(
             messages,
             seen_codes,
@@ -5016,18 +5259,26 @@ def _build_user_messages(result: Dict[str, Any], extraction_payload: Dict[str, A
                 "code": "ACTION_VERIFY_DATO_ASTA",
                 "severity": "WARNING",
                 "title_it": "Verifica dati asta",
-                "body_it": "Data e/o ora asta non risultano complete o affidabili nel documento analizzato.",
+                "body_it": (
+                    "Dati asta estratti: verificare sul portale ufficiale."
+                    if dati_asta_has_evidence
+                    else "Data/ora asta non presenti nel documento analizzato. Verificare sul portale ufficiale della procedura."
+                ),
                 "next_steps_it": [
                     "Verifica data, ora e modalità sul portale ufficiale della procedura.",
                     "Allinea i dati nel fascicolo prima di procedere.",
                 ],
                 "title_en": "Verify auction details",
-                "body_en": "Auction date and/or time are incomplete or low-confidence in the analyzed document.",
+                "body_en": (
+                    "Auction details extracted: verify on the official portal."
+                    if dati_asta_has_evidence
+                    else "Auction date/time not present in the analyzed document. Verify on the official procedure portal."
+                ),
                 "next_steps_en": [
                     "Check date, time, and format on the official procedure portal.",
                     "Align case records before proceeding.",
                 ],
-                "evidence": dati_asta_state.get("evidence", []) if isinstance(dati_asta_state.get("evidence"), list) else [],
+                "evidence": dati_asta_evidence,
             },
         )
 
@@ -5397,7 +5648,7 @@ async def analyze_perizia(request: Request, file: UploadFile = File(...)):
                 "error": "section_builder_failed",
             },
         }
-    result["user_messages"] = _build_user_messages(result, extraction_payload)
+    result["user_messages"] = _build_user_messages(result, extraction_payload, analysis_id=analysis_id)
     result["debug"] = debug_obj
     logger.info(f"[{request_id}] assemble_output analysis_id={analysis_id}")
 
