@@ -4830,6 +4830,276 @@ def _apply_unreadable_hard_stop(result: Dict[str, Any], document_quality: Dict[s
     section2["summary_en"] = decision_message_en
 
 
+def _to_int(value: Any) -> Optional[int]:
+    try:
+        return int(value)
+    except Exception:
+        return None
+
+
+def _normalize_user_message_evidence(evidence: Any, max_items: int = 1) -> List[Dict[str, Any]]:
+    if not isinstance(evidence, list):
+        return []
+    out: List[Dict[str, Any]] = []
+    for item in evidence:
+        if not isinstance(item, dict):
+            continue
+        page = _to_int(item.get("page"))
+        quote = str(item.get("quote") or "").strip()
+        if page is None or not quote:
+            continue
+        out.append({"page": page, "quote": quote[:180]})
+        if len(out) >= max_items:
+            break
+    return out
+
+
+def _append_user_message(messages: List[Dict[str, Any]], seen_codes: set, payload: Dict[str, Any], max_messages: int = 6) -> None:
+    code = str(payload.get("code") or "").strip()
+    if not code or code in seen_codes or len(messages) >= max_messages:
+        return
+    payload["next_steps_it"] = payload.get("next_steps_it") if isinstance(payload.get("next_steps_it"), list) else []
+    payload["next_steps_en"] = payload.get("next_steps_en") if isinstance(payload.get("next_steps_en"), list) else []
+    payload["evidence"] = _normalize_user_message_evidence(payload.get("evidence", []), max_items=2)
+    messages.append(payload)
+    seen_codes.add(code)
+
+
+def _has_blocker_for_field(result: Dict[str, Any], field_key: str, label_it: str) -> bool:
+    semaforo_candidates: List[Dict[str, Any]] = []
+    if isinstance(result.get("semaforo_generale"), dict):
+        semaforo_candidates.append(result["semaforo_generale"])
+    if isinstance(result.get("section_1_semaforo_generale"), dict):
+        semaforo_candidates.append(result["section_1_semaforo_generale"])
+    for semaforo in semaforo_candidates:
+        blockers = semaforo.get("top_blockers")
+        if not isinstance(blockers, list):
+            continue
+        for blocker in blockers:
+            if not isinstance(blocker, dict):
+                continue
+            status = str(blocker.get("status") or "").upper()
+            if status not in {"NOT_FOUND", "LOW_CONFIDENCE"}:
+                continue
+            key = str(blocker.get("key") or "").strip()
+            blocker_label = str(blocker.get("label_it") or "").strip().lower()
+            if key == field_key or blocker_label == label_it.strip().lower():
+                return True
+    return False
+
+
+def _build_user_messages(result: Dict[str, Any], extraction_payload: Dict[str, Any]) -> List[Dict[str, Any]]:
+    messages: List[Dict[str, Any]] = []
+    seen_codes: set = set()
+
+    document_quality = result.get("document_quality", {}) if isinstance(result.get("document_quality"), dict) else {}
+    dq_status = str(document_quality.get("status") or "TEXT_OK").upper()
+    ocr_plan = extraction_payload.get("ocr_plan", []) if isinstance(extraction_payload.get("ocr_plan"), list) else []
+    pages_raw = extraction_payload.get("pages_raw", []) if isinstance(extraction_payload.get("pages_raw"), list) else []
+    pages_needing_ocr = document_quality.get("pages_needing_ocr", [])
+    if not isinstance(pages_needing_ocr, list):
+        pages_needing_ocr = []
+
+    if dq_status == "NEEDS_OCR":
+        ocr_pages = [p for p in ([_to_int(x.get("page")) for x in ocr_plan] + [_to_int(x) for x in pages_needing_ocr]) if p is not None]
+        ordered_pages: List[int] = []
+        for p in ocr_pages:
+            if p not in ordered_pages:
+                ordered_pages.append(p)
+        pages_str = ", ".join(str(p) for p in ordered_pages[:12]) if ordered_pages else "non disponibili"
+        evidence: List[Dict[str, Any]] = []
+        if ordered_pages:
+            first_page = ordered_pages[0]
+            page_row = next((r for r in pages_raw if isinstance(r, dict) and _to_int(r.get("page")) == first_page), None)
+            page_text = str(page_row.get("text") or "").strip() if isinstance(page_row, dict) else ""
+            if page_text:
+                evidence = [{"page": first_page, "quote": page_text[:180]}]
+        _append_user_message(
+            messages,
+            seen_codes,
+            {
+                "code": "DOC_NEEDS_OCR",
+                "severity": "WARNING",
+                "title_it": "Documento parzialmente leggibile",
+                "body_it": f"Alcune pagine richiedono OCR o verifica manuale (pagine: {pages_str}).",
+                "next_steps_it": [
+                    "Esegui OCR sulle pagine indicate e riesegui l'analisi.",
+                    "Conferma manualmente i dati chiave prima di procedere.",
+                ],
+                "title_en": "Document partially readable",
+                "body_en": f"Some pages require OCR or manual review (pages: {pages_str}).",
+                "next_steps_en": [
+                    "Run OCR on the listed pages and re-run the analysis.",
+                    "Manually confirm key fields before proceeding.",
+                ],
+                "evidence": evidence,
+            },
+        )
+    elif dq_status == "UNREADABLE":
+        _append_user_message(
+            messages,
+            seen_codes,
+            {
+                "code": "DOC_UNREADABLE",
+                "severity": "BLOCKER",
+                "title_it": "Documento non leggibile",
+                "body_it": "Il PDF non è leggibile in modo affidabile per un'analisi automatica completa.",
+                "next_steps_it": [
+                    "Carica un PDF con testo selezionabile oppure una scansione più nitida.",
+                    "Richiedi revisione manuale prima di prendere decisioni.",
+                ],
+                "title_en": "Document unreadable",
+                "body_en": "The PDF is not reliably readable for complete automated analysis.",
+                "next_steps_en": [
+                    "Upload a selectable-text PDF or a clearer scan.",
+                    "Request manual review before making decisions.",
+                ],
+                "evidence": [],
+            },
+        )
+    else:
+        _append_user_message(
+            messages,
+            seen_codes,
+            {
+                "code": "DOC_TEXT_OK",
+                "severity": "INFO",
+                "title_it": "Documento leggibile",
+                "body_it": "La qualità testuale del documento è sufficiente per l'estrazione automatica.",
+                "next_steps_it": [
+                    "Verifica i campi più critici prima dell'offerta.",
+                    "Usa le evidenze a pagina per i controlli finali.",
+                ],
+                "title_en": "Document readable",
+                "body_en": "Text quality is sufficient for automated extraction.",
+                "next_steps_en": [
+                    "Validate critical fields before bidding.",
+                    "Use page evidence for final checks.",
+                ],
+                "evidence": [],
+            },
+        )
+
+    states = result.get("field_states", {}) if isinstance(result.get("field_states"), dict) else {}
+    cat_state = states.get("conformita_catastale") if isinstance(states.get("conformita_catastale"), dict) else {}
+    cat_flagged = str(cat_state.get("status") or "").upper() in {"NOT_FOUND", "LOW_CONFIDENCE"} or _has_blocker_for_field(result, "conformita_catastale", "Conformità catastale")
+    if cat_flagged:
+        _append_user_message(
+            messages,
+            seen_codes,
+            {
+                "code": "ACTION_VERIFY_CATASTO",
+                "severity": "WARNING",
+                "title_it": "Verifica conformità catastale",
+                "body_it": "La conformità catastale risulta assente o a bassa confidenza nei dati estratti.",
+                "next_steps_it": [
+                    "Controlla planimetria, visura e stato di fatto con un tecnico.",
+                    "Conferma eventuali difformità prima della partecipazione all'asta.",
+                ],
+                "title_en": "Verify cadastral compliance",
+                "body_en": "Cadastral compliance is missing or low-confidence in extracted data.",
+                "next_steps_en": [
+                    "Check floor plan, cadastral record, and actual property state with a technician.",
+                    "Confirm any mismatch before bidding.",
+                ],
+                "evidence": cat_state.get("evidence", []) if isinstance(cat_state.get("evidence"), list) else [],
+            },
+        )
+
+    dati_asta_state = states.get("dati_asta") if isinstance(states.get("dati_asta"), dict) else {}
+    dati_asta_flagged = str(dati_asta_state.get("status") or "").upper() in {"NOT_FOUND", "LOW_CONFIDENCE"} or _has_blocker_for_field(result, "dati_asta", "Dati asta")
+    if dati_asta_flagged:
+        _append_user_message(
+            messages,
+            seen_codes,
+            {
+                "code": "ACTION_VERIFY_DATO_ASTA",
+                "severity": "WARNING",
+                "title_it": "Verifica dati asta",
+                "body_it": "Data e/o ora asta non risultano complete o affidabili nel documento analizzato.",
+                "next_steps_it": [
+                    "Verifica data, ora e modalità sul portale ufficiale della procedura.",
+                    "Allinea i dati nel fascicolo prima di procedere.",
+                ],
+                "title_en": "Verify auction details",
+                "body_en": "Auction date and/or time are incomplete or low-confidence in the analyzed document.",
+                "next_steps_en": [
+                    "Check date, time, and format on the official procedure portal.",
+                    "Align case records before proceeding.",
+                ],
+                "evidence": dati_asta_state.get("evidence", []) if isinstance(dati_asta_state.get("evidence"), list) else [],
+            },
+        )
+
+    blueprint = result.get("estratto_blueprint", {}) if isinstance(result.get("estratto_blueprint"), dict) else {}
+    blueprint_abusi = blueprint.get("abusi", {}) if isinstance(blueprint.get("abusi"), dict) else {}
+    non_agibile = blueprint_abusi.get("non_agibile", {}) if isinstance(blueprint_abusi.get("non_agibile"), dict) else {}
+    if bool(non_agibile.get("value")):
+        _append_user_message(
+            messages,
+            seen_codes,
+            {
+                "code": "RISK_NON_AGIBILE",
+                "severity": "WARNING",
+                "title_it": "Rischio non agibile",
+                "body_it": "Dall'estratto emerge un'indicazione di non agibilità.",
+                "next_steps_it": [
+                    "Richiedi verifica tecnica e documentale su agibilità/abitabilità.",
+                    "Valuta tempi e costi di regolarizzazione prima dell'offerta.",
+                ],
+                "title_en": "Non-habitable risk",
+                "body_en": "The extracted blueprint indicates a non-habitable condition.",
+                "next_steps_en": [
+                    "Request technical and document checks on habitability.",
+                    "Assess remediation timing and costs before bidding.",
+                ],
+                "evidence": non_agibile.get("evidence", []) if isinstance(non_agibile.get("evidence"), list) else [],
+            },
+        )
+
+    blueprint_impianti = blueprint.get("impianti", {}) if isinstance(blueprint.get("impianti"), dict) else {}
+    impianti_hit: Optional[Dict[str, Any]] = None
+    for field_key, field_obj in blueprint_impianti.items():
+        if not isinstance(field_obj, dict):
+            continue
+        value = field_obj.get("value")
+        if value in (None, "", "NOT_FOUND"):
+            continue
+        if isinstance(value, str) and value.strip().upper() == "NOT_FOUND":
+            continue
+        impianti_hit = {
+            "field_key": field_key,
+            "value": value,
+            "evidence": field_obj.get("evidence", []),
+        }
+        break
+    if impianti_hit:
+        impianto_label = str(impianti_hit.get("field_key") or "impianti").replace("_", " ")
+        _append_user_message(
+            messages,
+            seen_codes,
+            {
+                "code": "INFO_IMPIANTI_PRESENT",
+                "severity": "INFO",
+                "title_it": "Informazioni impianti presenti",
+                "body_it": f"Sono presenti informazioni sugli impianti ({impianto_label}).",
+                "next_steps_it": [
+                    "Verifica conformità e certificazioni impiantistiche disponibili.",
+                    "Conferma eventuali adeguamenti necessari con un tecnico.",
+                ],
+                "title_en": "Systems information present",
+                "body_en": f"Systems-related information is present ({impianto_label}).",
+                "next_steps_en": [
+                    "Check available systems compliance/certifications.",
+                    "Confirm required upgrades with a technician.",
+                ],
+                "evidence": impianti_hit.get("evidence", []) if isinstance(impianti_hit.get("evidence"), list) else [],
+            },
+        )
+
+    return messages[:6]
+
+
 def _extract_pdf_text_digital(contents: bytes) -> Dict[str, Any]:
     """Primary deterministic extraction path from embedded PDF text (non-OCR)."""
     try:
@@ -5127,6 +5397,7 @@ async def analyze_perizia(request: Request, file: UploadFile = File(...)):
                 "error": "section_builder_failed",
             },
         }
+    result["user_messages"] = _build_user_messages(result, extraction_payload)
     result["debug"] = debug_obj
     logger.info(f"[{request_id}] assemble_output analysis_id={analysis_id}")
 

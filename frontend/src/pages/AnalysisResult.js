@@ -559,6 +559,7 @@ const AnalysisResult = () => {
   const datiAsta = result.dati_asta || result.dati_certi_del_lotto?.dati_asta || result.dati_certi?.dati_asta;
   const resultPathUsed = analysis?.__result_path || (analysis?.result ? 'result' : null);
   const estrattoSections = normalizeEstrattoSections(estrattoQuality);
+  const userMessages = Array.isArray(result.user_messages) ? result.user_messages : [];
 
   const getFieldState = (key) => fieldStates?.[key] || null;
   const getFieldEvidence = (key, fallback) => {
@@ -695,7 +696,11 @@ const AnalysisResult = () => {
         case_header_keys: caseHeader ? Object.keys(caseHeader) : [],
         field_state_keys: fieldStates ? Object.keys(fieldStates) : [],
         money_box_item_codes: moneyBoxItems.map((i) => i?.code || i?.voce || i?.label_it || 'UNKNOWN')
-      }
+      },
+      user_messages: {
+        count: userMessages.length,
+        codes: userMessages.map((m) => safeRender(m?.code, '')).filter(Boolean)
+      },
     };
   }
 
@@ -895,6 +900,61 @@ const AnalysisResult = () => {
             selectedLot={selectedLotIndex} 
             onSelectLot={setSelectedLotIndex} 
           />
+        )}
+
+        {userMessages.length > 0 && (
+          <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-6 mb-8">
+            <div className="flex items-center gap-2 mb-4">
+              <h2 className="text-lg font-semibold text-zinc-100">Messaggi / Messages</h2>
+              <span className="text-xs font-mono text-zinc-500">{userMessages.length}</span>
+            </div>
+            <div className="space-y-4">
+              {userMessages.map((msg, idx) => {
+                const severity = safeRender(msg?.severity, 'INFO').toUpperCase();
+                const badgeClass = severity === 'BLOCKER'
+                  ? 'bg-red-500/20 text-red-300 border-red-500/40'
+                  : severity === 'WARNING'
+                    ? 'bg-amber-500/20 text-amber-300 border-amber-500/40'
+                    : 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40';
+                const evidence = Array.isArray(msg?.evidence) ? msg.evidence : [];
+                const nextStepsIt = Array.isArray(msg?.next_steps_it) ? msg.next_steps_it : [];
+                const nextStepsEn = Array.isArray(msg?.next_steps_en) ? msg.next_steps_en : [];
+
+                return (
+                  <div key={`${safeRender(msg?.code, 'MSG')}_${idx}`} className="p-4 bg-zinc-950 rounded-lg border border-zinc-800">
+                    <div className="flex items-center justify-between gap-3 mb-2">
+                      <p className="text-sm font-semibold text-zinc-100">{safeRender(msg?.title_it, 'Messaggio')}</p>
+                      <span className={`px-2 py-0.5 text-[10px] font-mono rounded border ${badgeClass}`}>{severity}</span>
+                    </div>
+                    <p className="text-sm text-zinc-300">{safeRender(msg?.body_it, '')}</p>
+                    <p className="text-xs text-zinc-500 mt-1">{safeRender(msg?.title_en, '')}</p>
+                    <p className="text-xs text-zinc-500">{safeRender(msg?.body_en, '')}</p>
+
+                    {nextStepsIt.length > 0 && (
+                      <ul className="list-disc list-inside text-sm text-zinc-300 mt-3 space-y-1">
+                        {nextStepsIt.map((step, stepIdx) => (
+                          <li key={`it_${idx}_${stepIdx}`}>{safeRender(step, '')}</li>
+                        ))}
+                      </ul>
+                    )}
+                    {nextStepsEn.length > 0 && (
+                      <ul className="list-disc list-inside text-xs text-zinc-500 mt-2 space-y-1">
+                        {nextStepsEn.map((step, stepIdx) => (
+                          <li key={`en_${idx}_${stepIdx}`}>{safeRender(step, '')}</li>
+                        ))}
+                      </ul>
+                    )}
+
+                    {evidence.length > 0 && evidence[0]?.page && evidence[0]?.quote && (
+                      <p className="text-xs text-zinc-500 mt-3 italic border-l-2 border-gold/30 pl-2">
+                        p.{evidence[0].page} — {safeRender(evidence[0].quote, '')}
+                      </p>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
         )}
         
         {/* Header with Semaforo */}
