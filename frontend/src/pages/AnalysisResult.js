@@ -135,6 +135,22 @@ const formatMoney = (value) => {
   return value;
 };
 
+const parseNumericEuro = (value) => {
+  if (typeof value === 'number' && Number.isFinite(value)) return value;
+  if (typeof value === 'string') {
+    const normalized = value.replace(/[^\d,.-]/g, '').replace(/\./g, '').replace(',', '.');
+    const parsed = parseFloat(normalized);
+    return Number.isFinite(parsed) ? parsed : null;
+  }
+  return null;
+};
+
+const getShortText = (value, max = 110) => {
+  const text = safeRender(value, '').trim();
+  if (!text) return '';
+  return text.length > max ? `${text.slice(0, max)}...` : text;
+};
+
 // Get evidence from an object that might have it
 const getEvidence = (obj) => {
   if (!obj) return [];
@@ -143,80 +159,67 @@ const getEvidence = (obj) => {
   return [];
 };
 
+const getItemEvidence = (item) => {
+  if (!item || typeof item !== 'object') return [];
+  if (Array.isArray(item.evidence)) return item.evidence;
+  if (Array.isArray(item.fonte_perizia?.evidence)) return item.fonte_perizia.evidence;
+  return [];
+};
+
+const normalizeEstrattoSections = (estrattoQuality) => {
+  const rawSections = Array.isArray(estrattoQuality?.sections)
+    ? estrattoQuality.sections
+    : (estrattoQuality?.sections && typeof estrattoQuality.sections === 'object'
+      ? Object.values(estrattoQuality.sections)
+      : []);
+
+  return rawSections.map((section, sectionIndex) => {
+    const sectionItems = Array.isArray(section?.items)
+      ? section.items
+      : (section?.fields && typeof section.fields === 'object'
+        ? Object.entries(section.fields).map(([key, value]) => ({ key, ...(value || {}) }))
+        : []);
+    return {
+      ...section,
+      __key: section?.key || section?.name || section?.title_it || `section_${sectionIndex}`,
+      __title: section?.title_it || section?.name || `Sezione ${sectionIndex + 1}`,
+      __items: sectionItems.map((item, itemIndex) => ({
+        ...item,
+        __label: item?.label_it || item?.label || item?.name || item?.key || `Voce ${itemIndex + 1}`,
+        __value: item?.value ?? item?.formatted ?? item?.status ?? item?.text ?? item?.voce ?? '',
+        __evidence: getItemEvidence(item)
+      }))
+    };
+  });
+};
+
 // Money Box Item Component with Evidence - supports both old and ROMA STANDARD formats
 const MoneyBoxItem = ({ item }) => {
-  // Get evidence from either new format (fonte_perizia.evidence) or old format (item.evidence)
-  const evidence = getEvidence(item.fonte_perizia || item);
+  const evidence = getItemEvidence(item);
   const hasEvidence = evidence.length > 0;
-  const pages = hasEvidence ? [...new Set(evidence.map(e => e.page).filter(Boolean))] : [];
-
-  // Format value - handle TBD, numbers, and old format
-  const formatValue = () => {
-    // Handle TBD explicitly
-    if (item.stima_euro === 'TBD') return 'TBD';
-    
-    // New ROMA STANDARD format
-    if (item.stima_euro !== undefined && item.stima_euro !== null) {
-      const val = typeof item.stima_euro === 'number' ? item.stima_euro : parseFloat(item.stima_euro);
-      if (isNaN(val) || val === 0) {
-        return item.stima_nota?.includes('TBD') ? 'TBD' : (item.stima_nota || 'Da verificare');
-      }
-      return `€${val.toLocaleString()}`;
-    }
-    // Old format
-    const type = safeRender(item.type, 'UNKNOWN');
-    if ((type === 'NEXODIFY_ESTIMATE' || type === 'RANGE') && item.range) {
-      return `€${(item.range.min || 0).toLocaleString()} - €${(item.range.max || 0).toLocaleString()}`;
-    }
-    if (item.value !== undefined && item.value !== null && item.value !== 0) {
-      const val = typeof item.value === 'number' ? item.value : parseFloat(item.value);
-      return isNaN(val) ? safeRender(item.value) : `€${val.toLocaleString()}`;
-    }
-    return type;
-  };
-  
-  // Get label - new format uses 'voce', old format uses 'label_it'
-  const label = item.voce || item.label_it || item.label || 'Item';
-  const code = item.code || label.charAt(0);
-  const source = item.fonte_perizia?.value || item.source || '';
-  const displayValue = formatValue();
-  const isTBD = displayValue === 'TBD' || displayValue.includes('TBD');
+  const label = item.label_it || item.voce || item.label || 'Voce';
+  const euroValue = parseNumericEuro(item.stima_euro);
+  const displayValue = euroValue === null ? safeRender(item.stima_euro, 'TBD') : `€${euroValue.toLocaleString()}`;
+  const shortNota = getShortText(item.stima_nota, 95);
+  const firstEvidence = evidence[0];
 
   return (
     <div className="p-4 bg-zinc-950/50 rounded-lg border border-zinc-800">
-      <div className="flex items-start justify-between mb-2">
+      <div className="flex items-start justify-between gap-3 mb-2">
         <div className="flex-1">
-          <div className="flex items-center gap-2 mb-1">
-            <span className="font-mono text-xs text-gold">{code}</span>
-            <span className="text-sm font-medium text-zinc-100">{label}</span>
-            {hasEvidence && (
-              <span className="text-xs font-mono text-gold flex items-center gap-1">
-                <FileText className="w-3 h-3" />
-                p. {pages.join(', ')}
-              </span>
-            )}
-          </div>
-          {source && <p className="text-xs text-zinc-500">{normalizePlaceholder(source)}</p>}
+          <p className="text-sm font-medium text-zinc-100">{label}</p>
+          {shortNota && <p className="text-xs text-zinc-500 mt-1">{shortNota}</p>}
         </div>
         <div className="text-right">
-          <span className={`font-mono text-sm font-bold ${
-            isTBD ? 'text-amber-400' :
-            source.toLowerCase().includes('perizia') ? 'text-emerald-400' : 
-            item.type === 'NEXODIFY_ESTIMATE' || item.stima_nota ? 'text-gold' : 'text-zinc-400'
-          }`}>
-            {displayValue}
-          </span>
+          <span className="font-mono text-sm font-bold text-gold">{displayValue}</span>
         </div>
       </div>
-      {item.stima_nota && !isTBD && item.stima_euro > 0 && (
-        <p className="text-xs text-amber-400 mt-1">{item.stima_nota}</p>
-      )}
-      {item.action_required_it && (
-        <p className="text-xs text-amber-400 mt-1">{safeRender(item.action_required_it)}</p>
-      )}
-      {hasEvidence && evidence[0]?.quote && (
+      {hasEvidence && (
         <div className="mt-2 p-2 bg-zinc-900 rounded border-l-2 border-gold/30">
-          <p className="text-xs text-zinc-400 italic">"{evidence[0].quote}"</p>
+          <p className="text-xs text-zinc-400 italic">
+            {firstEvidence?.page ? `p.${firstEvidence.page} — ` : ''}
+            {safeRender(firstEvidence?.quote, 'Evidenza disponibile')}
+          </p>
         </div>
       )}
     </div>
@@ -404,6 +407,8 @@ const AnalysisResult = () => {
   const [isDeleting, setIsDeleting] = useState(false);
   const [selectedLotIndex, setSelectedLotIndex] = useState(0);
   const [headlineModal, setHeadlineModal] = useState({ open: false, fieldKey: null });
+  const [estrattoOpen, setEstrattoOpen] = useState({});
+  const [estrattoShowAll, setEstrattoShowAll] = useState({});
 
   const fetchAnalysis = async () => {
     const params = new URLSearchParams(location.search);
@@ -527,6 +532,7 @@ const AnalysisResult = () => {
   const semaforo = section1.status ? section1 : (result.semaforo_generale || {});
   const decision = section2.summary_it ? section2 : (result.decision_rapida_client || {});
   const moneyBox = section3.items ? section3 : (result.money_box || {});
+  const estrattoQuality = result.estratto_quality || {};
   
   // For multi-lot: use selected lot data, otherwise use section4
   const dati = selectedLot ? {
@@ -552,6 +558,7 @@ const AnalysisResult = () => {
   const fieldStates = result.field_states || {};
   const datiAsta = result.dati_asta || result.dati_certi_del_lotto?.dati_asta || result.dati_certi?.dati_asta;
   const resultPathUsed = analysis?.__result_path || (analysis?.result ? 'result' : null);
+  const estrattoSections = normalizeEstrattoSections(estrattoQuality);
 
   const getFieldState = (key) => fieldStates?.[key] || null;
   const getFieldEvidence = (key, fallback) => {
@@ -605,9 +612,22 @@ const AnalysisResult = () => {
   const activeHeadlineDisplay = activeHeadlineKey
     ? getHeadlineDisplayValue(activeHeadlineKey, getHeadlineSourceValue(activeHeadlineKey))
     : '';
+  const auctionBaseValue = parseNumericEuro(dati?.prezzo_base_asta?.value ?? dati?.prezzo_base_asta?.formatted ?? dati?.prezzo_base_asta);
 
-  // Get money box items - support both old and new format
-  const moneyBoxItems = Array.isArray(moneyBox.items) ? moneyBox.items : [];
+  // Get money box items - keep only estimate items with numeric stima_euro, excluding auction base price
+  const rawMoneyBoxItems = Array.isArray(moneyBox.items) ? moneyBox.items : [];
+  const moneyBoxItems = rawMoneyBoxItems
+    .filter((item) => {
+      const type = safeRender(item?.type, '').toUpperCase();
+      const label = `${safeRender(item?.label_it, '')} ${safeRender(item?.voce, '')}`.toLowerCase();
+      const stima = parseNumericEuro(item?.stima_euro);
+      const isEstimate = type === 'ESTIMATE' || type === 'NEXODIFY_ESTIMATE';
+      const isAuctionBaseLabel = label.includes('prezzo base') || label.includes("base d'asta") || label.includes("valore finale di stima");
+      const isAuctionBaseValue = auctionBaseValue !== null && stima !== null && Math.abs(stima - auctionBaseValue) < 0.01;
+      const isAuctionBase = isAuctionBaseLabel || isAuctionBaseValue;
+      return isEstimate && stima !== null && !isAuctionBase;
+    })
+    .sort((a, b) => (parseNumericEuro(b?.stima_euro) || 0) - (parseNumericEuro(a?.stima_euro) || 0));
   const moneyBoxItemA = moneyBoxItems.find((item) => item.code === 'A' || item.voce === 'A' || item.label_it?.toLowerCase().includes('regolarizzazione'));
   
   // Get money box total - support both old and new format, handle TBD
@@ -661,7 +681,8 @@ const AnalysisResult = () => {
   };
 
   const params = new URLSearchParams(location.search);
-  if (params.get('debug') === '1' && typeof window !== 'undefined') {
+  const isDebugMode = params.get('debug') === '1';
+  if (isDebugMode && typeof window !== 'undefined') {
     window.__UI_SNAPSHOT__ = {
       analysis_id: analysisId,
       result_path_used: resultPathUsed,
@@ -770,6 +791,16 @@ const AnalysisResult = () => {
       <Sidebar user={user} logout={logout} />
       
       <main className="ml-64 p-8">
+        {isDebugMode && (
+          <pre className="mb-4 text-[10px] leading-4 text-zinc-400 bg-zinc-950 border border-zinc-800 rounded p-2 overflow-x-auto">
+{JSON.stringify({
+  has_estratto_quality: !!result.estratto_quality,
+  estratto_sections_count: estrattoSections.length,
+  money_box_items_count: moneyBoxItems.length
+}, null, 2)}
+          </pre>
+        )}
+
         {/* Back Button & Actions */}
         <div className="flex items-center justify-between mb-6">
           <Link to="/history" className="inline-flex items-center gap-2 text-zinc-400 hover:text-zinc-100 transition-colors">
@@ -1084,6 +1115,59 @@ const AnalysisResult = () => {
                 <MoneyBoxItem item={moneyBoxItemA} />
               </div>
             )}
+
+            <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-6">
+              <h2 className="text-xl font-serif font-bold text-zinc-100 mb-4">Estratto (qualità agenzia)</h2>
+              {estrattoSections.length > 0 ? (
+                <div className="space-y-3">
+                  {estrattoSections.map((section, sectionIdx) => {
+                    const open = estrattoOpen[section.__key] !== undefined ? !!estrattoOpen[section.__key] : sectionIdx < 2;
+                    const showAll = !!estrattoShowAll[section.__key];
+                    const items = section.__items || [];
+                    const visibleItems = showAll ? items : items.slice(0, 12);
+                    return (
+                      <div key={section.__key} className="rounded-lg border border-zinc-800 bg-zinc-950/50">
+                        <button
+                          type="button"
+                          onClick={() => setEstrattoOpen((prev) => ({ ...prev, [section.__key]: !open }))}
+                          className="w-full px-4 py-3 text-left flex items-center justify-between"
+                        >
+                          <span className="text-sm font-semibold text-zinc-100">{section.__title}</span>
+                          <span className="text-xs text-zinc-500">{open ? 'Nascondi' : 'Mostra'}</span>
+                        </button>
+                        {open && (
+                          <div className="px-4 pb-4 space-y-2">
+                            {visibleItems.map((item, idx) => (
+                              <div key={`${section.__key}_${idx}`} className="p-3 rounded border border-zinc-800 bg-zinc-900">
+                                <p className="text-sm text-zinc-100">
+                                  <span className="font-medium">{item.__label}:</span> {safeRender(item.__value, 'NON SPECIFICATO IN PERIZIA')}
+                                </p>
+                                {(item.__evidence || []).map((ev, evIdx) => (
+                                  <p key={`${section.__key}_${idx}_ev_${evIdx}`} className="text-xs text-zinc-500 mt-1">
+                                    {`p.${safeRender(ev.page, '?')} — ${safeRender(ev.quote, 'Evidenza disponibile')}`}
+                                  </p>
+                                ))}
+                              </div>
+                            ))}
+                            {items.length > 12 && (
+                              <button
+                                type="button"
+                                onClick={() => setEstrattoShowAll((prev) => ({ ...prev, [section.__key]: !showAll }))}
+                                className="text-xs text-gold hover:underline"
+                              >
+                                {showAll ? 'Show less' : `Show more (${items.length - 12})`}
+                              </button>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              ) : (
+                <p className="text-zinc-500">Nessuna sezione estratto_quality disponibile.</p>
+              )}
+            </div>
             
             {/* Key Data Grid with Evidence */}
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">

@@ -7,6 +7,8 @@ import os
 import asyncio
 import logging
 import re
+import shutil
+import statistics
 from pathlib import Path
 from pydantic import BaseModel, Field, ConfigDict
 from typing import List, Optional, Dict, Any, Tuple
@@ -17,9 +19,12 @@ import httpx
 import ipaddress
 from fastapi.openapi.utils import get_openapi
 from PyPDF2 import PdfReader
+import pdfplumber
 import io
 import hashlib
 from openai import AsyncOpenAI
+from candidate_miner import run_candidate_miner_for_analysis
+from section_builder import build_estratto_quality
 
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
@@ -40,6 +45,16 @@ LLM_SUMMARY_TIMEOUT_SECONDS = int(os.environ.get('LLM_SUMMARY_TIMEOUT_SECONDS', 
 PDF_TEXT_MIN_PAGE_CHARS = int(os.environ.get("PDF_TEXT_MIN_PAGE_CHARS", "40"))
 PDF_TEXT_MIN_COVERAGE_RATIO = float(os.environ.get("PDF_TEXT_MIN_COVERAGE_RATIO", "0.6"))
 PDF_TEXT_MAX_BLANK_PAGE_RATIO = float(os.environ.get("PDF_TEXT_MAX_BLANK_PAGE_RATIO", "0.3"))
+OCR_MIN_WORD_COUNT = 30
+OCR_MIN_CHARS_NON_WS = 200
+OCR_MIN_ALPHA_RATIO = 0.30
+OCR_MAX_GARBAGE_RATIO = 0.25
+DOC_NEEDS_OCR_RATIO = 0.35
+DOC_NEEDS_OCR_RATIO_WITH_IMAGES = 0.20
+DOC_NEEDS_OCR_MIN_AVG_IMAGES = 1.0
+DOC_UNREADABLE_RATIO = 0.75
+DOC_UNREADABLE_MAX_MEDIAN_WORDS = 10
+DOC_UNREADABLE_MAX_AVG_ALPHA = 0.15
 OFFLINE_QA_ENV = os.environ.get('OFFLINE_QA', '0').lower() in {"1", "true", "yes"}
 ALLOW_OFFLINE_QA_ENV = os.environ.get("ALLOW_OFFLINE_QA", "0").strip() == "1"
 OFFLINE_QA_TOKEN = os.environ.get("OFFLINE_QA_TOKEN", "").strip()
@@ -4489,6 +4504,332 @@ def _build_full_text_from_pages(pages: List[Dict]) -> str:
     return full_text
 
 
+def _safe_float(value: Any) -> float:
+    try:
+        return float(value)
+    except Exception:
+        return 0.0
+
+
+def _safe_image_count(page_obj: Any) -> Tuple[int, Optional[str]]:
+    try:
+        images_attr = getattr(page_obj, "images", None)
+        if images_attr is not None:
+            try:
+                return len(list(images_attr)), None
+            except TypeError:
+                return len(images_attr), None
+            except Exception:
+                pass
+
+        resources = page_obj.get("/Resources")
+        if resources is None:
+            return 0, None
+        if hasattr(resources, "get_object"):
+            resources = resources.get_object()
+        xobject = resources.get("/XObject") if isinstance(resources, dict) else None
+        if xobject is None:
+            return 0, None
+        if hasattr(xobject, "get_object"):
+            xobject = xobject.get_object()
+
+        image_count = 0
+        if isinstance(xobject, dict):
+            for item in xobject.values():
+                try:
+                    resolved = item.get_object() if hasattr(item, "get_object") else item
+                    subtype = resolved.get("/Subtype") if isinstance(resolved, dict) else None
+                    if str(subtype) == "/Image":
+                        image_count += 1
+                except Exception:
+                    continue
+        return image_count, None
+    except Exception:
+        return 0, "image_detect_failed"
+
+
+def _build_step1_extract_payload(contents: bytes) -> Dict[str, Any]:
+    reader = PdfReader(io.BytesIO(contents))
+    pages_total = len(reader.pages)
+    pages_raw: List[Dict[str, Any]] = []
+    words_raw: List[Dict[str, Any]] = []
+    metrics: List[Dict[str, Any]] = []
+    ocr_plan: List[Dict[str, Any]] = []
+    full_raw_parts: List[str] = []
+    page_label_width = max(2, len(str(pages_total or 0)))
+
+    plumber_pages: List[Any] = []
+    try:
+        with pdfplumber.open(io.BytesIO(contents)) as plumber_pdf:
+            plumber_pages = list(plumber_pdf.pages)
+    except Exception:
+        plumber_pages = []
+
+    for idx in range(1, pages_total + 1):
+        page_obj = reader.pages[idx - 1]
+        extraction_errors: List[str] = []
+
+        try:
+            page_text = page_obj.extract_text() or ""
+        except Exception:
+            page_text = ""
+            extraction_errors.append("text_extract_failed")
+
+        page_words_output: List[Dict[str, Any]] = []
+        word_count = 0
+        try:
+            if idx - 1 >= len(plumber_pages):
+                raise RuntimeError("pdfplumber_page_unavailable")
+            page_words = plumber_pages[idx - 1].extract_words() or []
+            for token in page_words:
+                if not isinstance(token, dict):
+                    continue
+                token_text = str(token.get("text") or "")
+                if not token_text.strip():
+                    continue
+                word_entry: Dict[str, Any] = {"text": token_text}
+                if token.get("x0") is not None:
+                    word_entry["x0"] = _safe_float(token.get("x0"))
+                if token.get("x1") is not None:
+                    word_entry["x1"] = _safe_float(token.get("x1"))
+                if token.get("top") is not None:
+                    word_entry["y0"] = _safe_float(token.get("top"))
+                if token.get("bottom") is not None:
+                    word_entry["y1"] = _safe_float(token.get("bottom"))
+                page_words_output.append(word_entry)
+            word_count = len(page_words_output)
+        except Exception:
+            extraction_errors.append("word_extract_failed")
+            word_count = len(re.findall(r"\b\w+\b", page_text, flags=re.UNICODE))
+
+        image_count, image_error = _safe_image_count(page_obj)
+        if image_error:
+            extraction_errors.append(image_error)
+
+        non_ws_chars = [c for c in page_text if not c.isspace()]
+        chars_non_ws = len(non_ws_chars)
+        alpha_chars = sum(1 for c in non_ws_chars if c.isalpha())
+        garbage_chars = sum(1 for c in non_ws_chars if (not c.isalpha() and not c.isdigit()))
+        alpha_ratio = (alpha_chars / chars_non_ws) if chars_non_ws > 0 else 0.0
+        garbage_ratio = (garbage_chars / chars_non_ws) if chars_non_ws > 0 else 0.0
+
+        needs_ocr_reasons: List[str] = []
+        if word_count < OCR_MIN_WORD_COUNT:
+            needs_ocr_reasons.append("word_count_lt_30")
+        if chars_non_ws < OCR_MIN_CHARS_NON_WS:
+            needs_ocr_reasons.append("chars_non_ws_lt_200")
+        if alpha_ratio < OCR_MIN_ALPHA_RATIO:
+            needs_ocr_reasons.append("alpha_ratio_lt_0.30")
+        if garbage_ratio > OCR_MAX_GARBAGE_RATIO:
+            needs_ocr_reasons.append("garbage_ratio_gt_0.25")
+        if "word_extract_failed" in extraction_errors:
+            needs_ocr_reasons.append("word_extract_failed")
+        if "text_extract_failed" in extraction_errors:
+            needs_ocr_reasons.append("text_extract_failed")
+
+        needs_ocr = bool(needs_ocr_reasons)
+        pages_raw.append({"page": idx, "text": page_text})
+        words_raw.append({"page": idx, "words": page_words_output})
+        metrics_row = {
+            "page": idx,
+            "chars_non_ws": chars_non_ws,
+            "word_count": word_count,
+            "alpha_ratio": round(alpha_ratio, 6),
+            "garbage_ratio": round(garbage_ratio, 6),
+            "image_count": image_count,
+            "has_images": image_count > 0,
+            "extraction_errors": extraction_errors,
+            "needs_ocr": needs_ocr,
+            "needs_ocr_reasons": needs_ocr_reasons,
+        }
+        metrics.append(metrics_row)
+        if needs_ocr:
+            ocr_plan.append(
+                {
+                    "page": idx,
+                    "reasons": needs_ocr_reasons,
+                    "metrics_snapshot": {
+                        "word_count": word_count,
+                        "chars_non_ws": chars_non_ws,
+                        "alpha_ratio": round(alpha_ratio, 6),
+                        "garbage_ratio": round(garbage_ratio, 6),
+                        "image_count": image_count,
+                    },
+                }
+            )
+
+        page_label = str(idx).zfill(page_label_width)
+        full_raw_parts.append(f"===== PAGE {page_label} =====\n{page_text}")
+
+    pages_needing_ocr = [int(m["page"]) for m in metrics if m.get("needs_ocr")]
+    pages_good = [int(m["page"]) for m in metrics if not m.get("needs_ocr")]
+    needs_ocr_pages_ratio = (len(pages_needing_ocr) / pages_total) if pages_total else 0.0
+    total_images = sum(int(m.get("image_count", 0) or 0) for m in metrics)
+    avg_image_count_per_page = (total_images / pages_total) if pages_total else 0.0
+    median_word_count = int(statistics.median([int(m.get("word_count", 0) or 0) for m in metrics])) if metrics else 0
+    avg_alpha_ratio = (
+        sum(float(m.get("alpha_ratio", 0.0) or 0.0) for m in metrics) / pages_total
+        if pages_total
+        else 0.0
+    )
+
+    needs_ocr_document = (
+        needs_ocr_pages_ratio >= DOC_NEEDS_OCR_RATIO
+        or (
+            needs_ocr_pages_ratio >= DOC_NEEDS_OCR_RATIO_WITH_IMAGES
+            and avg_image_count_per_page >= DOC_NEEDS_OCR_MIN_AVG_IMAGES
+        )
+    )
+    unreadable_document = (
+        needs_ocr_pages_ratio >= DOC_UNREADABLE_RATIO
+        and median_word_count < DOC_UNREADABLE_MAX_MEDIAN_WORDS
+        and avg_alpha_ratio < DOC_UNREADABLE_MAX_AVG_ALPHA
+    )
+
+    if unreadable_document:
+        quality_status = "UNREADABLE"
+        quality_reason = "Most pages are likely scanned/images or low readability; reliable text extraction is not possible."
+        customer_message_it = "Documento non leggibile in modo affidabile (probabile scansione/immagini o qualità bassa). L’analisi automatica può essere incompleta. Carica un PDF migliore o richiedi revisione manuale."
+        customer_message_en = "Document is not reliably machine-readable (likely scan/images or low quality). Automated analysis may be incomplete. Upload a clearer PDF or request manual review."
+    elif needs_ocr_document:
+        quality_status = "NEEDS_OCR"
+        quality_reason = "A significant portion of pages likely needs OCR due to low readability signals."
+        customer_message_it = "Documento parzialmente leggibile in automatico (probabile scansione/immagini o qualità bassa). È consigliata OCR/revisione manuale."
+        customer_message_en = "Document appears only partially machine-readable (likely scan/images or low quality). OCR/manual review is recommended."
+    else:
+        quality_status = "TEXT_OK"
+        quality_reason = "Embedded text quality appears sufficient for deterministic extraction."
+        customer_message_it = "Documento leggibile in modo automatico con qualità accettabile."
+        customer_message_en = "Document appears machine-readable with acceptable quality."
+
+    thresholds = {
+        "page_needs_ocr": {
+            "word_count_lt": OCR_MIN_WORD_COUNT,
+            "chars_non_ws_lt": OCR_MIN_CHARS_NON_WS,
+            "alpha_ratio_lt": OCR_MIN_ALPHA_RATIO,
+            "garbage_ratio_gt": OCR_MAX_GARBAGE_RATIO,
+            "fail_flags": ["word_extract_failed", "text_extract_failed"],
+        },
+        "document_status": {
+            "needs_ocr_ratio_gte": DOC_NEEDS_OCR_RATIO,
+            "needs_ocr_ratio_gte_with_images": DOC_NEEDS_OCR_RATIO_WITH_IMAGES,
+            "avg_image_count_per_page_gte": DOC_NEEDS_OCR_MIN_AVG_IMAGES,
+            "unreadable_ratio_gte": DOC_UNREADABLE_RATIO,
+            "unreadable_median_word_count_lt": DOC_UNREADABLE_MAX_MEDIAN_WORDS,
+            "unreadable_avg_alpha_ratio_lt": DOC_UNREADABLE_MAX_AVG_ALPHA,
+        },
+    }
+
+    document_quality = {
+        "status": quality_status,
+        "reason": quality_reason,
+        "pages_total": pages_total,
+        "pages_needing_ocr": pages_needing_ocr,
+        "thresholds": thresholds,
+        "metrics_summary": {
+            "needs_ocr_pages_ratio": round(needs_ocr_pages_ratio, 6),
+            "avg_image_count_per_page": round(avg_image_count_per_page, 6),
+            "median_word_count": median_word_count,
+            "avg_alpha_ratio": round(avg_alpha_ratio, 6),
+        },
+        "customer_message_it": customer_message_it,
+        "customer_message_en": customer_message_en,
+    }
+
+    extraction_summary = {
+        "pages_total": pages_total,
+        "pages_needing_ocr": pages_needing_ocr,
+        "pages_good": pages_good,
+        "thresholds_used": thresholds,
+        "notes": "",
+    }
+
+    return {
+        "pages_raw": pages_raw,
+        "full_raw_txt": "\n\n".join(full_raw_parts).strip() + ("\n" if full_raw_parts else ""),
+        "words_raw": words_raw,
+        "metrics": metrics,
+        "ocr_plan": ocr_plan,
+        "document_quality": document_quality,
+        "extraction_summary": extraction_summary,
+    }
+
+
+def _write_extraction_pack(analysis_id: str, payload: Dict[str, Any], document_quality: Dict[str, Any]) -> str:
+    extract_dir = Path("/srv/perizia/_qa/runs") / analysis_id / "extract"
+    if extract_dir.exists():
+        shutil.rmtree(extract_dir)
+    extract_dir.mkdir(parents=True, exist_ok=True)
+
+    with open(extract_dir / "pages_raw.json", "w", encoding="utf-8") as f:
+        json.dump(payload.get("pages_raw", []), f, ensure_ascii=False, indent=2)
+    with open(extract_dir / "full_raw.txt", "w", encoding="utf-8") as f:
+        f.write(str(payload.get("full_raw_txt", "")))
+    with open(extract_dir / "words_raw.json", "w", encoding="utf-8") as f:
+        json.dump(payload.get("words_raw", []), f, ensure_ascii=False, indent=2)
+    with open(extract_dir / "metrics.json", "w", encoding="utf-8") as f:
+        json.dump(payload.get("metrics", []), f, ensure_ascii=False, indent=2)
+    with open(extract_dir / "ocr_plan.json", "w", encoding="utf-8") as f:
+        json.dump(payload.get("ocr_plan", []), f, ensure_ascii=False, indent=2)
+    with open(extract_dir / "quality.json", "w", encoding="utf-8") as f:
+        json.dump(document_quality, f, ensure_ascii=False, indent=2)
+
+    return str(extract_dir)
+
+
+def _apply_unreadable_hard_stop(result: Dict[str, Any], document_quality: Dict[str, Any]) -> None:
+    if str(document_quality.get("status")) != "UNREADABLE":
+        return
+
+    result["analysis_status"] = "UNREADABLE"
+
+    semaforo = result.get("semaforo_generale")
+    if not isinstance(semaforo, dict):
+        semaforo = {}
+        result["semaforo_generale"] = semaforo
+    semaforo["status"] = "UNKNOWN"
+    semaforo["status_it"] = "NON VALUTABILE"
+    semaforo["status_en"] = "NOT ASSESSABLE"
+    semaforo["reason_it"] = document_quality.get("customer_message_it")
+    semaforo["reason_en"] = document_quality.get("customer_message_en")
+    blockers = semaforo.get("top_blockers")
+    if isinstance(blockers, list):
+        if "DOCUMENT_UNREADABLE" not in blockers:
+            blockers.append("DOCUMENT_UNREADABLE")
+    else:
+        semaforo["top_blockers"] = ["DOCUMENT_UNREADABLE"]
+
+    section1 = result.get("section_1_semaforo_generale")
+    if isinstance(section1, dict):
+        section1["status"] = "UNKNOWN"
+        section1["status_it"] = "NON VALUTABILE"
+        section1["status_en"] = "NOT ASSESSABLE"
+        section1["reason_it"] = document_quality.get("customer_message_it")
+        section1["reason_en"] = document_quality.get("customer_message_en")
+        section1_blockers = section1.get("top_blockers")
+        if isinstance(section1_blockers, list):
+            if "DOCUMENT_UNREADABLE" not in section1_blockers:
+                section1_blockers.append("DOCUMENT_UNREADABLE")
+        else:
+            section1["top_blockers"] = ["DOCUMENT_UNREADABLE"]
+
+    decision_message_it = f"{document_quality.get('customer_message_it')}\nDisclaimer: verifica manuale obbligatoria."
+    decision_message_en = f"{document_quality.get('customer_message_en')}\nDisclaimer: manual review is required."
+    decision = result.get("decision_rapida_client")
+    if not isinstance(decision, dict):
+        decision = {}
+        result["decision_rapida_client"] = decision
+    decision["summary_it"] = decision_message_it
+    decision["summary_en"] = decision_message_en
+
+    section2 = result.get("section_2_decisione_rapida")
+    if not isinstance(section2, dict):
+        section2 = {}
+        result["section_2_decisione_rapida"] = section2
+    section2["summary_it"] = decision_message_it
+    section2["summary_en"] = decision_message_en
+
+
 def _extract_pdf_text_digital(contents: bytes) -> Dict[str, Any]:
     """Primary deterministic extraction path from embedded PDF text (non-OCR)."""
     try:
@@ -4665,6 +5006,7 @@ async def analyze_perizia(request: Request, file: UploadFile = File(...)):
 
     async def run_pipeline():
         logger.info(f"[{request_id}] pipeline_start analysis_id={analysis_id} offline_qa={offline_qa}")
+        extraction_payload = await asyncio.to_thread(_build_step1_extract_payload, contents)
 
         # Determine mime type
         mime_type = "application/pdf"
@@ -4698,14 +5040,7 @@ async def analyze_perizia(request: Request, file: UploadFile = File(...)):
                 or blank_ratio >= PDF_TEXT_MAX_BLANK_PAGE_RATIO
             )
             if needs_ocr_fallback:
-                logger.info(f"[{request_id}] docai_fallback_needed")
-                docai_pages, docai_text, docai_error = await _extract_with_docai(contents, mime_type, request_id)
-                if docai_error:
-                    logger.warning(f"[{request_id}] docai_fallback_failed {docai_error}")
-                elif docai_text.strip():
-                    pages = docai_pages
-                    full_text = docai_text
-                    logger.info(f"[{request_id}] docai_fallback_used pages={len(pages)} chars={len(full_text)}")
+                logger.info(f"[{request_id}] docai_fallback_skipped step1_no_execution=true")
 
         if not pages:
             pages = [{"page_number": 1, "text": "", "tables": [], "form_fields": [], "char_count": 0}]
@@ -4721,10 +5056,10 @@ async def analyze_perizia(request: Request, file: UploadFile = File(...)):
         if not offline_qa:
             await _enrich_summary_with_optional_llm(result, file.filename, full_text, request_id)
 
-        return result, pages, full_text
+        return result, pages, full_text, extraction_payload
 
     try:
-        result, pages, full_text = await asyncio.wait_for(run_pipeline(), timeout=PIPELINE_TIMEOUT_SECONDS)
+        result, pages, full_text, extraction_payload = await asyncio.wait_for(run_pipeline(), timeout=PIPELINE_TIMEOUT_SECONDS)
     except asyncio.TimeoutError:
         await _persist_failed_analysis(
             analysis_id=analysis_id,
@@ -4743,6 +5078,56 @@ async def analyze_perizia(request: Request, file: UploadFile = File(...)):
     _apply_headline_field_states(result, pages)
     _apply_decision_field_states(result, pages)
     _normalize_evidence_offsets(result, pages)
+
+    document_quality = extraction_payload.get("document_quality", {})
+    if not isinstance(document_quality, dict):
+        document_quality = {}
+    result["document_quality"] = document_quality
+
+    summary = extraction_payload.get("extraction_summary", {})
+    if not isinstance(summary, dict):
+        summary = {}
+    extract_folder = f"/srv/perizia/_qa/runs/{analysis_id}/extract/"
+    summary["notes"] = f"Step1 extraction pack created under {extract_folder}"
+    debug_obj = result.get("debug") if isinstance(result.get("debug"), dict) else {}
+    debug_obj["extraction_summary"] = summary
+    result["debug"] = debug_obj
+
+    _apply_unreadable_hard_stop(result, document_quality)
+    _write_extraction_pack(analysis_id, extraction_payload, document_quality)
+    candidate_summary: Dict[str, Any]
+    try:
+        candidate_summary = run_candidate_miner_for_analysis(analysis_id)
+    except Exception as e:
+        logger.exception(f"[{request_id}] candidate_miner_failed analysis_id={analysis_id} err={e}")
+        candidate_summary = {
+            "money_count": 0,
+            "date_count": 0,
+            "trigger_count": 0,
+            "low_quality_pages": [],
+            "candidates_folder": f"/srv/perizia/_qa/runs/{analysis_id}/candidates/",
+            "error": "candidate_miner_failed",
+        }
+    debug_obj["candidate_summary"] = candidate_summary
+    try:
+        result["estratto_quality"] = build_estratto_quality(analysis_id, result)
+    except Exception as e:
+        logger.exception(f"[{request_id}] section_builder_failed analysis_id={analysis_id} err={e}")
+        result["estratto_quality"] = {
+            "sections": [],
+            "build_meta": {
+                "analysis_id": analysis_id,
+                "candidate_counts": {
+                    "money": 0,
+                    "dates": 0,
+                    "triggers": 0,
+                    "pages": 0,
+                },
+                "low_quality_pages": [],
+                "error": "section_builder_failed",
+            },
+        }
+    result["debug"] = debug_obj
     logger.info(f"[{request_id}] assemble_output analysis_id={analysis_id}")
 
     # Create analysis record
@@ -4761,7 +5146,7 @@ async def analyze_perizia(request: Request, file: UploadFile = File(...)):
     analysis_dict = analysis.model_dump()
     analysis_dict["created_at"] = analysis_dict["created_at"].isoformat()
     analysis_dict["raw_text"] = full_text[:100000]  # Store raw text for assistant
-    analysis_dict["status"] = "COMPLETED"
+    analysis_dict["status"] = "UNREADABLE" if result.get("analysis_status") == "UNREADABLE" else "COMPLETED"
     if offline_qa:
         try:
             out_dir = Path("/tmp/perizia_qa_run")

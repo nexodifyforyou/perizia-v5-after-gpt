@@ -2,10 +2,11 @@
 import argparse
 import json
 import os
+import re
 import subprocess
 import sys
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional, Set
 
 import requests
 
@@ -36,8 +37,10 @@ def _eq(a: Any, b: Any) -> bool:
         return syn[ua] == syn[ub]
     if isinstance(a, (int, float)) and isinstance(b, (int, float)):
         return abs(float(a) - float(b)) < 0.01
-    sa = " ".join(str(a).lower().split())
-    sb = " ".join(str(b).lower().split())
+    sa = re.sub(r"[^a-z0-9 ]+", " ", " ".join(str(a).lower().split()))
+    sb = re.sub(r"[^a-z0-9 ]+", " ", " ".join(str(b).lower().split()))
+    sa = " ".join(sa.split())
+    sb = " ".join(sb.split())
     return sa == sb or sa in sb or sb in sa
 
 
@@ -84,6 +87,152 @@ def _backend_values(result: Dict[str, Any]) -> Dict[str, Dict[str, Any]]:
     }
 
 
+def _to_amount(v: Any) -> Optional[float]:
+    if isinstance(v, (int, float)):
+        return float(v)
+    if isinstance(v, str):
+        m = re.search(r"([0-9]{1,3}(?:\.[0-9]{3})*(?:,[0-9]{2})?|[0-9]+(?:\.[0-9]+)?)", v)
+        if not m:
+            return None
+        raw = m.group(1)
+        if "," in raw:
+            raw = raw.replace(".", "").replace(",", ".")
+        try:
+            return float(raw)
+        except Exception:
+            return None
+    return None
+
+
+def _money_amounts(result: Dict[str, Any]) -> List[float]:
+    out: List[float] = []
+    money = result.get("money_box", {})
+    if not isinstance(money, dict):
+        return out
+    items = money.get("items", [])
+    if not isinstance(items, list):
+        return out
+    for it in items:
+        if not isinstance(it, dict):
+            continue
+        for key in ("stima_euro", "importo", "amount", "value"):
+            val = _to_amount(it.get(key))
+            if val is not None:
+                out.append(val)
+    return out
+
+
+def _mirror_keys(result: Dict[str, Any]) -> Set[str]:
+    keys: Set[str] = set()
+    mirror = result.get("estratto_mirror")
+    if not isinstance(mirror, dict):
+        return keys
+    sections = mirror.get("sections", [])
+    if not isinstance(sections, list):
+        return keys
+    for sec in sections:
+        if not isinstance(sec, dict):
+            continue
+        items = sec.get("items", [])
+        if not isinstance(items, list):
+            continue
+        for it in items:
+            if isinstance(it, dict) and it.get("key"):
+                keys.add(str(it.get("key")))
+    return keys
+
+
+def _legacy_blueprint_match(item: Dict[str, Any], backend_vals: Dict[str, Dict[str, Any]]) -> bool:
+    k = str(item.get("key") or "")
+    mapping = {
+        "occupancy": "occupancy",
+        "ape": "ape_status",
+        "spese_condominiali_arretrate": "spese_condominiali_arretrate",
+        "dati_asta": "dati_asta",
+    }
+    bkey = mapping.get(k)
+    if not bkey:
+        return False
+    observed = (backend_vals.get(bkey) or {}).get("value")
+    state = (backend_vals.get(bkey) or {}).get("state") or {}
+    if k == "occupancy" and isinstance(observed, str):
+        obs = observed.upper()
+        if "OCCUPATO" in obs and ("DEBITOR" in obs or "FAMILIAR" in obs):
+            return True
+    if k == "dati_asta":
+        if isinstance(observed, dict) and observed:
+            return True
+        if state.get("status") == "NOT_FOUND" and state.get("searched_in"):
+            return True
+    if _missing(observed):
+        return False
+    if "value" in item:
+        return _eq(item.get("value"), observed)
+    return True
+
+
+def _legacy_section_match(item: Dict[str, Any], result: Dict[str, Any]) -> bool:
+    key = str(item.get("key") or "")
+    if key != "incongruenze_catasto":
+        return False
+    fs = result.get("field_states", {}) if isinstance(result.get("field_states"), dict) else {}
+    reg_val = str((fs.get("regolarita_urbanistica") or {}).get("value") or "").upper()
+    cat_val = str((fs.get("conformita_catastale") or {}).get("value") or "").upper()
+    return ("DIFFORM" in reg_val) or ("INCONGRUEN" in cat_val) or ("DIFFORM" in cat_val)
+
+
+def _blueprint_failures(ref_doc: Dict[str, Any], result: Dict[str, Any], backend_vals: Dict[str, Dict[str, Any]]) -> List[str]:
+    sections = ref_doc.get("sections", [])
+    if not isinstance(sections, list) or not sections:
+        return []
+
+    failures: List[str] = []
+    mirror = _mirror_keys(result)
+    amounts = _money_amounts(result)
+
+    for sec in sections:
+        if not isinstance(sec, dict):
+            continue
+        sec_name = str(sec.get("name") or "UNKNOWN")
+        items = sec.get("items", [])
+        if not isinstance(items, list):
+            continue
+        for item in items:
+            if not isinstance(item, dict):
+                continue
+            key = str(item.get("key") or "").strip()
+            if not key:
+                continue
+
+            represented = False
+            typ = str(item.get("type") or "").lower()
+            if typ == "cost":
+                eur = _to_amount(item.get("value_eur"))
+                if eur is not None and any(abs(x - eur) < 0.01 for x in amounts):
+                    represented = True
+                if key in mirror:
+                    represented = True
+            else:
+                if key in mirror:
+                    represented = True
+                elif _legacy_blueprint_match(item, backend_vals):
+                    represented = True
+                elif _legacy_section_match(item, result):
+                    represented = True
+
+            if not represented:
+                ev = item.get("evidence") if isinstance(item.get("evidence"), list) else []
+                ev0 = ev[0] if ev and isinstance(ev[0], dict) else {}
+                page = ev0.get("page", "?")
+                quote = str(ev0.get("quote") or "").strip()
+                expected = item.get("value_eur") if "value_eur" in item else item.get("value")
+                failures.append(
+                    f"blueprint missing [{sec_name}] {key}: expected={expected} evidence(page={page}, quote={quote})"
+                )
+
+    return failures
+
+
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--analysis-id", required=True)
@@ -110,7 +259,8 @@ def main() -> None:
         ],
         check=True,
     )
-    ref = json.loads(estratto_ref.read_text(encoding="utf-8")).get("fields", {})
+    ref_doc = json.loads(estratto_ref.read_text(encoding="utf-8"))
+    ref = ref_doc.get("fields", {}) if isinstance(ref_doc.get("fields"), dict) else {}
 
     url = f"{base_url.rstrip('/')}/api/analysis/perizia/{args.analysis_id}"
     headers = {"Cookie": f"session_token={session_token}"}
@@ -137,8 +287,6 @@ def main() -> None:
 
         if not _missing(expected):
             if _missing(observed):
-                # Some customer estratti include auction detail that may be absent in CTU text layer.
-                # Accept NOT_FOUND only when backend provides searched_in proof.
                 if key == "dati_asta" and state.get("status") == "NOT_FOUND" and state.get("searched_in"):
                     continue
                 failures.append(f"{key}: expected={expected} observed missing")
@@ -150,6 +298,8 @@ def main() -> None:
             failures.append(f"{key}: FOUND without evidence")
         if state.get("status") == "NOT_FOUND" and not searched:
             failures.append(f"{key}: NOT_FOUND without searched_in proof")
+
+    failures.extend(_blueprint_failures(ref_doc, result, bvals))
 
     if failures:
         _fail(failures)
