@@ -67,8 +67,9 @@ def main() -> None:
     for lbl in blocker_labels[:5]:
         if lbl and lbl in summary_it.lower():
             mentions += 1
-    if mentions < 2:
-        failures.append("summary_it must mention at least 2 real blockers/critical fields")
+    required_mentions = min(2, len(blocker_labels))
+    if mentions < required_mentions:
+        failures.append(f"summary_it must mention at least {required_mentions} real blockers/critical fields")
 
     if not summary_it:
         failures.append("summary_it missing")

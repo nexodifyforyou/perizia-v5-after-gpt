@@ -162,7 +162,11 @@ def build_fact_pack(result: Dict[str, Any]) -> Dict[str, Any]:
                 }
             )
 
+    document_quality = result.get("document_quality", {}) if isinstance(result.get("document_quality"), dict) else {}
     fact_pack = {
+        "document_quality": {
+            "status": _safe_text(document_quality.get("status"), 30),
+        },
         "semaforo_generale": semaforo_fact,
         "user_messages": messages_fact,
         "estratto_blueprint": blueprint_fact,
@@ -248,6 +252,14 @@ def _validate_narrated_payload(
         + [str(x) for x in (payload.get("bullets_it") or [])]
         + [str(x) for x in (payload.get("bullets_en") or [])]
     )
+    combined_lower = combined.lower()
+    doc_quality = fact_pack.get("document_quality", {}) if isinstance(fact_pack.get("document_quality"), dict) else {}
+    doc_status = str(doc_quality.get("status") or "").upper()
+    if doc_status == "TEXT_OK" and ("parziale" in combined_lower or "ocr" in combined_lower):
+        errors.append("invalid:text_ok_forbidden_partial_or_ocr")
+    if "estratto" in combined_lower:
+        errors.append("invalid:forbidden_word_estratto")
+
     fact_text = json.dumps(fact_pack, ensure_ascii=False)
     for token in _extract_number_tokens(combined):
         if token not in fact_text:
@@ -320,10 +332,19 @@ async def build_decisione_rapida_narration(
         "- No invented numbers/dates/times.\n"
         "- IT text must mention semaforo status and top 2 blockers by name.\n"
         "- bullets_it and bullets_en must be arrays of short actionable items.\n"
+        "- Never use source wording 'dall'estratto' / 'dallo estratto'. Use 'dal documento analizzato' or 'dalla perizia'.\n"
         f"- request_id: {request_id}\n"
         "FACT_PACK_JSON:\n"
         f"{json.dumps(fact_pack, ensure_ascii=False)}"
     )
+    doc_quality = fact_pack.get("document_quality", {}) if isinstance(fact_pack.get("document_quality"), dict) else {}
+    if str(doc_quality.get("status") or "").upper() == "TEXT_OK":
+        prompt = (
+            prompt
+            + "\nADDITIONAL TEXT_OK CONSTRAINTS:\n"
+            + "- Do NOT say 'analisi automatica è parziale', 'documento non leggibile', or 'OCR necessario'.\n"
+            + "- Prefer wording like 'alcuni dati richiedono verifica manuale' and 'verifiche consigliate'.\n"
+        )
     try:
         raw = await _call_narrator_llm(api_key=api_key, model=model, prompt=prompt, timeout_seconds=12.0)
         parsed = _extract_json_payload(raw)
@@ -331,6 +352,18 @@ async def build_decisione_rapida_narration(
         meta["status"] = "FALLBACK"
         meta["errors"].append(f"llm_error:{str(e)[:120]}")
         return None, meta
+
+    # Deterministic guardrail: ensure IT mentions semaforo status + top blockers.
+    it_text = str(parsed.get("it") or "").strip()
+    lower_it = it_text.lower()
+    additions: List[str] = []
+    if semaforo_status and semaforo_status.lower() not in lower_it:
+        additions.append(f"Semaforo {semaforo_status}.")
+    missing_blockers = [str(b).strip() for b in top_blockers[:2] if str(b).strip() and str(b).strip().lower() not in lower_it]
+    if missing_blockers:
+        additions.append("Blocchi principali: " + "; ".join(missing_blockers) + ".")
+    if additions:
+        parsed["it"] = (" ".join(additions) + " " + it_text).strip()
 
     errors = _validate_narrated_payload(parsed, fact_pack, semaforo_status, [str(x) for x in top_blockers])
     if errors:

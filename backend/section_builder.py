@@ -86,7 +86,15 @@ def _evidence_from_candidate(item: Dict[str, Any]) -> List[Dict[str, Any]]:
     quote = _clean_quote(item.get("quote"))
     if not isinstance(page, int) or not quote:
         return []
-    normalized_quote, search_hint = normalize_evidence_quote(quote, 0, len(quote), max_len=520)
+    field_key = str(item.get("field") or item.get("family") or item.get("code") or "").strip().lower() or None
+    normalized_quote, search_hint = normalize_evidence_quote(
+        quote,
+        0,
+        len(quote),
+        max_len=520,
+        field_key=field_key,
+        anchor_hint=quote,
+    )
     if not normalized_quote:
         return []
     payload = {"page": page, "quote": normalized_quote}
@@ -238,12 +246,25 @@ def _pages_in_window(pages: List[Dict[str, Any]], window: Optional[Dict[str, Any
     return [p for p in pages if sp <= int(p["page"]) <= ep]
 
 
-def _build_page_local_evidence(page_row: Dict[str, Any], start: int, end: int) -> Dict[str, Any]:
+def _build_page_local_evidence(
+    page_row: Dict[str, Any],
+    start: int,
+    end: int,
+    field_key: Optional[str] = None,
+    anchor_hint: Optional[str] = None,
+) -> Dict[str, Any]:
     text = str(page_row["text"])
     text_len = len(text)
     s = max(0, min(int(start), text_len))
     e = max(s, min(int(end), text_len))
-    normalized_quote, search_hint = normalize_evidence_quote(text, s, e, max_len=520)
+    normalized_quote, search_hint = normalize_evidence_quote(
+        text,
+        s,
+        e,
+        max_len=520,
+        field_key=field_key,
+        anchor_hint=anchor_hint,
+    )
     return {
         "page": int(page_row["page"]),
         "quote": normalized_quote,
@@ -315,7 +336,7 @@ def _extract_label_blocks(
             local_end = min(len(text), abs_end - p_start_abs)
             if local_end <= local_start:
                 continue
-            ev = _build_page_local_evidence(page_row, local_start, local_end)
+            ev = _build_page_local_evidence(page_row, local_start, local_end, field_key=field_key)
             if ev["quote"]:
                 pieces.append(ev)
         if not pieces:
@@ -352,7 +373,7 @@ def _extract_non_agibile(pages_window: List[Dict[str, Any]]) -> Dict[str, Any]:
             continue
         start = max(0, m.start() - 90)
         end = min(len(text), m.end() + 90)
-        ev = _build_page_local_evidence(page_row, start, end)
+        ev = _build_page_local_evidence(page_row, start, end, field_key="agibilita")
         return {"value": True, "evidence": [ev]}
     return {"value": False, "evidence": []}
 
@@ -414,7 +435,15 @@ def _integrate_money_box_cost_items(result: Dict[str, Any], money_candidates: Li
         quote = _clean_quote(cand.get("quote"))
         if not isinstance(page, int) or not quote:
             continue
-        normalized_quote, search_hint = normalize_evidence_quote(quote, 0, len(quote), max_len=520)
+        field_key = str(cand.get("field") or cand.get("family") or cand.get("code") or "money_box_item").strip().lower()
+        normalized_quote, search_hint = normalize_evidence_quote(
+            quote,
+            0,
+            len(quote),
+            max_len=520,
+            field_key=field_key,
+            anchor_hint=quote,
+        )
         if not normalized_quote:
             continue
         key = (amount, int(page), quote[:120])

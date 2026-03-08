@@ -90,6 +90,9 @@ def main() -> None:
         backend_status = str((backend_states.get(backend_key) or {}).get("status") or "")
         if ("Non presenti" in val or "NON PRESENTI" in val) and backend_status == "NOT_FOUND":
             failures.append(f"{key}: masking detected ('Non presenti' shown while backend is NOT_FOUND)")
+        if key == "spese_condominiali_arretrate" and backend_status == "NOT_FOUND":
+            # For missing condo arrears evidence, frontend may show null/empty/"Non specificato in perizia".
+            continue
         if _missing(val):
             failures.append(f"{key}: printed value missing")
 

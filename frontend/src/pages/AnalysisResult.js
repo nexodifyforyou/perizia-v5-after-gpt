@@ -151,6 +151,13 @@ const getShortText = (value, max = 110) => {
   return text.length > max ? `${text.slice(0, max)}...` : text;
 };
 
+const pickFirstNonEmpty = (...values) => {
+  for (const value of values) {
+    if (value !== null && value !== undefined && value !== '') return value;
+  }
+  return null;
+};
+
 // Get evidence from an object that might have it
 const getEvidence = (obj) => {
   if (!obj) return [];
@@ -164,6 +171,111 @@ const getItemEvidence = (item) => {
   if (Array.isArray(item.evidence)) return item.evidence;
   if (Array.isArray(item.fonte_perizia?.evidence)) return item.fonte_perizia.evidence;
   return [];
+};
+
+const cleanEvidenceWhitespace = (text) => {
+  if (typeof text !== 'string') return '';
+  return text
+    .replace(/\r\n?/g, '\n')
+    .replace(/[ \t]+/g, ' ')
+    .replace(/\n{3,}/g, '\n\n')
+    .replace(/[ ]*\n[ ]*/g, '\n')
+    .trim();
+};
+
+const trimEvidencePunctuationNoise = (text) => {
+  if (typeof text !== 'string') return '';
+  return text
+    .replace(/^[\s"'`“”‘’.,;:!?()[\]{}\-–—_]+/, '')
+    .replace(/[\s"'`“”‘’.,;:!?()[\]{}\-–—_]+$/, '')
+    .trim();
+};
+
+const smartTruncateText = (text, maxChars = 220) => {
+  if (typeof text !== 'string') return '';
+  if (text.length <= maxChars) return text;
+  const boundarySlice = text.slice(0, maxChars + 1);
+  const cutAt = boundarySlice.lastIndexOf(' ');
+  const trimmed = (cutAt > Math.floor(maxChars * 0.65) ? boundarySlice.slice(0, cutAt) : text.slice(0, maxChars)).trim();
+  return `${trimmed}…`;
+};
+
+const formatPrimaryEvidenceQuote = (evidence) => {
+  const first = Array.isArray(evidence) && evidence.length > 0 && evidence[0] && typeof evidence[0] === 'object'
+    ? evidence[0]
+    : null;
+  if (!first) {
+    return { quote: '', searchHint: '', pages: [] };
+  }
+  const cleaned = trimEvidencePunctuationNoise(cleanEvidenceWhitespace(safeRender(first.quote, '')));
+  const truncated = cleaned ? smartTruncateText(cleaned, 220) : '';
+  const pages = [...new Set(
+    (Array.isArray(evidence) ? evidence : [])
+      .map((item) => item?.page)
+      .filter((page) => Number.isFinite(Number(page)))
+      .map((page) => Number(page))
+  )].sort((a, b) => a - b);
+  return {
+    quote: truncated,
+    searchHint: cleanEvidenceWhitespace(safeRender(first.search_hint, '')),
+    pages
+  };
+};
+
+const normalizeOverviewValue = (value, fallback = 'Non specificato in perizia') => {
+  if (typeof value === 'string') {
+    const upper = value.trim().toUpperCase();
+    if (upper === 'TBD' || upper === 'UNKNOWN') return fallback;
+  }
+  return safeRender(value, fallback);
+};
+
+const classifyMoneyBoxItem = (item) => {
+  const evidence = getItemEvidence(item);
+  const source = safeRender(item?.source, '').toUpperCase();
+  const code = safeRender(item?.code || item?.voce, '').toUpperCase();
+  const hasMarketRange = item?.market_range_eur && typeof item.market_range_eur === 'object' &&
+    typeof item.market_range_eur.min === 'number' && typeof item.market_range_eur.max === 'number';
+  const isEstimated = hasMarketRange || source === 'MARKET_ESTIMATE';
+  const isDocumentBacked = !isEstimated && (
+    evidence.length > 0 ||
+    source === 'PERIZIA' ||
+    source === 'STEP3_CANDIDATES' ||
+    code.startsWith('S3C')
+  );
+  return { isDocumentBacked, isEstimated };
+};
+
+const PanoramicaDataValueCard = ({ label, value, evidence, valueClassName = 'text-zinc-100' }) => {
+  const normalizedValue = normalizeOverviewValue(value);
+  const { quote, searchHint, pages } = formatPrimaryEvidenceQuote(evidence);
+  return (
+    <div className="p-4 bg-zinc-950 rounded-lg border border-zinc-800">
+      <div className="flex items-center justify-between gap-2">
+        <p className="text-xs font-mono text-zinc-500">{label}</p>
+        {pages.length > 0 && (
+          <div className="flex flex-wrap justify-end gap-1">
+            {pages.map((page) => (
+              <span key={`${label}_p_${page}`} className="text-[10px] px-1.5 py-0.5 rounded border border-gold/40 text-gold font-mono">
+                p.{page}
+              </span>
+            ))}
+          </div>
+        )}
+      </div>
+      <p className={`mt-1 font-medium ${valueClassName}`}>{normalizedValue}</p>
+      {quote && (
+        <blockquote className="mt-2 border-l-2 border-gold/30 pl-2 text-xs text-zinc-400 italic whitespace-pre-wrap">
+          "{quote}"
+        </blockquote>
+      )}
+      {searchHint && (
+        <p className="mt-1 text-[11px] text-zinc-500 whitespace-pre-wrap">
+          Trova: {searchHint}
+        </p>
+      )}
+    </div>
+  );
 };
 
 const normalizeEstrattoSections = (estrattoQuality) => {
@@ -446,6 +558,32 @@ const RedFlagItem = ({ flag }) => {
   );
 };
 
+const RedFlagMatrixItem = ({ item }) => {
+  const severity = safeRender(item?.severity, 'AMBER').toUpperCase();
+  const evidence = Array.isArray(item?.evidence) ? item.evidence : [];
+  const pages = [...new Set(evidence.map((e) => e?.page).filter(Boolean))];
+  const toneClass = severity === 'RED'
+    ? 'border-red-500/30 bg-red-500/5'
+    : 'border-amber-500/30 bg-amber-500/5';
+
+  return (
+    <div className={`p-3 rounded-lg border ${toneClass}`}>
+      <div className="flex items-start justify-between gap-2">
+        <div>
+          <p className="text-sm font-medium text-zinc-100">{safeRender(item?.label, 'Rischio')}</p>
+          {item?.explanation && <p className="text-xs text-zinc-400 mt-1">{safeRender(item.explanation, '')}</p>}
+        </div>
+        {evidence.length > 0 && <EvidenceBadge evidence={evidence} />}
+      </div>
+      {pages.length > 0 && (
+        <p className="text-[11px] text-zinc-500 mt-2">
+          Evidenza: p. {pages.join(', ')}
+        </p>
+      )}
+    </div>
+  );
+};
+
 // Multi-Lot Selector Component
 const MultiLotSelector = ({ lots, selectedLot, onSelectLot }) => {
   if (!lots || lots.length <= 1) return null;
@@ -519,6 +657,7 @@ const AnalysisResult = () => {
   const [showDeleteModal, setShowDeleteModal] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
   const [selectedLotIndex, setSelectedLotIndex] = useState(0);
+  const [activeTab, setActiveTab] = useState('overview');
   const [headlineModal, setHeadlineModal] = useState({ open: false, fieldKey: null });
   const [estrattoShowAll, setEstrattoShowAll] = useState({});
 
@@ -762,6 +901,15 @@ const AnalysisResult = () => {
   const docTextOkMessage = (userMessagesByCode.DOC_TEXT_OK || [])[0] || null;
   const semaforoStatus = safeRender(semaforo.status || result?.semaforo?.status, 'AMBER').toUpperCase();
   const semaforoLabels = getSemaforoLabels(semaforoStatus);
+  const panoramicaContract = result.panoramica_contract && typeof result.panoramica_contract === 'object'
+    ? result.panoramica_contract
+    : null;
+  const contractLotSummary = panoramicaContract?.lot_summary && typeof panoramicaContract.lot_summary === 'object'
+    ? panoramicaContract.lot_summary
+    : null;
+  const contractLotSummaryEvidence = contractLotSummary?.evidence && typeof contractLotSummary.evidence === 'object'
+    ? contractLotSummary.evidence
+    : {};
 
   const getFieldState = (key) => fieldStates?.[key] || null;
   const getFieldEvidence = (key, fallback) => {
@@ -784,6 +932,290 @@ const AnalysisResult = () => {
   };
 
   const beni = (selectedLot && selectedLot.beni) || result.beni || [];
+  const legacyLotCompositionItems = (Array.isArray(beni) ? beni : [])
+    .map((bene, idx) => {
+      const beneNumber = pickFirstNonEmpty(bene?.bene_number, bene?.numero_bene, bene?.numero, bene?.bene_id, idx + 1);
+      const tipologia = pickFirstNonEmpty(bene?.tipologia, bene?.type, bene?.tipo, bene?.categoria, bene?.categoria_catastale);
+      const locationRaw = pickFirstNonEmpty(
+        bene?.ubicazione,
+        bene?.indirizzo,
+        bene?.address?.value,
+        bene?.address,
+        bene?.localizzazione,
+        bene?.piano ? `Piano ${safeRender(bene.piano, '')}` : null
+      );
+      const superficieRaw = pickFirstNonEmpty(
+        bene?.superficie_convenzionale_mq,
+        bene?.superficie_convenzionale,
+        bene?.superficie_mq,
+        bene?.mq,
+        bene?.superficie
+      );
+      const superficieValue = parseNumericEuro(superficieRaw);
+      const superficieDisplay = superficieValue !== null
+        ? `${superficieValue.toLocaleString()} mq`
+        : safeRender(superficieRaw, '');
+      const valoreStimaRaw = pickFirstNonEmpty(
+        bene?.valore_di_stima_bene,
+        bene?.valore_stima_bene,
+        bene?.valore_di_stima,
+        bene?.valore_stima,
+        bene?.stima_euro,
+        bene?.valore_euro,
+        bene?.valore
+      );
+      const valoreStimaValue = parseNumericEuro(valoreStimaRaw);
+      const valoreStimaDisplay = valoreStimaValue !== null
+        ? `€${valoreStimaValue.toLocaleString()}`
+        : safeRender(valoreStimaRaw, '');
+      const evidence = getEvidence(bene);
+      const hasData = Boolean(
+        tipologia ||
+        locationRaw ||
+        (superficieDisplay && superficieDisplay !== 'Non specificato in perizia') ||
+        (valoreStimaDisplay && valoreStimaDisplay !== 'Non specificato in perizia')
+      );
+      return {
+        key: bene?.bene_id || bene?.bene_number || idx,
+        title: beneNumber ? `Bene ${beneNumber}` : `Bene ${idx + 1}`,
+        tipologia: safeRender(tipologia, ''),
+        location: safeRender(locationRaw, ''),
+        superficie: superficieDisplay,
+        valoreStima: valoreStimaDisplay,
+        evidence,
+        hasData
+      };
+    })
+    .filter((item) => item.hasData);
+  const contractLotComposition = Array.isArray(panoramicaContract?.lot_composition)
+    ? panoramicaContract.lot_composition
+    : [];
+  const contractLotCompositionItems = contractLotComposition.map((item, idx) => {
+    const evidenceObj = item?.evidence && typeof item.evidence === 'object' ? item.evidence : {};
+    const condensedEvidence = [
+      ...(Array.isArray(evidenceObj.location_piano) ? evidenceObj.location_piano : []),
+      ...(Array.isArray(evidenceObj.superficie_mq) ? evidenceObj.superficie_mq : []),
+      ...(Array.isArray(evidenceObj.valore_stima_eur) ? evidenceObj.valore_stima_eur : [])
+    ].slice(0, 2);
+    const superficieValue = parseNumericEuro(item?.superficie_mq);
+    const valoreStimaValue = parseNumericEuro(item?.valore_stima_eur);
+    return {
+      key: item?.bene_number ?? idx,
+      title: item?.bene_number ? `Bene ${item.bene_number}` : `Bene ${idx + 1}`,
+      tipologia: safeRender(item?.tipologia, ''),
+      location: safeRender(item?.short_location, ''),
+      piano: safeRender(item?.piano, ''),
+      superficie: superficieValue !== null ? `${superficieValue.toLocaleString()} mq` : '',
+      valoreStima: valoreStimaValue !== null ? `€${valoreStimaValue.toLocaleString()}` : '',
+      evidence: condensedEvidence,
+      hasData: Boolean(
+        item?.bene_number ||
+        item?.tipologia ||
+        item?.short_location ||
+        item?.piano ||
+        superficieValue !== null ||
+        valoreStimaValue !== null
+      )
+    };
+  }).filter((item) => item.hasData);
+  const lotCompositionItems = contractLotCompositionItems.length > 0
+    ? contractLotCompositionItems
+    : legacyLotCompositionItems;
+
+  const mergeEvidence = (...lists) => {
+    const out = [];
+    const seen = new Set();
+    lists.forEach((list) => {
+      if (!Array.isArray(list)) return;
+      list.forEach((entry) => {
+        if (!entry || typeof entry !== 'object') return;
+        const key = `${entry.page || ''}|${safeRender(entry.quote, '').slice(0, 120)}|${safeRender(entry.search_hint, '').slice(0, 120)}`;
+        if (seen.has(key)) return;
+        seen.add(key);
+        out.push(entry);
+      });
+    });
+    return out;
+  };
+
+  const formatCatastoCompact = (catasto) => {
+    if (!catasto) return '';
+    if (typeof catasto === 'string') return safeRender(catasto, '');
+    if (typeof catasto !== 'object') return '';
+    const fg = safeRender(catasto.foglio, '').trim();
+    const part = safeRender(catasto.particella, '').trim();
+    const sub = safeRender(catasto.sub, '').trim();
+    const cat = safeRender(catasto.categoria, '').trim();
+    const parts = [];
+    if (fg) parts.push(`Fg. ${fg}`);
+    if (part) parts.push(`Part. ${part}`);
+    if (sub) parts.push(`Sub. ${sub}`);
+    if (cat) parts.push(`Cat. ${cat}`);
+    return parts.join(' - ');
+  };
+
+  const normalizeDettagliValue = (value) => {
+    const text = safeRender(value, '').trim();
+    if (!text) return '';
+    const upper = text.toUpperCase();
+    if (
+      upper === 'TBD' ||
+      upper === 'UNKNOWN' ||
+      upper === 'NOT_SPECIFIED' ||
+      upper === 'NOT_SPECIFIED_IN_PERIZIA' ||
+      upper === 'NON SPECIFICATO IN PERIZIA'
+    ) {
+      return '';
+    }
+    return text;
+  };
+
+  const selectedLotBeni = Array.isArray(selectedLot?.beni) ? selectedLot.beni : [];
+  const fallbackLotBeni = Array.isArray(lots?.[selectedLotIndex]?.beni)
+    ? lots[selectedLotIndex].beni
+    : (Array.isArray(lots?.[0]?.beni) ? lots[0].beni : []);
+  const sourceBeniList = selectedLotBeni.length > 0
+    ? selectedLotBeni
+    : (fallbackLotBeni.length > 0 ? fallbackLotBeni : (Array.isArray(result?.beni) ? result.beni : []));
+
+  const sourceBeneByNumber = new Map();
+  sourceBeniList.forEach((bene, idx) => {
+    const number = parseNumericEuro(pickFirstNonEmpty(bene?.bene_number, bene?.numero_bene, bene?.numero, idx + 1));
+    if (number !== null) sourceBeneByNumber.set(number, bene);
+  });
+  const contractBeneByNumber = new Map();
+  contractLotComposition.forEach((bene, idx) => {
+    const number = parseNumericEuro(pickFirstNonEmpty(bene?.bene_number, idx + 1));
+    if (number !== null) contractBeneByNumber.set(number, bene);
+  });
+  const beneNumbers = [...new Set([...contractBeneByNumber.keys(), ...sourceBeneByNumber.keys()])].sort((a, b) => a - b);
+
+  const detailsBeneCards = beneNumbers.map((beneNumber, idx) => {
+    const contractBene = contractBeneByNumber.get(beneNumber) || {};
+    const sourceBene = sourceBeneByNumber.get(beneNumber) || {};
+    const sourceEvidenceObj = sourceBene?.evidence && typeof sourceBene.evidence === 'object' ? sourceBene.evidence : {};
+    const contractEvidenceObj = contractBene?.evidence && typeof contractBene.evidence === 'object' ? contractBene.evidence : {};
+
+    const tipologia = safeRender(pickFirstNonEmpty(contractBene?.tipologia, sourceBene?.tipologia), '').trim();
+    const shortLocation = safeRender(pickFirstNonEmpty(contractBene?.short_location, sourceBene?.short_location, sourceBene?.ubicazione, sourceBene?.indirizzo), '').trim();
+    const piano = safeRender(pickFirstNonEmpty(contractBene?.piano, sourceBene?.piano), '').trim();
+    const superficieNum = parseNumericEuro(pickFirstNonEmpty(contractBene?.superficie_mq, sourceBene?.superficie_mq, sourceBene?.superficie_convenzionale_mq, sourceBene?.superficie_convenzionale, sourceBene?.superficie));
+    const valoreNum = parseNumericEuro(pickFirstNonEmpty(contractBene?.valore_stima_eur, sourceBene?.valore_stima_eur, sourceBene?.valore_stima_bene, sourceBene?.valore_di_stima_bene, sourceBene?.valore_stima));
+
+    const catastoValue = formatCatastoCompact(pickFirstNonEmpty(sourceBene?.catasto, contractBene?.catasto));
+    const dirittoRealeValue = normalizeDettagliValue(
+      pickFirstNonEmpty(sourceBene?.diritto_reale, sourceBene?.diritto, contractBene?.diritto_reale, dati?.diritto_reale?.value, dati?.diritto_reale)
+    );
+    const statoOccupativoValue = safeRender(pickFirstNonEmpty(sourceBene?.occupancy_status, sourceBene?.stato_occupativo, sourceBene?.occupazione_status, sourceBene?.occupazione, occupativo?.status_it, occupativo?.status), '').trim();
+    const urbanisticaValue = safeRender(pickFirstNonEmpty(sourceBene?.urbanistica, sourceBene?.regolarita_urbanistica, sourceBene?.conformita_urbanistica, abusi?.conformita_urbanistica?.status), '').trim();
+    const agibilitaValue = safeRender(pickFirstNonEmpty(sourceBene?.agibilita, sourceBene?.abitabilita, abusi?.agibilita?.status), '').trim();
+    const apeDeclValue = safeRender(pickFirstNonEmpty(sourceBene?.ape, sourceBene?.dichiarazioni_impianti, sourceBene?.dichiarazioni, abusi?.ape?.status), '').trim();
+
+    return {
+      key: `dettagli-bene-${beneNumber || idx + 1}`,
+      beneNumber: beneNumber || idx + 1,
+      tipologia,
+      shortLocation,
+      piano,
+      superficie: superficieNum !== null ? `${superficieNum.toLocaleString()} mq` : '',
+      valoreStima: valoreNum !== null ? `€${valoreNum.toLocaleString()}` : '',
+      topEvidence: mergeEvidence(
+        contractEvidenceObj?.tipologia,
+        contractEvidenceObj?.location_piano,
+        contractEvidenceObj?.superficie_mq,
+        contractEvidenceObj?.valore_stima_eur,
+        sourceEvidenceObj?.tipologia,
+        sourceEvidenceObj?.location_piano,
+        sourceEvidenceObj?.superficie,
+        sourceEvidenceObj?.valore_stima
+      ),
+      detailRows: [
+        {
+          key: 'diritto_reale',
+          label: 'Diritto reale',
+          value: dirittoRealeValue,
+          evidence: mergeEvidence(sourceEvidenceObj?.diritto_reale, dati?.diritto_reale?.evidence, getFieldEvidence('diritto_reale', dati?.diritto_reale))
+        },
+        {
+          key: 'stato_occupativo',
+          label: 'Stato occupativo',
+          value: statoOccupativoValue,
+          evidence: mergeEvidence(sourceEvidenceObj?.occupancy_status, sourceEvidenceObj?.occupazione, getFieldEvidence('stato_occupativo', occupativo))
+        },
+        {
+          key: 'catasto',
+          label: 'Catasto',
+          value: catastoValue,
+          evidence: mergeEvidence(sourceEvidenceObj?.catasto)
+        },
+        {
+          key: 'urbanistica',
+          label: 'Urbanistica',
+          value: urbanisticaValue,
+          evidence: mergeEvidence(sourceEvidenceObj?.urbanistica, getFieldEvidence('regolarita_urbanistica', abusi?.conformita_urbanistica))
+        },
+        {
+          key: 'agibilita',
+          label: 'Agibilità / Abitabilità',
+          value: agibilitaValue,
+          evidence: mergeEvidence(sourceEvidenceObj?.agibilita, sourceEvidenceObj?.note, getFieldEvidence('agibilita', abusi?.agibilita))
+        },
+        {
+          key: 'ape',
+          label: 'APE / Declarations',
+          value: apeDeclValue,
+          evidence: mergeEvidence(sourceEvidenceObj?.ape, sourceEvidenceObj?.dichiarazioni_impianti, getFieldEvidence('ape', abusi?.ape))
+        }
+      ]
+    };
+  });
+
+  const contractWaterfall = panoramicaContract?.valuation_waterfall && typeof panoramicaContract.valuation_waterfall === 'object'
+    ? panoramicaContract.valuation_waterfall
+    : null;
+  const waterfallStimaValue = parseNumericEuro(contractWaterfall?.valore_stima_eur);
+  const waterfallDeprezzamentiValue = parseNumericEuro(contractWaterfall?.deprezzamenti_eur);
+  const waterfallFinaleValue = parseNumericEuro(contractWaterfall?.valore_finale_eur);
+  const waterfallPrezzoBaseValue = parseNumericEuro(contractWaterfall?.prezzo_base_eur);
+  const canRenderValuationWaterfall = Boolean(contractWaterfall) && [
+    waterfallStimaValue,
+    waterfallDeprezzamentiValue,
+    waterfallFinaleValue,
+    waterfallPrezzoBaseValue
+  ].every((value) => typeof value === 'number' && Number.isFinite(value));
+  const waterfallEvidence = contractWaterfall?.evidence && typeof contractWaterfall.evidence === 'object'
+    ? contractWaterfall.evidence
+    : {};
+  const waterfallStimaEvidence = Array.isArray(waterfallEvidence.valore_stima_eur) ? waterfallEvidence.valore_stima_eur : [];
+  const waterfallDeprezzamentiEvidence = Array.isArray(waterfallEvidence.deprezzamenti_eur) ? waterfallEvidence.deprezzamenti_eur : [];
+  const waterfallFinaleEvidence = Array.isArray(waterfallEvidence.valore_finale_eur) ? waterfallEvidence.valore_finale_eur : [];
+  const waterfallPrezzoBaseEvidence = Array.isArray(waterfallEvidence.prezzo_base_eur) ? waterfallEvidence.prezzo_base_eur : [];
+
+  const overviewTribunale = safeRender(contractLotSummary?.tribunale, '').trim()
+    ? contractLotSummary.tribunale
+    : formatFieldStateDisplay('tribunale', caseHeader.tribunale?.value || caseHeader.tribunale);
+  const overviewProcedura = safeRender(contractLotSummary?.procedura, '').trim()
+    ? contractLotSummary.procedura
+    : formatFieldStateDisplay('procedura', caseHeader.procedure?.value || caseHeader.procedure_id);
+  const overviewLotto = safeRender(contractLotSummary?.lotto_label, '').trim()
+    ? contractLotSummary.lotto_label
+    : formatFieldStateDisplay('lotto', caseHeader.lotto?.value || caseHeader.lotto);
+  const overviewPrezzoBaseNum = parseNumericEuro(contractLotSummary?.prezzo_base_eur);
+  const overviewPrezzoBaseValue = overviewPrezzoBaseNum !== null
+    ? `€${overviewPrezzoBaseNum.toLocaleString()}`
+    : normalizeOverviewValue(dati.prezzo_base_asta?.formatted || dati.prezzo_base_asta?.value || dati.prezzo_base_asta);
+  const overviewTribunaleEvidence = Array.isArray(contractLotSummaryEvidence?.tribunale) && contractLotSummaryEvidence.tribunale.length > 0
+    ? contractLotSummaryEvidence.tribunale
+    : getFieldEvidence('tribunale', caseHeader.tribunale);
+  const overviewProceduraEvidence = Array.isArray(contractLotSummaryEvidence?.procedura) && contractLotSummaryEvidence.procedura.length > 0
+    ? contractLotSummaryEvidence.procedura
+    : getFieldEvidence('procedura', caseHeader.procedure || caseHeader.procedure_id);
+  const overviewLottoEvidence = Array.isArray(contractLotSummaryEvidence?.lotto_label) && contractLotSummaryEvidence.lotto_label.length > 0
+    ? contractLotSummaryEvidence.lotto_label
+    : getFieldEvidence('lotto', caseHeader.lotto);
+  const overviewPrezzoBaseEvidence = Array.isArray(contractLotSummaryEvidence?.prezzo_base_eur) && contractLotSummaryEvidence.prezzo_base_eur.length > 0
+    ? contractLotSummaryEvidence.prezzo_base_eur
+    : getEvidence(dati.prezzo_base_asta);
 
   const getHeadlineStatus = (fieldKey) => fieldStates?.[fieldKey]?.status;
   const isNeedsVerification = (status) => status === 'LOW_CONFIDENCE' || status === 'NOT_FOUND';
@@ -878,15 +1310,543 @@ const AnalysisResult = () => {
   const moneyBoxTotalMin = moneyBoxTotal?.min;
   const moneyBoxTotalMax = moneyBoxTotal?.max;
   const isTotalTBD = moneyBoxTotalMin === 'TBD' || moneyBoxTotalMax === 'TBD';
+  const hasMoneyBoxTotalRange = typeof moneyBoxTotalRange?.min_eur === 'number' && typeof moneyBoxTotalRange?.max_eur === 'number';
+  const prezzoBaseValue =
+    parseNumericEuro(selectedLot?.prezzo_base_value) ??
+    parseNumericEuro(dati?.prezzo_base_asta?.value) ??
+    parseNumericEuro(dati?.prezzo_base_asta?.formatted) ??
+    parseNumericEuro(dati?.prezzo_base_asta);
+  const canonicalCostCodes = new Set(['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H']);
+  const valuationWaterfall = panoramicaContract?.valuation_waterfall && typeof panoramicaContract.valuation_waterfall === 'object'
+    ? panoramicaContract.valuation_waterfall
+    : null;
+  const valuationDeprezzamentiValue = parseNumericEuro(valuationWaterfall?.deprezzamenti_eur);
+  const valuationDeprezzamentiEvidence = Array.isArray(valuationWaterfall?.evidence?.deprezzamenti_eur)
+    ? valuationWaterfall.evidence.deprezzamenti_eur
+    : [];
 
-  // Get legal killers - convert new array format to object for display
-  const legalKillersObj = legalKillers.items 
-    ? legalKillers.items.reduce((acc, item) => { 
-        const key = item.killer || item.key || `item_${Object.keys(acc).length}`;
-        acc[key] = item; 
-        return acc; 
-      }, {}) 
-    : (typeof legalKillers === 'object' ? legalKillers : {});
+  const isJunkOrValuationSummaryCost = (item) => {
+    const code = safeRender(item?.code || item?.voce, '').toUpperCase();
+    const value = parseNumericEuro(item?.stima_euro);
+    const textBlob = [
+      safeRender(item?.label_it || item?.label, ''),
+      safeRender(item?.stima_nota, ''),
+      ...getItemEvidence(item).map((ev) => `${safeRender(ev?.quote, '')} ${safeRender(ev?.search_hint, '')}`)
+    ].join(' ').toLowerCase();
+
+    if (code === 'S3C08') return true;
+    if (value !== null && value <= 0) return true;
+    if (value !== null && prezzoBaseValue !== null && Math.round(value) === Math.round(prezzoBaseValue)) return true;
+    if (textBlob.includes('già conteggiate')) return true;
+
+    const valuationSummaryMarkers = [
+      'valore di stima',
+      'valore finale di stima',
+      'prezzo base',
+      'deprezzamento',
+      'rischio assunto',
+      'oneri di regolarizzazione urbanistica'
+    ];
+    return valuationSummaryMarkers.some((marker) => textBlob.includes(marker));
+  };
+
+  const explicitCostMentions = (() => {
+    const candidates = moneyBoxItems.filter((item) => {
+      const value = parseNumericEuro(item?.stima_euro);
+      if (value === null || value <= 0) return false;
+      if (isJunkOrValuationSummaryCost(item)) return false;
+      const code = safeRender(item?.code || item?.voce, '').toUpperCase();
+      if (!code.startsWith('S3C')) return false;
+      return true;
+    });
+
+    const seen = new Set();
+    return candidates
+      .filter((item) => {
+        const value = parseNumericEuro(item?.stima_euro);
+        const evidence = getItemEvidence(item);
+        const firstQuote = safeRender(evidence?.[0]?.quote, '').toLowerCase();
+        const dedupeKey = `${Math.round(value || 0)}|${firstQuote.replace(/\s+/g, ' ').slice(0, 120)}`;
+        if (seen.has(dedupeKey)) return false;
+        seen.add(dedupeKey);
+        return true;
+      })
+      .sort((a, b) => (parseNumericEuro(b?.stima_euro) || 0) - (parseNumericEuro(a?.stima_euro) || 0));
+  })();
+
+  const canonicalMoneyBoxItems = moneyBoxItems.filter((item) => {
+    const code = safeRender(item?.code || item?.voce, '').toUpperCase();
+    return canonicalCostCodes.has(code);
+  });
+
+  const explicitAmountKeys = new Set(
+    explicitCostMentions
+      .map((item) => parseNumericEuro(item?.stima_euro))
+      .filter((value) => typeof value === 'number' && Number.isFinite(value) && value > 0)
+      .map((value) => Math.round(value))
+  );
+  const nexodifyEstimateItems = [...canonicalMoneyBoxItems]
+    .filter((item) => {
+      const { isDocumentBacked, isEstimated } = classifyMoneyBoxItem(item);
+      if (!isEstimated) return false;
+
+      const numericValue = parseNumericEuro(item?.stima_euro);
+      const roundedValue = typeof numericValue === 'number' && Number.isFinite(numericValue)
+        ? Math.round(numericValue)
+        : null;
+
+      // Keep Nexodify bucket semantically pure: drop estimate rows that duplicate
+      // a deterministic explicit cost already shown in the document-backed bucket.
+      if (isDocumentBacked && roundedValue !== null && explicitAmountKeys.has(roundedValue)) {
+        return false;
+      }
+      return true;
+    })
+    .sort((a, b) => {
+      const aCode = safeRender(a?.code || a?.voce, '').toUpperCase();
+      const bCode = safeRender(b?.code || b?.voce, '').toUpperCase();
+      return aCode.localeCompare(bCode);
+    });
+  const moneyBoxBreakdown = canonicalMoneyBoxItems.reduce((acc, item) => {
+    const euroValue = parseNumericEuro(item?.stima_euro);
+    const marketRange = item?.market_range_eur && typeof item.market_range_eur === 'object'
+      ? item.market_range_eur
+      : null;
+    const hasMarketRange = typeof marketRange?.min === 'number' && typeof marketRange?.max === 'number';
+    const { isDocumentBacked, isEstimated } = classifyMoneyBoxItem(item);
+    const addToBucket = (bucket, min, max) => {
+      if (!Number.isFinite(min) || !Number.isFinite(max)) return;
+      acc[bucket].min += min;
+      acc[bucket].max += max;
+    };
+
+    if (euroValue !== null) {
+      if (isEstimated) addToBucket('estimated', euroValue, euroValue);
+      else if (isDocumentBacked) addToBucket('documentBacked', euroValue, euroValue);
+      return acc;
+    }
+
+    if (hasMarketRange) {
+      if (isEstimated) addToBucket('estimated', marketRange.min, marketRange.max);
+      else if (isDocumentBacked) addToBucket('documentBacked', marketRange.min, marketRange.max);
+    }
+
+    return acc;
+  }, {
+    documentBacked: { min: 0, max: 0 },
+    estimated: { min: 0, max: 0 }
+  });
+  const documentBackedMin = moneyBoxBreakdown.documentBacked.min;
+  const documentBackedMax = moneyBoxBreakdown.documentBacked.max;
+  const estimatedMin = moneyBoxBreakdown.estimated.min;
+  const estimatedMax = moneyBoxBreakdown.estimated.max;
+  const allInMin = hasMoneyBoxTotalRange && prezzoBaseValue !== null
+    ? prezzoBaseValue + moneyBoxTotalRange.min_eur
+    : null;
+  const allInMax = hasMoneyBoxTotalRange && prezzoBaseValue !== null
+    ? prezzoBaseValue + moneyBoxTotalRange.max_eur
+    : null;
+  const canRenderAllIn = allInMin !== null && allInMax !== null;
+
+  const isTocLikeLegalEvidence = (quoteRaw, searchHintRaw = '') => {
+    const quote = safeRender(quoteRaw, '').toLowerCase();
+    const searchHint = safeRender(searchHintRaw, '').toLowerCase();
+    const text = `${quote} ${searchHint}`.trim();
+    const compact = text.replace(/\s+/g, ' ');
+    if (!text) return true;
+    if (/\.\.{4,}/.test(text)) return true;
+    if (/[·•]\s*\d+\s*$/.test(text)) return true;
+    if (/servit[ùu][\s,;:\-]+censo[\s,;:\-]+livell[\s,;:\-]+usi civici/.test(compact)) return true;
+    if (/bene\s*n[°o]?|benen°|beni oggetto/.test(compact) && /servit[ùu]|usi civici/.test(compact)) return true;
+    if (/sommario|indice/.test(text)) return true;
+    if (text.length < 45 && /(servitù|usi civici|vincolo)/.test(text)) return true;
+    return false;
+  };
+
+  const isSubstantiveServituEvidence = (quoteRaw, searchHintRaw = '') => {
+    const quote = safeRender(quoteRaw, '').toLowerCase();
+    const searchHint = safeRender(searchHintRaw, '').toLowerCase();
+    const text = `${quote} ${searchHint}`.replace(/\s+/g, ' ').trim();
+    const normalized = text
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .replace(/[^a-z0-9]+/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+    if (!text) return false;
+    if (isTocLikeLegalEvidence(quoteRaw, searchHintRaw)) return false;
+    // Hard-stop heading/index phrases even when OCR introduces spacing noise (es. "LIVE LLO").
+    if (/servitu\s+censo\s+livell\w*\s+usi\s+civici/.test(normalized)) return false;
+    // Absence statements are not blockers and must never be top-promoted.
+    if (/(non\s+sono\s+presenti|non\s+risultan\w*|assenza)\s+.*(servitu|usi\s+civici)/.test(normalized)) return false;
+    // Reject short/generic snippets without an operative finding.
+    if (normalized.length < 140) return false;
+    if (!/(servitu|usi\s+civici)/.test(normalized)) return false;
+    // Strict requirement: only promote when a concrete operative servitù/usi-civici finding is present.
+    return /(servitu\s+di\s+passaggio|fondo\s+dominante|fondo\s+servente|atto\s+di\s+servitu|servitu\s+costituit\w*|grava\w*\s+da\s+servitu|usi\s+civici\s+presenti|diritti\s+demaniali\s+presenti)/.test(normalized);
+  };
+
+  const getFirstEvidence = (entry) => {
+    if (!entry || typeof entry !== 'object') return null;
+    const ev = getEvidence(entry);
+    if (Array.isArray(ev) && ev.length > 0) return ev[0];
+    if (Array.isArray(entry.__evidence) && entry.__evidence.length > 0) return entry.__evidence[0];
+    return null;
+  };
+
+  const pickLegalCategory = (entry) => {
+    const firstEv = getFirstEvidence(entry);
+    const text = [
+      safeRender(entry?.killer, ''),
+      safeRender(entry?.label_it || entry?.__label, ''),
+      safeRender(entry?.label_en, ''),
+      safeRender(entry?.status_it || entry?.status, ''),
+      safeRender(entry?.reason_it || entry?.action_required_it || entry?.action, ''),
+      safeRender(entry?.value_it || entry?.__value, ''),
+      safeRender(firstEv?.quote, ''),
+      safeRender(firstEv?.search_hint, ''),
+    ].join(' ').toLowerCase();
+
+    if (/(occupat|debitore|coniuge)/.test(text)) return 'occupazione';
+    if (/(pignorament|esecuzione immobiliare)/.test(text)) return 'pignoramento_esecuzione';
+    if (/(ipotec|formalit)/.test(text)) return 'ipoteca_formalita';
+    if (/(difform|catast|urbanistic|regolarit)/.test(text)) return 'difformita_urb_cat';
+    if (/(agibil|abitabil|ape|impiant|documentaz)/.test(text)) return 'agibilita_docs';
+    if (/(accesso|mappal|atto\s+di\s+vincolo|vincoli?\s+ancora\s+vigenti|a\s+carico\s+del\s+proprietario)/.test(text)) return 'accesso_vincolo';
+    if (/(servitù|servitu|usi civici|censo|livello)/.test(text)) return 'servitu_usi_civici';
+    return null;
+  };
+
+  const categoryLabelMap = {
+    occupazione: 'Occupazione',
+    pignoramento_esecuzione: 'Pignoramento / Esecuzione',
+    ipoteca_formalita: 'Ipoteca / Formalità pregiudizievoli',
+    difformita_urb_cat: 'Difformità urbanistico-catastali',
+    agibilita_docs: 'Agibilità / documentazione tecnica critica',
+    accesso_vincolo: 'Accesso / vincolo da verificare',
+    servitu_usi_civici: 'Servitù / usi civici'
+  };
+
+  const baseLegalItems = Array.isArray(legalKillers?.items) ? legalKillers.items : [];
+  const detailLegalItems = Array.isArray(estrattoLegalSection?.__items) ? estrattoLegalSection.__items : [];
+  const difformitaKeywordRegex = /(difform|incongruenz|non\s+sussiste\s+corrispondenza\s+catastal|planimetri[a|e].*(difform|non\s+corrispond)|mancata\s+corrispondenza\s+catastal|irregolarit[àa]\s+urbanistic|abusi?\s+ediliz)/i;
+  const difformitaFieldCandidates = ['regolarita_urbanistica', 'conformita_catastale']
+    .map((key) => fieldStates?.[key])
+    .filter((state) => state && typeof state === 'object')
+    .map((state) => {
+      const ev = Array.isArray(state?.evidence) ? state.evidence : [];
+      const first = ev[0] || null;
+      const signalText = [
+        safeRender(state?.value, ''),
+        safeRender(state?.status, ''),
+        safeRender(state?.status_it, ''),
+        safeRender(first?.quote, ''),
+        safeRender(first?.search_hint, '')
+      ].join(' ');
+      if (!difformitaKeywordRegex.test(signalText)) return null;
+      return {
+        killer: 'Difformità urbanistico-catastali',
+        status: 'ROSSO',
+        status_it: 'CRITICO',
+        reason_it: safeRender(state?.status_it, 'Difformità rilevata'),
+        evidence: ev
+      };
+    })
+    .filter(Boolean);
+
+  const allLegalCandidates = [...baseLegalItems, ...detailLegalItems, ...difformitaFieldCandidates].filter((entry) => entry && typeof entry === 'object');
+
+  const legalCategoryCandidates = Object.keys(categoryLabelMap).reduce((acc, key) => {
+    acc[key] = [];
+    return acc;
+  }, {});
+
+  allLegalCandidates.forEach((entry) => {
+    const category = pickLegalCategory(entry);
+    if (!category) return;
+    const firstEv = getFirstEvidence(entry);
+    const quote = safeRender(firstEv?.quote, '');
+    const searchHint = safeRender(firstEv?.search_hint, '');
+    const page = firstEv?.page;
+    const isSubstantive = Boolean(quote) && !isTocLikeLegalEvidence(quote, searchHint);
+    legalCategoryCandidates[category].push({
+      entry,
+      isSubstantive,
+      page: typeof page === 'number' ? page : 999,
+      quoteLen: quote.length,
+      quote,
+      searchHint
+    });
+  });
+
+  const severityByCategory = {
+    occupazione: 'GIALLO',
+    pignoramento_esecuzione: 'ROSSO',
+    ipoteca_formalita: 'ROSSO',
+    difformita_urb_cat: 'ROSSO',
+    agibilita_docs: 'GIALLO',
+    accesso_vincolo: 'GIALLO',
+    servitu_usi_civici: 'GIALLO'
+  };
+
+  const buildTopLegalChecklist = () => {
+    const ordered = [
+      'pignoramento_esecuzione',
+      'ipoteca_formalita',
+      'difformita_urb_cat',
+      'agibilita_docs',
+      'occupazione',
+      'accesso_vincolo',
+      'servitu_usi_civici'
+    ];
+    const out = [];
+    ordered.forEach((category) => {
+      const candidates = legalCategoryCandidates[category] || [];
+      let substantive = candidates.filter((c) => c.isSubstantive);
+      if (category === 'servitu_usi_civici') {
+        substantive = substantive.filter((c) => isSubstantiveServituEvidence(c.quote, c.searchHint));
+      }
+      if (category === 'accesso_vincolo') {
+        substantive = substantive.filter((c) => {
+          const txt = `${safeRender(c.quote, '')} ${safeRender(c.searchHint, '')}`.toLowerCase();
+          return /(accesso|mappal|atto\s+di\s+vincolo|vincoli?\s+ancora\s+vigenti|proprietario\s+debitore)/.test(txt)
+            && !isTocLikeLegalEvidence(c.quote, c.searchHint);
+        });
+      }
+      if (substantive.length === 0) return;
+      substantive.sort((a, b) => {
+        if (a.page !== b.page) return a.page - b.page;
+        return b.quoteLen - a.quoteLen;
+      });
+      const best = substantive[0];
+      const source = best.entry || {};
+      out.push({
+        killer: categoryLabelMap[category],
+        status: safeRender(source?.status, severityByCategory[category]),
+        status_it: safeRender(source?.status_it, ''),
+        action: safeRender(source?.reason_it || source?.action_required_it || source?.action, ''),
+        evidence: getEvidence(source),
+      });
+    });
+    return out;
+  };
+
+  const topLegalChecklistItems = buildTopLegalChecklist();
+  const legalKillersObj = topLegalChecklistItems.reduce((acc, item, idx) => {
+    acc[item.killer || `killer_${idx + 1}`] = item;
+    return acc;
+  }, {});
+
+  const filteredLegalDetailItems = (() => {
+    if (!Array.isArray(detailLegalItems)) return [];
+    const seen = new Set();
+    let genericVincoloSeen = 0;
+    const cleaned = [];
+    detailLegalItems.forEach((item) => {
+      if (!item || typeof item !== 'object') return;
+      const label = safeRender(item?.label_it || item?.__label, '').toLowerCase();
+      const firstEv = getFirstEvidence(item);
+      const quote = safeRender(firstEv?.quote, '');
+      const searchHint = safeRender(firstEv?.search_hint, '');
+      const isTocLike = isTocLikeLegalEvidence(quote, searchHint);
+      const isGenericVincolo = label.includes('vincolo legale: vincolo');
+      if (isGenericVincolo) {
+        genericVincoloSeen += 1;
+        if (genericVincoloSeen > 1) return;
+      }
+      if (isTocLike && !/pignorament|ipotec|difform|occupat|agibil|servitù|servitu|usi civici/i.test(`${label} ${quote}`)) {
+        return;
+      }
+      const key = `${label}|${quote.replace(/\s+/g, ' ').slice(0, 160)}`;
+      if (seen.has(key)) return;
+      seen.add(key);
+      cleaned.push(item);
+    });
+    return cleaned;
+  })();
+
+  const redFlagGroups = {
+    legal: [],
+    technical: [],
+    occupancy: [],
+    missingData: [],
+    costUncertainty: []
+  };
+
+  const addRedFlag = (groupKey, item) => {
+    if (!redFlagGroups[groupKey]) return;
+    if (!item || typeof item !== 'object') return;
+    const key = safeRender(item.key || item.label, '').toLowerCase();
+    if (!key) return;
+    const exists = redFlagGroups[groupKey].some((entry) => safeRender(entry.key || entry.label, '').toLowerCase() === key);
+    if (exists) return;
+    redFlagGroups[groupKey].push(item);
+  };
+
+  topLegalChecklistItems.forEach((item, idx) => {
+    const status = safeRender(item?.status, 'AMBER').toUpperCase();
+    addRedFlag('legal', {
+      key: `legal_${idx}_${safeRender(item?.killer, 'legal')}`,
+      label: safeRender(item?.killer, 'Vincolo legale'),
+      explanation: safeRender(item?.action || item?.status_it, 'Verificare in perizia originale.'),
+      severity: status === 'ROSSO' ? 'RED' : 'AMBER',
+      evidence: Array.isArray(item?.evidence) ? item.evidence : []
+    });
+  });
+
+  const urbanStatus = safeRender(abusi?.conformita_urbanistica?.status || abusi?.conformita_urbanistica, '').toUpperCase();
+  if (urbanStatus && !urbanStatus.includes('CONFORME')) {
+    addRedFlag('technical', {
+      key: 'tech_urbanistica',
+      label: 'Difformità urbanistiche',
+      explanation: safeRender(abusi?.conformita_urbanistica?.detail || urbanStatus, 'Conformità urbanistica da verificare.'),
+      severity: 'RED',
+      evidence: getFieldEvidence('regolarita_urbanistica', abusi?.conformita_urbanistica)
+    });
+  }
+
+  const catastoStatus = safeRender(abusi?.conformita_catastale?.status || abusi?.conformita_catastale, '').toUpperCase();
+  if (catastoStatus && !catastoStatus.includes('CONFORME')) {
+    addRedFlag('technical', {
+      key: 'tech_catasto',
+      label: 'Difformità catastali',
+      explanation: safeRender(catastoStatus, 'Conformità catastale da verificare.'),
+      severity: 'RED',
+      evidence: getFieldEvidence('conformita_catastale', abusi?.conformita_catastale)
+    });
+  }
+
+  const agibilitaStatus = safeRender(abusi?.agibilita?.status || abusi?.agibilita, '').toUpperCase();
+  if (agibilitaStatus.includes('ASSENTE') || agibilitaStatus.includes('NON')) {
+    addRedFlag('technical', {
+      key: 'tech_agibilita',
+      label: 'Agibilità / abitabilità assente',
+      explanation: safeRender(abusi?.agibilita?.status || abusi?.agibilita, 'Assenza o criticità su agibilità/abitabilità.'),
+      severity: 'RED',
+      evidence: getFieldEvidence('agibilita', abusi?.agibilita)
+    });
+  }
+
+  const apeStatus = safeRender(abusi?.ape?.status || abusi?.ape, '').toUpperCase();
+  if (apeStatus.includes('ASSENTE') || apeStatus.includes('NON')) {
+    addRedFlag('technical', {
+      key: 'tech_ape',
+      label: 'APE assente',
+      explanation: safeRender(abusi?.ape?.status || abusi?.ape, 'Certificato energetico non disponibile.'),
+      severity: 'AMBER',
+      evidence: getFieldEvidence('ape', abusi?.ape)
+    });
+  }
+
+  const apeSectionItems = Array.isArray(estrattoSectionMap?.ape?.__items) ? estrattoSectionMap.ape.__items : [];
+  const dichiarazioniItem = apeSectionItems.find((item) => {
+    const text = `${safeRender(item?.__label, '')} ${safeRender(item?.__value, '')}`.toLowerCase();
+    return text.includes('dichiaraz') && (text.includes('non esiste') || text.includes('assente'));
+  });
+  if (dichiarazioniItem) {
+    addRedFlag('technical', {
+      key: 'tech_dichiarazioni_impianti',
+      label: 'Dichiarazioni impianti assenti',
+      explanation: safeRender(dichiarazioniItem?.__value, 'Dichiarazioni di conformità impianti non presenti.'),
+      severity: 'AMBER',
+      evidence: Array.isArray(dichiarazioniItem?.__evidence) ? dichiarazioniItem.__evidence : []
+    });
+  }
+
+  const occupancyStatus = safeRender(occupativo?.status_it || occupativo?.status, '').toLowerCase();
+  if (occupancyStatus.includes('occupat') || occupancyStatus.includes('debitore')) {
+    addRedFlag('occupancy', {
+      key: 'occ_occupato',
+      label: 'Immobile occupato',
+      explanation: safeRender(occupativo?.status_it || occupativo?.status, 'Occupazione da verificare.'),
+      severity: 'AMBER',
+      evidence: getFieldEvidence('stato_occupativo', occupativo)
+    });
+  }
+
+  const missingFieldMap = [
+    ['dati_asta', 'Dati asta mancanti'],
+    ['spese_condominiali_arretrate', 'Spese condominiali arretrate non determinate'],
+    ['formalita_pregiudizievoli', 'Copertura formalità incompleta'],
+    ['diritto_reale', 'Diritto reale non determinato']
+  ];
+  missingFieldMap.forEach(([fieldKey, label]) => {
+    const state = fieldStates?.[fieldKey];
+    const status = safeRender(state?.status, '').toUpperCase();
+    if (status === 'NOT_FOUND' || status === 'LOW_CONFIDENCE') {
+      addRedFlag('missingData', {
+        key: `missing_${fieldKey}`,
+        label,
+        explanation: status === 'NOT_FOUND' ? 'Campo non trovato in estrazione.' : 'Campo a bassa confidenza, verifica manuale richiesta.',
+        severity: 'AMBER',
+        evidence: Array.isArray(state?.evidence) ? state.evidence : []
+      });
+    }
+  });
+
+  if ((userMessagesByCode.ACTION_VERIFY_DATO_ASTA || []).length > 0) {
+    const msg = userMessagesByCode.ACTION_VERIFY_DATO_ASTA[0];
+    addRedFlag('missingData', {
+      key: 'missing_dati_asta_msg',
+      label: safeRender(msg?.title_it, 'Dati asta mancanti'),
+      explanation: safeRender(msg?.body_it, 'Data/ora asta da verificare su fonte ufficiale.'),
+      severity: 'AMBER',
+      evidence: Array.isArray(msg?.evidence) ? msg.evidence : []
+    });
+  }
+
+  if (estimatedMax > 0 || estimatedMin > 0 || hasMoneyBoxTotalRange || isTotalTBD) {
+    const rangeText = hasMoneyBoxTotalRange
+      ? `Range stimato: €${moneyBoxTotalRange.min_eur.toLocaleString()} - €${moneyBoxTotalRange.max_eur.toLocaleString()}`
+      : 'Presenza di voci stimate/non document-certain.';
+    addRedFlag('costUncertainty', {
+      key: 'cost_assumptions',
+      label: 'Costi stimati / assunzioni Nexodify',
+      explanation: rangeText,
+      severity: 'AMBER',
+      evidence: []
+    });
+  }
+
+  // Dedupe across groups: keep occupancy only in Occupazione group.
+  redFlagGroups.legal = redFlagGroups.legal.filter((item) => {
+    const label = safeRender(item?.label, '').toLowerCase();
+    return !label.includes('occupazione');
+  });
+
+  // Dedupe broad legal difformita when technical split flags are present.
+  const hasTechUrbanisticaFlag = redFlagGroups.technical.some((item) => item?.key === 'tech_urbanistica');
+  const hasTechCatastoFlag = redFlagGroups.technical.some((item) => item?.key === 'tech_catasto');
+  const hasTechAgibilitaFlag = redFlagGroups.technical.some((item) => item?.key === 'tech_agibilita');
+  if (hasTechUrbanisticaFlag && hasTechCatastoFlag) {
+    redFlagGroups.legal = redFlagGroups.legal.filter((item) => {
+      const key = safeRender(item?.key, '').toLowerCase();
+      const label = safeRender(item?.label, '').toLowerCase();
+      if (key.includes('difformita_urb_cat')) return false;
+      if (label.includes('difformità urbanistico-catastali')) return false;
+      return true;
+    });
+  }
+
+  if (hasTechAgibilitaFlag) {
+    redFlagGroups.legal = redFlagGroups.legal.filter((item) => {
+      const key = safeRender(item?.key, '').toLowerCase();
+      const label = safeRender(item?.label, '').toLowerCase();
+      if (key.includes('agibilita_docs')) return false;
+      if (label.includes('agibilità')) return false;
+      if (label.includes('abitabilità')) return false;
+      return true;
+    });
+  }
+
+  const groupedRedFlags = [
+    { key: 'legal', title: 'Legale / Formalità', items: redFlagGroups.legal },
+    { key: 'technical', title: 'Tecnico / Compliance', items: redFlagGroups.technical },
+    { key: 'occupancy', title: 'Occupazione', items: redFlagGroups.occupancy },
+    { key: 'missingData', title: 'Dati mancanti / Copertura', items: redFlagGroups.missingData },
+    { key: 'costUncertainty', title: 'Incertezza costi / Assunzioni', items: redFlagGroups.costUncertainty }
+  ];
+  const hasGroupedRedFlags = groupedRedFlags.some((group) => group.items.length > 0);
 
   // Debug logging for troubleshooting
   if (process.env.NODE_ENV === 'development') {
@@ -1213,88 +2173,92 @@ const AnalysisResult = () => {
               </p>
             </div>
           </div>
-          <p className="text-sm text-zinc-400 mt-3">
-            {safeRender(semaforo.status_label || semaforo.reason_it || semaforo.status_it, '')}
-          </p>
-          <p className="text-xs text-zinc-500 mt-1">
-            {safeRender(semaforo.reason_en || semaforo.status_en, '')}
-          </p>
-          <div className="text-right">
-              {/* Show driver/reason for semaforo */}
-              {semaforo.driver?.value && (
-                <p className="text-xs text-amber-400 mt-1">
-                  Driver: {semaforo.driver.value}
-                </p>
-              )}
-              {/* Show evidence pages */}
-              {(getEvidence(semaforo.semaforo_complessivo || semaforo).length > 0) && (
-                <p className="text-xs text-gold mt-1 flex items-center justify-end gap-1">
-                  <FileText className="w-3 h-3" />
-                  Basato su pag. {[...new Set(getEvidence(semaforo.semaforo_complessivo || semaforo).map(e => e.page))].join(', ')}
-                </p>
-              )}
-            </div>
-          
-          {/* Quick Decision with Evidence */}
-          <div className="mt-6 p-4 bg-zinc-950 rounded-lg border border-zinc-800">
-            <div className="flex items-center justify-between gap-3 mb-2">
-              <p className="text-xs font-mono uppercase text-zinc-500">Decisione Rapida</p>
-              <span className="text-[10px] px-2 py-1 rounded border border-zinc-700 text-zinc-400 uppercase tracking-wide">
-                {decisionSourceLabel}
-              </span>
-            </div>
-            <p className="text-lg font-semibold text-zinc-100">{decisionIt}</p>
-            <p className="text-sm text-zinc-500 mt-1">{decisionEn}</p>
-            {decisionBulletsIt.length > 0 && (
-              <ul className="mt-3 space-y-1 text-sm text-zinc-300 list-disc pl-5">
-                {decisionBulletsIt.slice(0, 5).map((item, idx) => (
-                  <li key={`it-bullet-${idx}`}>{safeRender(item, '')}</li>
-                ))}
-              </ul>
-            )}
-            {decisionBulletsEn.length > 0 && (
-              <ul className="mt-2 space-y-1 text-xs text-zinc-500 list-disc pl-5">
-                {decisionBulletsEn.slice(0, 5).map((item, idx) => (
-                  <li key={`en-bullet-${idx}`}>{safeRender(item, '')}</li>
-                ))}
-              </ul>
-            )}
-            
-            {/* Mutuabilità if available */}
-            {semaforo.mutuabilita_stimata && (
-              <div className="mt-3 p-2 bg-zinc-900 rounded">
-                <span className="text-xs text-zinc-500">Mutuabilità stimata: </span>
-                <span className="text-sm font-medium text-gold">{semaforo.mutuabilita_stimata.value}</span>
-                {semaforo.mutuabilita_stimata.reason && (
-                  <p className="text-xs text-zinc-400 mt-1">{semaforo.mutuabilita_stimata.reason}</p>
+          {activeTab === 'overview' && (
+            <>
+              <p className="text-sm text-zinc-400 mt-3">
+                {safeRender(semaforo.status_label || semaforo.reason_it || semaforo.status_it, '')}
+              </p>
+              <p className="text-xs text-zinc-500 mt-1">
+                {safeRender(semaforo.reason_en || semaforo.status_en, '')}
+              </p>
+              <div className="text-right">
+                {/* Show driver/reason for semaforo */}
+                {semaforo.driver?.value && (
+                  <p className="text-xs text-amber-400 mt-1">
+                    Driver: {semaforo.driver.value}
+                  </p>
+                )}
+                {/* Show evidence pages */}
+                {(getEvidence(semaforo.semaforo_complessivo || semaforo).length > 0) && (
+                  <p className="text-xs text-gold mt-1 flex items-center justify-end gap-1">
+                    <FileText className="w-3 h-3" />
+                    Basato su pag. {[...new Set(getEvidence(semaforo.semaforo_complessivo || semaforo).map(e => e.page))].join(', ')}
+                  </p>
                 )}
               </div>
-            )}
-            
-            {/* Driver Rosso with Evidence - old format */}
-            {decision.driver_rosso && decision.driver_rosso.length > 0 && (
-              <div className="mt-4 space-y-2">
-                <p className="text-xs font-mono text-red-400 uppercase">Criticità Rilevate:</p>
-                {decision.driver_rosso.map((driver, idx) => (
-                  <div key={idx} className="p-2 bg-red-500/10 rounded border border-red-500/20">
-                    <div className="flex items-center gap-2">
-                      <AlertTriangle className="w-4 h-4 text-red-400" />
-                      <span className="text-sm text-red-400">{safeRender(driver.headline_it)}</span>
-                      {getEvidence(driver).length > 0 && (
-                        <span className="text-xs font-mono text-gold">
-                          p. {[...new Set(getEvidence(driver).map(e => e.page))].join(', ')}
-                        </span>
-                      )}
-                    </div>
+
+              {/* Quick Decision with Evidence */}
+              <div className="mt-6 p-4 bg-zinc-950 rounded-lg border border-zinc-800">
+                <div className="flex items-center justify-between gap-3 mb-2">
+                  <p className="text-xs font-mono uppercase text-zinc-500">Decisione Rapida</p>
+                  <span className="text-[10px] px-2 py-1 rounded border border-zinc-700 text-zinc-400 uppercase tracking-wide">
+                    {decisionSourceLabel}
+                  </span>
+                </div>
+                <p className="text-lg font-semibold text-zinc-100">{decisionIt}</p>
+                <p className="text-sm text-zinc-500 mt-1">{decisionEn}</p>
+                {decisionBulletsIt.length > 0 && (
+                  <ul className="mt-3 space-y-1 text-sm text-zinc-300 list-disc pl-5">
+                    {decisionBulletsIt.slice(0, 5).map((item, idx) => (
+                      <li key={`it-bullet-${idx}`}>{safeRender(item, '')}</li>
+                    ))}
+                  </ul>
+                )}
+                {decisionBulletsEn.length > 0 && (
+                  <ul className="mt-2 space-y-1 text-xs text-zinc-500 list-disc pl-5">
+                    {decisionBulletsEn.slice(0, 5).map((item, idx) => (
+                      <li key={`en-bullet-${idx}`}>{safeRender(item, '')}</li>
+                    ))}
+                  </ul>
+                )}
+                
+                {/* Mutuabilità if available */}
+                {semaforo.mutuabilita_stimata && (
+                  <div className="mt-3 p-2 bg-zinc-900 rounded">
+                    <span className="text-xs text-zinc-500">Mutuabilità stimata: </span>
+                    <span className="text-sm font-medium text-gold">{semaforo.mutuabilita_stimata.value}</span>
+                    {semaforo.mutuabilita_stimata.reason && (
+                      <p className="text-xs text-zinc-400 mt-1">{semaforo.mutuabilita_stimata.reason}</p>
+                    )}
                   </div>
-                ))}
+                )}
+                
+                {/* Driver Rosso with Evidence - old format */}
+                {decision.driver_rosso && decision.driver_rosso.length > 0 && (
+                  <div className="mt-4 space-y-2">
+                    <p className="text-xs font-mono text-red-400 uppercase">Criticità Rilevate:</p>
+                    {decision.driver_rosso.map((driver, idx) => (
+                      <div key={idx} className="p-2 bg-red-500/10 rounded border border-red-500/20">
+                        <div className="flex items-center gap-2">
+                          <AlertTriangle className="w-4 h-4 text-red-400" />
+                          <span className="text-sm text-red-400">{safeRender(driver.headline_it)}</span>
+                          {getEvidence(driver).length > 0 && (
+                            <span className="text-xs font-mono text-gold">
+                              p. {[...new Set(getEvidence(driver).map(e => e.page))].join(', ')}
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
-            )}
-          </div>
+            </>
+          )}
         </div>
         
         {/* Tabs */}
-        <Tabs defaultValue="overview" className="w-full">
+        <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
           <TabsList className="w-full justify-start bg-zinc-900 border border-zinc-800 p-1 mb-6 overflow-x-auto">
             <TabsTrigger value="overview" data-testid="tab-overview">Panoramica</TabsTrigger>
             <TabsTrigger value="costs" data-testid="tab-costs">Costi</TabsTrigger>
@@ -1360,38 +2324,38 @@ const AnalysisResult = () => {
             <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-6">
               <h2 className="text-xl font-serif font-bold text-zinc-100 mb-4">Case Summary</h2>
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                <DataValueWithEvidence
+                <PanoramicaDataValueCard
                   label="Tribunale"
-                  value={formatFieldStateDisplay('tribunale', caseHeader.tribunale?.value || caseHeader.tribunale)}
-                  evidence={getFieldEvidence('tribunale', caseHeader.tribunale)}
+                  value={overviewTribunale}
+                  evidence={overviewTribunaleEvidence}
                 />
-                <DataValueWithEvidence
+                <PanoramicaDataValueCard
                   label="Procedura"
-                  value={formatFieldStateDisplay('procedura', caseHeader.procedure?.value || caseHeader.procedure_id)}
-                  evidence={getFieldEvidence('procedura', caseHeader.procedure || caseHeader.procedure_id)}
+                  value={overviewProcedura}
+                  evidence={overviewProceduraEvidence}
                 />
-                <DataValueWithEvidence
+                <PanoramicaDataValueCard
                   label="Lotto"
-                  value={formatFieldStateDisplay('lotto', caseHeader.lotto?.value || caseHeader.lotto)}
-                  evidence={getFieldEvidence('lotto', caseHeader.lotto)}
+                  value={overviewLotto}
+                  evidence={overviewLottoEvidence}
                 />
-                <DataValueWithEvidence
+                <PanoramicaDataValueCard
                   label="Stato Occupativo"
                   value={formatFieldStateDisplay('stato_occupativo', occupativo.status_it || occupativo.status)}
                   evidence={getFieldEvidence('stato_occupativo', occupativo)}
                 />
-                <DataValueWithEvidence
+                <PanoramicaDataValueCard
                   label="Spese Condominiali Arretrate"
                   value={formatFieldStateDisplay('spese_condominiali_arretrate', result.spese_condominiali_arretrate || result.spese_condominiali)}
                   evidence={getFieldEvidence('spese_condominiali_arretrate', result.spese_condominiali_arretrate || result.spese_condominiali)}
                 />
-                <DataValueWithEvidence
+                <PanoramicaDataValueCard
                   label="APE"
                   value={safeRender(getFieldValue('ape', abusi.ape?.status || result.ape), 'Non specificato in perizia')}
                   evidence={getFieldEvidence('ape', abusi.ape || result.ape)}
                 />
                 {datiAsta && (
-                  <DataValueWithEvidence
+                  <PanoramicaDataValueCard
                     label="Dati Asta"
                     value={safeRender(datiAsta?.data || datiAsta?.value || datiAsta)}
                     evidence={getEvidence(datiAsta)}
@@ -1400,24 +2364,93 @@ const AnalysisResult = () => {
               </div>
             </div>
 
-            {/* Riepilogo Costi / Cost Summary */}
+            {/* Composizione Lotto / Lot Composition */}
+            {lotCompositionItems.length > 0 && (
+              <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-6">
+                <h2 className="text-lg font-serif font-bold text-zinc-100 mb-3">Composizione Lotto / Lot Composition</h2>
+                <p className="text-xs text-zinc-500 mb-4">
+                  {lotCompositionItems.length > 1
+                    ? `Composizione rilevata del lotto selezionato (${lotCompositionItems.length} beni).`
+                    : 'Composizione rilevata del lotto selezionato (1 bene).'}
+                </p>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                  {lotCompositionItems.map((item) => (
+                    <div key={item.key} className="p-4 bg-zinc-950 rounded-lg border border-zinc-800">
+                      <div className="flex items-center justify-between gap-2">
+                        <p className="text-sm font-semibold text-zinc-100">{item.title}</p>
+                        {item.evidence.length > 0 && <EvidenceBadge evidence={item.evidence} />}
+                      </div>
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 mt-3">
+                        {item.tipologia && (
+                          <div>
+                            <p className="text-[11px] uppercase tracking-wide text-zinc-500">Tipologia</p>
+                            <p className="text-sm text-zinc-200">{item.tipologia}</p>
+                          </div>
+                        )}
+                        {item.location && (
+                          <div>
+                            <p className="text-[11px] uppercase tracking-wide text-zinc-500">Ubicazione</p>
+                            <p className="text-sm text-zinc-200">{item.location}</p>
+                          </div>
+                        )}
+                        {item.piano && (
+                          <div>
+                            <p className="text-[11px] uppercase tracking-wide text-zinc-500">Piano</p>
+                            <p className="text-sm text-zinc-200">{item.piano}</p>
+                          </div>
+                        )}
+                        {item.superficie && item.superficie !== 'Non specificato in perizia' && (
+                          <div>
+                            <p className="text-[11px] uppercase tracking-wide text-zinc-500">Superficie</p>
+                            <p className="text-sm text-zinc-200">{item.superficie}</p>
+                          </div>
+                        )}
+                        {item.valoreStima && item.valoreStima !== 'Non specificato in perizia' && (
+                          <div>
+                            <p className="text-[11px] uppercase tracking-wide text-zinc-500">Valore stima bene</p>
+                            <p className="text-sm font-mono text-gold">{item.valoreStima}</p>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Riepilogo Costi (Stima Compatta) */}
             <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-6">
-              <h2 className="text-lg font-serif font-bold text-zinc-100 mb-3">Riepilogo Costi / Cost Summary</h2>
-              {moneyBoxTotalRange && typeof moneyBoxTotalRange.min_eur === 'number' && typeof moneyBoxTotalRange.max_eur === 'number' ? (
-                <>
-                  <p className="text-base font-semibold text-zinc-100">
-                    Costi extra stimati: € {moneyBoxTotalRange.min_eur.toLocaleString()} - € {moneyBoxTotalRange.max_eur.toLocaleString()}
+              <h2 className="text-lg font-serif font-bold text-zinc-100 mb-3">Sintesi costi extra (stima) / Compact extra-cost estimate</h2>
+              {hasMoneyBoxTotalRange ? (
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between gap-3 text-sm">
+                    <span className="text-zinc-400">Da perizia / Document-backed</span>
+                    <span className="font-mono text-emerald-300">
+                      €{documentBackedMin.toLocaleString()} - €{documentBackedMax.toLocaleString()}
+                    </span>
+                  </div>
+                  <div className="flex items-center justify-between gap-3 text-sm">
+                    <span className="text-zinc-400">Stime Nexodify / Estimated missing items</span>
+                    <span className="font-mono text-gold">
+                      €{estimatedMin.toLocaleString()} - €{estimatedMax.toLocaleString()}
+                    </span>
+                  </div>
+                  <div className="mt-3 pt-3 border-t border-zinc-800 flex items-center justify-between gap-3">
+                    <span className="text-zinc-200 font-medium">Totale costi extra / Total extra costs</span>
+                    <span className="font-mono font-bold text-zinc-100">
+                      €{moneyBoxTotalRange.min_eur.toLocaleString()} - €{moneyBoxTotalRange.max_eur.toLocaleString()}
+                    </span>
+                  </div>
+                  <p className="text-xs text-zinc-500 mt-2">
+                    Le voci rilevate automaticamente dalla perizia non sono incluse in questo totale finché non sono validate.
                   </p>
-                  <p className="text-sm text-zinc-400 mt-1">
-                    Estimated extra costs: € {moneyBoxTotalRange.min_eur.toLocaleString()} - € {moneyBoxTotalRange.max_eur.toLocaleString()}
+                  <p className="text-[11px] text-zinc-600">
+                    Automatically detected cost mentions from the appraisal are not included in this total until validated.
                   </p>
-                  {moneyBoxTotalRange.includes_market_estimates && (
-                    <>
-                      <p className="text-xs text-zinc-500 mt-2">Include stime Nexodify per voci non presenti in perizia.</p>
-                      <p className="text-[11px] text-zinc-600">Includes Nexodify estimates for items not present in the appraisal.</p>
-                    </>
-                  )}
-                </>
+                  <p className="text-xs text-zinc-500 mt-2">
+                    Quadro sintetico indicativo: non sostituisce la tassonomia costi completa del contratto.
+                  </p>
+                </div>
               ) : (
                 <>
                   <p className="text-sm text-zinc-400">Costi extra: non disponibili</p>
@@ -1428,48 +2461,85 @@ const AnalysisResult = () => {
             
             {/* Key Data Grid with Evidence */}
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-              <DataValueWithEvidence 
+              <PanoramicaDataValueCard
                 label="Prezzo Base" 
-                value={dati.prezzo_base_asta?.formatted || dati.prezzo_base_asta?.value || dati.prezzo_base_asta}
-                evidence={getEvidence(dati.prezzo_base_asta)}
+                value={overviewPrezzoBaseValue}
+                evidence={overviewPrezzoBaseEvidence}
                 valueClassName="text-gold text-xl"
               />
-              <DataValueWithEvidence 
+              <PanoramicaDataValueCard
                 label="Superficie" 
-                value={dati.superficie_catastale?.value || dati.superficie_catastale}
+                value={normalizeOverviewValue(dati.superficie_catastale?.value || dati.superficie_catastale)}
                 evidence={getEvidence(dati.superficie_catastale)}
               />
-              <DataValueWithEvidence 
+              <PanoramicaDataValueCard
                 label="Stato Occupativo" 
-                value={occupativo.status_it || occupativo.status}
+                value={normalizeOverviewValue(occupativo.status_it || occupativo.status)}
                 evidence={getEvidence(occupativo)}
               />
-              <DataValueWithEvidence 
+              <PanoramicaDataValueCard
                 label="Conformità Urbanistica" 
-                value={abusi.conformita_urbanistica?.status}
+                value={normalizeOverviewValue(abusi.conformita_urbanistica?.status)}
                 evidence={getEvidence(abusi.conformita_urbanistica)}
               />
-              <DataValueWithEvidence 
+              <PanoramicaDataValueCard
                 label="Conformità Catastale" 
-                value={abusi.conformita_catastale?.status}
+                value={normalizeOverviewValue(abusi.conformita_catastale?.status)}
                 evidence={getEvidence(abusi.conformita_catastale)}
               />
-              <DataValueWithEvidence 
+              <PanoramicaDataValueCard
                 label="Agibilità/Abitabilità" 
-                value={abusi.agibilita?.status || 'Non specificato'}
+                value={normalizeOverviewValue(abusi.agibilita?.status)}
                 evidence={getEvidence(abusi.agibilita)}
               />
-              <DataValueWithEvidence 
+              <PanoramicaDataValueCard
                 label="APE (Certificato Energetico)" 
-                value={abusi.ape?.status || 'Non specificato'}
+                value={normalizeOverviewValue(abusi.ape?.status)}
                 evidence={getEvidence(abusi.ape)}
               />
-              <DataValueWithEvidence 
+              <PanoramicaDataValueCard
                 label="Diritto Reale" 
-                value={dati.diritto_reale?.value || dati.diritto_reale}
+                value={normalizeOverviewValue(dati.diritto_reale?.value || dati.diritto_reale)}
                 evidence={getEvidence(dati.diritto_reale)}
               />
             </div>
+
+            {/* Waterfall Valutativo / Valuation Waterfall */}
+            {canRenderValuationWaterfall && (
+              <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-6">
+                <h2 className="text-lg font-serif font-bold text-zinc-100 mb-3">Waterfall Valutativo / Valuation Waterfall</h2>
+                <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
+                  <div className="p-3 bg-zinc-950 rounded-lg border border-zinc-800">
+                    <div className="flex items-center justify-between gap-2">
+                      <p className="text-xs text-zinc-500">Valore di stima</p>
+                      {waterfallStimaEvidence.length > 0 && <EvidenceBadge evidence={waterfallStimaEvidence} />}
+                    </div>
+                    <p className="mt-2 text-lg font-mono font-semibold text-zinc-100">€{waterfallStimaValue.toLocaleString()}</p>
+                  </div>
+                  <div className="p-3 bg-zinc-950 rounded-lg border border-zinc-800">
+                    <div className="flex items-center justify-between gap-2">
+                      <p className="text-xs text-zinc-500">Deprezzamenti</p>
+                      {waterfallDeprezzamentiEvidence.length > 0 && <EvidenceBadge evidence={waterfallDeprezzamentiEvidence} />}
+                    </div>
+                    <p className="mt-2 text-lg font-mono font-semibold text-amber-300">- €{waterfallDeprezzamentiValue.toLocaleString()}</p>
+                  </div>
+                  <div className="p-3 bg-zinc-950 rounded-lg border border-zinc-800">
+                    <div className="flex items-center justify-between gap-2">
+                      <p className="text-xs text-zinc-500">Valore finale</p>
+                      {waterfallFinaleEvidence.length > 0 && <EvidenceBadge evidence={waterfallFinaleEvidence} />}
+                    </div>
+                    <p className="mt-2 text-lg font-mono font-semibold text-gold">€{waterfallFinaleValue.toLocaleString()}</p>
+                  </div>
+                  <div className="p-3 bg-zinc-950 rounded-lg border border-zinc-800">
+                    <div className="flex items-center justify-between gap-2">
+                      <p className="text-xs text-zinc-500">Prezzo base d'asta</p>
+                      {waterfallPrezzoBaseEvidence.length > 0 && <EvidenceBadge evidence={waterfallPrezzoBaseEvidence} />}
+                    </div>
+                    <p className="mt-2 text-lg font-mono font-semibold text-emerald-300">€{waterfallPrezzoBaseValue.toLocaleString()}</p>
+                  </div>
+                </div>
+              </div>
+            )}
             
             {/* Impianti Section */}
             {abusi.impianti && (
@@ -1516,30 +2586,33 @@ const AnalysisResult = () => {
               </div>
             )}
             
-            {/* Indice di Convenienza */}
-            {(indice.all_in_light_min || indice.all_in_light_max || indice.prezzo_base) && (
+            {/* Scenario Indicativo */}
+            {canRenderAllIn && (
               <div className="bg-gold/10 border border-gold/30 rounded-xl p-6">
-                <h3 className="text-lg font-semibold text-zinc-100 mb-2">Indice di Convenienza (All-In Light)</h3>
+                <h3 className="text-lg font-semibold text-zinc-100 mb-2">Scenario indicativo (stima)</h3>
                 <p className="text-zinc-300 mb-4 text-sm">{safeRender(indice.lettura_secca_it || indice.dry_read_it, 'Calcolo basato su prezzo base + extra budget stimato')}</p>
                 <div className="grid grid-cols-3 gap-4">
                   <div className="text-center p-3 bg-zinc-950 rounded-lg">
                     <p className="text-xs text-zinc-500 mb-1">PREZZO BASE</p>
-                    <p className="text-lg font-mono font-bold text-zinc-300">€{(indice.prezzo_base || dati.prezzo_base_asta?.value || 0).toLocaleString()}</p>
+                    <p className="text-lg font-mono font-bold text-zinc-300">€{prezzoBaseValue.toLocaleString()}</p>
                   </div>
                   <div className="text-center p-3 bg-zinc-950 rounded-lg">
                     <p className="text-xs text-zinc-500 mb-1">ALL-IN MIN</p>
-                    <p className="text-lg font-mono font-bold text-gold">€{(indice.all_in_light_min || 0).toLocaleString()}</p>
+                    <p className="text-lg font-mono font-bold text-gold">€{allInMin.toLocaleString()}</p>
                   </div>
                   <div className="text-center p-3 bg-zinc-950 rounded-lg">
                     <p className="text-xs text-zinc-500 mb-1">ALL-IN MAX</p>
-                    <p className="text-lg font-mono font-bold text-gold">€{(indice.all_in_light_max || 0).toLocaleString()}</p>
+                    <p className="text-lg font-mono font-bold text-gold">€{allInMax.toLocaleString()}</p>
                   </div>
                 </div>
-                {(indice.extra_budget_min || indice.extra_budget_max) && (
+                {hasMoneyBoxTotalRange && (
                   <p className="text-xs text-zinc-500 mt-3 text-center">
-                    Extra budget: €{(indice.extra_budget_min || 0).toLocaleString()} - €{(indice.extra_budget_max || 0).toLocaleString()}
+                    Extra budget: €{moneyBoxTotalRange.min_eur.toLocaleString()} - €{moneyBoxTotalRange.max_eur.toLocaleString()}
                   </p>
                 )}
+                <p className="text-xs text-zinc-500 mt-2 text-center">
+                  Basato su extra stimati: non sostituisce verifica tecnica e legale.
+                </p>
               </div>
             )}
           </TabsContent>
@@ -1549,40 +2622,76 @@ const AnalysisResult = () => {
             <div className="money-box-card p-6">
               <div className="flex items-center gap-3 mb-2">
                 <DollarSign className="w-6 h-6 text-gold" />
-                <h2 className="text-xl font-serif font-bold text-zinc-100">Portafoglio Costi (Money Box)</h2>
+                <h2 className="text-xl font-serif font-bold text-zinc-100">Costi / Costs</h2>
               </div>
               <p className="text-xs text-zinc-500 mb-6">
-                <span className="text-emerald-400">Verde</span> = dal documento | 
-                <span className="text-gold ml-2">Oro</span> = stima Nexodify
+                Sezioni separate per evitare mix fuorviante tra deprezzamenti, costi espliciti e stime.
               </p>
+
+              <div className="p-4 rounded-lg border border-zinc-800 bg-zinc-950/60 mb-5">
+                <h3 className="text-sm font-semibold text-zinc-100 mb-2">Deprezzamenti da perizia / Perizia valuation adjustments</h3>
+                {valuationDeprezzamentiValue !== null ? (
+                  <>
+                    <p className="text-lg font-mono font-semibold text-amber-300">- €{valuationDeprezzamentiValue.toLocaleString()}</p>
+                    {valuationDeprezzamentiEvidence.length > 0 && (
+                      <div className="mt-2">
+                        <EvidenceDetail evidence={valuationDeprezzamentiEvidence} />
+                      </div>
+                    )}
+                    <p className="text-xs text-zinc-500 mt-2">
+                      Voce di deprezzamento della valutazione in perizia: non equivale automaticamente a cassa extra lato acquirente.
+                    </p>
+                  </>
+                ) : (
+                  <p className="text-sm text-zinc-500">Non specificato in perizia</p>
+                )}
+              </div>
+
               {moneyBoxTotalRange && typeof moneyBoxTotalRange.min_eur === 'number' && typeof moneyBoxTotalRange.max_eur === 'number' && (
                 <div className="mb-5 p-4 bg-zinc-950 rounded-lg border border-gold/30">
                   <p className="text-lg font-semibold text-zinc-100">
-                    Totale costi extra stimati: €{moneyBoxTotalRange.min_eur.toLocaleString()} - €{moneyBoxTotalRange.max_eur.toLocaleString()}
+                    Scenario stima extra-costi (escl. deprezzamenti): €{moneyBoxTotalRange.min_eur.toLocaleString()} - €{moneyBoxTotalRange.max_eur.toLocaleString()}
                   </p>
-                  {moneyBoxTotalRange.includes_market_estimates ? (
-                    <p className="text-xs text-zinc-500 mt-1">Include stime di mercato per voci non presenti in perizia.</p>
-                  ) : (
-                    <p className="text-xs text-zinc-500 mt-1">Calcolato solo su importi rilevati dalla perizia.</p>
-                  )}
+                  <p className="text-xs text-zinc-500 mt-1">
+                    Range indicativo di extra-costi; le stime Nexodify sono assunzioni e non frasi dirette della perizia.
+                  </p>
                 </div>
               )}
-              
-              {moneyBoxItems.length > 0 ? (
-                <div className="space-y-3">
-                  {moneyBoxItems.map((item, index) => (
-                    <MoneyBoxItem key={index} item={item} />
-                  ))}
-                </div>
-              ) : (
-                <p className="text-zinc-500 text-center py-8">Nessun dato sui costi disponibile</p>
-              )}
-              
+
+              <div className="p-4 rounded-lg border border-zinc-800 bg-zinc-950/40 mb-5">
+                <h3 className="text-sm font-semibold text-zinc-100 mb-3">Costi espliciti citati nel testo / Explicit cost mentions from text</h3>
+                {explicitCostMentions.length > 0 ? (
+                  <div className="space-y-3">
+                    {explicitCostMentions.map((item, index) => (
+                      <MoneyBoxItem key={`explicit_${index}`} item={item} />
+                    ))}
+                  </div>
+                ) : (
+                  <p className="text-zinc-500 text-sm">Nessun costo esplicito affidabile disponibile.</p>
+                )}
+              </div>
+
+              <div className="p-4 rounded-lg border border-zinc-800 bg-zinc-950/40">
+                <h3 className="text-sm font-semibold text-zinc-100 mb-3">Stime Nexodify / Nexodify estimates</h3>
+                <p className="text-xs text-zinc-500 mb-3">
+                  Voci canoniche A-H mostrate come stime/assunzioni operative, non come dichiarazioni dirette della perizia.
+                </p>
+                {nexodifyEstimateItems.length > 0 ? (
+                  <div className="space-y-3">
+                    {nexodifyEstimateItems.map((item, index) => (
+                      <MoneyBoxItem key={`nexo_${index}`} item={item} />
+                    ))}
+                  </div>
+                ) : (
+                  <p className="text-zinc-500 text-sm">Nessuna stima Nexodify disponibile.</p>
+                )}
+              </div>
+
               {/* Total - support TBD and numeric totals */}
               {(moneyBoxTotal || moneyBox.total_extra_costs) && !moneyBoxTotalRange && (
                 <div className="mt-6 p-4 bg-gold/10 border border-gold/30 rounded-lg">
                   <div className="flex items-center justify-between">
-                    <span className="text-lg font-semibold text-zinc-100">Totale Costi Extra Stimati</span>
+                    <span className="text-lg font-semibold text-zinc-100">Totale stima extra-costi (escl. deprezzamenti)</span>
                     <span className={`text-2xl font-mono font-bold ${isTotalTBD ? 'text-amber-400' : 'text-gold'}`}>
                       {isTotalTBD ? (
                         'Non disponibile'
@@ -1625,14 +2734,14 @@ const AnalysisResult = () => {
                   ))}
                 </div>
               ) : (
-                <p className="text-zinc-500 text-center py-8">Checklist legal killers non disponibile</p>
+                <p className="text-zinc-500 text-center py-8">Nessun blocker legale materiale con evidenza sostanziale disponibile</p>
               )}
 
-              {estrattoLegalSection && Array.isArray(estrattoLegalSection.__items) && estrattoLegalSection.__items.length > 0 && (
+              {filteredLegalDetailItems.length > 0 && (
                 <div className="mt-6 p-4 rounded-lg border border-zinc-800 bg-zinc-950/60">
                   <h3 className="text-sm font-semibold text-zinc-100">Dettagli dal documento / Document details</h3>
                   <div className="space-y-3 mt-3">
-                    {(!!estrattoShowAll.legal_doc ? estrattoLegalSection.__items : estrattoLegalSection.__items.slice(0, 12)).map((item, idx) => {
+                    {(!!estrattoShowAll.legal_doc ? filteredLegalDetailItems : filteredLegalDetailItems.slice(0, 12)).map((item, idx) => {
                       const labelIt = safeRender(item?.label_it || item?.__label, 'Voce');
                       const labelEn = safeRender(item?.label_en, '');
                       const displayValue = getEstrattoItemDisplayValue(item);
@@ -1652,13 +2761,13 @@ const AnalysisResult = () => {
                         </div>
                       );
                     })}
-                    {estrattoLegalSection.__items.length > 12 && (
+                    {filteredLegalDetailItems.length > 12 && (
                       <button
                         type="button"
                         onClick={() => setEstrattoShowAll((prev) => ({ ...prev, legal_doc: !prev.legal_doc }))}
                         className="text-xs text-gold hover:underline"
                       >
-                        {estrattoShowAll.legal_doc ? 'Mostra meno / Show less' : `Mostra altri / Show more (${estrattoLegalSection.__items.length - 12})`}
+                        {estrattoShowAll.legal_doc ? 'Mostra meno / Show less' : `Mostra altri / Show more (${filteredLegalDetailItems.length - 12})`}
                       </button>
                     )}
                   </div>
@@ -1700,34 +2809,60 @@ const AnalysisResult = () => {
               </div>
             </div>
 
-            {/* Beni Section */}
+            {/* Per-bene detailed cards (contract-first, deterministic only) */}
             <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-6">
-              <h2 className="text-xl font-serif font-bold text-zinc-100 mb-4">Beni del Lotto</h2>
-              {Array.isArray(beni) && beni.length > 0 ? (
-                <div className="space-y-3">
-                  {beni.map((bene, idx) => (
-                    <div key={bene.bene_number || idx} className="p-4 bg-zinc-950 rounded-lg border border-zinc-800">
-                      <div className="flex items-start justify-between gap-4">
-                        <div className="space-y-1">
-                          <p className="text-sm font-semibold text-zinc-100">
-                            {bene.bene_number ? `Bene ${bene.bene_number}` : `Bene ${idx + 1}`} - {safeRender(bene.tipologia, 'Tipologia non specificata')}
-                          </p>
-                          {bene.note && (
-                            <p className="text-xs text-zinc-500">{safeRender(bene.note, '')}</p>
-                          )}
-                          {bene.catasto && (
-                            <p className="text-xs text-zinc-400">
-                              Catasto: {safeRender(bene.catasto)}
-                            </p>
-                          )}
-                        </div>
-                        {getEvidence(bene).length > 0 && (
-                          <EvidenceBadge evidence={getEvidence(bene)} />
+              <h2 className="text-xl font-serif font-bold text-zinc-100 mb-4">Dettagli per bene</h2>
+              {detailsBeneCards.length > 0 ? (
+                <div className="space-y-4">
+                  {detailsBeneCards.map((card) => (
+                    <div key={card.key} className="p-4 bg-zinc-950 rounded-lg border border-zinc-800">
+                      <div className="flex items-start justify-between gap-3">
+                        <p className="text-sm font-semibold text-zinc-100">
+                          Bene {card.beneNumber}{card.tipologia ? ` - ${card.tipologia}` : ''}
+                        </p>
+                        {card.topEvidence.length > 0 && <EvidenceBadge evidence={card.topEvidence} />}
+                      </div>
+
+                      <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mt-3">
+                        {card.shortLocation && (
+                          <div>
+                            <p className="text-[11px] uppercase tracking-wide text-zinc-500">Short location</p>
+                            <p className="text-sm text-zinc-200">{card.shortLocation}</p>
+                          </div>
+                        )}
+                        {card.piano && (
+                          <div>
+                            <p className="text-[11px] uppercase tracking-wide text-zinc-500">Piano</p>
+                            <p className="text-sm text-zinc-200">{card.piano}</p>
+                          </div>
+                        )}
+                        {card.superficie && (
+                          <div>
+                            <p className="text-[11px] uppercase tracking-wide text-zinc-500">Superficie</p>
+                            <p className="text-sm text-zinc-200">{card.superficie}</p>
+                          </div>
+                        )}
+                        {card.valoreStima && (
+                          <div>
+                            <p className="text-[11px] uppercase tracking-wide text-zinc-500">Valore stima bene</p>
+                            <p className="text-sm font-mono text-gold">{card.valoreStima}</p>
+                          </div>
                         )}
                       </div>
-                      {getEvidence(bene).length > 0 && (
-                        <EvidenceDetail evidence={getEvidence(bene)} />
-                      )}
+
+                      <div className="mt-4 pt-3 border-t border-zinc-800 grid grid-cols-1 md:grid-cols-2 gap-3">
+                        {card.detailRows.map((row) => (
+                          row.value ? (
+                            <div key={`${card.key}_${row.key}`} className="p-3 rounded border border-zinc-800 bg-zinc-900/70">
+                              <div className="flex items-center justify-between gap-2">
+                                <p className="text-[11px] uppercase tracking-wide text-zinc-500">{row.label}</p>
+                                {row.evidence.length > 0 && <EvidenceBadge evidence={row.evidence} />}
+                              </div>
+                              <p className="text-sm text-zinc-200 mt-1">{row.value}</p>
+                            </div>
+                          ) : null
+                        ))}
+                      </div>
                     </div>
                   ))}
                 </div>
@@ -1736,338 +2871,31 @@ const AnalysisResult = () => {
               )}
             </div>
 
-            {/* Estratto sections mapped to Dettagli */}
+            {/* Compact lot-level details: deterministic values only */}
             <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-6">
-              <h2 className="text-xl font-serif font-bold text-zinc-100 mb-4">Dettagli dal documento</h2>
-              <div className="space-y-4">
-                {estrattoSectionDefs.map((def) => {
-                  const section = estrattoSectionMap[def.key];
-                  const sectionItems = Array.isArray(section?.__items) ? section.__items : [];
-                  const showAll = !!estrattoShowAll[`details_${def.key}`];
-                  const visibleItems = showAll ? sectionItems : sectionItems.slice(0, 10);
-                  const headingIt = safeRender(section?.heading_it || section?.__title, def.headingIt);
-                  const headingEn = safeRender(section?.heading_en, def.headingEn);
-
-                  return (
-                    <div key={`details_section_${def.key}`} className="p-4 rounded-lg border border-zinc-800 bg-zinc-950/60">
-                      <h3 className="text-sm font-semibold text-zinc-100">{headingIt}</h3>
-                      <p className="text-xs text-zinc-500 mb-3">{headingEn}</p>
-                      {visibleItems.length > 0 ? (
-                        <div className="space-y-3">
-                          {visibleItems.map((item, idx) => {
-                            const labelIt = safeRender(item?.label_it || item?.__label, 'Voce');
-                            const labelEn = safeRender(item?.label_en, '');
-                            const displayValue = getEstrattoItemDisplayValue(item);
-                            const evidence = Array.isArray(item?.__evidence) ? item.__evidence : [];
-                            return (
-                              <div key={`details_${def.key}_${idx}`} className="p-3 rounded border border-zinc-800 bg-zinc-900">
-                                <p className="text-sm text-zinc-100">
-                                  <span className="font-medium">{labelIt}</span>
-                                  {displayValue ? `: ${displayValue}` : ''}
-                                </p>
-                                {labelEn && <p className="text-xs text-zinc-500 mt-1">{labelEn}</p>}
-                                {evidence.length > 0 && (
-                                  <div className="mt-2">
-                                    <EvidenceDetail evidence={evidence} />
-                                  </div>
-                                )}
-                              </div>
-                            );
-                          })}
-                          {sectionItems.length > 10 && (
-                            <button
-                              type="button"
-                              onClick={() => setEstrattoShowAll((prev) => ({ ...prev, [`details_${def.key}`]: !showAll }))}
-                              className="text-xs text-gold hover:underline"
-                            >
-                              {showAll ? 'Mostra meno / Show less' : `Mostra altri / Show more (${sectionItems.length - 10})`}
-                            </button>
-                          )}
-                        </div>
-                      ) : (
-                        <p className="text-xs text-zinc-500">Nessuna voce estratta per questa sezione.</p>
-                      )}
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
-            
-            {/* Abusi Edilizi / Conformità - Section 5 */}
-            <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-6">
-              <h2 className="text-xl font-serif font-bold text-zinc-100 mb-4">Abusi Edilizi / Conformità</h2>
-              {(userMessagesByCode.ACTION_VERIFY_CATASTO || []).map((msg, idx) => (
-                <MessageInjectionCard key={`catasto_msg_${idx}`} msg={msg} />
-              ))}
-              {(userMessagesByCode.RISK_NON_AGIBILE || []).map((msg, idx) => (
-                <MessageInjectionCard key={`non_agibile_msg_${idx}`} msg={msg} />
-              ))}
+              <h2 className="text-xl font-serif font-bold text-zinc-100 mb-4">Dettagli lotto (compatti)</h2>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <DataValueWithEvidence 
-                  label="Conformità Urbanistica" 
-                  value={abusi.conformita_urbanistica?.status}
-                  evidence={getEvidence(abusi.conformita_urbanistica)}
+                <DataValueWithEvidence
+                  label="Conformità Urbanistica"
+                  value={safeRender(abusi.conformita_urbanistica?.status || abusi.conformita_urbanistica, 'Non specificato in perizia')}
+                  evidence={getFieldEvidence('regolarita_urbanistica', abusi.conformita_urbanistica)}
                 />
-                {abusi.conformita_urbanistica?.detail && (
-                  <div className="p-3 bg-zinc-950 rounded-lg md:col-span-2">
-                    <p className="text-xs text-zinc-500 mb-1">Dettaglio Conformità</p>
-                    <p className="text-sm text-zinc-300">{abusi.conformita_urbanistica.detail}</p>
-                  </div>
-                )}
-                <DataValueWithEvidence 
-                  label="Conformità Catastale" 
-                  value={abusi.conformita_catastale?.status}
-                  evidence={getEvidence(abusi.conformita_catastale)}
-                />
-                <DataValueWithEvidence 
-                  label="Condono Presente" 
-                  value={safeRender(abusi.condono?.presente || abusi.condono?.present, 'Non specificato in perizia')}
-                  evidence={getEvidence(abusi.condono)}
-                />
-                {(abusi.condono?.anno || abusi.condono?.pratica) && (
-                  <DataValueWithEvidence 
-                    label="Pratica Condono" 
-                    value={`${abusi.condono.pratica || ''} (${abusi.condono.anno || ''}) - ${abusi.condono.stato || ''}`}
-                    evidence={getEvidence(abusi.condono)}
-                  />
-                )}
-                <DataValueWithEvidence 
-                  label="Agibilità/Abitabilità" 
+                <DataValueWithEvidence
+                  label="Agibilità/Abitabilità"
                   value={safeRender(abusi.agibilita?.status || abusi.agibilita, 'Non specificato in perizia')}
-                  evidence={getEvidence(abusi.agibilita)}
+                  evidence={getFieldEvidence('agibilita', abusi.agibilita)}
                 />
-                <DataValueWithEvidence 
-                  label="APE (Certificato Energetico)" 
-                  value={abusi.ape?.status || abusi.ape}
-                  evidence={getEvidence(abusi.ape)}
+                <DataValueWithEvidence
+                  label="APE (Certificato Energetico)"
+                  value={safeRender(abusi.ape?.status || abusi.ape, 'Non specificato in perizia')}
+                  evidence={getFieldEvidence('ape', abusi.ape)}
                 />
-              </div>
-              
-              {/* Impianti Section */}
-              {abusi.impianti && (
-                <div className="mt-4 p-4 bg-zinc-950 rounded-lg">
-                  <p className="text-xs text-zinc-500 mb-2">Conformità Impianti</p>
-                  <div className="grid grid-cols-3 gap-4">
-                    <div className="text-center">
-                      <p className="text-xs text-zinc-400">Elettrico</p>
-                      <p className={`text-sm font-medium ${
-                        abusi.impianti.elettrico?.conformita === 'SI' ? 'text-emerald-400' : 
-                        abusi.impianti.elettrico?.conformita === 'NO' ? 'text-red-400' : 'text-amber-400'
-                      }`}>{abusi.impianti.elettrico?.conformita || 'NON RISULTA'}</p>
-                    </div>
-                    <div className="text-center">
-                      <p className="text-xs text-zinc-400">Termico</p>
-                      <p className={`text-sm font-medium ${
-                        abusi.impianti.termico?.conformita === 'SI' ? 'text-emerald-400' : 
-                        abusi.impianti.termico?.conformita === 'NO' ? 'text-red-400' : 'text-amber-400'
-                      }`}>{abusi.impianti.termico?.conformita || 'NON RISULTA'}</p>
-                    </div>
-                    <div className="text-center">
-                      <p className="text-xs text-zinc-400">Idrico</p>
-                      <p className={`text-sm font-medium ${
-                        abusi.impianti.idrico?.conformita === 'SI' ? 'text-emerald-400' : 
-                        abusi.impianti.idrico?.conformita === 'NO' ? 'text-red-400' : 'text-amber-400'
-                      }`}>{abusi.impianti.idrico?.conformita || 'NON RISULTA'}</p>
-                    </div>
-                  </div>
-                </div>
-              )}
-            </div>
-            
-            {/* Stato Conservativo - Section 7 */}
-            <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-6">
-              {(userMessagesByCode.INFO_IMPIANTI_PRESENT || []).map((msg, idx) => (
-                <MessageInjectionCard key={`impianti_msg_${idx}`} msg={msg} />
-              ))}
-              <h2 className="text-xl font-serif font-bold text-zinc-100 mb-4">Stato Conservativo / Impianti</h2>
-              <p className="text-zinc-300">{safeRender(conservativo.condizione_generale || conservativo.general_condition_it, 'Nessuna nota disponibile')}</p>
-
-              {estrattoSectionMap.impianti && Array.isArray(estrattoSectionMap.impianti.__items) && estrattoSectionMap.impianti.__items.length > 0 ? (
-                <div className="mt-4 p-4 bg-zinc-950 rounded-lg border border-zinc-800">
-                  <p className="text-xs text-zinc-500 mb-3">Impianti estratti dal documento</p>
-                  <ul className="space-y-3">
-                    {estrattoSectionMap.impianti.__items.map((item, idx) => (
-                      <li key={`estratto_impianti_${idx}`} className="text-sm text-zinc-300">
-                        <span className="text-zinc-100">• {safeRender(item.__label, 'Impianti')}</span>: {safeRender(item.__value, 'Non specificato in perizia')}
-                        {Array.isArray(item.__evidence) && item.__evidence.length > 0 && (
-                          <div className="mt-1">
-                            <EvidenceDetail evidence={item.__evidence} />
-                          </div>
-                        )}
-                      </li>
-                    ))}
-                  </ul>
-                </div>
-              ) : (
-                <MissingStateRationale fieldKey="impianti" forceMissing={true} />
-              )}
-              
-              {/* Carenze */}
-              {conservativo.carenze && (
-                <div className="mt-3 p-3 bg-amber-500/10 rounded border border-amber-500/30">
-                  <p className="text-xs text-amber-400 mb-1">Carenze riscontrate:</p>
-                  <p className="text-sm text-zinc-300">{conservativo.carenze}</p>
-                </div>
-              )}
-              
-              {/* Dettagli array */}
-              {Array.isArray(conservativo.dettagli) && conservativo.dettagli.length > 0 && (
-                <div className="mt-4 space-y-2">
-                  {conservativo.dettagli.map((det, i) => (
-                    <div key={i} className="flex items-start gap-2 p-2 bg-zinc-950 rounded">
-                      <Home className="w-4 h-4 text-zinc-500 mt-0.5" />
-                      <div>
-                        <span className="text-zinc-300 text-sm">{det.area}: {det.stato}</span>
-                        {getEvidence(det).length > 0 && (
-                          <span className="text-xs font-mono text-gold ml-2">
-                            p. {[...new Set(getEvidence(det).map(e => e.page))].join(', ')}
-                          </span>
-                        )}
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              )}
-              
-              {/* Old format issues_found */}
-              {Array.isArray(conservativo.issues_found) && conservativo.issues_found.length > 0 && (
-                <div className="mt-4 space-y-2">
-                  {conservativo.issues_found.map((issue, i) => (
-                    <div key={i} className="flex items-start gap-2 p-2 bg-amber-500/10 rounded">
-                      <AlertTriangle className="w-4 h-4 text-amber-400 mt-0.5" />
-                      <div>
-                        <span className="text-amber-400 text-sm">{safeRender(issue.issue_it || issue)}</span>
-                        {getEvidence(issue).length > 0 && (
-                          <span className="text-xs font-mono text-gold ml-2">
-                            p. {[...new Set(getEvidence(issue).map(e => e.page))].join(', ')}
-                          </span>
-                        )}
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-            
-            {/* Formalità - Section 8 */}
-            <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-6">
-              <h2 className="text-xl font-serif font-bold text-zinc-100 mb-4">Formalità</h2>
-              
-              {/* Ipoteche */}
-              {Array.isArray(formalita.ipoteche) && formalita.ipoteche.length > 0 ? (
-                <div className="mb-4">
-                  <p className="text-xs text-zinc-500 mb-2">Ipoteche registrate:</p>
-                  <div className="space-y-2">
-                    {formalita.ipoteche.map((ip, i) => (
-                      <div key={i} className="p-3 bg-zinc-950 rounded flex items-center justify-between">
-                        <div>
-                          <span className="text-zinc-300 text-sm">{ip.tipo || 'Ipoteca'}</span>
-                          {ip.data && <span className="text-xs text-zinc-500 ml-2">({ip.data})</span>}
-                        </div>
-                        <span className="font-mono text-gold">€{(ip.importo || 0).toLocaleString()}</span>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              ) : (
-                <DataValueWithEvidence 
-                  label="Ipoteca" 
-                  value={safeRender(formalita.ipoteca?.status, 'Non specificato in perizia')}
-                  evidence={getEvidence(formalita.ipoteca)}
-                />
-              )}
-              
-              {/* Pignoramenti */}
-              {Array.isArray(formalita.pignoramenti) && formalita.pignoramenti.length > 0 && (
-                <div className="mb-4">
-                  <p className="text-xs text-zinc-500 mb-2">Pignoramenti:</p>
-                  <div className="space-y-2">
-                    {formalita.pignoramenti.map((pig, i) => (
-                      <div key={i} className="p-3 bg-zinc-950 rounded">
-                        <span className="text-zinc-300 text-sm">Pignoramento {pig.data || ''}</span>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-              
-              {/* Cancellazione */}
-              {formalita.cancellazione && (
-                <div className="p-3 bg-emerald-500/10 rounded border border-emerald-500/30">
-                  <p className="text-xs text-emerald-400 mb-1">Cancellazione:</p>
-                  <p className="text-sm text-zinc-300">{formalita.cancellazione}</p>
-                </div>
-              )}
-              
-              {/* Evidence */}
-              {getEvidence(formalita).length > 0 && (
-                <p className="text-xs text-gold mt-2 flex items-center gap-1">
-                  <FileText className="w-3 h-3" />
-                  Riferimento: p. {[...new Set(getEvidence(formalita).map(e => e.page))].join(', ')}
-                </p>
-              )}
-            </div>
-            
-            {/* Checklist Pre-Offerta */}
-            <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-6">
-              <h2 className="text-xl font-serif font-bold text-zinc-100 mb-4">Dati Asta</h2>
-              {(userMessagesByCode.ACTION_VERIFY_DATO_ASTA || []).map((msg, idx) => (
-                <MessageInjectionCard key={`dati_asta_msg_${idx}`} msg={msg} />
-              ))}
-              <div className="mb-4">
                 <DataValueWithEvidence
                   label="Dati Asta"
                   value={safeRender(datiAsta?.data || datiAsta?.value || datiAsta, 'Non specificato in perizia')}
                   evidence={getEvidence(datiAsta)}
                 />
-                <MissingStateRationale fieldKey="dati_asta" forceMissing={!datiAsta} />
               </div>
-              <h2 className="text-xl font-serif font-bold text-zinc-100 mb-4">Checklist Pre-Offerta</h2>
-              <p className="text-xs text-zinc-500 mb-1">Legenda: P0 = obbligatorio prima dell’offerta; P1 = consigliato.</p>
-              <p className="text-[11px] text-zinc-600 mb-3">Legend: P0 = must-do before bidding; P1 = recommended.</p>
-              {checklist.length > 0 ? (
-                <div className="space-y-2">
-                  {checklist.map((item, i) => {
-                    // Handle both string array (new format) and object array (old format)
-                    const itemText = typeof item === 'string' ? item : (item.item_it || item.task_it || item.text || JSON.stringify(item));
-                    const priority = typeof item === 'object' ? item.priority : null;
-                    const status = typeof item === 'object' ? item.status : null;
-                    const priorityLabel = priority === 'P0' ? 'Obbligatorio' : priority === 'P1' ? 'Consigliato' : priority;
-                    const priorityTooltip = priority === 'P0'
-                      ? 'Obbligatorio prima dell’offerta'
-                      : priority === 'P1'
-                        ? 'Consigliato prima/dopo l’offerta'
-                        : '';
-                    
-                    return (
-                      <div key={i} className="flex items-center gap-3 p-3 bg-zinc-950 rounded-lg">
-                        {status === 'DONE' ? (
-                          <CheckCircle className="w-5 h-5 text-emerald-400" />
-                        ) : (
-                          <div className="w-5 h-5 rounded-full border-2 border-gold/50 flex items-center justify-center">
-                            <span className="text-xs text-gold font-bold">{i + 1}</span>
-                          </div>
-                        )}
-                        <span className="text-zinc-300 text-sm flex-1">{itemText}</span>
-                        {priority && (
-                          <span
-                            title={priorityTooltip}
-                            className={`text-xs px-2 py-1 rounded ${
-                            priority === 'P0' ? 'bg-red-500/20 text-red-400' :
-                            priority === 'P1' ? 'bg-amber-500/20 text-amber-400' :
-                            'bg-zinc-700 text-zinc-400'
-                            }`}
-                          >
-                            {priorityLabel}
-                          </span>
-                        )}
-                      </div>
-                    );
-                  })}
-                </div>
-              ) : (
-                <p className="text-zinc-500">Nessuna checklist disponibile</p>
-              )}
             </div>
           </TabsContent>
           
@@ -2081,8 +2909,23 @@ const AnalysisResult = () => {
               <p className="text-xs text-zinc-500 mb-6">
                 Problematiche identificate nel documento. Clicca sul riferimento pagina per verificare nel PDF originale.
               </p>
-              
-              {redFlags.length > 0 ? (
+
+              {hasGroupedRedFlags ? (
+                <div className="space-y-5">
+                  {groupedRedFlags.map((group) => (
+                    group.items.length > 0 ? (
+                      <div key={`rf_group_${group.key}`} className="p-4 rounded-lg border border-zinc-800 bg-zinc-950/60">
+                        <h3 className="text-sm font-semibold text-zinc-100 mb-3">{group.title}</h3>
+                        <div className="space-y-3">
+                          {group.items.map((item) => (
+                            <RedFlagMatrixItem key={item.key} item={item} />
+                          ))}
+                        </div>
+                      </div>
+                    ) : null
+                  ))}
+                </div>
+              ) : redFlags.length > 0 ? (
                 <div className="space-y-4">
                   {redFlags.map((flag, i) => (
                     <RedFlagItem key={i} flag={flag} />

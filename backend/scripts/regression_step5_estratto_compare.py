@@ -101,11 +101,12 @@ def _parse_estratto(text: str) -> Dict[str, Any]:
         elif re.search(r"presente", ape_line, re.I):
             ref["ape_present"] = True
 
-    # Spese condominiali
+    # Spese condominiali arretrate:
+    # accept NON PRESENTI only when explicitly tied to arrears/morosita wording.
     spese_block = re.search(r"SPESE\\s+CONDOMINIALI\\s*\\n([^\\n]+)", text_norm, re.I)
     if spese_block:
         spese_line = spese_block.group(1)
-        if re.search(r"non\\s+presenti|assen", spese_line, re.I):
+        if re.search(r"(arretrat|morosit)", spese_line, re.I) and re.search(r"non\\s+presenti|assen|non\\s+risult", spese_line, re.I):
             ref["spese_condominiali"] = "NON PRESENTI"
 
     # Sanatoria estimate

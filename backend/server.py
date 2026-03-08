@@ -380,12 +380,26 @@ def _load_offline_fixture() -> Dict[str, Any]:
     except Exception as e:
         raise RuntimeError(f"Offline QA fixture load failed: {e}")
 
-def _build_evidence(page_text: str, page_num: int, start: int, end: int) -> Dict[str, Any]:
+def _build_evidence(
+    page_text: str,
+    page_num: int,
+    start: int,
+    end: int,
+    field_key: Optional[str] = None,
+    anchor_hint: Optional[str] = None,
+) -> Dict[str, Any]:
     text = page_text or ""
     text_len = len(text)
     s = max(0, min(int(start), text_len))
     e = max(s, min(int(end), text_len))
-    quote, search_hint = normalize_evidence_quote(text, s, e, max_len=520)
+    quote, search_hint = normalize_evidence_quote(
+        text,
+        s,
+        e,
+        max_len=520,
+        field_key=field_key,
+        anchor_hint=anchor_hint,
+    )
     page_text_hash = hashlib.sha256(text.encode("utf-8")).hexdigest()
     payload = {
         "page": page_num,
@@ -406,6 +420,8 @@ def _build_search_entry(
     start: int,
     end: int,
     fallback_quote: Optional[str] = None,
+    field_key: Optional[str] = None,
+    anchor_hint: Optional[str] = None,
 ) -> Dict[str, Any]:
     text = page_text or ""
     text_len = len(text)
@@ -427,6 +443,8 @@ def _build_search_entry(
         start if text else 0,
         end if text else len(quote),
         max_len=520,
+        field_key=field_key,
+        anchor_hint=anchor_hint or fallback_quote or quote,
     )
     if not normalized_quote:
         normalized_quote = quote[:520]
@@ -444,14 +462,35 @@ def _build_search_entry(
         payload["search_hint"] = search_hint
     return payload
 
-def _find_regex_in_pages(pages_in: List[Dict], pattern: str, flags=0) -> Optional[Dict[str, Any]]:
+def _find_regex_in_pages(
+    pages_in: List[Dict],
+    pattern: str,
+    flags=0,
+    field_key: Optional[str] = None,
+) -> Optional[Dict[str, Any]]:
     import re
+    best: Optional[Tuple[int, Dict[str, Any]]] = None
     for p in pages_in:
         text = str(p.get("text", "") or "")
         m = re.search(pattern, text, flags)
         if m:
-            return _build_evidence(text, int(p.get("page_number", 0) or 0), m.start(), m.end())
-    return None
+            ev = _build_evidence(
+                text,
+                int(p.get("page_number", 0) or 0),
+                m.start(),
+                m.end(),
+                field_key=field_key,
+                anchor_hint=m.group(0),
+            )
+            quote = str(ev.get("quote") or "")
+            if field_key in {"lotto", "prezzo_base_asta", "superficie", "superficie_catastale", "tribunale"} and _is_toc_like_quote(quote):
+                continue
+            page_num = int(p.get("page_number", 0) or 0)
+            # Prefer later pages for real content when multiple matches exist.
+            score = page_num
+            if best is None or score > best[0]:
+                best = (score, ev)
+    return best[1] if best else None
 
 def _clean_field_value(val: Any) -> str:
     if isinstance(val, dict):
@@ -488,7 +527,12 @@ def _clean_field_value(val: Any) -> str:
         return "NON SPECIFICATO IN PERIZIA"
     return s
 
-def _search_proof(pages_in: List[Dict[str, Any]], keywords: List[str], snippets: Optional[List[Dict[str, Any]]] = None) -> List[Dict[str, Any]]:
+def _search_proof(
+    pages_in: List[Dict[str, Any]],
+    keywords: List[str],
+    snippets: Optional[List[Dict[str, Any]]] = None,
+    field_key: Optional[str] = None,
+) -> List[Dict[str, Any]]:
     entries: List[Dict[str, Any]] = []
     if not pages_in:
         return []
@@ -505,7 +549,17 @@ def _search_proof(pages_in: List[Dict[str, Any]], keywords: List[str], snippets:
         if quote and text:
             idx = text.find(quote)
             if idx >= 0:
-                entries.append(_build_search_entry(text, page, idx, idx + len(quote), fallback_quote=quote))
+                entries.append(
+                    _build_search_entry(
+                        text,
+                        page,
+                        idx,
+                        idx + len(quote),
+                        fallback_quote=quote,
+                        field_key=field_key,
+                        anchor_hint=quote,
+                    )
+                )
                 return
         lowered = text.lower()
         for kw in keywords:
@@ -513,7 +567,7 @@ def _search_proof(pages_in: List[Dict[str, Any]], keywords: List[str], snippets:
             if idx >= 0:
                 start = max(0, idx - 40)
                 end = min(len(text), idx + 80)
-                entries.append(_build_search_entry(text, page, start, end, fallback_quote=kw))
+                entries.append(_build_search_entry(text, page, start, end, fallback_quote=kw, field_key=field_key, anchor_hint=kw))
                 return
 
     if snippets:
@@ -541,7 +595,7 @@ def _search_proof(pages_in: List[Dict[str, Any]], keywords: List[str], snippets:
             if idx >= 0:
                 start = max(0, idx - 40)
                 end = min(len(text), idx + 80)
-                entries.append(_build_search_entry(text, page_num, start, end, fallback_quote=kw))
+                entries.append(_build_search_entry(text, page_num, start, end, fallback_quote=kw, field_key=field_key, anchor_hint=kw))
                 break
 
     return entries
@@ -570,10 +624,11 @@ def _make_searched_in(
     keywords: List[str],
     status: str,
     snippets: Optional[List[Dict[str, Any]]] = None,
+    field_key: Optional[str] = None,
 ) -> List[Dict[str, Any]]:
     if status not in {"NOT_FOUND", "LOW_CONFIDENCE"}:
         return []
-    entries = _search_proof(pages_in, keywords, snippets)
+    entries = _search_proof(pages_in, keywords, snippets, field_key=field_key)
     if entries:
         return entries
     return [_build_synthetic_search_entry(pages_in, keywords)]
@@ -821,6 +876,45 @@ def _line_bounds(text: str, start: int, end: int) -> Tuple[int, int]:
     line_end = len(text) if line_end < 0 else line_end
     return line_start, line_end
 
+
+def _is_toc_like_line(line: str) -> bool:
+    raw = str(line or "")
+    compact = " ".join(raw.split()).strip()
+    if not compact:
+        return False
+    # Typical index/table-of-contents leaders: many dots plus trailing page number.
+    if re.search(r"\.{6,}", compact) and re.search(r"\b\d{1,3}\s*$", compact):
+        return True
+    if re.search(r"…{2,}", compact) and re.search(r"\b\d{1,3}\s*$", compact):
+        return True
+    # Very short index-like rows often end with a page number.
+    if len(compact) <= 80 and re.search(r"\b\d{1,3}\s*$", compact) and ":" not in compact:
+        return True
+    if re.search(r"\b(indice|sommario)\b", compact, re.I):
+        return True
+    return False
+
+
+def _is_toc_like_quote(quote: str) -> bool:
+    for line in str(quote or "").splitlines():
+        if _is_toc_like_line(line):
+            return True
+    return _is_toc_like_line(quote)
+
+
+def _is_cost_table_context(line: str) -> bool:
+    low = str(line or "").lower()
+    return any(
+        tok in low
+        for tok in (
+            "deprezzamento",
+            "valore tipo",
+            "rischio assunto",
+            "oneri di regolarizzazione urbanistica",
+            "valore finale",
+        )
+    )
+
 def _build_headline_state_from_existing(
     *,
     report_obj: Any,
@@ -894,7 +988,17 @@ def _extract_tribunale_state(pages: List[Dict[str, Any]]) -> Dict[str, Any]:
         match = pattern_full.search(text)
         if match:
             start, end = match.start(), match.end()
-            evidence.append(_build_evidence(text, int(p.get("page_number", 0) or 0), start, end))
+            ev = _build_evidence(
+                text,
+                int(p.get("page_number", 0) or 0),
+                start,
+                end,
+                field_key="tribunale",
+                anchor_hint=match.group(0),
+            )
+            if not str(ev.get("quote") or "").strip() or _is_toc_like_quote(str(ev.get("quote") or "")):
+                continue
+            evidence.append(ev)
             raw = match.group(0)
             value = _normalize_tribunale_value(raw)
             location_found = True
@@ -906,13 +1010,23 @@ def _extract_tribunale_state(pages: List[Dict[str, Any]]) -> Dict[str, Any]:
             match = pattern_word.search(text)
             if match:
                 start, end = match.start(), match.end()
-                evidence.append(_build_evidence(text, int(p.get("page_number", 0) or 0), start, end))
+                ev = _build_evidence(
+                    text,
+                    int(p.get("page_number", 0) or 0),
+                    start,
+                    end,
+                    field_key="tribunale",
+                    anchor_hint=match.group(0),
+                )
+                if not str(ev.get("quote") or "").strip() or _is_toc_like_quote(str(ev.get("quote") or "")):
+                    continue
+                evidence.append(ev)
                 value = _normalize_headline_text(text[start:end])
                 status = "LOW_CONFIDENCE"
                 break
 
     snippets = _collect_keyword_snippets(pages, keywords)
-    searched_in = _make_searched_in(pages, keywords, status, snippets)
+    searched_in = _make_searched_in(pages, keywords, status, snippets, field_key="tribunale")
     prompt = None
     if status in {"LOW_CONFIDENCE", "NOT_FOUND"}:
         prompt = "Verifica il tribunale indicato nella perizia (in intestazione o nei dati procedura)."
@@ -948,7 +1062,16 @@ def _extract_procedura_state(pages: List[Dict[str, Any]]) -> Dict[str, Any]:
             match = pat.search(text)
             if match:
                 start, end = match.start(), match.end()
-                evidence.append(_build_evidence(text, int(p.get("page_number", 0) or 0), start, end))
+                evidence.append(
+                    _build_evidence(
+                        text,
+                        int(p.get("page_number", 0) or 0),
+                        start,
+                        end,
+                        field_key="procedura",
+                        anchor_hint=match.group(0),
+                    )
+                )
                 value = _normalize_procedura_value(match.group(0))
                 status = "FOUND"
                 break
@@ -962,7 +1085,16 @@ def _extract_procedura_state(pages: List[Dict[str, Any]]) -> Dict[str, Any]:
                 match = pat.search(text)
                 if match:
                     start, end = match.start(), match.end()
-                    evidence.append(_build_evidence(text, int(p.get("page_number", 0) or 0), start, end))
+                    evidence.append(
+                        _build_evidence(
+                            text,
+                            int(p.get("page_number", 0) or 0),
+                            start,
+                            end,
+                            field_key="procedura",
+                            anchor_hint=match.group(0),
+                        )
+                    )
                     value = _normalize_procedura_value(match.group(0))
                     status = "LOW_CONFIDENCE"
                     break
@@ -970,7 +1102,7 @@ def _extract_procedura_state(pages: List[Dict[str, Any]]) -> Dict[str, Any]:
                 break
 
     snippets = _collect_keyword_snippets(pages, keywords)
-    searched_in = _make_searched_in(pages, keywords, status, snippets)
+    searched_in = _make_searched_in(pages, keywords, status, snippets, field_key="procedura")
     prompt = None
     if status in {"LOW_CONFIDENCE", "NOT_FOUND"}:
         prompt = "Verifica il numero di procedura/R.G.E. indicato in perizia."
@@ -1023,7 +1155,19 @@ def _extract_lotto_state(pages: List[Dict[str, Any]], lots: List[Dict[str, Any]]
         except Exception:
             continue
         ev_list = lot.get("evidence", {}).get("lotto", []) if isinstance(lot.get("evidence"), dict) else []
-        evidence.extend(ev_list)
+        for ev in (ev_list if isinstance(ev_list, list) else []):
+            if not isinstance(ev, dict):
+                continue
+            raw_q = str(ev.get("quote") or "").strip()
+            if not raw_q:
+                continue
+            n_quote, n_hint = normalize_evidence_quote(raw_q, 0, len(raw_q), max_len=520, field_key="lotto", anchor_hint=raw_q)
+            if not n_quote or _is_toc_like_quote(n_quote):
+                continue
+            payload = {"page": ev.get("page"), "quote": n_quote}
+            if n_hint:
+                payload["search_hint"] = n_hint
+            evidence.append(payload)
 
     if lot_numbers:
         lot_numbers = sorted(set(lot_numbers))
@@ -1031,20 +1175,39 @@ def _extract_lotto_state(pages: List[Dict[str, Any]], lots: List[Dict[str, Any]]
             value = f"Lotti {lot_numbers[0]}–{lot_numbers[-1]}"
         else:
             lot_num = lot_numbers[0]
-            unico_match = _find_regex_in_pages(pages, r"\bLOTTO\s+UNICO\b", re.I)
+            unico_match = _find_regex_in_pages(pages, r"\bLOTTO\s+UNICO\b", re.I, field_key="lotto")
             value = "Lotto Unico" if unico_match else f"Lotto {lot_num}"
             if unico_match:
                 evidence.append(unico_match)
         status = "FOUND" if evidence else "LOW_CONFIDENCE"
 
     if status == "NOT_FOUND":
-        match = _find_regex_in_pages(pages, r"\bLOTTO\s+UNICO\b|\bLOTTO\s+\d+\b", re.I)
+        match = None
+        for p in pages:
+            text = str(p.get("text", "") or "")
+            local = re.search(r"\bLOTTO\s+UNICO\b|\bLOTTO\s+\d+\b", text, re.I)
+            if not local:
+                continue
+            ls, le = _line_bounds(text, local.start(), local.end())
+            line = text[ls:le]
+            ev = _build_evidence(
+                text,
+                int(p.get("page_number", 0) or 0),
+                ls,
+                le,
+                field_key="lotto",
+                anchor_hint=local.group(0),
+            )
+            if _is_toc_like_line(line) or _is_toc_like_quote(str(ev.get("quote") or "")):
+                continue
+            match = ev
+            break
         if match:
             evidence.append(match)
             value = _normalize_headline_text(match.get("quote", ""))
             status = "FOUND"
         else:
-            match = _find_regex_in_pages(pages, r"\bLOTTO\b", re.I)
+            match = _find_regex_in_pages(pages, r"\bLOTTO\b", re.I, field_key="lotto")
             if match:
                 evidence.append(match)
                 value = "Lotto"
@@ -1056,7 +1219,7 @@ def _extract_lotto_state(pages: List[Dict[str, Any]], lots: List[Dict[str, Any]]
             value = normalized
 
     snippets = _collect_keyword_snippets(pages, keywords)
-    searched_in = _make_searched_in(pages, keywords, status, snippets)
+    searched_in = _make_searched_in(pages, keywords, status, snippets, field_key="lotto")
     prompt = None
     if status in {"LOW_CONFIDENCE", "NOT_FOUND"}:
         prompt = "Verifica il lotto indicato nella perizia (schema riassuntivo)."
@@ -1146,10 +1309,24 @@ def _extract_prezzo_base_asta_state(pages: List[Dict[str, Any]]) -> Dict[str, An
                     continue
                 start = m.start(1)
                 end = m.end(2)
-                evidence = [_build_evidence(text, int(p.get("page_number", 0) or 0), start, end)]
-                searched_in = _make_searched_in(pages, keywords, "FOUND")
+                ls, le = _line_bounds(text, start, end)
+                ev = _build_evidence(
+                    text,
+                    int(p.get("page_number", 0) or 0),
+                    ls,
+                    le,
+                    field_key="prezzo_base_asta",
+                    anchor_hint=m.group(0),
+                )
+                line_text = text[ls:le]
+                if _is_toc_like_line(line_text) or _is_toc_like_quote(str(ev.get("quote") or "")):
+                    continue
+                if not str(ev.get("quote") or "").strip():
+                    continue
+                evidence = [ev]
+                searched_in = _make_searched_in(pages, keywords, "FOUND", field_key="prezzo_base_asta")
                 return _build_field_state(value=value, status="FOUND", evidence=evidence, searched_in=searched_in)
-    searched_in = _make_searched_in(pages, keywords, "NOT_FOUND")
+    searched_in = _make_searched_in(pages, keywords, "NOT_FOUND", field_key="prezzo_base_asta")
     return _build_field_state(value=None, status="NOT_FOUND", evidence=[], searched_in=searched_in)
 
 def _extract_superficie_state(pages: List[Dict[str, Any]], dati_certi: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
@@ -1159,6 +1336,28 @@ def _extract_superficie_state(pages: List[Dict[str, Any]], dati_certi: Optional[
     if isinstance(existing, dict):
         value = existing.get("value")
         evidence = existing.get("evidence", [])
+        normalized_existing_evidence: List[Dict[str, Any]] = []
+        if isinstance(evidence, list):
+            for ev in evidence[:2]:
+                if not isinstance(ev, dict):
+                    continue
+                quote = str(ev.get("quote") or "").strip()
+                if not quote:
+                    continue
+                n_quote, n_hint = normalize_evidence_quote(
+                    quote,
+                    0,
+                    len(quote),
+                    max_len=220,
+                    field_key="superficie_catastale",
+                    anchor_hint=quote,
+                )
+                if not n_quote or "superficie" not in n_quote.lower():
+                    continue
+                payload = {"page": ev.get("page"), "quote": n_quote}
+                if n_hint:
+                    payload["search_hint"] = n_hint
+                normalized_existing_evidence.append(payload)
         if isinstance(value, str):
             match = re.search(r"(\d{1,4}(?:[\.,]\d{1,2})?)", value)
             if match:
@@ -1167,9 +1366,9 @@ def _extract_superficie_state(pages: List[Dict[str, Any]], dati_certi: Optional[
                     value = {"value": float(raw), "unit": "mq", "label": "Superficie"}
                 except Exception:
                     value = existing.get("value")
-        if value is not None and isinstance(evidence, list) and evidence:
-            searched_in = _make_searched_in(pages, keywords, "FOUND")
-            return _build_field_state(value=value, status="FOUND", evidence=evidence, searched_in=searched_in)
+        if value is not None and normalized_existing_evidence:
+            searched_in = _make_searched_in(pages, keywords, "FOUND", field_key="superficie_catastale")
+            return _build_field_state(value=value, status="FOUND", evidence=normalized_existing_evidence, searched_in=searched_in)
 
     pattern = re.compile(
         r"(Superficie(?:\s+catastale|\s+commerciale)?[^\n]{0,40}?)(\d{1,4}(?:[\.,]\d{1,2})?)\s*(m2|m²|mq)",
@@ -1195,11 +1394,22 @@ def _extract_superficie_state(pages: List[Dict[str, Any]], dati_certi: Optional[
             unit = "mq"
             start = m.start(1)
             end = m.end(3)
-            evidence = [_build_evidence(text, int(p.get("page_number", 0) or 0), start, end)]
+            evidence = [
+                _build_evidence(
+                    text,
+                    int(p.get("page_number", 0) or 0),
+                    start,
+                    end,
+                    field_key="superficie_catastale",
+                    anchor_hint=m.group(0),
+                )
+            ]
+            if not evidence or not str(evidence[0].get("quote") or "").strip() or _is_toc_like_quote(str(evidence[0].get("quote") or "")):
+                continue
             value = {"value": value_num, "unit": unit, "label": _normalize_headline_text(m.group(1))}
-            searched_in = _make_searched_in(pages, keywords, "FOUND")
+            searched_in = _make_searched_in(pages, keywords, "FOUND", field_key="superficie_catastale")
             return _build_field_state(value=value, status="FOUND", evidence=evidence, searched_in=searched_in)
-    searched_in = _make_searched_in(pages, keywords, "NOT_FOUND")
+    searched_in = _make_searched_in(pages, keywords, "NOT_FOUND", field_key="superficie_catastale")
     return _build_field_state(value=None, status="NOT_FOUND", evidence=[], searched_in=searched_in)
 
 def _extract_diritto_reale_state(pages: List[Dict[str, Any]]) -> Dict[str, Any]:
@@ -1216,9 +1426,18 @@ def _extract_diritto_reale_state(pages: List[Dict[str, Any]]) -> Dict[str, Any]:
         m = schema_pattern.search(text)
         if m:
             start, end = m.start(1), m.end(1)
-            evidence = [_build_evidence(text, int(p.get("page_number", 0) or 0), start, end)]
+            evidence = [
+                _build_evidence(
+                    text,
+                    int(p.get("page_number", 0) or 0),
+                    start,
+                    end,
+                    field_key="diritto_reale",
+                    anchor_hint=m.group(0),
+                )
+            ]
             value = _normalize_headline_text(m.group(1))
-            searched_in = _make_searched_in(pages, keywords, "FOUND")
+            searched_in = _make_searched_in(pages, keywords, "FOUND", field_key="stato_occupativo")
             return _build_field_state(value=value, status="FOUND", evidence=evidence, searched_in=searched_in)
     for p in pages:
         text = str(p.get("text", "") or "")
@@ -1226,11 +1445,20 @@ def _extract_diritto_reale_state(pages: List[Dict[str, Any]]) -> Dict[str, Any]:
         if not m:
             continue
         start, end = m.start(), m.end()
-        evidence = [_build_evidence(text, int(p.get("page_number", 0) or 0), start, end)]
+        evidence = [
+            _build_evidence(
+                text,
+                int(p.get("page_number", 0) or 0),
+                start,
+                end,
+                field_key="diritto_reale",
+                anchor_hint=m.group(0),
+            )
+        ]
         value = _normalize_headline_text(m.group(0))
-        searched_in = _make_searched_in(pages, keywords, "FOUND")
+        searched_in = _make_searched_in(pages, keywords, "FOUND", field_key="stato_occupativo")
         return _build_field_state(value=value, status="FOUND", evidence=evidence, searched_in=searched_in)
-    searched_in = _make_searched_in(pages, keywords, "NOT_FOUND")
+    searched_in = _make_searched_in(pages, keywords, "NOT_FOUND", field_key="stato_occupativo")
     return _build_field_state(value=None, status="NOT_FOUND", evidence=[], searched_in=searched_in)
 
 def _extract_stato_occupativo_state(pages: List[Dict[str, Any]]) -> Dict[str, Any]:
@@ -1253,7 +1481,16 @@ def _extract_stato_occupativo_state(pages: List[Dict[str, Any]]) -> Dict[str, An
             start, end = m.start(), m.end()
             line_start, line_end = _line_bounds(text, start, end)
             line_text = text[line_start:line_end].lower()
-            evidence = [_build_evidence(text, int(p.get("page_number", 0) or 0), line_start, line_end)]
+            evidence = [
+                _build_evidence(
+                    text,
+                    int(p.get("page_number", 0) or 0),
+                    line_start,
+                    line_end,
+                    field_key="stato_occupativo",
+                    anchor_hint=m.group(0),
+                )
+            ]
             status = "LOW_CONFIDENCE" if any(marker in line_text for marker in ambiguous_markers) else "FOUND"
             candidates.append((pri.get(label, 0), int(p.get("page_number", 0) or 0), label, status, evidence[0]))
 
@@ -1263,13 +1500,13 @@ def _extract_stato_occupativo_state(pages: List[Dict[str, Any]]) -> Dict[str, An
         chosen_label = top[2]
         chosen_status = top[3]
         chosen_evidence = [top[4]]
-        searched_in = _make_searched_in(pages, keywords, chosen_status)
+        searched_in = _make_searched_in(pages, keywords, chosen_status, field_key="ape")
         return _build_field_state(value=chosen_label, status=chosen_status, evidence=chosen_evidence, searched_in=searched_in)
 
     if len(set([c[2] for c in candidates])) > 1:
-        searched_in = _make_searched_in(pages, keywords, "LOW_CONFIDENCE")
+        searched_in = _make_searched_in(pages, keywords, "LOW_CONFIDENCE", field_key="ape")
         return _build_field_state(value="DA VERIFICARE", status="LOW_CONFIDENCE", evidence=[], searched_in=searched_in)
-    searched_in = _make_searched_in(pages, keywords, "NOT_FOUND")
+    searched_in = _make_searched_in(pages, keywords, "NOT_FOUND", field_key="ape")
     return _build_field_state(value=None, status="NOT_FOUND", evidence=[], searched_in=searched_in)
 
 def _extract_ape_state(pages: List[Dict[str, Any]]) -> Dict[str, Any]:
@@ -1287,9 +1524,77 @@ def _extract_ape_state(pages: List[Dict[str, Any]]) -> Dict[str, Any]:
                 continue
             start, end = m.start(), m.end()
             line_start, line_end = _line_bounds(text, start, end)
-            evidence = [_build_evidence(text, int(p.get("page_number", 0) or 0), line_start, line_end)]
+            evidence = [
+                _build_evidence(
+                    text,
+                    int(p.get("page_number", 0) or 0),
+                    line_start,
+                    line_end,
+                    field_key="ape",
+                    anchor_hint=m.group(0),
+                )
+            ]
             searched_in = _make_searched_in(pages, keywords, "FOUND")
             return _build_field_state(value=label, status="FOUND", evidence=evidence, searched_in=searched_in)
+    searched_in = _make_searched_in(pages, keywords, "NOT_FOUND")
+    return _build_field_state(value=None, status="NOT_FOUND", evidence=[], searched_in=searched_in)
+
+
+def _extract_agibilita_state(pages: List[Dict[str, Any]]) -> Dict[str, Any]:
+    keywords = ["agibilità", "agibilita", "abitabilità", "abitabilita", "agibile"]
+    absent_patterns = [
+        re.compile(r"(non\s+[èe]\s+presente\s+l['’]?abitabilit[aà][^\n]{0,120})", re.I),
+        re.compile(r"(non\s+risulta\s+agibil[ei][^\n]{0,120})", re.I),
+        re.compile(r"(agibilit[aà][^\n]{0,120}(assente|non\s+presente))", re.I),
+    ]
+    present_patterns = [
+        re.compile(r"(\brisulta\s+agibil[ei]\b[^\n]{0,120})", re.I),
+        re.compile(r"(\bagibilit[aà]\b[^\n]{0,120}\bpresente\b)", re.I),
+    ]
+
+    for p in pages:
+        text = str(p.get("text", "") or "")
+        for pat in absent_patterns:
+            m = pat.search(text)
+            if not m:
+                continue
+            ls, le = _line_bounds(text, m.start(), m.end())
+            evidence = [
+                _build_evidence(
+                    text,
+                    int(p.get("page_number", 0) or 0),
+                    ls,
+                    le,
+                    field_key="agibilita",
+                    anchor_hint=m.group(0),
+                )
+            ]
+            searched_in = _make_searched_in(pages, keywords, "FOUND")
+            return _build_field_state(value="ASSENTE", status="FOUND", evidence=evidence, searched_in=searched_in)
+
+    for p in pages:
+        text = str(p.get("text", "") or "")
+        for pat in present_patterns:
+            m = pat.search(text)
+            if not m:
+                continue
+            ls, le = _line_bounds(text, m.start(), m.end())
+            line = text[ls:le].lower()
+            if "non risulta agibile" in line:
+                continue
+            evidence = [
+                _build_evidence(
+                    text,
+                    int(p.get("page_number", 0) or 0),
+                    ls,
+                    le,
+                    field_key="agibilita",
+                    anchor_hint=m.group(0),
+                )
+            ]
+            searched_in = _make_searched_in(pages, keywords, "LOW_CONFIDENCE")
+            return _build_field_state(value="PRESENTE", status="LOW_CONFIDENCE", evidence=evidence, searched_in=searched_in)
+
     searched_in = _make_searched_in(pages, keywords, "NOT_FOUND")
     return _build_field_state(value=None, status="NOT_FOUND", evidence=[], searched_in=searched_in)
 
@@ -1302,7 +1607,16 @@ def _extract_dati_asta_state(pages: List[Dict[str, Any]]) -> Dict[str, Any]:
             continue
         start, end = m.start(), m.end()
         line_start, line_end = _line_bounds(text, start, end)
-        evidence = [_build_evidence(text, int(p.get("page_number", 0) or 0), line_start, line_end)]
+        evidence = [
+            _build_evidence(
+                text,
+                int(p.get("page_number", 0) or 0),
+                line_start,
+                line_end,
+                field_key="dati_asta",
+                anchor_hint=m.group(0),
+            )
+        ]
         value = {"data": m.group(1), "ora": m.group(2).replace(".", ":")}
         searched_in = _make_searched_in(pages, keywords, "FOUND")
         return _build_field_state(value=value, status="FOUND", evidence=evidence, searched_in=searched_in)
@@ -1311,9 +1625,16 @@ def _extract_dati_asta_state(pages: List[Dict[str, Any]]) -> Dict[str, Any]:
 
 def _extract_regolarita_urbanistica_state(pages: List[Dict[str, Any]]) -> Dict[str, Any]:
     keywords = ["conformità urbanistica", "abusi edilizi", "sanatoria", "condono", "pratiche edilizie", "difformità"]
-    positive = re.compile(r"(non\s+(?:risultano|emergono)\s+abusi|assenza\s+di\s+abusi|non\s+sono\s+stati\s+riscontrati\s+abusi)", re.I)
-    negative = re.compile(r"(abusi\s+edilizi|difformit[aà]|non\s+conform[ei]|irregolarit[aà]|sanatoria|condono)", re.I)
+    positive = re.compile(
+        r"(non\s+(?:risultano|emergono)\s+abusi|assenza\s+di\s+abusi|non\s+sono\s+stati\s+riscontrati\s+abusi|conform(?:e|ità)\s+urbanistic\w*)",
+        re.I,
+    )
+    negative = re.compile(
+        r"(abusi\s+edilizi|difformit[aà]|non\s+conform[ei]|irregolarit[aà]|sanatoria|condono|incongruenz\w+\s+nello\s+stato\s+di\s+fatto)",
+        re.I,
+    )
     ambiguous = re.compile(r"(da\s+verificare|non\s+è\s+noto|non\s+e'\s+noto|da\s+accertare|si\s+presume|presumibilmente)", re.I)
+    candidates: List[Tuple[int, int, str, str, Dict[str, Any]]] = []
     for p in pages:
         text = str(p.get("text", "") or "")
         for pat, label in ((positive, "NON EMERGONO ABUSI"), (negative, "PRESENTI DIFFORMITÀ")):
@@ -1323,19 +1644,44 @@ def _extract_regolarita_urbanistica_state(pages: List[Dict[str, Any]]) -> Dict[s
             start, end = m.start(), m.end()
             line_start, line_end = _line_bounds(text, start, end)
             line_text = text[line_start:line_end]
-            evidence = [_build_evidence(text, int(p.get("page_number", 0) or 0), line_start, line_end)]
+            if _is_toc_like_line(line_text):
+                continue
+            evidence_obj = _build_evidence(
+                text,
+                int(p.get("page_number", 0) or 0),
+                line_start,
+                line_end,
+                field_key="conformita_urbanistica",
+                anchor_hint=m.group(0),
+            )
             status = "LOW_CONFIDENCE" if ambiguous.search(line_text) else "FOUND"
             value = "DA VERIFICARE" if status == "LOW_CONFIDENCE" else label
-            searched_in = _make_searched_in(pages, keywords, status)
-            return _build_field_state(value=value, status=status, evidence=evidence, searched_in=searched_in)
-    searched_in = _make_searched_in(pages, keywords, "NOT_FOUND")
+            score = 0
+            low_line = line_text.lower()
+            if label == "PRESENTI DIFFORMITÀ":
+                score += 6
+            if any(tok in low_line for tok in ("abusi", "difform", "incongruenz", "non conforme", "irregolarit")):
+                score += 4
+            if _is_cost_table_context(low_line):
+                score -= 5
+            candidates.append((score, int(p.get("page_number", 0) or 0), value, status, evidence_obj))
+    if candidates:
+        candidates.sort(key=lambda x: (-x[0], x[1]))
+        top = candidates[0]
+        searched_in = _make_searched_in(pages, keywords, top[3], field_key="conformita_urbanistica")
+        return _build_field_state(value=top[2], status=top[3], evidence=[top[4]], searched_in=searched_in)
+    searched_in = _make_searched_in(pages, keywords, "NOT_FOUND", field_key="conformita_urbanistica")
     return _build_field_state(value=None, status="NOT_FOUND", evidence=[], searched_in=searched_in)
 
 def _extract_conformita_catastale_state(pages: List[Dict[str, Any]]) -> Dict[str, Any]:
     keywords = ["conformità catastale", "difformità", "planimetria", "catasto"]
     positive = re.compile(r"(conformit[aà]\s+catastale|planimetria\s+conforme|conforme\s+al\s+catasto)", re.I)
-    negative = re.compile(r"(difformit[aà]\s+catastal[ei]|non\s+conforme|mancata\s+corrispondenza|planimetria\s+non\s+conforme)", re.I)
+    negative = re.compile(
+        r"(difformit[aà]\s+catastal[ei]|non\s+conforme|mancata\s+corrispondenza|planimetria\s+non\s+conforme|incongruenz\w+[\s\S]{0,220}?planimetri\w+\s+catastal\w*)",
+        re.I,
+    )
     ambiguous = re.compile(r"(da\s+verificare|non\s+è\s+noto|non\s+e'\s+noto|da\s+accertare|si\s+presume|presumibilmente)", re.I)
+    candidates: List[Tuple[int, int, str, str, Dict[str, Any]]] = []
     for p in pages:
         text = str(p.get("text", "") or "")
         for pat, label in ((positive, "CONFORME"), (negative, "PRESENTI DIFFORMITÀ")):
@@ -1345,29 +1691,82 @@ def _extract_conformita_catastale_state(pages: List[Dict[str, Any]]) -> Dict[str
             start, end = m.start(), m.end()
             line_start, line_end = _line_bounds(text, start, end)
             line_text = text[line_start:line_end]
-            evidence = [_build_evidence(text, int(p.get("page_number", 0) or 0), line_start, line_end)]
+            snippet = text[max(0, start - 40):min(len(text), end + 120)]
+            if _is_toc_like_line(line_text) or _is_toc_like_line(snippet):
+                continue
+            evidence_obj = _build_evidence(
+                text,
+                int(p.get("page_number", 0) or 0),
+                start,
+                end,
+                field_key="conformita_catastale",
+                anchor_hint=m.group(0),
+            )
             status = "LOW_CONFIDENCE" if ambiguous.search(line_text) else "FOUND"
             value = "DA VERIFICARE" if status == "LOW_CONFIDENCE" else label
-            searched_in = _make_searched_in(pages, keywords, status)
-            return _build_field_state(value=value, status=status, evidence=evidence, searched_in=searched_in)
+            score = 0
+            low_line = line_text.lower()
+            if label == "PRESENTI DIFFORMITÀ":
+                score += 5
+            if any(tok in low_line for tok in ("planimetria catastale", "incongruenz", "difform", "non conforme", "catast")):
+                score += 4
+            candidates.append((score, int(p.get("page_number", 0) or 0), value, status, evidence_obj))
+    if candidates:
+        candidates.sort(key=lambda x: (-x[0], x[1]))
+        top = candidates[0]
+        searched_in = _make_searched_in(pages, keywords, top[3])
+        return _build_field_state(value=top[2], status=top[3], evidence=[top[4]], searched_in=searched_in)
     searched_in = _make_searched_in(pages, keywords, "NOT_FOUND")
     return _build_field_state(value=None, status="NOT_FOUND", evidence=[], searched_in=searched_in)
 
 def _extract_spese_condominiali_state(pages: List[Dict[str, Any]]) -> Dict[str, Any]:
     keywords = ["spese condominiali", "arretrate", "arretrati", "oneri condominiali", "morosità"]
-    positive = re.compile(r"(nessun\s+arretrato|non\s+risultano\s+arretrati|in\s+regola\s+con\s+i\s+pagamenti|spese\s+condominiali\s+non\s+presenti|incidenza\s+condominiale[:\s]*0[,\.]?0*)", re.I)
+    # Positive is accepted only when explicitly tied to arrears/morosita context.
+    positive = re.compile(
+        r"((?:spese\s+condominiali\s+arretrat\w*|arretrat\w+\s+condominial\w*|morosit[aà])[\s\S]{0,70}?(?:non\s+presenti|non\s+risultan\w*|nessun\w*))",
+        re.I,
+    )
     negative = re.compile(r"(spese\s+condominiali\s+arretrate|arretrati\s+condominiali|morosit[aà]|oneri\s+condominiali\s+insoluti)", re.I)
     ambiguous = re.compile(r"(da\s+verificare|non\s+è\s+noto|non\s+e'\s+noto|da\s+accertare|si\s+presume|presumibilmente)", re.I)
+    weak_condo_proxy = re.compile(r"incidenza\s+condominial", re.I)
+    spese_section_ocr = re.compile(
+        r"s\s*p\s*e\s*s\s*e\s+c\s*o\s*n\s*d\s*o\s*m\s*i\s*n\s*i\s*a\s*l\s*i(?:\s+a\s*r\s*r\s*e\s*t\s*r\s*a\s*t\s*e)?",
+        re.I,
+    )
+    absence_ocr = re.compile(
+        r"(n\s*o\s*n\s+p\s*r\s*e\s*s\s*e\s*n\s*t\s*i|n\s*o\s*n\s+r\s*i\s*s\s*u\s*l\s*t\s*a\s*n\s*o|n\s*e\s*s\s*s\s*u\s*n\s*a|n\s*e\s*s\s*s\s*u\s*n\s+a\s*r\s*r\s*e\s*t\s*r\s*a\s*t\s*o)",
+        re.I,
+    )
     for p in pages:
         text = str(p.get("text", "") or "")
         # Section-aware parsing: heading may be on one line and value on next lines
-        sec = re.search(r"spese\s+condominiali", text, re.I)
+        sec = re.search(r"spese\s+condominiali", text, re.I) or spese_section_ocr.search(text)
         if sec:
             after = text[sec.end():sec.end() + 220]
-            if re.search(r"non\s+presenti|non\s+risultano|nessun\s+arretrato", after, re.I):
-                line_start, line_end = _line_bounds(text, sec.start(), min(len(text), sec.end() + len(after)))
-                evidence = [_build_evidence(text, int(p.get("page_number", 0) or 0), line_start, line_end)]
-                searched_in = _make_searched_in(pages, keywords, "FOUND")
+            absence = re.search(r"(non\s+presenti|non\s+risultano|nessun\s+arretrato|nessuna)", after, re.I) or absence_ocr.search(after)
+            if absence:
+                # Guardrail: only accept "non presenti/non risultano" when the snippet
+                # explicitly refers to arrears (not generic condo incidence/fees).
+                sec_window = text[sec.start():min(len(text), sec.end() + len(after))]
+                if not re.search(r"(arretrat|morosit[aà])", sec_window, re.I):
+                    continue
+                match_start = sec.end() + absence.start()
+                match_end = sec.end() + absence.end()
+                if match_end < len(text) and text[match_end] in ".;:!?":
+                    match_end += 1
+                evidence = [
+                    _build_evidence(
+                        text,
+                        int(p.get("page_number", 0) or 0),
+                        match_start,
+                        match_end,
+                        field_key="spese_condominiali_arretrate",
+                        anchor_hint=text[sec.start():min(len(text), sec.end() + len(after))],
+                    )
+                ]
+                if not evidence or not str(evidence[0].get("quote") or "").strip():
+                    continue
+                searched_in = _make_searched_in(pages, keywords, "FOUND", field_key="spese_condominiali_arretrate")
                 return _build_field_state(value="NON PRESENTI", status="FOUND", evidence=evidence, searched_in=searched_in)
         for pat, label in ((positive, "NON PRESENTI"), (negative, "PRESENTI ARRETRATI")):
             m = pat.search(text)
@@ -1376,12 +1775,26 @@ def _extract_spese_condominiali_state(pages: List[Dict[str, Any]]) -> Dict[str, 
             start, end = m.start(), m.end()
             line_start, line_end = _line_bounds(text, start, end)
             line_text = text[line_start:line_end]
-            evidence = [_build_evidence(text, int(p.get("page_number", 0) or 0), line_start, line_end)]
+            if weak_condo_proxy.search(line_text):
+                # "incidenza condominiale: 0,00%" is not deterministic proof of no arrears.
+                continue
+            evidence = [
+                _build_evidence(
+                    text,
+                    int(p.get("page_number", 0) or 0),
+                    line_start,
+                    line_end,
+                    field_key="spese_condominiali_arretrate",
+                    anchor_hint=m.group(0),
+                )
+            ]
+            if not evidence or not str(evidence[0].get("quote") or "").strip():
+                continue
             status = "LOW_CONFIDENCE" if ambiguous.search(line_text) else "FOUND"
             value = "DA VERIFICARE" if status == "LOW_CONFIDENCE" else label
-            searched_in = _make_searched_in(pages, keywords, status)
+            searched_in = _make_searched_in(pages, keywords, status, field_key="spese_condominiali_arretrate")
             return _build_field_state(value=value, status=status, evidence=evidence, searched_in=searched_in)
-    searched_in = _make_searched_in(pages, keywords, "NOT_FOUND")
+    searched_in = _make_searched_in(pages, keywords, "NOT_FOUND", field_key="spese_condominiali_arretrate")
     return _build_field_state(
         value=None,
         status="NOT_FOUND",
@@ -1542,6 +1955,11 @@ def _apply_decision_states_to_result(result: Dict[str, Any], states: Dict[str, A
         "status": _field_state_display_value(ape_state),
         "evidence": ape_state.get("evidence", []),
     }
+    agibilita_state = states.get("agibilita") or {}
+    abusi["agibilita"] = {
+        "status": _field_state_display_value(agibilita_state),
+        "evidence": agibilita_state.get("evidence", []),
+    }
     result["abusi_edilizi_conformita"] = abusi
 
     money_box = result.get("money_box", {}) if isinstance(result.get("money_box"), dict) else {}
@@ -1602,6 +2020,9 @@ def _ensure_semaforo_top_blockers(result: Dict[str, Any], states: Dict[str, Any]
         status = state.get("status")
         if status not in {"NOT_FOUND", "LOW_CONFIDENCE"}:
             continue
+        if key == "spese_condominiali_arretrate" and status == "NOT_FOUND":
+            # Missing condo arrears data is a coverage warning, not a top blocker by itself.
+            continue
         evidence = state.get("evidence") if isinstance(state.get("evidence"), list) else []
         searched_in = state.get("searched_in") if isinstance(state.get("searched_in"), list) else []
         if not evidence and not searched_in:
@@ -1627,7 +2048,6 @@ def _synthesize_decisione_rapida(result: Dict[str, Any], states: Dict[str, Any])
         ("stato_occupativo", "stato occupativo"),
         ("regolarita_urbanistica", "regolarità urbanistica"),
         ("conformita_catastale", "conformità catastale"),
-        ("spese_condominiali_arretrate", "spese condominiali"),
         ("ape", "APE"),
         ("dati_asta", "dati asta"),
     ]
@@ -1637,10 +2057,14 @@ def _synthesize_decisione_rapida(result: Dict[str, Any], states: Dict[str, Any])
         if st.get("status") in {"NOT_FOUND", "LOW_CONFIDENCE"}:
             missing_labels.append(label)
 
-    points = []
+    points: List[str] = []
+    seen_points: set = set()
     for lbl in blocker_labels + missing_labels:
-        if lbl not in points:
-            points.append(lbl)
+        norm = str(lbl or "").strip().lower()
+        if not norm or norm in seen_points:
+            continue
+        seen_points.add(norm)
+        points.append(str(lbl))
     points = points[:3]
     while len(points) < 2:
         points.append("verifica documentale")
@@ -1768,6 +2192,7 @@ def _apply_decision_field_states(result: Dict[str, Any], pages: List[Dict[str, A
             "conformita_catastale": _extract_conformita_catastale_state(pages),
             "spese_condominiali_arretrate": _extract_spese_condominiali_state(pages),
             "ape": _extract_ape_state(pages),
+            "agibilita": _extract_agibilita_state(pages),
             "dati_asta": _extract_dati_asta_state(pages),
             "formalita_pregiudizievoli": _extract_formalita_pregiudizievoli_state(pages),
         })
@@ -1826,6 +2251,12 @@ def _apply_decision_field_states(result: Dict[str, Any], pages: List[Dict[str, A
                 pages=pages,
                 keywords=["ape", "certificato energetico", "attestato di prestazione energetica"],
             ),
+            "agibilita": _build_state_from_existing_value(
+                value_obj=abusi.get("agibilita", {}).get("status") if isinstance(abusi.get("agibilita"), dict) else None,
+                evidence=abusi.get("agibilita", {}).get("evidence", []) if isinstance(abusi.get("agibilita"), dict) else [],
+                pages=pages,
+                keywords=["agibilità", "agibilita", "abitabilità", "abitabilita", "agibile"],
+            ),
             "dati_asta": _build_state_from_existing_value(
                 value_obj=result.get("dati_asta"),
                 evidence=result.get("dati_asta", {}).get("evidence", []) if isinstance(result.get("dati_asta"), dict) else [],
@@ -1863,28 +2294,59 @@ def _apply_decision_field_states(result: Dict[str, Any], pages: List[Dict[str, A
                 raw_value: Any,
                 evidence_key: str,
                 keywords: List[str],
+                field_key: Optional[str] = None,
                 value_builder=None,
                 existing_state: Optional[Dict[str, Any]] = None,
             ) -> Dict[str, Any]:
                 evidence = lot_evidence.get(evidence_key, [])
+                if isinstance(existing_state, dict):
+                    existing_status = str(existing_state.get("status") or "").upper()
+                    existing_evidence = existing_state.get("evidence") if isinstance(existing_state.get("evidence"), list) else []
+                    if existing_status == "FOUND" and existing_evidence:
+                        return existing_state
+
+                normalized_evidence: List[Dict[str, Any]] = []
+                if isinstance(evidence, list):
+                    for ev in evidence[:2]:
+                        if not isinstance(ev, dict):
+                            continue
+                        quote = str(ev.get("quote") or "").strip()
+                        if not quote:
+                            continue
+                        n_quote, n_hint = normalize_evidence_quote(
+                            quote,
+                            0,
+                            len(quote),
+                            max_len=520,
+                            field_key=field_key,
+                            anchor_hint=quote,
+                        )
+                        if not n_quote:
+                            continue
+                        payload = {"page": ev.get("page"), "quote": n_quote}
+                        if n_hint:
+                            payload["search_hint"] = n_hint
+                        normalized_evidence.append(payload)
+                evidence = normalized_evidence
                 value = raw_value
                 if value_builder:
                     value = value_builder(raw_value)
                 if raw_value in (None, "", "TBD", "NON SPECIFICATO IN PERIZIA") and not evidence:
                     if isinstance(existing_state, dict) and existing_state.get("status") in {"FOUND", "LOW_CONFIDENCE", "USER_PROVIDED"}:
                         return existing_state
-                    searched_in = _make_searched_in(pages, keywords, "NOT_FOUND")
+                    searched_in = _make_searched_in(pages, keywords, "NOT_FOUND", field_key=field_key)
                     return _build_field_state(value=None, status="NOT_FOUND", evidence=[], searched_in=searched_in)
                 if not evidence:
-                    searched_in = _make_searched_in(pages, keywords, "LOW_CONFIDENCE")
+                    searched_in = _make_searched_in(pages, keywords, "LOW_CONFIDENCE", field_key=field_key)
                     return _build_field_state(value=value, status="LOW_CONFIDENCE", evidence=[], searched_in=searched_in)
-                searched_in = _make_searched_in(pages, keywords, "FOUND")
+                searched_in = _make_searched_in(pages, keywords, "FOUND", field_key=field_key)
                 return _build_field_state(value=value, status="FOUND", evidence=evidence, searched_in=searched_in)
 
             states["prezzo_base_asta"] = _state_from_lot_value(
                 selected_lot.get("prezzo_base_value"),
                 "prezzo_base",
                 ["prezzo base", "prezzo base d'asta", "€"],
+                field_key="prezzo_base_asta",
                 existing_state=states.get("prezzo_base_asta"),
             )
 
@@ -1905,6 +2367,7 @@ def _apply_decision_field_states(result: Dict[str, Any], pages: List[Dict[str, A
                 selected_lot.get("superficie_mq"),
                 "superficie",
                 ["superficie", "mq", "m²"],
+                field_key="superficie_catastale",
                 value_builder=_superficie_value,
                 existing_state=states.get("superficie"),
             )
@@ -1913,6 +2376,7 @@ def _apply_decision_field_states(result: Dict[str, Any], pages: List[Dict[str, A
                 selected_lot.get("diritto_reale"),
                 "diritto_reale",
                 ["proprietà", "nuda proprietà", "usufrutto", "diritto di"],
+                field_key="diritto_reale",
                 existing_state=states.get("diritto_reale"),
             )
 
@@ -2067,10 +2531,15 @@ def _ensure_lot_contract(lot: Dict[str, Any], lot_number: int) -> Dict[str, Any]
 
 def _build_fallback_lot_from_pages(pages: List[Dict[str, Any]]) -> Dict[str, Any]:
     lot = _ensure_lot_contract({}, 1)
-    lotto_ev = _find_regex_in_pages(pages, r"\\bLOTTO\\s+UNICO\\b|\\bLOTTO\\s+1\\b", re.I)
+    lotto_ev = _find_regex_in_pages(pages, r"\\bLOTTO\\s+UNICO\\b|\\bLOTTO\\s+1\\b", re.I, field_key="lotto")
     if lotto_ev:
         lot["evidence"]["lotto"] = [lotto_ev]
-    prezzo_ev = _find_regex_in_pages(pages, r"PREZZO\\s+BASE[^\\n]{0,60}?([0-9]{1,3}(?:[.\\s][0-9]{3})*(?:,[0-9]{2})?)", re.I)
+    prezzo_ev = _find_regex_in_pages(
+        pages,
+        r"PREZZO\\s+BASE[^\\n]{0,60}?([0-9]{1,3}(?:[.\\s][0-9]{3})*(?:,[0-9]{2})?)",
+        re.I,
+        field_key="prezzo_base_asta",
+    )
     if prezzo_ev:
         lot["evidence"]["prezzo_base"] = [prezzo_ev]
         parsed = _parse_euro_number(prezzo_ev.get("quote", ""))
@@ -2083,13 +2552,23 @@ def _build_fallback_lot_from_pages(pages: List[Dict[str, Any]]) -> Dict[str, Any
     if ubic_ev:
         lot["evidence"]["ubicazione"] = [ubic_ev]
         lot["ubicazione"] = _normalize_address_value(ubic_ev.get("quote", ""))
-    diritto_ev = _find_regex_in_pages(pages, r"Diritto\\s+reale[:\\s]*([^\\n]{3,60})", re.I)
+    diritto_ev = _find_regex_in_pages(pages, r"Diritto\\s+reale[:\\s]*([^\\n]{3,60})", re.I, field_key="diritto_reale")
     if not diritto_ev:
-        diritto_ev = _find_regex_in_pages(pages, r"\\b(Nuda\\s+proprietà|Piena\\s+proprietà|Proprietà|Usufrutto|Diritto\\s+di\\s+[^\\n]{0,40})\\b", re.I)
+        diritto_ev = _find_regex_in_pages(
+            pages,
+            r"\\b(Nuda\\s+proprietà|Piena\\s+proprietà|Proprietà|Usufrutto|Diritto\\s+di\\s+[^\\n]{0,40})\\b",
+            re.I,
+            field_key="diritto_reale",
+        )
     if diritto_ev:
         lot["evidence"]["diritto_reale"] = [diritto_ev]
         lot["diritto_reale"] = _normalize_headline_text(diritto_ev.get("quote", ""))
-    sup_ev = _find_regex_in_pages(pages, r"Superficie[^\\d\\n]{0,40}([\\d.,]+)\\s*(m2|m²|mq)", re.I)
+    sup_ev = _find_regex_in_pages(
+        pages,
+        r"Superficie[^\\d\\n]{0,40}([\\d.,]+)\\s*(m2|m²|mq)",
+        re.I,
+        field_key="superficie_catastale",
+    )
     if sup_ev:
         lot["evidence"]["superficie"] = [sup_ev]
         match = re.search(r"(\\d{1,4}(?:[\\.,]\\d{1,2})?)", sup_ev.get("quote", ""))
@@ -2236,12 +2715,30 @@ def _extract_lots_from_schema_riassuntivo(pages_in: List[Dict]) -> List[Dict[str
                     pass
                 abs_start = block_start + prezzo_match.start()
                 abs_end = block_start + prezzo_match.end()
-                lot_data["evidence"]["prezzo_base"] = [_build_evidence(text, page_num, abs_start, abs_end)]
+                lot_data["evidence"]["prezzo_base"] = [
+                    _build_evidence(
+                        text,
+                        page_num,
+                        abs_start,
+                        abs_end,
+                        field_key="prezzo_base_asta",
+                        anchor_hint=prezzo_match.group(0),
+                    )
+                ]
 
             if not lot_data["evidence"].get("lotto"):
                 lotto_match = re.search(r"\bLOTTO\s+UNICO\b|\bLOTTO\s+\d+\b", text, re.I)
                 if lotto_match:
-                    lot_data["evidence"]["lotto"] = [_build_evidence(text, page_num, lotto_match.start(), lotto_match.end())]
+                    lot_data["evidence"]["lotto"] = [
+                        _build_evidence(
+                            text,
+                            page_num,
+                            lotto_match.start(),
+                            lotto_match.end(),
+                            field_key="lotto",
+                            anchor_hint=lotto_match.group(0),
+                        )
+                    ]
 
             ubic_match = re.search(r"Ubicazione[:\s]*([^\n]+)", block, re.I)
             if ubic_match and lot_data["ubicazione"] == "TBD":
@@ -2255,7 +2752,16 @@ def _extract_lots_from_schema_riassuntivo(pages_in: List[Dict]) -> List[Dict[str
                 lot_data["diritto_reale"] = _normalize_headline_text(diritto_match.group(1).strip()[:100])
                 abs_start = block_start + diritto_match.start()
                 abs_end = block_start + diritto_match.end()
-                lot_data["evidence"]["diritto_reale"] = [_build_evidence(text, page_num, abs_start, abs_end)]
+                lot_data["evidence"]["diritto_reale"] = [
+                    _build_evidence(
+                        text,
+                        page_num,
+                        abs_start,
+                        abs_end,
+                        field_key="diritto_reale",
+                        anchor_hint=diritto_match.group(0),
+                    )
+                ]
 
             sup_matches = list(re.finditer(r"Superficie[^\d\n]{0,40}([\d.,]+)\s*mq", block, re.I))
             if sup_matches and lot_data["superficie_mq"] == "TBD":
@@ -2274,7 +2780,16 @@ def _extract_lots_from_schema_riassuntivo(pages_in: List[Dict]) -> List[Dict[str
                     lot_data["superficie_mq"] = best_val
                     abs_start = block_start + best.start()
                     abs_end = block_start + best.end()
-                    lot_data["evidence"]["superficie"] = [_build_evidence(text, page_num, abs_start, abs_end)]
+                    lot_data["evidence"]["superficie"] = [
+                        _build_evidence(
+                            text,
+                            page_num,
+                            abs_start,
+                            abs_end,
+                            field_key="superficie_catastale",
+                            anchor_hint=best.group(0),
+                        )
+                    ]
 
             tipo_match = re.search(r"Tipologia[:\s]*([^\n]+)", block, re.I)
             if tipo_match and lot_data["tipologia"] == "TBD":
@@ -2303,6 +2818,27 @@ def _extract_beni_from_pages(pages_in: List[Dict[str, Any]]) -> List[Dict[str, A
     import re
     beni_by_num: Dict[int, Dict[str, Any]] = {}
     current_num: Optional[int] = None
+    last_num_by_page: Dict[int, int] = {}
+
+    def _clean_location_text(raw: Optional[str]) -> Optional[str]:
+        if not raw:
+            return None
+        text = _normalize_headline_text(str(raw))
+        text = re.sub(r"\.{2,}\s*\d+\s*$", "", text).strip()
+        text = re.sub(r"\s{2,}", " ", text).strip(" ,;-")
+        text = re.sub(r",\s*piano\s+[A-Za-zÀ-ÿ].*$", "", text, flags=re.I).strip(" ,;-")
+        return text or None
+
+    def _clean_piano_text(raw: Optional[str]) -> Optional[str]:
+        if not raw:
+            return None
+        text = _normalize_headline_text(str(raw))
+        text = re.sub(r"\.{2,}\s*\d+\s*$", "", text).strip()
+        text = re.sub(r"^\s*piano\s+", "", text, flags=re.I).strip()
+        text = re.sub(r"\s+(\d{1,2})\s*$", "", text).strip(" ,;-")
+        text = re.sub(r"\s*-\s*", " - ", text)
+        text = re.sub(r"\s{2,}", " ", text).strip(" ,;-")
+        return text or None
 
     def ensure_bene(num: int) -> Dict[str, Any]:
         bene = beni_by_num.get(num)
@@ -2310,9 +2846,20 @@ def _extract_beni_from_pages(pages_in: List[Dict[str, Any]]) -> List[Dict[str, A
             bene = {
                 "bene_number": num,
                 "tipologia": None,
+                "short_location": None,
+                "piano": None,
+                "superficie_mq": None,
+                "valore_stima_eur": None,
                 "catasto": {},
                 "note": [],
-                "evidence": {"tipologia": [], "catasto": [], "note": []},
+                "evidence": {
+                    "tipologia": [],
+                    "location_piano": [],
+                    "superficie": [],
+                    "valore_stima": [],
+                    "catasto": [],
+                    "note": [],
+                },
             }
             beni_by_num[num] = bene
         return bene
@@ -2328,6 +2875,7 @@ def _extract_beni_from_pages(pages_in: List[Dict[str, Any]]) -> List[Dict[str, A
             except Exception:
                 continue
             current_num = num
+            last_num_by_page[page_num] = num
             bene = ensure_bene(num)
             heading = m.group(2).strip()
             tip_m = re.search(r"^([A-Za-zÀ-Ù'\s]+?)\s+ubicat[oa]", heading, re.I)
@@ -2338,6 +2886,59 @@ def _extract_beni_from_pages(pages_in: List[Dict[str, Any]]) -> List[Dict[str, A
             if tipologia and not bene.get("tipologia"):
                 bene["tipologia"] = tipologia
                 bene["evidence"]["tipologia"] = [_build_evidence(text, page_num, m.start(), m.end())]
+
+            loc_piano_m = re.search(r"ubicat[oa]\s+a?\s*(?P<loc>.*?)(?:,\s*piano\s+(?P<piano>[^\.]+))?$", heading, re.I)
+            if loc_piano_m:
+                loc = _clean_location_text(loc_piano_m.group("loc"))
+                piano = _clean_piano_text(loc_piano_m.group("piano"))
+                can_replace_loc = not bene.get("short_location")
+                can_replace_piano = not bene.get("piano")
+                if loc and can_replace_loc:
+                    bene["short_location"] = loc
+                if piano and can_replace_piano:
+                    bene["piano"] = piano
+                if (loc or piano) and not bene["evidence"].get("location_piano"):
+                    bene["evidence"]["location_piano"] = [_build_evidence(text, page_num, m.start(), m.end())]
+
+        # Summary rows with superficie and valore per-bene (deterministic table).
+        normalized_page_text = " ".join(text.split())
+        row_pattern = re.compile(
+            r"Bene\s*N[°o]\s*(\d+)\s*-\s*([^\n]{0,260}?)\s(\d{1,3},\d{2})\s*mq\s+[0-9\.,]+\s*€/mq\s*€\s*([0-9\.\s]+,\d{2})",
+            re.I,
+        )
+        for m in row_pattern.finditer(normalized_page_text):
+            try:
+                num = int(m.group(1))
+            except Exception:
+                continue
+            bene = ensure_bene(num)
+            row_desc = _normalize_headline_text(m.group(2))
+            row_loc = None
+            row_piano = None
+            row_lp = re.search(r"^(.*?),\s*piano\s+(.+)$", row_desc, re.I)
+            if row_lp:
+                row_loc = _clean_location_text(row_lp.group(1))
+                row_piano = _clean_piano_text(row_lp.group(2))
+            else:
+                row_loc = _clean_location_text(row_desc)
+
+            superficie_val = _parse_euro_number(m.group(3))
+            stima_val = _parse_euro_number(m.group(4))
+            if row_loc:
+                bene["short_location"] = row_loc
+            if row_piano:
+                bene["piano"] = row_piano
+            if isinstance(superficie_val, (int, float)) and bene.get("superficie_mq") is None:
+                bene["superficie_mq"] = round(float(superficie_val), 2)
+            if isinstance(stima_val, (int, float)) and bene.get("valore_stima_eur") is None:
+                bene["valore_stima_eur"] = int(round(float(stima_val)))
+            row_quote = _normalize_headline_text(m.group(0))
+            ev_obj = {"page": page_num, "quote": row_quote, "search_hint": row_quote[:120]}
+            bene["evidence"]["location_piano"] = [ev_obj]
+            if not bene["evidence"].get("superficie"):
+                bene["evidence"]["superficie"] = [ev_obj]
+            if not bene["evidence"].get("valore_stima"):
+                bene["evidence"]["valore_stima"] = [ev_obj]
 
         # Catasto lines linked to current bene
         for m in re.finditer(r"Identificato\s+al\s+catasto[^\n]*", text, re.I):
@@ -2394,6 +2995,61 @@ def _extract_beni_from_pages(pages_in: List[Dict[str, Any]]) -> List[Dict[str, A
             if note and note not in bene.get("note", []):
                 bene.setdefault("note", []).append(note)
                 bene["evidence"]["note"] = [_build_evidence(text, page_num, line_start, line_end)]
+
+        # Match headings on this page for deterministic bene mapping.
+        heading_matches = [hm for hm in re.finditer(r"\bBene\s*(?:N[°o]\s*)?(\d+)\s*-\s*", text, re.I)]
+
+        # Superficie lines by current bene in descriptive sections (only when unambiguous).
+        heading_count_on_page = len(heading_matches)
+        superficie_matches_on_page = list(re.finditer(r"Superficie\s+(\d{1,3}(?:,\d{1,2})?)\s*mq", text, re.I))
+        if heading_count_on_page <= 1 and len(superficie_matches_on_page) == 1:
+            surface_iter = superficie_matches_on_page
+        else:
+            surface_iter = []
+        for m in surface_iter:
+            num = current_num or last_num_by_page.get(page_num)
+            if num is None:
+                continue
+            bene = ensure_bene(num)
+            sup_val = _parse_euro_number(m.group(1))
+            if isinstance(sup_val, (int, float)) and bene.get("superficie_mq") is None:
+                bene["superficie_mq"] = round(float(sup_val), 2)
+            if not bene["evidence"].get("superficie"):
+                line_start, line_end = _line_bounds(text, m.start(), m.end())
+                bene["evidence"]["superficie"] = [_build_evidence(text, page_num, line_start, line_end)]
+
+        # "Valore di stima del bene" lines: map deterministically to bene on page.
+        heading_order: List[int] = []
+        for hm in heading_matches:
+            try:
+                num = int(hm.group(1))
+            except Exception:
+                continue
+            if num not in heading_order:
+                heading_order.append(num)
+        value_matches = [vm for vm in re.finditer(r"Valore\s+di\s+stima\s+del\s+bene[^\n]{0,30}?€\s*([0-9\.\s]+,\d{2})", text, re.I)]
+        for idx, vm in enumerate(value_matches):
+            mapped_num: Optional[int] = None
+            if idx < len(heading_order):
+                mapped_num = heading_order[idx]
+            if mapped_num is None:
+                prev_headings = [hm for hm in heading_matches if hm.start() <= vm.start()]
+                if prev_headings:
+                    try:
+                        mapped_num = int(prev_headings[-1].group(1))
+                    except Exception:
+                        mapped_num = None
+            if mapped_num is None:
+                mapped_num = current_num
+            if mapped_num is None:
+                continue
+            bene = ensure_bene(mapped_num)
+            val = _parse_euro_number(vm.group(1))
+            if isinstance(val, (int, float)) and bene.get("valore_stima_eur") is None:
+                bene["valore_stima_eur"] = int(round(float(val)))
+            if not bene["evidence"].get("valore_stima"):
+                line_start, line_end = _line_bounds(text, vm.start(), vm.end())
+                bene["evidence"]["valore_stima"] = [_build_evidence(text, page_num, line_start, line_end)]
 
     beni = [beni_by_num[k] for k in sorted(beni_by_num.keys())]
     return beni
@@ -2469,6 +3125,504 @@ def _extract_deprezzamenti(pages_in: List[Dict]) -> List[Dict[str, Any]]:
                 "evidence": _build_evidence(text, page_num, m.start(), m.end())
             })
     return items
+
+
+def _normalize_contract_evidence_list(raw: Any, max_items: int = 4) -> List[Dict[str, Any]]:
+    if not isinstance(raw, list):
+        return []
+    out: List[Dict[str, Any]] = []
+    for entry in raw:
+        if not isinstance(entry, dict):
+            continue
+        quote = _normalize_headline_text(str(entry.get("quote", "") or ""))
+        if not quote:
+            continue
+        try:
+            page = int(entry.get("page", 0) or 0)
+        except Exception:
+            page = 0
+        payload: Dict[str, Any] = {
+            "page": page,
+            "quote": quote,
+            "search_hint": str(entry.get("search_hint") or quote[:120]).strip(),
+        }
+        out.append(payload)
+        if len(out) >= max_items:
+            break
+    return out
+
+
+def _extract_contract_value_from_obj(value_obj: Any) -> Tuple[Optional[float], List[Dict[str, Any]]]:
+    if isinstance(value_obj, dict):
+        value = _as_float_or_none(value_obj.get("value"))
+        evidence = _normalize_contract_evidence_list(value_obj.get("evidence", []))
+        if value is not None and not (value == 0 and not evidence):
+            return value, evidence
+        formatted = _as_float_or_none(value_obj.get("formatted"))
+        if formatted is not None and not (formatted == 0 and not evidence):
+            return formatted, evidence
+    value = _as_float_or_none(value_obj)
+    if value == 0:
+        return None, []
+    return value, []
+
+
+def _parse_dep_total_from_obj(value_obj: Any) -> Tuple[Optional[float], List[Dict[str, Any]]]:
+    if isinstance(value_obj, list):
+        nums: List[float] = []
+        ev_all: List[Dict[str, Any]] = []
+        for item in value_obj:
+            if not isinstance(item, dict):
+                continue
+            num = _as_float_or_none(item.get("importo"))
+            if num is None:
+                num = _as_float_or_none(item.get("value"))
+            if num is None:
+                num = _as_float_or_none(item.get("amount"))
+            if num is not None:
+                nums.append(num)
+            ev_all.extend(_normalize_contract_evidence_list(item.get("evidence", []), max_items=2))
+        if nums and any(abs(n) > 0.0001 for n in nums):
+            return sum(nums), ev_all[:4]
+    if isinstance(value_obj, dict):
+        direct = _as_float_or_none(value_obj.get("totale"))
+        if direct is None:
+            direct = _as_float_or_none(value_obj.get("total"))
+        if direct is None:
+            direct = _as_float_or_none(value_obj.get("importo"))
+        if direct is None:
+            direct = _as_float_or_none(value_obj.get("value"))
+        if direct is not None and not (direct == 0 and not _normalize_contract_evidence_list(value_obj.get("evidence", []))):
+            return direct, _normalize_contract_evidence_list(value_obj.get("evidence", []))
+    return None, []
+
+
+def _extract_location_piano_from_bene(bene: Dict[str, Any], lot: Optional[Dict[str, Any]]) -> Tuple[Optional[str], Optional[str]]:
+    def _clean_loc(raw: Optional[str]) -> Optional[str]:
+        if not raw:
+            return None
+        text = _normalize_headline_text(str(raw))
+        text = re.sub(r"\.{2,}\s*\d+\s*$", "", text).strip()
+        text = re.sub(r",\s*piano\s+[A-Za-zÀ-ÿ].*$", "", text, flags=re.I).strip(" ,;-")
+        text = re.sub(r"\s{2,}", " ", text).strip(" ,;-")
+        return text or None
+
+    def _clean_piano(raw: Optional[str]) -> Optional[str]:
+        if not raw:
+            return None
+        text = _normalize_headline_text(str(raw))
+        text = re.sub(r"^\s*piano\s+", "", text, flags=re.I).strip()
+        text = re.sub(r"\.{2,}\s*\d+\s*$", "", text).strip()
+        text = re.sub(r"\s+\d{1,2}\s*$", "", text).strip(" ,;-")
+        text = re.sub(r"\s*-\s*", " - ", text)
+        text = re.sub(r"\s{2,}", " ", text).strip(" ,;-")
+        return text or None
+
+    direct_loc = _clean_loc(str(bene.get("short_location", "") or ""))
+    direct_piano = _clean_piano(str(bene.get("piano", "") or ""))
+    if direct_loc or direct_piano:
+        return direct_loc, direct_piano
+
+    evidence = bene.get("evidence", {}) if isinstance(bene.get("evidence"), dict) else {}
+    tip_ev = evidence.get("tipologia", []) if isinstance(evidence.get("tipologia"), list) else []
+    if tip_ev:
+        quote = _normalize_headline_text(str(tip_ev[0].get("quote", "") or ""))
+        if quote:
+            # Example: Bene N° 1 - Ufficio ubicato a ... , piano Terra-primo ...
+            m = re.search(
+                r"ubicat[oa]\s+a?\s*(?P<loc>.*?)(?:,\s*piano\s+(?P<piano>[^\.]+))?(?:\.{2,}\s*\d+\s*$|$)",
+                quote,
+                re.I,
+            )
+            if m:
+                loc = _clean_loc(str(m.group("loc") or "").strip(" ,.-"))
+                piano = _clean_piano(str(m.group("piano") or "").strip(" ,.-"))
+                if loc:
+                    return loc[:140], piano
+    if isinstance(lot, dict):
+        lot_loc = str(lot.get("ubicazione", "") or "").strip()
+        if lot_loc and lot_loc.upper() not in {"TBD", "NON SPECIFICATO IN PERIZIA"}:
+            piano_m = re.search(r"piano\s+(.+)$", lot_loc, re.I)
+            piano = _clean_piano(piano_m.group(1)) if piano_m else None
+            if piano_m:
+                short_loc = _clean_loc(lot_loc[:piano_m.start()].strip(" ,-"))
+            else:
+                short_loc = _clean_loc(lot_loc)
+            return short_loc[:140], piano
+    return None, None
+
+
+def _extract_bene_surface_value(bene: Dict[str, Any]) -> Optional[float]:
+    direct_candidates = [
+        bene.get("superficie_mq"),
+        bene.get("superficie"),
+        bene.get("superficie_convenzionale"),
+        bene.get("superficie_convenzionale_mq"),
+    ]
+    for candidate in direct_candidates:
+        value = _as_float_or_none(candidate)
+        if value is not None:
+            return value
+    catasto = bene.get("catasto", {}) if isinstance(bene.get("catasto"), dict) else {}
+    cons = str(catasto.get("consistenza", "") or "")
+    m = re.search(r"(\d{1,4}(?:[.,]\d{1,2})?)\s*(?:mq|m2|m²)", cons, re.I)
+    if m:
+        return _as_float_or_none(m.group(1))
+    return None
+
+
+def _extract_bene_stima_value(bene: Dict[str, Any]) -> Optional[float]:
+    for key in (
+        "valore_stima_eur",
+        "valore_stima",
+        "valore_di_stima",
+        "valore_di_stima_bene",
+        "valore_stima_bene",
+        "stima_euro",
+        "valore_euro",
+        "valore",
+    ):
+        value = _as_float_or_none(bene.get(key))
+        if value is not None:
+            return value
+    return None
+
+
+def _extract_valuation_waterfall_from_pages(pages: List[Dict[str, Any]]) -> Dict[str, Any]:
+    out = {
+        "valore_stima_eur": None,
+        "deprezzamenti_eur": None,
+        "valore_finale_eur": None,
+        "prezzo_base_eur": None,
+        "evidence": {
+            "valore_stima_eur": [],
+            "deprezzamenti_eur": [],
+            "valore_finale_eur": [],
+            "prezzo_base_eur": [],
+        },
+    }
+    if not isinstance(pages, list) or not pages:
+        return out
+
+    prezzo_state = _extract_prezzo_base_asta_state(pages)
+    if isinstance(prezzo_state, dict):
+        prezzo_val = _as_float_or_none(prezzo_state.get("value"))
+        if prezzo_val is not None:
+            out["prezzo_base_eur"] = int(round(prezzo_val))
+            out["evidence"]["prezzo_base_eur"] = _normalize_contract_evidence_list(prezzo_state.get("evidence", []))
+
+    amount_re = r"(?P<value>(?:[0-9]{1,3}(?:[.\s][0-9]{3})+|[0-9]{4,7}|[0-9]{1,3})(?:,[0-9]{2})?)"
+    stima_patterns = [
+        re.compile(rf"Valore\s+di\s+stima[^\n]{{0,60}}?[:€]\s*{amount_re}", re.I),
+        re.compile(rf"Valore\s+complessivo[^\n]{{0,60}}?stima[^\n]{{0,40}}?[:€]\s*{amount_re}", re.I),
+    ]
+    finale_pattern = re.compile(
+        rf"Valore\s+finale\s+di\s+stima[^\n]{{0,40}}?[:€]\s*{amount_re}",
+        re.I,
+    )
+    dep_total_pattern = re.compile(
+        rf"Deprezzamenti[^\n]{{0,80}}?[:€]\s*{amount_re}",
+        re.I,
+    )
+    dep_item_pattern = re.compile(
+        rf"(?P<label>Oneri\s+di\s+regolarizzazione\s+urbanistica|Rischio\s+assunto\s+per\s+mancata\s+garanzia(?:\s+per\s+vizi\s+occulti)?|Vizi\s+occulti)[^\n]{{0,60}}?{amount_re}\s*€",
+        re.I,
+    )
+
+    seen_dep_keys = set()
+    dep_values: List[float] = []
+    dep_evidence: List[Dict[str, Any]] = []
+
+    stima_candidates: List[Tuple[float, Dict[str, Any]]] = []
+
+    for p in pages:
+        text = str(p.get("text", "") or "")
+        page_num = int(p.get("page_number", 0) or 0)
+        if not text:
+            continue
+
+        for pat in stima_patterns:
+            for m in pat.finditer(text):
+                candidate_line_start, candidate_line_end = _line_bounds(text, m.start(), m.end())
+                candidate_line = text[candidate_line_start:candidate_line_end]
+                if re.search(r"valore\s+finale\s+di\s+stima", candidate_line, re.I):
+                    continue
+                val = _parse_euro_number(m.group("value"))
+                if val is None:
+                    continue
+                ev = _build_evidence(
+                    text,
+                    page_num,
+                    candidate_line_start,
+                    candidate_line_end,
+                    field_key="valore_stima_complessivo",
+                    anchor_hint=m.group(0),
+                )
+                if _is_toc_like_quote(str(ev.get("quote") or "")):
+                    continue
+                stima_candidates.append((float(val), ev))
+
+        if out["valore_finale_eur"] is None:
+            m = finale_pattern.search(text)
+            if m:
+                line_start, line_end = _line_bounds(text, m.start(), m.end())
+                val = _parse_euro_number(m.group("value"))
+                if val is not None:
+                    ev = _build_evidence(
+                        text,
+                        page_num,
+                        line_start,
+                        line_end,
+                        field_key="valore_finale_stima",
+                        anchor_hint=m.group(0),
+                    )
+                    if not _is_toc_like_quote(str(ev.get("quote") or "")):
+                        out["valore_finale_eur"] = int(round(val))
+                        out["evidence"]["valore_finale_eur"] = _normalize_contract_evidence_list([ev])
+
+        for m in dep_item_pattern.finditer(text):
+            val = _parse_euro_number(m.group("value"))
+            if val is None:
+                continue
+            line_start, line_end = _line_bounds(text, m.start(), m.end())
+            ev = _build_evidence(
+                text,
+                page_num,
+                line_start,
+                line_end,
+                field_key="deprezzamenti",
+                anchor_hint=m.group(0),
+            )
+            quote = str(ev.get("quote") or "")
+            if _is_toc_like_quote(quote):
+                continue
+            key = (page_num, int(round(val)), _normalize_headline_text(m.group("label")).lower())
+            if key in seen_dep_keys:
+                continue
+            seen_dep_keys.add(key)
+            dep_values.append(val)
+            dep_evidence.extend(_normalize_contract_evidence_list([ev], max_items=1))
+
+        if out["deprezzamenti_eur"] is None:
+            m = dep_total_pattern.search(text)
+            if m:
+                val = _parse_euro_number(m.group("value"))
+                if val is not None:
+                    line_start, line_end = _line_bounds(text, m.start(), m.end())
+                    ev = _build_evidence(
+                        text,
+                        page_num,
+                        line_start,
+                        line_end,
+                        field_key="deprezzamenti",
+                        anchor_hint=m.group(0),
+                    )
+                    if not _is_toc_like_quote(str(ev.get("quote") or "")):
+                        out["deprezzamenti_eur"] = int(round(val))
+                        out["evidence"]["deprezzamenti_eur"] = _normalize_contract_evidence_list([ev])
+
+    if dep_values:
+        out["deprezzamenti_eur"] = int(round(sum(dep_values)))
+        if dep_evidence:
+            out["evidence"]["deprezzamenti_eur"] = dep_evidence[:4]
+    if stima_candidates:
+        # Prefer lot-level valuation over per-bene values by taking the highest deterministic candidate.
+        best_value, best_ev = sorted(stima_candidates, key=lambda item: item[0], reverse=True)[0]
+        out["valore_stima_eur"] = int(round(best_value))
+        out["evidence"]["valore_stima_eur"] = _normalize_contract_evidence_list([best_ev])
+    return out
+
+
+def _build_panoramica_contract(result: Dict[str, Any], pages: List[Dict[str, Any]]) -> Dict[str, Any]:
+    lots = result.get("lots") if isinstance(result.get("lots"), list) else []
+    raw_lot_index = result.get("lot_index", 0)
+    try:
+        selected_lot_index = int(raw_lot_index)
+    except Exception:
+        selected_lot_index = 0
+    if selected_lot_index < 0 or selected_lot_index >= len(lots):
+        selected_lot_index = 0
+    selected_lot = lots[selected_lot_index] if lots else {}
+
+    report_header = result.get("report_header", {}) if isinstance(result.get("report_header"), dict) else {}
+    case_header = result.get("case_header", {}) if isinstance(result.get("case_header"), dict) else {}
+    dati = result.get("dati_certi_del_lotto", {}) if isinstance(result.get("dati_certi_del_lotto"), dict) else {}
+    section4 = result.get("section_4_dati_certi", {}) if isinstance(result.get("section_4_dati_certi"), dict) else {}
+
+    tribunale = None
+    procedura = None
+    lotto_label = None
+    tribunale_ev: List[Dict[str, Any]] = []
+    procedura_ev: List[Dict[str, Any]] = []
+    lotto_ev: List[Dict[str, Any]] = []
+
+    if isinstance(report_header.get("tribunale"), dict):
+        tribunale = report_header.get("tribunale", {}).get("value")
+        tribunale_ev = _normalize_contract_evidence_list(report_header.get("tribunale", {}).get("evidence", []))
+    if tribunale is None:
+        tribunale = case_header.get("tribunale")
+    if isinstance(report_header.get("procedure"), dict):
+        procedura = report_header.get("procedure", {}).get("value")
+        procedura_ev = _normalize_contract_evidence_list(report_header.get("procedure", {}).get("evidence", []))
+    if procedura is None:
+        procedura = case_header.get("procedure_id")
+    if isinstance(report_header.get("lotto"), dict):
+        lotto_label = report_header.get("lotto", {}).get("value")
+        lotto_ev = _normalize_contract_evidence_list(report_header.get("lotto", {}).get("evidence", []))
+    if lotto_label is None:
+        lotto_label = case_header.get("lotto")
+    if not lotto_label and isinstance(selected_lot, dict) and selected_lot.get("lot_number"):
+        lotto_label = f"Lotto {selected_lot.get('lot_number')}"
+
+    prezzo_value = None
+    prezzo_ev: List[Dict[str, Any]] = []
+    if isinstance(selected_lot, dict):
+        prezzo_value = _as_float_or_none(selected_lot.get("prezzo_base_value"))
+        lot_price_ev = selected_lot.get("evidence", {}).get("prezzo_base", []) if isinstance(selected_lot.get("evidence"), dict) else []
+        prezzo_ev = _normalize_contract_evidence_list(lot_price_ev)
+    if prezzo_value is None:
+        prezzo_value, prezzo_ev_fallback = _extract_contract_value_from_obj(dati.get("prezzo_base_asta"))
+        if prezzo_ev_fallback:
+            prezzo_ev = prezzo_ev_fallback
+    if prezzo_value is None:
+        prezzo_value, prezzo_ev_fallback = _extract_contract_value_from_obj(section4.get("prezzo_base_asta"))
+        if prezzo_ev_fallback:
+            prezzo_ev = prezzo_ev_fallback
+
+    lot_summary = {
+        "tribunale": _normalize_headline_text(str(tribunale or "")) or None,
+        "procedura": _normalize_headline_text(str(procedura or "")) or None,
+        "lotto_label": _normalize_headline_text(str(lotto_label or "")) or None,
+        "prezzo_base_eur": int(round(prezzo_value)) if prezzo_value is not None else None,
+        "evidence": {
+            "tribunale": tribunale_ev,
+            "procedura": procedura_ev,
+            "lotto_label": lotto_ev,
+            "prezzo_base_eur": prezzo_ev,
+        },
+    }
+
+    lot_beni: List[Dict[str, Any]] = []
+    if isinstance(selected_lot, dict) and isinstance(selected_lot.get("beni"), list):
+        lot_beni = selected_lot.get("beni") or []
+    elif isinstance(result.get("beni"), list):
+        lot_beni = result.get("beni") or []
+
+    lot_composition: List[Dict[str, Any]] = []
+    for idx, bene_raw in enumerate(lot_beni):
+        if not isinstance(bene_raw, dict):
+            continue
+        bene_number = bene_raw.get("bene_number")
+        if not isinstance(bene_number, int):
+            try:
+                bene_number = int(str(bene_number))
+            except Exception:
+                bene_number = idx + 1
+        tipologia = _normalize_headline_text(str(bene_raw.get("tipologia", "") or "")) or None
+        short_location, piano = _extract_location_piano_from_bene(bene_raw, selected_lot if isinstance(selected_lot, dict) else None)
+        if short_location and tipologia:
+            prefix = f"{tipologia} "
+            if short_location.lower().startswith(prefix.lower()):
+                short_location = short_location[len(prefix):].strip()
+        if isinstance(piano, str) and piano:
+            piano = piano[0].upper() + piano[1:]
+        superficie = _extract_bene_surface_value(bene_raw)
+        valore_stima = _extract_bene_stima_value(bene_raw)
+        evidence_map = bene_raw.get("evidence", {}) if isinstance(bene_raw.get("evidence"), dict) else {}
+
+        lot_composition.append({
+            "bene_number": bene_number,
+            "tipologia": tipologia,
+            "short_location": short_location,
+            "piano": piano,
+            "superficie_mq": round(float(superficie), 2) if isinstance(superficie, (int, float)) else None,
+            "valore_stima_eur": int(round(valore_stima)) if isinstance(valore_stima, (int, float)) else None,
+            "evidence": {
+                "tipologia": _normalize_contract_evidence_list(evidence_map.get("tipologia", [])),
+                "location_piano": _normalize_contract_evidence_list(evidence_map.get("location_piano", [])),
+                "superficie_mq": _normalize_contract_evidence_list(evidence_map.get("superficie", [])),
+                "valore_stima_eur": _normalize_contract_evidence_list(evidence_map.get("valore_stima", [])),
+                "catasto": _normalize_contract_evidence_list(evidence_map.get("catasto", [])),
+                "note": _normalize_contract_evidence_list(evidence_map.get("note", []), max_items=2),
+            },
+        })
+
+    wf_from_pages = _extract_valuation_waterfall_from_pages(pages)
+    stima_value, stima_ev = _extract_contract_value_from_obj(dati.get("valore_stima_complessivo"))
+    if stima_value is None:
+        stima_value, stima_ev = _extract_contract_value_from_obj(section4.get("valore_stima_complessivo"))
+
+    dep_value, dep_ev = _parse_dep_total_from_obj(dati.get("deprezzamenti"))
+    if dep_value is None:
+        dep_value, dep_ev = _parse_dep_total_from_obj(section4.get("deprezzamenti"))
+
+    finale_value, finale_ev = _extract_contract_value_from_obj(dati.get("valore_finale_stima"))
+    if finale_value is None:
+        finale_value, finale_ev = _extract_contract_value_from_obj(section4.get("valore_finale_stima"))
+
+    prezzo_wf_value = lot_summary.get("prezzo_base_eur")
+    prezzo_wf_ev = lot_summary.get("evidence", {}).get("prezzo_base_eur", [])
+
+    if stima_value is None:
+        stima_value = wf_from_pages.get("valore_stima_eur")
+        stima_ev = wf_from_pages.get("evidence", {}).get("valore_stima_eur", [])
+    dep_from_pages = wf_from_pages.get("deprezzamenti_eur")
+    if dep_value is None or (
+        isinstance(dep_value, (int, float))
+        and dep_value <= 0
+        and isinstance(dep_from_pages, (int, float))
+        and dep_from_pages > 0
+    ):
+        dep_value = dep_from_pages
+        dep_ev = wf_from_pages.get("evidence", {}).get("deprezzamenti_eur", [])
+    if (dep_value is None or (isinstance(dep_value, (int, float)) and dep_value <= 0)) and dep_ev:
+        dep_nums: List[float] = []
+        seen_dep_num_keys = set()
+        for ev in dep_ev:
+            if not isinstance(ev, dict):
+                continue
+            quote = str(ev.get("quote", "") or "")
+            for m in re.finditer(r"([0-9][0-9\.\,\s]{0,18})\s*€", quote):
+                parsed = _parse_euro_number(m.group(1))
+                if parsed is None or parsed <= 0:
+                    continue
+                key = int(round(parsed))
+                if key in seen_dep_num_keys:
+                    continue
+                seen_dep_num_keys.add(key)
+                dep_nums.append(parsed)
+        if dep_nums:
+            dep_value = float(sum(dep_nums))
+    if finale_value is None:
+        finale_value = wf_from_pages.get("valore_finale_eur")
+        finale_ev = wf_from_pages.get("evidence", {}).get("valore_finale_eur", [])
+    if prezzo_wf_value is None:
+        prezzo_wf_value = wf_from_pages.get("prezzo_base_eur")
+        prezzo_wf_ev = wf_from_pages.get("evidence", {}).get("prezzo_base_eur", [])
+
+    valuation_waterfall = {
+        "valore_stima_eur": int(round(stima_value)) if isinstance(stima_value, (int, float)) else None,
+        "deprezzamenti_eur": int(round(dep_value)) if isinstance(dep_value, (int, float)) else None,
+        "valore_finale_eur": int(round(finale_value)) if isinstance(finale_value, (int, float)) else None,
+        "prezzo_base_eur": int(round(prezzo_wf_value)) if isinstance(prezzo_wf_value, (int, float)) else None,
+        "evidence": {
+            "valore_stima_eur": _normalize_contract_evidence_list(stima_ev),
+            "deprezzamenti_eur": _normalize_contract_evidence_list(dep_ev),
+            "valore_finale_eur": _normalize_contract_evidence_list(finale_ev),
+            "prezzo_base_eur": _normalize_contract_evidence_list(prezzo_wf_ev),
+        },
+    }
+
+    return {
+        "version": "v1",
+        "selected_lot_index": selected_lot_index,
+        "selected_lot_number": selected_lot.get("lot_number") if isinstance(selected_lot, dict) else None,
+        "lots_count": len(lots),
+        "is_multi_lot": len(lots) > 1,
+        "lot_summary": lot_summary,
+        "lot_composition": lot_composition,
+        "valuation_waterfall": valuation_waterfall,
+    }
 
 def _apply_low_confidence(field: Dict[str, Any], field_key: str = "value") -> None:
     field["confidence"] = "LOW"
@@ -3455,12 +4609,30 @@ async def analyze_perizia_with_llm(pdf_text: str, pages: List[Dict], file_name: 
                         pass
                     abs_start = block_start + prezzo_match.start()
                     abs_end = block_start + prezzo_match.end()
-                    lot_data["evidence"]["prezzo_base"] = [_build_evidence(text, page_num, abs_start, abs_end)]
+                    lot_data["evidence"]["prezzo_base"] = [
+                        _build_evidence(
+                            text,
+                            page_num,
+                            abs_start,
+                            abs_end,
+                            field_key="prezzo_base_asta",
+                            anchor_hint=prezzo_match.group(0),
+                        )
+                    ]
 
                 if "lotto" not in lot_data["evidence"]:
                     lotto_match = re.search(r"\bLOTTO\s+UNICO\b|\bLOTTO\s+\d+\b", text, re.I)
                     if lotto_match:
-                        lot_data["evidence"]["lotto"] = [_build_evidence(text, page_num, lotto_match.start(), lotto_match.end())]
+                        lot_data["evidence"]["lotto"] = [
+                            _build_evidence(
+                                text,
+                                page_num,
+                                lotto_match.start(),
+                                lotto_match.end(),
+                                field_key="lotto",
+                                anchor_hint=lotto_match.group(0),
+                            )
+                        ]
                 
                 # Extract Ubicazione
                 ubic_match = re.search(
@@ -3482,7 +4654,16 @@ async def analyze_perizia_with_llm(pdf_text: str, pages: List[Dict], file_name: 
                     lot_data["diritto_reale"] = diritto_match.group(1).strip()[:100]
                     abs_start = block_start + diritto_match.start()
                     abs_end = block_start + diritto_match.end()
-                    lot_data["evidence"]["diritto_reale"] = [_build_evidence(text, page_num, abs_start, abs_end)]
+                    lot_data["evidence"]["diritto_reale"] = [
+                        _build_evidence(
+                            text,
+                            page_num,
+                            abs_start,
+                            abs_end,
+                            field_key="diritto_reale",
+                            anchor_hint=diritto_match.group(0),
+                        )
+                    ]
                 
                 # Extract Superficie
                 sup_matches = list(re.finditer(r"Superficie[^\d\n]{0,40}([\d.,]+)\s*mq", block, re.I))
@@ -3503,7 +4684,16 @@ async def analyze_perizia_with_llm(pdf_text: str, pages: List[Dict], file_name: 
                         lot_data["superficie_mq"] = f"{best.group(1)} mq"
                         abs_start = block_start + best.start()
                         abs_end = block_start + best.end()
-                        lot_data["evidence"]["superficie"] = [_build_evidence(text, page_num, abs_start, abs_end)]
+                        lot_data["evidence"]["superficie"] = [
+                            _build_evidence(
+                                text,
+                                page_num,
+                                abs_start,
+                                abs_end,
+                                field_key="superficie_catastale",
+                                anchor_hint=best.group(0),
+                            )
+                        ]
                 
                 # Extract Tipologia
                 tipo_match = re.search(
@@ -4067,7 +5257,7 @@ def apply_deterministic_fixes(result: Dict, pdf_text: str, pages: List[Dict], de
     if "non esiste il certificato energetico" in text_lower or "non esiste l'attestato di prestazione energetica" in text_lower:
         abusi["ape"] = {"status": "ASSENTE"}
     
-    if "non è presente l'abitabilità" in text_lower or "non risulta agibile" in text_lower:
+    if re.search(r"non\s+[èe]\s+presente\s+l['’]?abitabilit[aà]|non\s+risulta\s+agibil[ei]", text_lower, re.I):
         abusi["agibilita"] = {"status": "ASSENTE"}
     
     if impianti:
@@ -4083,6 +5273,7 @@ def apply_deterministic_fixes(result: Dict, pdf_text: str, pages: List[Dict], de
         pages,
         r"(Non\\s+esiste\\s+il\\s+certificato\\s+energetico[^\\n]*|APE\\s+non\\s+presente|Attestato\\s+di\\s+prestazione\\s+energetica\\s+non\\s+presente)",
         re.I,
+        field_key="ape",
     )
     if ape_ev:
         abusi["ape"] = {"status": "ASSENTE", "evidence": [ape_ev]}
@@ -4090,6 +5281,48 @@ def apply_deterministic_fixes(result: Dict, pdf_text: str, pages: List[Dict], de
             result["section_5_abusi_conformita"] = abusi
         if "abusi_edilizi_conformita" in result:
             result["abusi_edilizi_conformita"] = abusi
+    agibilita_ev = _find_regex_in_pages(
+        pages,
+        r"(non\s+[èe]\s+presente\s+l['’]?abitabilit[aà][^\n]*|non\s+risulta\s+agibil[ei][^\n]*|agibilit[aà][^\n]{0,80}(?:assente|non\s+presente)|abitabilit[aà][^\n]{0,80}(?:assente|non\s+presente))",
+        re.I,
+        field_key="agibilita",
+    )
+    if agibilita_ev and _is_cost_table_context(str(agibilita_ev.get("quote", "") or "")):
+        agibilita_ev = _find_regex_in_pages(
+            pages,
+            r"(non\s+risulta\s+agibil[ei][^\n]*|non\s+[èe]\s+presente\s+l['’]?abitabilit[aà][^\n]*)",
+            re.I,
+            field_key="agibilita",
+        )
+    if agibilita_ev and isinstance(abusi, dict):
+        agibilita_obj = abusi.get("agibilita") if isinstance(abusi.get("agibilita"), dict) else {}
+        agibilita_obj["status"] = agibilita_obj.get("status") or "ASSENTE"
+        agibilita_obj["evidence"] = [agibilita_ev]
+        abusi["agibilita"] = agibilita_obj
+        if "section_5_abusi_conformita" in result:
+            result["section_5_abusi_conformita"] = abusi
+        if "abusi_edilizi_conformita" in result:
+            result["abusi_edilizi_conformita"] = abusi
+
+    # Catasto conformity fallback from explicit "incongruenze ... planimetria catastale"
+    catasto_ev = _find_regex_in_pages(
+        pages,
+        r"(incongruenz\w+[\s\S]{0,220}?planimetri\w+\s+catastal\w*|planimetri\w+\s+catastal\w*[\s\S]{0,160}?non\s+conforme)",
+        re.I,
+        field_key="conformita_catastale",
+    )
+    if catasto_ev and isinstance(abusi, dict):
+        cat_obj = abusi.get("conformita_catastale") if isinstance(abusi.get("conformita_catastale"), dict) else {}
+        current_status = str(cat_obj.get("status") or "").upper()
+        if current_status in {"", "UNKNOWN", "NON SPECIFICATO IN PERIZIA", "NOT_FOUND"}:
+            cat_obj["status"] = "PRESENTI DIFFORMITÀ"
+            cat_obj["detail_it"] = "PRESENTI DIFFORMITÀ"
+            cat_obj["evidence"] = [catasto_ev]
+            abusi["conformita_catastale"] = cat_obj
+            if "section_5_abusi_conformita" in result:
+                result["section_5_abusi_conformita"] = abusi
+            if "abusi_edilizi_conformita" in result:
+                result["abusi_edilizi_conformita"] = abusi
 
     # ==========================================
     # FIX 3: Extract EUR values from text if missing
@@ -4303,13 +5536,18 @@ def create_fallback_analysis(file_name: str, case_id: str, run_id: str, pages: L
     
     # Find procedure ID with evidence
     procedure_id = "NON SPECIFICATO IN PERIZIA"
-    procedure_ev = _find_regex_in_pages(pages, r"Esecuzione\s+Immobiliare\s+\d+/\d+\s+del\s+R\.G\.E\.", re.I)
+    procedure_ev = _find_regex_in_pages(
+        pages,
+        r"Esecuzione\s+Immobiliare\s+\d+/\d+\s+del\s+R\.G\.E\.",
+        re.I,
+        field_key="procedura",
+    )
     if procedure_ev:
         procedure_id = procedure_ev["quote"].strip()
     
     # Find tribunal with evidence
     tribunale = "NON SPECIFICATO IN PERIZIA"
-    tribunale_ev = _find_regex_in_pages(pages, r"TRIBUNALE\s+DI\s+[A-Z\s]+", re.I)
+    tribunale_ev = _find_regex_in_pages(pages, r"TRIBUNALE\s+DI\s+[A-Z\s]+", re.I, field_key="tribunale")
     if tribunale_ev:
         tribunale = tribunale_ev["quote"].strip()
     
@@ -4941,7 +6179,12 @@ def _to_int(value: Any) -> Optional[int]:
         return None
 
 
-def _normalize_user_message_evidence(evidence: Any, max_items: int = 1) -> List[Dict[str, Any]]:
+def _normalize_user_message_evidence(
+    evidence: Any,
+    max_items: int = 1,
+    field_key: Optional[str] = None,
+    anchor_hint: Optional[str] = None,
+) -> List[Dict[str, Any]]:
     if not isinstance(evidence, list):
         return []
     out: List[Dict[str, Any]] = []
@@ -4952,7 +6195,15 @@ def _normalize_user_message_evidence(evidence: Any, max_items: int = 1) -> List[
         quote = str(item.get("quote") or "").strip()
         if page is None or not quote:
             continue
-        normalized_quote, search_hint = normalize_evidence_quote(quote, 0, len(quote), max_len=220)
+        inferred_key = field_key or str(item.get("field_key") or item.get("field") or item.get("family") or "").strip().lower() or None
+        normalized_quote, search_hint = normalize_evidence_quote(
+            quote,
+            0,
+            len(quote),
+            max_len=220,
+            field_key=inferred_key,
+            anchor_hint=anchor_hint or quote,
+        )
         if not normalized_quote:
             continue
         payload = {"page": page, "quote": normalized_quote}
@@ -4981,9 +6232,12 @@ def _normalize_token(value: Any) -> str:
 def _first_evidence_from_row(row: Any) -> List[Dict[str, Any]]:
     if not isinstance(row, dict):
         return []
+    row_field_key = str(row.get("field") or row.get("family") or row.get("code") or "").strip().lower() or None
     return _normalize_user_message_evidence(
         [{"page": row.get("page"), "quote": row.get("quote")}],
         max_items=1,
+        field_key=row_field_key,
+        anchor_hint=str(row.get("quote") or ""),
     )
 
 
@@ -5715,6 +6969,7 @@ async def analyze_perizia(request: Request, file: UploadFile = File(...)):
     _apply_decision_field_states(result, pages)
     _apply_market_ranges_to_money_box(result)
     _normalize_evidence_offsets(result, pages)
+    result["panoramica_contract"] = _build_panoramica_contract(result, pages)
 
     document_quality = extraction_payload.get("document_quality", {})
     if not isinstance(document_quality, dict):
@@ -7502,6 +8757,39 @@ def _load_offline_persisted_analysis(path: Path) -> Optional[Dict[str, Any]]:
         return None
     return None
 
+def _load_pages_for_analysis(analysis_id: str, pages_hint: int) -> List[Dict[str, Any]]:
+    """
+    Load extracted pages for deterministic read-path rebuilds.
+    Falls back to placeholder pages only when extraction artifacts are unavailable.
+    """
+    safe_pages_hint = max(1, int(pages_hint or 0))
+    extract_pages_path = Path("/srv/perizia/_qa/runs") / analysis_id / "extract" / "pages_raw.json"
+    if extract_pages_path.exists():
+        try:
+            with open(extract_pages_path, "r", encoding="utf-8") as f:
+                payload = json.load(f)
+            if isinstance(payload, list) and payload:
+                pages: List[Dict[str, Any]] = []
+                for idx, entry in enumerate(payload, start=1):
+                    if not isinstance(entry, dict):
+                        continue
+                    page_number = entry.get("page_number")
+                    try:
+                        page_number = int(page_number)
+                    except Exception:
+                        page_number = idx
+                    pages.append(
+                        {
+                            "page_number": page_number,
+                            "text": str(entry.get("text", "") or ""),
+                        }
+                    )
+                if pages:
+                    return pages
+        except Exception:
+            pass
+    return [{"page_number": i + 1, "text": ""} for i in range(safe_pages_hint)]
+
 async def _get_perizia_analysis_for_user_with_storage(
     analysis_id: str,
     user: User
@@ -7590,14 +8878,12 @@ async def _get_perizia_analysis_for_user(analysis_id: str, user: User) -> Dict[s
 
     result = analysis.get("result")
     if isinstance(result, dict):
+        pages_hint = int(analysis.get("pages_count", 0) or 0)
+        pages_for_proof = _load_pages_for_analysis(analysis_id, pages_hint)
         if not isinstance(result.get("field_states"), dict):
-            pages_hint = int(analysis.get("pages_count", 0) or 0)
-            pages_for_proof = [{"page_number": i + 1, "text": ""} for i in range(max(1, pages_hint))]
             _apply_headline_field_states(result, pages_for_proof)
             _apply_decision_field_states(result, pages_for_proof)
         else:
-            pages_hint = int(analysis.get("pages_count", 0) or 0)
-            pages_for_proof = [{"page_number": i + 1, "text": ""} for i in range(max(1, pages_hint))]
             decision_keys = {
                 "prezzo_base_asta",
                 "superficie",
@@ -7613,6 +8899,7 @@ async def _get_perizia_analysis_for_user(analysis_id: str, user: User) -> Dict[s
         _apply_headline_overrides(result, analysis.get("headline_overrides") or {})
         _apply_field_overrides(result, analysis.get("field_overrides") or {})
         _enforce_field_states_contract(result, pages_for_proof)
+        result["panoramica_contract"] = _build_panoramica_contract(result, pages_for_proof)
         states = result.get("field_states")
         if isinstance(states, dict):
             if "superficie" not in states and "superficie_catastale" in states:

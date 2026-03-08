@@ -317,12 +317,22 @@ def build_ref(pdf_path: str) -> Dict[str, Any]:
         _add_item(section_items, "APE", {"key": "ape", "value": ape_value, "type": "fact", "evidence": _line_evidence(ape_row)})
 
     spese_block = blocks.get("SPESE CONDOMINIALI", [])
-    spese_row = _first_line(spese_block, re.compile(r"non\s+present|assent|non\s+risult", re.I))
+    spese_row = _first_line(
+        spese_block,
+        re.compile(r"(arretrat|morosit[aà]).{0,70}?(non\s+present|assent|non\s+risult|nessun)", re.I),
+    )
     if not spese_row:
-        spese_row = _first_line(spese_block or all_lines, re.compile(r"spese\s+condominial", re.I))
+        spese_row = _first_line(
+            spese_block,
+            re.compile(r"(spese\s+condominiali\s+arretrat|arretrati\s+condominial|morosit[aà])", re.I),
+        )
     if spese_row:
         q = _normalize(spese_row["line"])
-        sval = "NON PRESENTI" if re.search(r"NON\s+PRESENT|ASSENT|NON\s+RISULT", q) else _clean_spaces(spese_row["line"])
+        # Only assert NON PRESENTI when line explicitly speaks about arrears/morosita.
+        if re.search(r"(arretrat|morosit[aà])", q, re.I) and re.search(r"(NON\s+PRESENT|ASSENT|NON\s+RISULT|NESSUN)", q):
+            sval = "NON PRESENTI"
+        else:
+            sval = _clean_spaces(spese_row["line"])
         _add_item(
             section_items,
             "SPESE CONDOMINIALI",
@@ -414,10 +424,10 @@ def build_ref(pdf_path: str) -> Dict[str, Any]:
         out["fields"]["ape_status"] = _nf([r"APE", r"certificato energetico"])
 
     spese_item = next((x for x in section_items.get("SPESE CONDOMINIALI", []) if x.get("key") == "spese_condominiali_arretrate"), None)
-    if spese_item:
-        out["fields"]["spese_condominiali_arretrate"] = {"value": spese_item.get("value"), "evidence": spese_item.get("evidence", [])}
+    if spese_item and str(spese_item.get("value") or "").strip().upper() == "NON PRESENTI":
+        out["fields"]["spese_condominiali_arretrate"] = {"value": "NON PRESENTI", "evidence": spese_item.get("evidence", [])}
     else:
-        out["fields"]["spese_condominiali_arretrate"] = _nf([r"spese\s+condominiali"])
+        out["fields"]["spese_condominiali_arretrate"] = _nf([r"spese\s+condominiali\s+arretrat", r"morosit[aà]"])
 
     if "sanatoria_bene3" in costs:
         out["fields"]["sanatoria_estimate_eur"] = {

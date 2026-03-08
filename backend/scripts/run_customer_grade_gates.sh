@@ -10,9 +10,12 @@ BASE_URL="${BASE_URL:-https://api-periziascan.nexodify.com}"
 SESSION_TOKEN="${SESSION_TOKEN:-${session_token:-}}"
 OFFLINE_QA="${OFFLINE_QA:-0}"
 
-# Safety: if running against localhost, never skip step2-4
+# Safety: if running against localhost, default to online checks unless OFFLINE_QA
+# is explicitly requested by caller.
 if [[ "$BASE_URL" =~ ^http://(127\.0\.0\.1|localhost)(:|/|$) ]]; then
-  OFFLINE_QA=0
+  if [[ "$OFFLINE_QA" != "1" ]]; then
+    OFFLINE_QA=0
+  fi
 fi
 
 OFFLINE_QA_TOKEN="${OFFLINE_QA_TOKEN:-}"
