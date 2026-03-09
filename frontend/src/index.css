@@ -207,3 +207,461 @@
 .premium-badge {
     @apply bg-[#D4AF37]/10 text-[#D4AF37] border border-[#D4AF37]/20 px-3 py-1 rounded-full text-xs font-semibold;
 }
+
+.perizia-print-html,
+.perizia-print-body {
+    background: #efe8de;
+}
+
+.perizia-print-body {
+    color: #1f1a15;
+}
+
+.perizia-print-view {
+    min-height: 100vh;
+    background: linear-gradient(180deg, #f4efe8 0%, #ece4d8 100%);
+    color: #1f1a15;
+}
+
+.print-screen-toolbar {
+    max-width: 980px;
+    margin: 0 auto;
+    padding: 1.5rem 1.25rem 0;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 1rem;
+}
+
+.print-back-link,
+.print-action-button {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+    border-radius: 999px;
+    border: 1px solid rgba(64, 51, 34, 0.18);
+    padding: 0.7rem 1rem;
+    background: rgba(255, 255, 255, 0.72);
+    color: #2d251b;
+    font-size: 0.9rem;
+    text-decoration: none;
+}
+
+.print-action-button {
+    cursor: pointer;
+}
+
+.print-report-shell {
+    max-width: 980px;
+    margin: 0 auto;
+    padding: 2rem 1.25rem 4.5rem;
+}
+
+.print-report-paper {
+    background: #fffdfa;
+    border: 1px solid rgba(86, 67, 42, 0.12);
+    border-radius: 1.1rem;
+    box-shadow: 0 12px 28px rgba(71, 53, 31, 0.06);
+    padding: 3.2rem 3rem 2.8rem;
+}
+
+.print-cover {
+    padding-bottom: 2.3rem;
+    border-bottom: 1px solid rgba(106, 85, 51, 0.14);
+}
+
+.print-cover-brand {
+    display: inline-block;
+    font-family: 'Manrope', sans-serif;
+    font-size: 0.74rem;
+    letter-spacing: 0.05em;
+    text-transform: none;
+    color: #7b6a58;
+    margin-bottom: 0.9rem;
+    font-weight: 600;
+}
+
+.print-cover-grid {
+    display: grid;
+    grid-template-columns: 1.75fr 0.95fr;
+    gap: 1.8rem;
+    align-items: start;
+}
+
+.print-kicker,
+.print-section-index,
+.print-card-label {
+    text-transform: uppercase;
+    letter-spacing: 0.12em;
+    font-weight: 700;
+}
+
+.print-kicker {
+    color: #8b7964;
+    font-size: 0.68rem;
+    margin-bottom: 0.55rem;
+    letter-spacing: 0.08em;
+    text-transform: none;
+}
+
+.print-title {
+    font-size: 2.15rem;
+    line-height: 1.08;
+    color: #1f1a15;
+    margin-bottom: 0.9rem;
+    max-width: 12ch;
+}
+
+.print-summary {
+    font-size: 0.95rem;
+    line-height: 1.72;
+    color: #514537;
+    max-width: 34rem;
+}
+
+.print-cover-card,
+.print-info-card,
+.print-metric-card {
+    background: #fffdf9;
+    border: 1px solid rgba(106, 85, 51, 0.14);
+    border-radius: 0.95rem;
+    padding: 0.95rem 1.05rem;
+}
+
+.print-cover-row {
+    display: flex;
+    justify-content: space-between;
+    gap: 1rem;
+    padding: 0.42rem 0;
+    border-bottom: 1px solid rgba(106, 85, 51, 0.10);
+    font-size: 0.85rem;
+}
+
+.print-cover-row:last-child {
+    border-bottom: none;
+}
+
+.print-cover-row span {
+    color: #7c6a55;
+}
+
+.cover-meta {
+    margin-top: 1.4rem;
+}
+
+.print-section {
+    padding-top: 2.55rem;
+}
+
+.print-section-header {
+    display: grid;
+    grid-template-columns: 52px 1fr;
+    gap: 1.15rem;
+    align-items: start;
+    margin-bottom: 1.35rem;
+}
+
+.print-section-index {
+    color: #9d8664;
+    font-size: 0.72rem;
+    padding-top: 0.5rem;
+}
+
+.print-section-title {
+    font-size: 1.56rem;
+    color: #201a14;
+    margin-bottom: 0.28rem;
+}
+
+.print-section-description {
+    color: #706251;
+    font-size: 0.9rem;
+    line-height: 1.62;
+    max-width: 42rem;
+}
+
+.print-card-grid {
+    display: grid;
+    gap: 0.95rem;
+}
+
+.print-card-grid.two {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.print-card-grid.metrics {
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+    margin-top: 1rem;
+}
+
+.print-card-title {
+    font-weight: 700;
+    font-size: 0.98rem;
+    line-height: 1.4;
+    color: #211a13;
+}
+
+.print-card-label {
+    font-family: 'Manrope', sans-serif;
+    color: #8c775d;
+    font-size: 0.68rem;
+    margin-bottom: 0.5rem;
+}
+
+.print-card-value,
+.print-metric-value {
+    color: #241d17;
+    font-size: 0.98rem;
+    line-height: 1.52;
+}
+
+.print-metric-value {
+    font-size: 1.04rem;
+    font-weight: 700;
+}
+
+.print-card-subvalue {
+    color: #6e5d4a;
+    font-size: 0.84rem;
+    margin-top: 0.34rem;
+    line-height: 1.58;
+}
+
+.print-info-card.accent {
+    background: #fcf8f1;
+}
+
+.print-info-card.compact {
+    min-height: 0;
+}
+
+.print-subgrid {
+    margin-top: 1.45rem;
+}
+
+.print-subtitle {
+    font-size: 1rem;
+    color: #241d17;
+    margin-bottom: 0.75rem;
+}
+
+.print-detail-block .print-subtitle {
+    break-after: avoid-page;
+    page-break-after: avoid;
+}
+
+.print-list,
+.print-detail-stack {
+    display: grid;
+    gap: 0.8rem;
+}
+
+.print-list-row,
+.print-flag-row {
+    display: grid;
+    grid-template-columns: 1fr auto;
+    gap: 1rem;
+    align-items: start;
+    background: #fffdf9;
+    border: 1px solid rgba(106, 85, 51, 0.14);
+    border-radius: 0.95rem;
+    padding: 0.92rem 1rem;
+}
+
+.print-flag-row {
+    grid-template-columns: 1fr;
+}
+
+.print-status-row,
+.print-flag-meta {
+    display: flex;
+    align-items: start;
+    justify-content: space-between;
+    gap: 0.8rem;
+}
+
+.print-status-badge {
+    display: inline-flex;
+    align-items: center;
+    border-radius: 999px;
+    background: #f6f0e6;
+    color: #7c6240;
+    border: 1px solid rgba(148, 112, 57, 0.18);
+    padding: 0.28rem 0.58rem;
+    font-size: 0.68rem;
+    font-family: 'Manrope', sans-serif;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+}
+
+.print-detail-card {
+    border: 1px solid rgba(106, 85, 51, 0.14);
+    border-radius: 1rem;
+    padding: 1.05rem 1.1rem;
+    background: #fffdf9;
+}
+
+.print-detail-intro {
+    break-inside: avoid;
+    page-break-inside: avoid;
+}
+
+.print-detail-intro .print-evidence {
+    margin-top: 0.4rem;
+}
+
+.print-evidence {
+    margin-top: 0.55rem;
+}
+
+.print-evidence-pages {
+    display: inline-flex;
+    border-radius: 999px;
+    background: #f7f1e8;
+    padding: 0.16rem 0.44rem;
+    color: #80684a;
+    font-size: 0.68rem;
+    font-family: 'JetBrains Mono', monospace;
+}
+
+.print-evidence-quote {
+    margin-top: 0.38rem;
+    padding-left: 0.55rem;
+    border-left: 1px solid rgba(141, 121, 92, 0.18);
+    color: #7b6957;
+    font-size: 0.74rem;
+    line-height: 1.55;
+    font-style: italic;
+}
+
+.print-empty-state {
+    color: #7b6a58;
+    font-size: 0.92rem;
+    padding: 0.75rem 0;
+}
+
+.print-footer {
+    margin-top: 2.4rem;
+    padding-top: 1rem;
+    border-top: 1px solid rgba(106, 85, 51, 0.14);
+    color: #6f604f;
+    font-size: 0.78rem;
+    line-height: 1.6;
+}
+
+.print-loading-shell {
+    min-height: 100vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: linear-gradient(180deg, #f2ede4 0%, #e7dece 100%);
+}
+
+.print-loading-card {
+    background: rgba(255, 255, 255, 0.84);
+    border: 1px solid rgba(86, 67, 42, 0.12);
+    border-radius: 1.25rem;
+    padding: 1.5rem;
+    display: flex;
+    align-items: center;
+    gap: 0.9rem;
+    color: #382d22;
+}
+
+@media (max-width: 900px) {
+    .print-cover-grid,
+    .print-card-grid.two,
+    .print-card-grid.metrics,
+    .print-subgrid .print-card-grid.two {
+        grid-template-columns: 1fr;
+    }
+
+    .print-report-paper {
+        padding: 1.4rem;
+        border-radius: 1.2rem;
+    }
+
+    .print-section-header {
+        grid-template-columns: 1fr;
+    }
+
+    .print-list-row {
+        grid-template-columns: 1fr;
+    }
+}
+
+@media print {
+    @page {
+        size: A4;
+        margin: 14mm;
+    }
+
+    html,
+    body,
+    .App,
+    .perizia-print-view {
+        background: #ffffff !important;
+    }
+
+    .noise-overlay,
+    .screen-only,
+    [data-sonner-toaster] {
+        display: none !important;
+    }
+
+    .print-report-shell {
+        max-width: none;
+        padding: 0;
+    }
+
+    .print-report-paper {
+        box-shadow: none;
+        border: none;
+        border-radius: 0;
+        padding: 0;
+        background: #ffffff;
+    }
+
+    .print-cover,
+    .print-section-header,
+    .print-subgrid {
+        break-inside: avoid-page;
+        page-break-inside: avoid;
+    }
+
+    .print-section,
+    .print-info-card,
+    .print-metric-card,
+    .print-list-row,
+    .print-flag-row {
+        break-inside: avoid-page;
+        page-break-inside: avoid;
+    }
+
+    .print-detail-card {
+        break-inside: auto;
+        page-break-inside: auto;
+    }
+
+    .print-detail-intro {
+        break-inside: avoid-page;
+        page-break-inside: avoid;
+    }
+
+    .print-detail-card .print-detail-block,
+    .print-detail-card .print-card-grid.two {
+        break-inside: auto;
+        page-break-inside: auto;
+    }
+
+    .print-detail-card .print-info-card {
+        break-inside: avoid-page;
+        page-break-inside: avoid;
+    }
+
+    .section-break {
+        break-before: page;
+        page-break-before: always;
+    }
+}

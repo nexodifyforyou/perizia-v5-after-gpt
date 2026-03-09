@@ -2402,15 +2402,26 @@ const AnalysisResult = () => {
               </div>
             </div>
             <div className="text-right space-y-2">
-              <Button
-                onClick={handleDownloadPDF}
-                disabled={downloading}
-                data-testid="download-pdf-btn"
-                className="bg-gold text-zinc-950 hover:bg-gold-dim"
-              >
-                <FileDown className="w-4 h-4 mr-2" />
-                {downloading ? 'Scaricando...' : 'Scarica Report'}
-              </Button>
+              <div className="flex items-center justify-end gap-2">
+                <Link
+                  to={`/analysis/${analysisId}/print`}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="inline-flex items-center gap-2 rounded-md border border-zinc-700 px-3 py-2 text-sm text-zinc-200 transition-colors hover:border-zinc-500 hover:bg-zinc-800"
+                >
+                  <FileText className="w-4 h-4" />
+                  Vista stampa
+                </Link>
+                <Button
+                  onClick={handleDownloadPDF}
+                  disabled={downloading}
+                  data-testid="download-pdf-btn"
+                  className="bg-gold text-zinc-950 hover:bg-gold-dim"
+                >
+                  <FileDown className="w-4 h-4 mr-2" />
+                  {downloading ? 'Scaricando...' : 'Scarica Report'}
+                </Button>
+              </div>
               <div className="flex justify-end">
                 <SemaforoBadge status={semaforoStatus} />
               </div>

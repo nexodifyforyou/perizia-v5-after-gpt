@@ -17,6 +17,7 @@ from datetime import datetime, timezone, timedelta
 import json
 import httpx
 import ipaddress
+import contextlib
 from fastapi.openapi.utils import get_openapi
 from PyPDF2 import PdfReader
 import pdfplumber
@@ -67,6 +68,8 @@ OFFLINE_QA_FIXTURE_PATH = os.environ.get(
     "OFFLINE_QA_FIXTURE_PATH",
     str(ROOT_DIR / "tests" / "fixtures" / "perizia_test_extraction.json")
 )
+FRONTEND_URL = os.environ.get("FRONTEND_URL", "").strip().rstrip("/")
+PRINT_RENDER_TIMEOUT_SECONDS = int(os.environ.get("PRINT_RENDER_TIMEOUT_SECONDS", "120"))
 
 
 class DocAIUnavailable(Exception):
@@ -7621,6 +7624,57 @@ async def analyze_perizia(request: Request, file: UploadFile = File(...)):
 # PDF REPORT DOWNLOAD
 # ===================
 
+async def _render_print_pdf_via_frontend(analysis_id: str, session_token: str, api_base_url: str) -> bytes:
+    frontend_dir = ROOT_DIR.parent / "frontend"
+    node_script = frontend_dir / "scripts" / "render_analysis_print_pdf.mjs"
+    frontend_url = os.environ.get("PERIZIA_PRINT_FRONTEND_URL", "").strip().rstrip("/") or FRONTEND_URL
+    if not frontend_url:
+        raise HTTPException(status_code=500, detail="FRONTEND_URL not configured for print PDF rendering")
+    if not node_script.exists():
+        raise HTTPException(status_code=500, detail="Print PDF renderer script not found")
+
+    out_path = Path("/tmp") / f"perizia_print_{analysis_id}_{uuid.uuid4().hex}.pdf"
+    env = os.environ.copy()
+    env.update(
+        {
+            "ANALYSIS_ID": analysis_id,
+            "FRONTEND_URL": frontend_url,
+            "API_BASE_URL": api_base_url.rstrip("/"),
+            "SESSION_TOKEN": session_token,
+            "OUT_PATH": str(out_path),
+        }
+    )
+
+    proc = await asyncio.create_subprocess_exec(
+        "node",
+        str(node_script),
+        cwd=str(frontend_dir),
+        env=env,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+    )
+    try:
+        stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=PRINT_RENDER_TIMEOUT_SECONDS)
+    except asyncio.TimeoutError:
+        with contextlib.suppress(ProcessLookupError):
+            proc.kill()
+        raise HTTPException(status_code=504, detail="Frontend print PDF rendering timed out")
+
+    if proc.returncode != 0:
+        detail = (stderr or stdout or b"").decode("utf-8", errors="ignore")[:1500]
+        raise HTTPException(status_code=502, detail=f"Frontend print PDF rendering failed: {detail}")
+
+    if not out_path.exists():
+        raise HTTPException(status_code=502, detail="Frontend print PDF renderer did not produce a file")
+
+    try:
+        return out_path.read_bytes()
+    finally:
+        with contextlib.suppress(Exception):
+            out_path.unlink()
+        with contextlib.suppress(Exception):
+            Path(f"{out_path}.meta.json").unlink()
+
 @api_router.get(
     "/analysis/perizia/{analysis_id}/pdf",
     response_class=Response,
@@ -7655,6 +7709,41 @@ async def download_perizia_pdf(analysis_id: str, request: Request):
         media_type="application/pdf",
         headers={
             "Content-Disposition": f'attachment; filename="nexodify_report_{analysis_id}.pdf"',
+            "Cache-Control": "no-store"
+        }
+    )
+
+
+@api_router.get(
+    "/analysis/perizia/{analysis_id}/pdf-html",
+    response_class=Response,
+    responses={
+        200: {
+            "description": "HTML-to-PDF report rendered from frontend print route",
+            "content": {"application/pdf": {}},
+        }
+    },
+)
+async def download_perizia_print_pdf(analysis_id: str, request: Request):
+    user = await require_auth(request)
+    analysis = await db.perizia_analyses.find_one(
+        {"analysis_id": analysis_id, "user_id": user.user_id},
+        {"_id": 0}
+    )
+    if not analysis:
+        raise HTTPException(status_code=404, detail="Analysis not found")
+
+    session_token = request.cookies.get("session_token")
+    if not session_token:
+        raise HTTPException(status_code=400, detail="Session token missing for print PDF rendering")
+
+    api_base_url = f"{request.url.scheme}://{request.headers.get('host')}"
+    pdf_bytes = await _render_print_pdf_via_frontend(analysis_id, session_token, api_base_url)
+    return Response(
+        content=pdf_bytes,
+        media_type="application/pdf",
+        headers={
+            "Content-Disposition": f'attachment; filename="nexodify_report_html_{analysis_id}.pdf"',
             "Cache-Control": "no-store"
         }
     )

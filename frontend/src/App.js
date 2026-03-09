@@ -7,6 +7,7 @@ import Landing from "./pages/Landing";
 import Dashboard from "./pages/Dashboard";
 import NewAnalysis from "./pages/NewAnalysis";
 import AnalysisResult from "./pages/AnalysisResult";
+import AnalysisPrintView from "./pages/AnalysisPrintView";
 import ImageForensics from "./pages/ImageForensics";
 import Assistant from "./pages/Assistant";
 import History from "./pages/History";
@@ -113,6 +114,9 @@ function AppRouter() {
       } />
       <Route path="/analysis/:analysisId" element={
         <ProtectedRoute><AnalysisResult /></ProtectedRoute>
+      } />
+      <Route path="/analysis/:analysisId/print" element={
+        <ProtectedRoute><AnalysisPrintView /></ProtectedRoute>
       } />
       <Route path="/forensics" element={
         <ProtectedRoute><ImageForensics /></ProtectedRoute>
