@@ -1178,6 +1178,9 @@ const AnalysisResult = () => {
     const statoOccupativoValue = safeRender(pickFirstNonEmpty(sourceBene?.occupancy_status, sourceBene?.stato_occupativo, sourceBene?.occupazione_status, sourceBene?.occupazione, occupativo?.status_it, occupativo?.status), '').trim();
     const urbanisticaValue = safeRender(pickFirstNonEmpty(sourceBene?.urbanistica, sourceBene?.regolarita_urbanistica, sourceBene?.conformita_urbanistica, abusi?.conformita_urbanistica?.status), '').trim();
     const agibilitaValue = safeRender(pickFirstNonEmpty(sourceBene?.agibilita, sourceBene?.abitabilita, abusi?.agibilita?.status), '').trim();
+    const statoConservativoValue = getDettagliStatusValue(
+      pickFirstNonEmpty(sourceBene?.stato_conservativo, contractBene?.stato_conservativo)
+    );
     const declarationSources = [
       sourceBene?.dichiarazioni_impianti,
       sourceBene?.dichiarazioni,
@@ -1225,6 +1228,56 @@ const AnalysisResult = () => {
       contractEvidenceObj?.dichiarazioni?.dichiarazione_impianto_idrico,
       extractDeclarationEvidenceFromSources(declarationEvidenceSources, ['impiantoidrico', 'dichiarazioneimpiantoidrico', 'idrico', 'conformitaidrico'])
     );
+    const statoConservativoEvidence = mergeEvidence(
+      sourceBene?.stato_conservativo?.evidence,
+      contractBene?.stato_conservativo?.evidence,
+      sourceEvidenceObj?.stato_conservativo,
+      contractEvidenceObj?.stato_conservativo
+    );
+    const impiantiValueObj = pickFirstNonEmpty(sourceBene?.impianti, contractBene?.impianti);
+    const impiantiEvidenceObj = mergeEvidence(
+      sourceEvidenceObj?.impianti?.elettrico,
+      sourceEvidenceObj?.impianti?.idrico,
+      sourceEvidenceObj?.impianti?.termico,
+      contractEvidenceObj?.impianti?.elettrico,
+      contractEvidenceObj?.impianti?.idrico,
+      contractEvidenceObj?.impianti?.termico
+    );
+    const impiantiRows = [
+      {
+        key: 'impianto_elettrico',
+        label: 'Elettrico',
+        value: getDettagliStatusValue(impiantiValueObj?.elettrico),
+        evidence: mergeEvidence(
+          sourceBene?.impianti?.elettrico?.evidence,
+          contractBene?.impianti?.elettrico?.evidence,
+          sourceEvidenceObj?.impianti?.elettrico,
+          contractEvidenceObj?.impianti?.elettrico
+        )
+      },
+      {
+        key: 'impianto_idrico',
+        label: 'Idrico',
+        value: getDettagliStatusValue(impiantiValueObj?.idrico),
+        evidence: mergeEvidence(
+          sourceBene?.impianti?.idrico?.evidence,
+          contractBene?.impianti?.idrico?.evidence,
+          sourceEvidenceObj?.impianti?.idrico,
+          contractEvidenceObj?.impianti?.idrico
+        )
+      },
+      {
+        key: 'impianto_termico',
+        label: 'Termico',
+        value: getDettagliStatusValue(impiantiValueObj?.termico),
+        evidence: mergeEvidence(
+          sourceBene?.impianti?.termico?.evidence,
+          contractBene?.impianti?.termico?.evidence,
+          sourceEvidenceObj?.impianti?.termico,
+          contractEvidenceObj?.impianti?.termico
+        )
+      }
+    ];
 
     return {
       key: `dettagli-bene-${beneNumber || idx + 1}`,
@@ -1275,7 +1328,15 @@ const AnalysisResult = () => {
           value: agibilitaValue,
           evidence: mergeEvidence(sourceEvidenceObj?.agibilita, sourceEvidenceObj?.note, getFieldEvidence('agibilita', abusi?.agibilita))
         },
+        {
+          key: 'stato_conservativo',
+          label: 'Stato conservativo',
+          value: statoConservativoValue,
+          evidence: statoConservativoEvidence
+        },
       ],
+      impiantiRows,
+      impiantiTopEvidence: impiantiEvidenceObj,
       declarationRows: [
         {
           key: 'ape',
@@ -3049,6 +3110,30 @@ const AnalysisResult = () => {
                           <p className="text-[11px] uppercase tracking-wide text-zinc-500 mb-3">Certificazioni / Dichiarazioni</p>
                           <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                             {card.declarationRows.map((row) => (
+                              row.value ? (
+                                <div key={`${card.key}_${row.key}`} className="p-3 rounded border border-zinc-800 bg-zinc-900/70">
+                                  <div className="flex items-center justify-between gap-2">
+                                    <p className="text-[11px] uppercase tracking-wide text-zinc-500">{row.label}</p>
+                                    {row.evidence.length > 0 && <EvidenceBadge evidence={row.evidence} />}
+                                  </div>
+                                  <p className="text-sm text-zinc-200 mt-1">{row.value}</p>
+                                </div>
+                              ) : null
+                            ))}
+                          </div>
+                        </div>
+                      )}
+
+                      {Array.isArray(card.impiantiRows) && card.impiantiRows.some((row) => row?.value) && (
+                        <div className="mt-4 pt-3 border-t border-zinc-800">
+                          <div className="flex items-center justify-between gap-2 mb-3">
+                            <p className="text-[11px] uppercase tracking-wide text-zinc-500">Impianti</p>
+                            {Array.isArray(card.impiantiTopEvidence) && card.impiantiTopEvidence.length > 0 && (
+                              <EvidenceBadge evidence={card.impiantiTopEvidence} />
+                            )}
+                          </div>
+                          <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                            {card.impiantiRows.map((row) => (
                               row.value ? (
                                 <div key={`${card.key}_${row.key}`} className="p-3 rounded border border-zinc-800 bg-zinc-900/70">
                                   <div className="flex items-center justify-between gap-2">

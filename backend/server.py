@@ -2863,6 +2863,17 @@ def _extract_beni_from_pages(pages_in: List[Dict[str, Any]]) -> List[Dict[str, A
                     "dichiarazione_impianto_termico": None,
                     "dichiarazione_impianto_idrico": None,
                 },
+                "stato_conservativo": {
+                    "status_it": None,
+                    "status_en": None,
+                    "notes_it": None,
+                    "evidence": [],
+                },
+                "impianti": {
+                    "elettrico": {"status_it": None, "status_en": None, "notes_it": None, "evidence": []},
+                    "idrico": {"status_it": None, "status_en": None, "notes_it": None, "evidence": []},
+                    "termico": {"status_it": None, "status_en": None, "notes_it": None, "evidence": []},
+                },
                 "evidence": {
                     "tipologia": [],
                     "location_piano": [],
@@ -2880,6 +2891,12 @@ def _extract_beni_from_pages(pages_in: List[Dict[str, Any]]) -> List[Dict[str, A
                         "dichiarazione_impianto_elettrico": [],
                         "dichiarazione_impianto_termico": [],
                         "dichiarazione_impianto_idrico": [],
+                    },
+                    "stato_conservativo": [],
+                    "impianti": {
+                        "elettrico": [],
+                        "idrico": [],
+                        "termico": [],
                     },
                 },
             }
@@ -2914,6 +2931,116 @@ def _extract_beni_from_pages(pages_in: List[Dict[str, Any]]) -> List[Dict[str, A
         if not existing:
             return candidate
         return candidate if rank.get(candidate, 1) >= rank.get(existing, 1) else existing
+
+    def _impianto_status_rank(status_it: Optional[str]) -> int:
+        rank = {
+            "Non funzionante": 5,
+            "Presente solo in centrale termica": 4,
+            "Presente": 3,
+            "Assente": 2,
+            None: 0,
+            "": 0,
+        }
+        return rank.get(status_it, 1)
+
+    def _status_en_from_it(status_it: Optional[str]) -> Optional[str]:
+        mapping = {
+            "Presente": "Present",
+            "Assente": "Missing",
+            "Non funzionante": "Not working",
+            "Presente solo in centrale termica": "Present only in boiler room",
+        }
+        if not status_it:
+            return None
+        return mapping.get(status_it, _normalize_headline_text(str(status_it)))
+
+    def _set_impianto_state(
+        bene: Dict[str, Any],
+        system_key: str,
+        status_it: Optional[str],
+        note_it: Optional[str],
+        ev: Optional[Dict[str, Any]],
+    ) -> None:
+        if system_key not in {"elettrico", "idrico", "termico"}:
+            return
+        imp = bene.get("impianti")
+        if not isinstance(imp, dict):
+            imp = {}
+        state = imp.get(system_key)
+        if not isinstance(state, dict):
+            state = {"status_it": None, "status_en": None, "notes_it": None, "evidence": []}
+
+        existing_status = state.get("status_it")
+        if _impianto_status_rank(status_it) >= _impianto_status_rank(existing_status):
+            state["status_it"] = status_it
+            state["status_en"] = _status_en_from_it(status_it)
+
+        if note_it:
+            existing_notes = str(state.get("notes_it") or "").strip()
+            if existing_notes:
+                if note_it not in existing_notes:
+                    state["notes_it"] = f"{existing_notes}; {note_it}"
+            else:
+                state["notes_it"] = note_it
+
+        ev_list = state.get("evidence")
+        if not isinstance(ev_list, list):
+            ev_list = []
+        if isinstance(ev, dict) and ev:
+            ev_key = f"{ev.get('page')}|{str(ev.get('quote') or '')[:140]}"
+            seen = {f"{e.get('page')}|{str(e.get('quote') or '')[:140]}" for e in ev_list if isinstance(e, dict)}
+            if ev_key not in seen:
+                ev_list.append(ev)
+        state["evidence"] = ev_list[:4]
+        imp[system_key] = state
+        bene["impianti"] = imp
+
+        ev_container = bene.get("evidence")
+        if not isinstance(ev_container, dict):
+            ev_container = {}
+        imp_ev = ev_container.get("impianti")
+        if not isinstance(imp_ev, dict):
+            imp_ev = {"elettrico": [], "idrico": [], "termico": []}
+        if isinstance(ev, dict) and ev:
+            bucket = imp_ev.get(system_key)
+            if not isinstance(bucket, list):
+                bucket = []
+            ev_key = f"{ev.get('page')}|{str(ev.get('quote') or '')[:140]}"
+            seen = {f"{e.get('page')}|{str(e.get('quote') or '')[:140]}" for e in bucket if isinstance(e, dict)}
+            if ev_key not in seen:
+                bucket.append(ev)
+            imp_ev[system_key] = bucket[:4]
+        ev_container["impianti"] = imp_ev
+        bene["evidence"] = ev_container
+
+    def _append_stato_conservativo_phrase(
+        bene: Dict[str, Any],
+        phrase: str,
+        ev: Optional[Dict[str, Any]],
+    ) -> None:
+        phrase_norm = _normalize_headline_text(str(phrase or ""))
+        if not phrase_norm:
+            return
+        tmp = bene.get("_stato_conservativo_phrases")
+        if not isinstance(tmp, list):
+            tmp = []
+        if phrase_norm not in tmp:
+            tmp.append(phrase_norm)
+        bene["_stato_conservativo_phrases"] = tmp
+
+        ev_container = bene.get("evidence")
+        if not isinstance(ev_container, dict):
+            ev_container = {}
+        ev_list = ev_container.get("stato_conservativo")
+        if not isinstance(ev_list, list):
+            ev_list = []
+        if isinstance(ev, dict) and ev:
+            ev_key = f"{ev.get('page')}|{str(ev.get('quote') or '')[:140]}"
+            seen = {f"{e.get('page')}|{str(e.get('quote') or '')[:140]}" for e in ev_list if isinstance(e, dict)}
+            if ev_key not in seen:
+                ev_list.append(ev)
+        ev_container["stato_conservativo"] = ev_list[:5]
+        bene["evidence"] = ev_container
 
     def _assign_declaration_to_bene(
         mapped_num: int,
@@ -3251,7 +3378,151 @@ def _extract_beni_from_pages(pages_in: List[Dict[str, Any]]) -> List[Dict[str, A
                 ev = _build_evidence(text, page_num, line_start, line_end)
                 _assign_declaration_to_bene(mapped_num, status, ev, system_key=system_key, is_ape=False)
 
+        # Impianti per-bene (deterministic existence/condition; separate from dichiarazioni).
+        raw_lines = text.splitlines(keepends=True)
+        offset = 0
+        for raw_line in raw_lines:
+            line = str(raw_line or "")
+            line_start = offset
+            line_end = offset + len(line)
+            offset = line_end
+            compact = _normalize_headline_text(line)
+            if not compact:
+                continue
+            low = compact.lower()
+            low_no_space = re.sub(r"\s+", "", low)
+
+            mapped_num: Optional[int] = None
+            for head_pos, head_num in heading_positions:
+                if head_pos <= line_start:
+                    mapped_num = head_num
+                else:
+                    break
+            if mapped_num is None:
+                mapped_num = page_start_bene_num if page_start_bene_num is not None else last_num_by_page.get(page_num)
+            if mapped_num is None:
+                continue
+            bene = ensure_bene(mapped_num)
+            ev = _build_evidence(text, page_num, line_start, line_end)
+
+            # Stato conservativo per-bene (concise phrases).
+            if "buono stato di conservazione" in low:
+                if "piano terra" in low:
+                    _append_stato_conservativo_phrase(bene, "Piano terra buono", ev)
+                elif "piano primo" in low:
+                    _append_stato_conservativo_phrase(bene, "Piano primo buono", ev)
+                else:
+                    _append_stato_conservativo_phrase(bene, "Buono stato", ev)
+            elif "si presenta al grezzo" in low or "a vista grezzo" in low:
+                if "piano primo" in low:
+                    _append_stato_conservativo_phrase(bene, "Piano primo al grezzo", ev)
+                else:
+                    _append_stato_conservativo_phrase(bene, "Al grezzo", ev)
+            elif "trascurato stato di manutenzione" in low:
+                _append_stato_conservativo_phrase(bene, "Area laterale in trascurato stato di manutenzione", ev)
+            elif "tracce di umidità" in low:
+                _append_stato_conservativo_phrase(bene, "Tracce di umidità", ev)
+
+            # Impianti status extraction.
+            # Note: declaration-of-conformity phrases are handled in dichiarazioni_impianti,
+            # and must not be interpreted as impianto presence/absence.
+            segments = [s.strip() for s in re.split(r";\s*", compact) if str(s).strip()]
+            if not segments:
+                segments = [compact]
+            for segment in segments:
+                seg_low = segment.lower()
+                seg_no_space = re.sub(r"\s+", "", seg_low)
+                if "dichiarazion" in seg_no_space and "conformit" in seg_no_space:
+                    continue
+
+                system_key: Optional[str] = None
+                if "impiantoelettric" in seg_no_space or re.search(r"impiant\w*\s+elettric\w*", seg_low, re.I):
+                    system_key = "elettrico"
+                elif "impiantoidric" in seg_no_space or re.search(r"impiant\w*\s+idric\w*", seg_low, re.I):
+                    system_key = "idrico"
+                elif (
+                    "impiantodiriscaldamento" in seg_no_space
+                    or "impiantotermic" in seg_no_space
+                    or re.search(r"\briscaldament\w*\b", seg_low, re.I)
+                    or re.search(r"impiant\w*\s+di\s+riscaldament\w*", seg_low, re.I)
+                ):
+                    system_key = "termico"
+                if not system_key:
+                    continue
+
+                status_it: Optional[str] = None
+                note_it: Optional[str] = None
+                if "non funzion" in seg_low:
+                    status_it = "Non funzionante"
+                elif "presentesolonellacentraletermica" in seg_no_space:
+                    status_it = "Presente solo in centrale termica"
+                elif "non presente" in seg_low or "non esiste" in seg_low or "assente" in seg_low:
+                    status_it = "Assente"
+                elif (
+                    "presente" in seg_low
+                    or "alimentat" in seg_low
+                    or "allacciat" in seg_low
+                    or "dotat" in seg_low
+                    or "con caldaia" in seg_low
+                ):
+                    status_it = "Presente"
+                if status_it:
+                    _set_impianto_state(bene, system_key, status_it, note_it, ev)
+
+            # Shared meters notes (Bene 4, idrico/termico).
+            if "contatore dell’acqua" in low or "contatore dell'acqua" in low:
+                if "in comune" in low:
+                    _set_impianto_state(bene, "idrico", bene.get("impianti", {}).get("idrico", {}).get("status_it") or "Presente", "Contatore acqua in comune", ev)
+            if "contatore del gas" in low and "in comune" in low:
+                _set_impianto_state(bene, "termico", bene.get("impianti", {}).get("termico", {}).get("status_it") or "Presente", "Contatore gas in comune", ev)
+
     beni = [beni_by_num[k] for k in sorted(beni_by_num.keys())]
+    for bene in beni:
+        phrases = bene.pop("_stato_conservativo_phrases", [])
+        if not isinstance(phrases, list):
+            phrases = []
+        phrases_low = [str(p).lower() for p in phrases]
+        status_it: Optional[str] = None
+        notes_it: Optional[str] = None
+
+        has_buono = any("buono" in p for p in phrases_low)
+        has_grezzo = any("grezzo" in p for p in phrases_low)
+        has_trascurato = any("trascurato stato di manutenzione" in p for p in phrases_low)
+
+        if has_buono and has_grezzo:
+            status_it = "Piano terra buono; piano primo al grezzo"
+        elif has_buono and has_trascurato:
+            status_it = "In generale buono; area laterale in trascurato stato di manutenzione"
+        elif has_buono:
+            status_it = "Buono stato"
+        elif has_grezzo:
+            status_it = "Al grezzo"
+
+        if any("tracce di umidità" in p for p in phrases_low):
+            notes_it = "Tracce di umidità rilevate"
+
+        stato_ev = bene.get("evidence", {}).get("stato_conservativo", []) if isinstance(bene.get("evidence"), dict) else []
+        bene["stato_conservativo"] = {
+            "status_it": status_it,
+            "status_en": _status_en_from_it(status_it),
+            "notes_it": notes_it,
+            "evidence": stato_ev if isinstance(stato_ev, list) else [],
+        }
+
+        impianti = bene.get("impianti")
+        if not isinstance(impianti, dict):
+            impianti = {}
+        for key in ("elettrico", "idrico", "termico"):
+            s = impianti.get(key)
+            if not isinstance(s, dict):
+                s = {"status_it": None, "status_en": None, "notes_it": None, "evidence": []}
+            status_it = s.get("status_it")
+            s["status_en"] = _status_en_from_it(status_it)
+            if not isinstance(s.get("evidence"), list):
+                s["evidence"] = []
+            impianti[key] = s
+        bene["impianti"] = impianti
+
     return beni
 
 def _scan_legal_killers(pages_in: List[Dict]) -> List[Dict[str, Any]]:
