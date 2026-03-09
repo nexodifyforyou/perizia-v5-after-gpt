@@ -2413,13 +2413,13 @@ const AnalysisResult = () => {
                   Vista stampa
                 </Link>
                 <Button
-                  onClick={handleDownloadPDF}
-                  disabled={downloading}
+                  disabled
                   data-testid="download-pdf-btn"
-                  className="bg-gold text-zinc-950 hover:bg-gold-dim"
+                  title="Temporaneamente non disponibile"
+                  className="bg-gold text-zinc-950 hover:bg-gold-dim disabled:cursor-not-allowed disabled:opacity-60"
                 >
                   <FileDown className="w-4 h-4 mr-2" />
-                  {downloading ? 'Scaricando...' : 'Scarica Report'}
+                  Scarica Report
                 </Button>
               </div>
               <div className="flex justify-end">
