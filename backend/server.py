@@ -2852,6 +2852,17 @@ def _extract_beni_from_pages(pages_in: List[Dict[str, Any]]) -> List[Dict[str, A
                 "valore_stima_eur": None,
                 "catasto": {},
                 "note": [],
+                "ape": None,
+                "dichiarazioni_impianti": {
+                    "elettrico": None,
+                    "termico": None,
+                    "idrico": None,
+                },
+                "dichiarazioni": {
+                    "dichiarazione_impianto_elettrico": None,
+                    "dichiarazione_impianto_termico": None,
+                    "dichiarazione_impianto_idrico": None,
+                },
                 "evidence": {
                     "tipologia": [],
                     "location_piano": [],
@@ -2859,14 +2870,111 @@ def _extract_beni_from_pages(pages_in: List[Dict[str, Any]]) -> List[Dict[str, A
                     "valore_stima": [],
                     "catasto": [],
                     "note": [],
+                    "ape": [],
+                    "dichiarazioni_impianti": {
+                        "elettrico": [],
+                        "termico": [],
+                        "idrico": [],
+                    },
+                    "dichiarazioni": {
+                        "dichiarazione_impianto_elettrico": [],
+                        "dichiarazione_impianto_termico": [],
+                        "dichiarazione_impianto_idrico": [],
+                    },
                 },
             }
             beni_by_num[num] = bene
         return bene
 
+    def _status_from_declaration_line(line_raw: str) -> Optional[str]:
+        line = str(line_raw or "").lower()
+        if not line.strip():
+            return None
+        if "non esiste" in line:
+            return "Non esiste"
+        if "non presente" in line:
+            return "Non presente"
+        if "assente" in line:
+            return "Assente"
+        if "presente" in line or "esiste" in line:
+            return "Presente"
+        return None
+
+    def _pick_better_status(existing: Optional[str], candidate: Optional[str]) -> Optional[str]:
+        rank = {
+            "Non esiste": 4,
+            "Non presente": 3,
+            "Assente": 3,
+            "Presente": 2,
+            None: 0,
+            "": 0,
+        }
+        if not candidate:
+            return existing
+        if not existing:
+            return candidate
+        return candidate if rank.get(candidate, 1) >= rank.get(existing, 1) else existing
+
+    def _assign_declaration_to_bene(
+        mapped_num: int,
+        status: str,
+        ev: Dict[str, Any],
+        system_key: Optional[str] = None,
+        is_ape: bool = False,
+    ) -> None:
+        bene = ensure_bene(mapped_num)
+        if is_ape:
+            bene["ape"] = _pick_better_status(bene.get("ape"), status)
+            if isinstance(ev, dict) and ev:
+                existing = bene["evidence"].get("ape", [])
+                if not isinstance(existing, list):
+                    existing = []
+                if not existing:
+                    bene["evidence"]["ape"] = [ev]
+            return
+
+        if not system_key:
+            return
+        imp_map = bene.get("dichiarazioni_impianti")
+        if not isinstance(imp_map, dict):
+            imp_map = {"elettrico": None, "termico": None, "idrico": None}
+        imp_map[system_key] = _pick_better_status(imp_map.get(system_key), status)
+        bene["dichiarazioni_impianti"] = imp_map
+
+        alias_map = bene.get("dichiarazioni")
+        if not isinstance(alias_map, dict):
+            alias_map = {}
+        alias_key = f"dichiarazione_impianto_{system_key}"
+        alias_map[alias_key] = _pick_better_status(alias_map.get(alias_key), status)
+        bene["dichiarazioni"] = alias_map
+
+        ev_container = bene.get("evidence")
+        if not isinstance(ev_container, dict):
+            ev_container = {}
+        imp_ev = ev_container.get("dichiarazioni_impianti")
+        if not isinstance(imp_ev, dict):
+            imp_ev = {"elettrico": [], "termico": [], "idrico": []}
+        if isinstance(ev, dict) and ev and not imp_ev.get(system_key):
+            imp_ev[system_key] = [ev]
+        ev_container["dichiarazioni_impianti"] = imp_ev
+
+        alias_ev = ev_container.get("dichiarazioni")
+        if not isinstance(alias_ev, dict):
+            alias_ev = {
+                "dichiarazione_impianto_elettrico": [],
+                "dichiarazione_impianto_termico": [],
+                "dichiarazione_impianto_idrico": [],
+            }
+        if isinstance(ev, dict) and ev and not alias_ev.get(alias_key):
+            alias_ev[alias_key] = [ev]
+        ev_container["dichiarazioni"] = alias_ev
+        bene["evidence"] = ev_container
+
     for p in pages_in:
         text = str(p.get("text", "") or "")
         page_num = int(p.get("page_number", 0) or 0)
+        page_start_bene_num = current_num
+        heading_positions: List[Tuple[int, int]] = []
 
         # Bene headings
         for m in re.finditer(r"\bBene\s*(?:N[°o]\s*)?(\d+)\s*-\s*([^\n]+)", text, re.I):
@@ -2876,6 +2984,7 @@ def _extract_beni_from_pages(pages_in: List[Dict[str, Any]]) -> List[Dict[str, A
                 continue
             current_num = num
             last_num_by_page[page_num] = num
+            heading_positions.append((m.start(), num))
             bene = ensure_bene(num)
             heading = m.group(2).strip()
             tip_m = re.search(r"^([A-Za-zÀ-Ù'\s]+?)\s+ubicat[oa]", heading, re.I)
@@ -3050,6 +3159,97 @@ def _extract_beni_from_pages(pages_in: List[Dict[str, Any]]) -> List[Dict[str, A
             if not bene["evidence"].get("valore_stima"):
                 line_start, line_end = _line_bounds(text, vm.start(), vm.end())
                 bene["evidence"]["valore_stima"] = [_build_evidence(text, page_num, line_start, line_end)]
+
+        # Certificazioni energetiche / dichiarazioni impianti (deterministic, per-bene).
+        raw_lines = text.splitlines(keepends=True)
+        offset = 0
+        for raw_line in raw_lines:
+            line = str(raw_line or "")
+            line_start = offset
+            line_end = offset + len(line)
+            offset = line_end
+            compact = _normalize_headline_text(line)
+            if not compact:
+                continue
+            low = compact.lower()
+            low_no_space = re.sub(r"\s+", "", low)
+            if not (
+                "certificato energetico" in low
+                or "attestato di prestazione energetica" in low
+                or re.search(r"\bape\b", low, re.I)
+                or ("dichiarazionediconformit" in low_no_space and "impianto" in low_no_space)
+            ):
+                continue
+
+            status = _status_from_declaration_line(compact)
+            if not status:
+                continue
+
+            mapped_num: Optional[int] = None
+            for head_pos, head_num in heading_positions:
+                if head_pos <= line_start:
+                    mapped_num = head_num
+                else:
+                    break
+            if mapped_num is None:
+                mapped_num = page_start_bene_num if page_start_bene_num is not None else last_num_by_page.get(page_num)
+            if mapped_num is None:
+                continue
+            ev = _build_evidence(text, page_num, line_start, line_end)
+
+            # APE / certificazione energetica (separata dalle dichiarazioni impianti).
+            if "certificato energetico" in low or "attestato di prestazione energetica" in low or re.search(r"\bape\b", low, re.I):
+                _assign_declaration_to_bene(mapped_num, status, ev, is_ape=True)
+                continue
+
+            # Dichiarazioni di conformita impianti (non stato/esistenza impianto).
+            system_key = None
+            if "impiantoelettric" in low_no_space or re.search(r"impiant\w*\s+elettric\w*", low, re.I):
+                system_key = "elettrico"
+            elif "impiantotermic" in low_no_space or re.search(r"impiant\w*\s+termic\w*", low, re.I):
+                system_key = "termico"
+            elif "impiantoidric" in low_no_space or re.search(r"impiant\w*\s+idric\w*", low, re.I):
+                system_key = "idrico"
+            if not system_key:
+                continue
+            _assign_declaration_to_bene(mapped_num, status, ev, system_key=system_key, is_ape=False)
+
+        # Regex fallback for wrapped declaration lines (e.g. "... impianto\\ntermico").
+        fallback_patterns = [
+            ("elettrico", re.compile(
+                r"(?:non\s+esiste|non\s+presente|assente|presente|esiste)[\s\S]{0,120}dichiarazio\s*ne\s+di\s+conformit[àa]\s+dell['’]?\s*impiant\w*[\s\-]*elettric\w*[^\n]*"
+                r"|dichiarazio\s*ne\s+di\s+conformit[àa]\s+dell['’]?\s*impiant\w*[\s\-]*elettric\w*[\s\S]{0,120}(?:non\s+esiste|non\s+presente|assente|presente|esiste)",
+                re.I,
+            )),
+            ("termico", re.compile(
+                r"(?:non\s+esiste|non\s+presente|assente|presente|esiste)[\s\S]{0,120}dichiarazio\s*ne\s+di\s+conformit[àa]\s+dell['’]?\s*impiant\w*[\s\-]*termic\w*[^\n]*"
+                r"|dichiarazio\s*ne\s+di\s+conformit[àa]\s+dell['’]?\s*impiant\w*[\s\-]*termic\w*[\s\S]{0,120}(?:non\s+esiste|non\s+presente|assente|presente|esiste)",
+                re.I,
+            )),
+            ("idrico", re.compile(
+                r"(?:non\s+esiste|non\s+presente|assente|presente|esiste)[\s\S]{0,120}dichiarazio\s*ne\s+di\s+conformit[àa]\s+dell['’]?\s*impiant\w*[\s\-]*idric\w*[^\n]*"
+                r"|dichiarazio\s*ne\s+di\s+conformit[àa]\s+dell['’]?\s*impiant\w*[\s\-]*idric\w*[\s\S]{0,120}(?:non\s+esiste|non\s+presente|assente|presente|esiste)",
+                re.I,
+            )),
+        ]
+        for system_key, pattern in fallback_patterns:
+            for m in pattern.finditer(text):
+                status = _status_from_declaration_line(m.group(0))
+                if not status:
+                    continue
+                mapped_num: Optional[int] = None
+                for head_pos, head_num in heading_positions:
+                    if head_pos <= m.start():
+                        mapped_num = head_num
+                    else:
+                        break
+                if mapped_num is None:
+                    mapped_num = page_start_bene_num if page_start_bene_num is not None else last_num_by_page.get(page_num)
+                if mapped_num is None:
+                    continue
+                line_start, line_end = _line_bounds(text, m.start(), m.end())
+                ev = _build_evidence(text, page_num, line_start, line_end)
+                _assign_declaration_to_bene(mapped_num, status, ev, system_key=system_key, is_ape=False)
 
     beni = [beni_by_num[k] for k in sorted(beni_by_num.keys())]
     return beni
@@ -3507,6 +3707,16 @@ def _build_panoramica_contract(result: Dict[str, Any], pages: List[Dict[str, Any
         lot_beni = selected_lot.get("beni") or []
     elif isinstance(result.get("beni"), list):
         lot_beni = result.get("beni") or []
+    result_beni_index: Dict[int, Dict[str, Any]] = {}
+    for idx, bene_obj in enumerate(result.get("beni") if isinstance(result.get("beni"), list) else []):
+        if not isinstance(bene_obj, dict):
+            continue
+        bene_num_raw = bene_obj.get("bene_number")
+        try:
+            bene_num = int(str(bene_num_raw))
+        except Exception:
+            bene_num = idx + 1
+        result_beni_index[bene_num] = bene_obj
 
     lot_composition: List[Dict[str, Any]] = []
     for idx, bene_raw in enumerate(lot_beni):
@@ -3529,6 +3739,40 @@ def _build_panoramica_contract(result: Dict[str, Any], pages: List[Dict[str, Any
         superficie = _extract_bene_surface_value(bene_raw)
         valore_stima = _extract_bene_stima_value(bene_raw)
         evidence_map = bene_raw.get("evidence", {}) if isinstance(bene_raw.get("evidence"), dict) else {}
+        fallback_bene = result_beni_index.get(bene_number, {})
+        if not isinstance(fallback_bene, dict):
+            fallback_bene = {}
+        fallback_evidence_map = fallback_bene.get("evidence", {}) if isinstance(fallback_bene.get("evidence"), dict) else {}
+
+        ape_value = bene_raw.get("ape")
+        if ape_value in (None, ""):
+            ape_value = fallback_bene.get("ape")
+        dichiarazioni_impianti = bene_raw.get("dichiarazioni_impianti")
+        if not isinstance(dichiarazioni_impianti, dict):
+            dichiarazioni_impianti = fallback_bene.get("dichiarazioni_impianti")
+        if not isinstance(dichiarazioni_impianti, dict):
+            dichiarazioni_impianti = {}
+        dichiarazioni_alias = bene_raw.get("dichiarazioni")
+        if not isinstance(dichiarazioni_alias, dict):
+            dichiarazioni_alias = fallback_bene.get("dichiarazioni")
+        if not isinstance(dichiarazioni_alias, dict):
+            dichiarazioni_alias = {}
+
+        ape_evidence_raw = evidence_map.get("ape")
+        if not isinstance(ape_evidence_raw, list):
+            ape_evidence_raw = fallback_evidence_map.get("ape", [])
+
+        dichiarazioni_impianti_evidence_raw = evidence_map.get("dichiarazioni_impianti")
+        if not isinstance(dichiarazioni_impianti_evidence_raw, dict):
+            dichiarazioni_impianti_evidence_raw = fallback_evidence_map.get("dichiarazioni_impianti", {})
+        if not isinstance(dichiarazioni_impianti_evidence_raw, dict):
+            dichiarazioni_impianti_evidence_raw = {}
+
+        dichiarazioni_alias_evidence_raw = evidence_map.get("dichiarazioni")
+        if not isinstance(dichiarazioni_alias_evidence_raw, dict):
+            dichiarazioni_alias_evidence_raw = fallback_evidence_map.get("dichiarazioni", {})
+        if not isinstance(dichiarazioni_alias_evidence_raw, dict):
+            dichiarazioni_alias_evidence_raw = {}
 
         lot_composition.append({
             "bene_number": bene_number,
@@ -3537,6 +3781,17 @@ def _build_panoramica_contract(result: Dict[str, Any], pages: List[Dict[str, Any
             "piano": piano,
             "superficie_mq": round(float(superficie), 2) if isinstance(superficie, (int, float)) else None,
             "valore_stima_eur": int(round(valore_stima)) if isinstance(valore_stima, (int, float)) else None,
+            "ape": _normalize_headline_text(str(ape_value or "")) or None,
+            "dichiarazioni_impianti": {
+                "elettrico": _normalize_headline_text(str(dichiarazioni_impianti.get("elettrico") or "")) or None,
+                "termico": _normalize_headline_text(str(dichiarazioni_impianti.get("termico") or "")) or None,
+                "idrico": _normalize_headline_text(str(dichiarazioni_impianti.get("idrico") or "")) or None,
+            },
+            "dichiarazioni": {
+                "dichiarazione_impianto_elettrico": _normalize_headline_text(str(dichiarazioni_alias.get("dichiarazione_impianto_elettrico") or "")) or None,
+                "dichiarazione_impianto_termico": _normalize_headline_text(str(dichiarazioni_alias.get("dichiarazione_impianto_termico") or "")) or None,
+                "dichiarazione_impianto_idrico": _normalize_headline_text(str(dichiarazioni_alias.get("dichiarazione_impianto_idrico") or "")) or None,
+            },
             "evidence": {
                 "tipologia": _normalize_contract_evidence_list(evidence_map.get("tipologia", [])),
                 "location_piano": _normalize_contract_evidence_list(evidence_map.get("location_piano", [])),
@@ -3544,6 +3799,17 @@ def _build_panoramica_contract(result: Dict[str, Any], pages: List[Dict[str, Any
                 "valore_stima_eur": _normalize_contract_evidence_list(evidence_map.get("valore_stima", [])),
                 "catasto": _normalize_contract_evidence_list(evidence_map.get("catasto", [])),
                 "note": _normalize_contract_evidence_list(evidence_map.get("note", []), max_items=2),
+                "ape": _normalize_contract_evidence_list(ape_evidence_raw),
+                "dichiarazioni_impianti": {
+                    "elettrico": _normalize_contract_evidence_list(dichiarazioni_impianti_evidence_raw.get("elettrico", [])),
+                    "termico": _normalize_contract_evidence_list(dichiarazioni_impianti_evidence_raw.get("termico", [])),
+                    "idrico": _normalize_contract_evidence_list(dichiarazioni_impianti_evidence_raw.get("idrico", [])),
+                },
+                "dichiarazioni": {
+                    "dichiarazione_impianto_elettrico": _normalize_contract_evidence_list(dichiarazioni_alias_evidence_raw.get("dichiarazione_impianto_elettrico", [])),
+                    "dichiarazione_impianto_termico": _normalize_contract_evidence_list(dichiarazioni_alias_evidence_raw.get("dichiarazione_impianto_termico", [])),
+                    "dichiarazione_impianto_idrico": _normalize_contract_evidence_list(dichiarazioni_alias_evidence_raw.get("dichiarazione_impianto_idrico", [])),
+                },
             },
         })
 

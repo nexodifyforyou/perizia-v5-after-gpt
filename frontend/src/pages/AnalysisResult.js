@@ -659,7 +659,6 @@ const AnalysisResult = () => {
   const [selectedLotIndex, setSelectedLotIndex] = useState(0);
   const [activeTab, setActiveTab] = useState('overview');
   const [headlineModal, setHeadlineModal] = useState({ open: false, fieldKey: null });
-  const [estrattoShowAll, setEstrattoShowAll] = useState({});
 
   const fetchAnalysis = async () => {
     const params = new URLSearchParams(location.search);
@@ -1070,6 +1069,76 @@ const AnalysisResult = () => {
     return text;
   };
 
+  const getDettagliStatusValue = (value) => {
+    if (value === null || value === undefined) return '';
+    if (typeof value === 'object' && !Array.isArray(value)) {
+      return normalizeDettagliValue(
+        pickFirstNonEmpty(
+          value?.status_it,
+          value?.status,
+          value?.value_it,
+          value?.value,
+          value?.label_it,
+          value?.label,
+          value?.description_it,
+          value?.description
+        )
+      );
+    }
+    return normalizeDettagliValue(value);
+  };
+
+  const normalizeDeclarationKey = (value) => safeRender(value, '')
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^a-z0-9]/g, '');
+
+  const extractDeclarationValueFromSources = (sources, aliases) => {
+    for (const source of sources) {
+      if (!source || typeof source !== 'object') continue;
+      for (const [key, raw] of Object.entries(source)) {
+        const normalized = normalizeDeclarationKey(key);
+        if (!aliases.some((alias) => normalized === alias || normalized.includes(alias))) continue;
+        const rendered = getDettagliStatusValue(raw);
+        if (rendered) return rendered;
+      }
+    }
+    return '';
+  };
+
+  const extractDeclarationEvidenceFromSources = (sources, aliases) => {
+    const lists = [];
+    sources.forEach((source) => {
+      if (!source || typeof source !== 'object') return;
+      Object.entries(source).forEach(([key, raw]) => {
+        const normalized = normalizeDeclarationKey(key);
+        const match = aliases.some((alias) => normalized === alias || normalized.includes(alias));
+        if (!match) return;
+        if (Array.isArray(raw)) {
+          lists.push(raw);
+          return;
+        }
+        if (raw && typeof raw === 'object') {
+          const directEvidence = getEvidence(raw);
+          if (directEvidence.length > 0) {
+            lists.push(directEvidence);
+          }
+          Object.entries(raw).forEach(([nestedKey, nestedRaw]) => {
+            const nestedNormalized = normalizeDeclarationKey(nestedKey);
+            if (!aliases.some((alias) => nestedNormalized === alias || nestedNormalized.includes(alias))) return;
+            if (Array.isArray(nestedRaw)) lists.push(nestedRaw);
+            if (nestedRaw && typeof nestedRaw === 'object') {
+              const nestedEvidence = getEvidence(nestedRaw);
+              if (nestedEvidence.length > 0) lists.push(nestedEvidence);
+            }
+          });
+        }
+      });
+    });
+    return mergeEvidence(...lists);
+  };
+
   const selectedLotBeni = Array.isArray(selectedLot?.beni) ? selectedLot.beni : [];
   const fallbackLotBeni = Array.isArray(lots?.[selectedLotIndex]?.beni)
     ? lots[selectedLotIndex].beni
@@ -1109,7 +1178,53 @@ const AnalysisResult = () => {
     const statoOccupativoValue = safeRender(pickFirstNonEmpty(sourceBene?.occupancy_status, sourceBene?.stato_occupativo, sourceBene?.occupazione_status, sourceBene?.occupazione, occupativo?.status_it, occupativo?.status), '').trim();
     const urbanisticaValue = safeRender(pickFirstNonEmpty(sourceBene?.urbanistica, sourceBene?.regolarita_urbanistica, sourceBene?.conformita_urbanistica, abusi?.conformita_urbanistica?.status), '').trim();
     const agibilitaValue = safeRender(pickFirstNonEmpty(sourceBene?.agibilita, sourceBene?.abitabilita, abusi?.agibilita?.status), '').trim();
-    const apeDeclValue = safeRender(pickFirstNonEmpty(sourceBene?.ape, sourceBene?.dichiarazioni_impianti, sourceBene?.dichiarazioni, abusi?.ape?.status), '').trim();
+    const declarationSources = [
+      sourceBene?.dichiarazioni_impianti,
+      sourceBene?.dichiarazioni,
+      contractBene?.dichiarazioni_impianti,
+      contractBene?.dichiarazioni
+    ];
+    const declarationEvidenceSources = [
+      sourceEvidenceObj?.dichiarazioni_impianti,
+      sourceEvidenceObj?.dichiarazioni,
+      contractEvidenceObj?.dichiarazioni_impianti,
+      contractEvidenceObj?.dichiarazioni
+    ];
+    const apeValue = getDettagliStatusValue(pickFirstNonEmpty(sourceBene?.ape, contractBene?.ape, abusi?.ape?.status));
+    const elettricoValue = extractDeclarationValueFromSources(declarationSources, ['impiantoelettrico', 'dichiarazioneimpiantoelettrico', 'elettrico', 'conformitaelettrico']);
+    const termicoValue = extractDeclarationValueFromSources(declarationSources, ['impiantotermico', 'dichiarazioneimpiantotermico', 'termico', 'conformitatermico']);
+    const idricoValue = extractDeclarationValueFromSources(declarationSources, ['impiantoidrico', 'dichiarazioneimpiantoidrico', 'idrico', 'conformitaidrico']);
+    const apeEvidence = mergeEvidence(
+      sourceEvidenceObj?.ape,
+      contractEvidenceObj?.ape,
+      sourceEvidenceObj?.dichiarazioni_impianti?.ape,
+      sourceEvidenceObj?.dichiarazioni?.ape,
+      contractEvidenceObj?.dichiarazioni_impianti?.ape,
+      contractEvidenceObj?.dichiarazioni?.ape,
+      extractDeclarationEvidenceFromSources(declarationEvidenceSources, ['ape', 'attestatodiprestazioneenergetica', 'certificazioneenergetica']),
+      getFieldEvidence('ape', abusi?.ape)
+    );
+    const elettricoEvidence = mergeEvidence(
+      sourceEvidenceObj?.dichiarazioni_impianti?.elettrico,
+      sourceEvidenceObj?.dichiarazioni?.dichiarazione_impianto_elettrico,
+      contractEvidenceObj?.dichiarazioni_impianti?.elettrico,
+      contractEvidenceObj?.dichiarazioni?.dichiarazione_impianto_elettrico,
+      extractDeclarationEvidenceFromSources(declarationEvidenceSources, ['impiantoelettrico', 'dichiarazioneimpiantoelettrico', 'elettrico', 'conformitaelettrico'])
+    );
+    const termicoEvidence = mergeEvidence(
+      sourceEvidenceObj?.dichiarazioni_impianti?.termico,
+      sourceEvidenceObj?.dichiarazioni?.dichiarazione_impianto_termico,
+      contractEvidenceObj?.dichiarazioni_impianti?.termico,
+      contractEvidenceObj?.dichiarazioni?.dichiarazione_impianto_termico,
+      extractDeclarationEvidenceFromSources(declarationEvidenceSources, ['impiantotermico', 'dichiarazioneimpiantotermico', 'termico', 'conformitatermico'])
+    );
+    const idricoEvidence = mergeEvidence(
+      sourceEvidenceObj?.dichiarazioni_impianti?.idrico,
+      sourceEvidenceObj?.dichiarazioni?.dichiarazione_impianto_idrico,
+      contractEvidenceObj?.dichiarazioni_impianti?.idrico,
+      contractEvidenceObj?.dichiarazioni?.dichiarazione_impianto_idrico,
+      extractDeclarationEvidenceFromSources(declarationEvidenceSources, ['impiantoidrico', 'dichiarazioneimpiantoidrico', 'idrico', 'conformitaidrico'])
+    );
 
     return {
       key: `dettagli-bene-${beneNumber || idx + 1}`,
@@ -1160,11 +1275,31 @@ const AnalysisResult = () => {
           value: agibilitaValue,
           evidence: mergeEvidence(sourceEvidenceObj?.agibilita, sourceEvidenceObj?.note, getFieldEvidence('agibilita', abusi?.agibilita))
         },
+      ],
+      declarationRows: [
         {
           key: 'ape',
-          label: 'APE / Declarations',
-          value: apeDeclValue,
-          evidence: mergeEvidence(sourceEvidenceObj?.ape, sourceEvidenceObj?.dichiarazioni_impianti, getFieldEvidence('ape', abusi?.ape))
+          label: 'APE',
+          value: apeValue,
+          evidence: apeEvidence
+        },
+        {
+          key: 'dichiarazione_impianto_elettrico',
+          label: 'Dichiarazione impianto elettrico',
+          value: elettricoValue,
+          evidence: elettricoEvidence
+        },
+        {
+          key: 'dichiarazione_impianto_termico',
+          label: 'Dichiarazione impianto termico',
+          value: termicoValue,
+          evidence: termicoEvidence
+        },
+        {
+          key: 'dichiarazione_impianto_idrico',
+          label: 'Dichiarazione impianto idrico',
+          value: idricoValue,
+          evidence: idricoEvidence
         }
       ]
     };
@@ -1663,6 +1798,59 @@ const AnalysisResult = () => {
       cleaned.push(item);
     });
     return cleaned;
+  })();
+
+  const groupedLegalDetailSections = (() => {
+    const groups = {
+      pignoramento_esecuzione: [],
+      ipoteca_formalita: [],
+      accesso_vincolo: [],
+      other_legal_mentions: []
+    };
+    const seen = new Set();
+
+    const mapToGroup = (category) => {
+      if (category === 'pignoramento_esecuzione') return 'pignoramento_esecuzione';
+      if (category === 'ipoteca_formalita') return 'ipoteca_formalita';
+      if (category === 'accesso_vincolo') return 'accesso_vincolo';
+      return 'other_legal_mentions';
+    };
+
+    filteredLegalDetailItems.forEach((item) => {
+      const firstEv = getFirstEvidence(item);
+      const quote = safeRender(firstEv?.quote, '');
+      const searchHint = safeRender(firstEv?.search_hint, '');
+      const page = firstEv?.page ?? '';
+      const category = pickLegalCategory(item);
+      if (category === 'servitu_usi_civici' && !isSubstantiveServituEvidence(quote, searchHint)) return;
+      const bucket = mapToGroup(category);
+      const labelIt = safeRender(item?.label_it || item?.__label, 'Voce');
+      const labelEn = safeRender(item?.label_en, '');
+      const displayValue = getEstrattoItemDisplayValue(item);
+      const normalizedQuote = quote
+        .toLowerCase()
+        .replace(/\s+/g, ' ')
+        .replace(/[^a-z0-9 ]/g, '')
+        .trim()
+        .slice(0, 170);
+      const dedupeKey = `${bucket}|${page}|${normalizedQuote || `${labelIt}|${displayValue}`.toLowerCase().slice(0, 170)}`;
+      if (seen.has(dedupeKey)) return;
+      seen.add(dedupeKey);
+      groups[bucket].push({
+        key: dedupeKey,
+        labelIt,
+        labelEn,
+        displayValue,
+        evidence: Array.isArray(item?.__evidence) ? item.__evidence : []
+      });
+    });
+
+    return [
+      { key: 'pignoramento_esecuzione', title: 'Pignoramento / Esecuzione', items: groups.pignoramento_esecuzione },
+      { key: 'ipoteca_formalita', title: 'Ipoteca / Formalità pregiudizievoli', items: groups.ipoteca_formalita },
+      { key: 'accesso_vincolo', title: 'Accesso / vincolo', items: groups.accesso_vincolo },
+      { key: 'other_legal_mentions', title: 'Other legal mentions', items: groups.other_legal_mentions }
+    ].filter((group) => Array.isArray(group.items) && group.items.length > 0);
   })();
 
   const redFlagGroups = {
@@ -2737,41 +2925,33 @@ const AnalysisResult = () => {
                 <p className="text-zinc-500 text-center py-8">Nessun blocker legale materiale con evidenza sostanziale disponibile</p>
               )}
 
-              {filteredLegalDetailItems.length > 0 && (
-                <div className="mt-6 p-4 rounded-lg border border-zinc-800 bg-zinc-950/60">
-                  <h3 className="text-sm font-semibold text-zinc-100">Dettagli dal documento / Document details</h3>
-                  <div className="space-y-3 mt-3">
-                    {(!!estrattoShowAll.legal_doc ? filteredLegalDetailItems : filteredLegalDetailItems.slice(0, 12)).map((item, idx) => {
-                      const labelIt = safeRender(item?.label_it || item?.__label, 'Voce');
-                      const labelEn = safeRender(item?.label_en, '');
-                      const displayValue = getEstrattoItemDisplayValue(item);
-                      const evidence = Array.isArray(item?.__evidence) ? item.__evidence : [];
-                      return (
-                        <div key={`legal_doc_${idx}`} className="p-3 rounded border border-zinc-800 bg-zinc-900">
-                          <p className="text-sm text-zinc-100">
-                            <span className="font-medium">{labelIt}</span>
-                            {displayValue ? `: ${displayValue}` : ''}
-                          </p>
-                          {labelEn && <p className="text-xs text-zinc-500 mt-1">{labelEn}</p>}
-                          {evidence.length > 0 && (
-                            <div className="mt-2">
-                              <EvidenceDetail evidence={evidence} />
+              {groupedLegalDetailSections.length > 0 && (
+                <details className="mt-6 p-4 rounded-lg border border-zinc-800 bg-zinc-950/60">
+                  <summary className="cursor-pointer text-sm font-semibold text-zinc-100 select-none">
+                    Approfondisci evidenze legali
+                  </summary>
+                  <div className="space-y-4 mt-3">
+                    {groupedLegalDetailSections.map((group) => (
+                      <div key={group.key} className="p-3 rounded border border-zinc-800 bg-zinc-900/70">
+                        <h3 className="text-xs uppercase tracking-wide text-zinc-400">{group.title}</h3>
+                        <div className="space-y-2 mt-2">
+                          {group.items.map((item) => (
+                            <div key={item.key} className="p-2 rounded border border-zinc-800 bg-zinc-900">
+                              <div className="flex items-center justify-between gap-2">
+                                <p className="text-sm text-zinc-100">
+                                  <span className="font-medium">{item.labelIt}</span>
+                                  {item.displayValue ? `: ${item.displayValue}` : ''}
+                                </p>
+                                {item.evidence.length > 0 && <EvidenceBadge evidence={item.evidence} />}
+                              </div>
+                              {item.labelEn && <p className="text-xs text-zinc-500 mt-1">{item.labelEn}</p>}
                             </div>
-                          )}
+                          ))}
                         </div>
-                      );
-                    })}
-                    {filteredLegalDetailItems.length > 12 && (
-                      <button
-                        type="button"
-                        onClick={() => setEstrattoShowAll((prev) => ({ ...prev, legal_doc: !prev.legal_doc }))}
-                        className="text-xs text-gold hover:underline"
-                      >
-                        {estrattoShowAll.legal_doc ? 'Mostra meno / Show less' : `Mostra altri / Show more (${filteredLegalDetailItems.length - 12})`}
-                      </button>
-                    )}
+                      </div>
+                    ))}
                   </div>
-                </div>
+                </details>
               )}
             </div>
           </TabsContent>
@@ -2863,6 +3043,25 @@ const AnalysisResult = () => {
                           ) : null
                         ))}
                       </div>
+
+                      {Array.isArray(card.declarationRows) && card.declarationRows.some((row) => row?.value) && (
+                        <div className="mt-4 pt-3 border-t border-zinc-800">
+                          <p className="text-[11px] uppercase tracking-wide text-zinc-500 mb-3">Certificazioni / Dichiarazioni</p>
+                          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                            {card.declarationRows.map((row) => (
+                              row.value ? (
+                                <div key={`${card.key}_${row.key}`} className="p-3 rounded border border-zinc-800 bg-zinc-900/70">
+                                  <div className="flex items-center justify-between gap-2">
+                                    <p className="text-[11px] uppercase tracking-wide text-zinc-500">{row.label}</p>
+                                    {row.evidence.length > 0 && <EvidenceBadge evidence={row.evidence} />}
+                                  </div>
+                                  <p className="text-sm text-zinc-200 mt-1">{row.value}</p>
+                                </div>
+                              ) : null
+                            ))}
+                          </div>
+                        </div>
+                      )}
                     </div>
                   ))}
                 </div>
