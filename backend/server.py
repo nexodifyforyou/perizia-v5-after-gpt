@@ -2051,15 +2051,15 @@ def _synthesize_decisione_rapida(result: Dict[str, Any], states: Dict[str, Any])
     lots = result.get("lots") if isinstance(result.get("lots"), list) else []
     if len(lots) > 1:
         lot_fragments: List[str] = []
+        lot_fragments_en: List[str] = []
         for lot in lots[:3]:
             if not isinstance(lot, dict):
                 continue
             lot_num = lot.get("lot_number")
             tipo = _normalize_headline_text(str(lot.get("tipologia") or "")) or "bene"
             ubic = _normalize_headline_text(str(lot.get("ubicazione") or "")) or "ubicazione da verificare"
-            notes = lot.get("risk_notes") if isinstance(lot.get("risk_notes"), list) else []
-            focus = notes[0] if notes else "verifica tecnico-legale dedicata"
-            lot_fragments.append(f"Lotto {lot_num} ({tipo}, {ubic}): {focus}")
+            lot_fragments.append(f"Lotto {lot_num} ({tipo}, {ubic}): {_lot_risk_cluster_it(lot)}")
+            lot_fragments_en.append(f"Lot {lot_num} ({tipo}, {ubic}): {_lot_risk_cluster_en(lot)}")
         if lot_fragments:
             summary_it = (
                 f"Caso multi-lotto ({len(lots)} lotti). "
@@ -2068,7 +2068,7 @@ def _synthesize_decisione_rapida(result: Dict[str, Any], states: Dict[str, Any])
             )
             summary_en = (
                 f"Multi-lot case ({len(lots)} lots). "
-                + " | ".join(lot_fragments)
+                + " | ".join(lot_fragments_en)
                 + ". Mandatory lot-by-lot legal/technical verification before bidding."
             )
             decision = result.get("decision_rapida_client", {}) if isinstance(result.get("decision_rapida_client"), dict) else {}
@@ -2567,8 +2567,10 @@ def _ensure_lot_contract(lot: Dict[str, Any], lot_number: int) -> Dict[str, Any]
     lot_obj.setdefault("ubicazione", "TBD")
     lot_obj.setdefault("superficie_mq", "TBD")
     lot_obj.setdefault("diritto_reale", "TBD")
+    lot_obj.setdefault("shared_rights_note", None)
+    lot_obj.setdefault("detail_scope", "LOT")
     evidence = lot_obj.get("evidence") if isinstance(lot_obj.get("evidence"), dict) else {}
-    for key in ("lotto", "prezzo_base", "ubicazione", "superficie", "diritto_reale", "tipologia", "valore_stima", "deprezzamento"):
+    for key in ("lotto", "prezzo_base", "ubicazione", "superficie", "diritto_reale", "shared_rights_note", "tipologia", "valore_stima", "deprezzamento"):
         if not isinstance(evidence.get(key), list):
             evidence[key] = []
     lot_obj["evidence"] = evidence
@@ -2730,6 +2732,100 @@ def _extract_lot_risk_notes(section_pages: List[Dict[str, Any]]) -> List[str]:
     return notes
 
 
+def _select_best_address_candidate(candidates: List[Tuple[str, Dict[str, Any]]]) -> Optional[Tuple[str, Dict[str, Any]]]:
+    ranked: List[Tuple[int, str, Dict[str, Any]]] = []
+    for raw_value, ev in candidates:
+        value = _normalize_address_value(raw_value) or _normalize_headline_text(raw_value)
+        if not value:
+            continue
+        value = re.sub(r"\.{2,}\s*\d+\s*$", "", value).strip(" ,.;-")
+        if _is_toc_like_line(value) or _is_toc_like_quote(value):
+            continue
+        m_common = re.search(
+            r"Comune\s+di\s+([^\(,\n]+)\s*\(([A-Z]{2})\)[^\n]{0,120}?\bvia\b\s+(?:della\s+|del\s+|di\s+)?([A-Za-zÀ-ÿ' ]+?)\s+(snc|senza\s+numero\s+civico)",
+            value,
+            re.I,
+        )
+        if m_common:
+            comune = _normalize_headline_text(m_common.group(1))
+            prov = m_common.group(2).upper()
+            street = _normalize_headline_text(m_common.group(3))
+            value = f"{comune} ({prov}) - via {street} senza numero civico"
+        score = len(value)
+        low = value.lower()
+        if "numero civico" in low or "n.c." in low or "snc" in low:
+            score += 40
+        if "comune di" in low or "(pt)" in low or "(mn)" in low:
+            score += 15
+        ranked.append((score, value, ev))
+    if not ranked:
+        return None
+    ranked.sort(key=lambda item: (-item[0], -len(item[1])))
+    return ranked[0][1], ranked[0][2]
+
+
+def _extract_lot_identity_and_rights(lot_pages: List[Dict[str, Any]], lot_num: int) -> Dict[str, Any]:
+    address_candidates: List[Tuple[str, Dict[str, Any]]] = []
+    right_candidates: List[Tuple[str, Dict[str, Any]]] = []
+    shared_candidates: List[Tuple[str, Dict[str, Any]]] = []
+    early_pages = [p for p in lot_pages[:5] if isinstance(p, dict)]
+
+    for page_obj in early_pages:
+        text = str(page_obj.get("text", "") or "")
+        page_num = _get_page_number(page_obj)
+        if not text or page_num <= 0:
+            continue
+
+        for m in re.finditer(rf"Bene\s+N[°º]?\s*{lot_num}\s*-\s*[^\n]*?ubicat[oa]\s+a\s+([^\n]+)", text, re.I):
+            line_start, line_end = _line_bounds(text, m.start(), m.end())
+            ev = _build_evidence(text, page_num, line_start, line_end, field_key="ubicazione", anchor_hint=m.group(0))
+            address_candidates.append((m.group(1).strip(), ev))
+
+        for m in re.finditer(r"posto\s+in\s+Comune\s+di\s+([^\n,]+)[^\n]{0,180}?\bvia\b[^\n,]*?(senza\s+numero\s+civico|n\.?c\.?\s*\d+|snc)", text, re.I):
+            line_start, line_end = _line_bounds(text, m.start(), m.end())
+            ev = _build_evidence(text, page_num, line_start, line_end, field_key="ubicazione", anchor_hint=m.group(0))
+            address_candidates.append((m.group(0).strip(), ev))
+
+        for m in re.finditer(r"Diritti?\s+di\s+piena\s+propriet[àa]\s+per\s+la\s+quota\s+di\s+1/1[^\n]{0,120}", text, re.I):
+            line_start, line_end = _line_bounds(text, m.start(), m.end())
+            ev = _build_evidence(text, page_num, line_start, line_end, field_key="diritto_reale", anchor_hint=m.group(0))
+            right_candidates.append(("Proprietà 1/1", ev))
+
+        for m in re.finditer(r"\(Proprietà\s+1/1\)", text, re.I):
+            line_start, line_end = _line_bounds(text, m.start(), m.end())
+            ev = _build_evidence(text, page_num, line_start, line_end, field_key="diritto_reale", anchor_hint=m.group(0))
+            right_candidates.append(("Proprietà 1/1", ev))
+
+        for m in re.finditer(r"diritti?\s+di\s+compropriet[àa]\s+pari\s+ad\s+1/4\s+dell['’]intero[^\n]{0,140}", text, re.I):
+            line_start, line_end = _line_bounds(text, m.start(), m.end())
+            ev = _build_evidence(text, page_num, line_start, line_end, field_key="shared_rights_note", anchor_hint=m.group(0))
+            shared_candidates.append(("Quota 1/4 della stradella privata di accesso", ev))
+
+        for m in re.finditer(r"stradella\s+(?:privata|di\s+penetrazione)[^\n]{0,180}corte\s+comune", text, re.I):
+            line_start, line_end = _line_bounds(text, m.start(), m.end())
+            ev = _build_evidence(text, page_num, line_start, line_end, field_key="shared_rights_note", anchor_hint=m.group(0))
+            shared_candidates.append(("Accesso tramite stradella privata e corte comune", ev))
+
+    out: Dict[str, Any] = {}
+    best_address = _select_best_address_candidate(address_candidates)
+    if best_address:
+        out["ubicazione"] = best_address[0]
+        out["ubicazione_evidence"] = [best_address[1]]
+    if right_candidates:
+        out["diritto_reale"] = right_candidates[0][0]
+        out["diritto_reale_evidence"] = [right_candidates[0][1]]
+    if shared_candidates:
+        shared_text = shared_candidates[0][0]
+        out["shared_rights_note"] = shared_text
+        out["shared_rights_evidence"] = [shared_candidates[0][1]]
+        if out.get("diritto_reale"):
+            out["diritto_reale"] = f"{out['diritto_reale']} + {shared_text}"
+        else:
+            out["diritto_reale"] = shared_text
+            out["diritto_reale_evidence"] = [shared_candidates[0][1]]
+    return out
+
+
 def _build_lots_overview(lots: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     out: List[Dict[str, Any]] = []
     for idx, raw_lot in enumerate(lots):
@@ -2756,6 +2852,175 @@ def _build_lots_overview(lots: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
             "prezzo_base_eur": int(round(prezzo)) if isinstance(prezzo, (int, float)) else None,
         })
     return out
+
+
+def _build_multi_lot_top_legal_items(lots: List[Dict[str, Any]], pages: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    if not isinstance(lots, list) or len(lots) <= 1:
+        return []
+
+    lot_sections = _build_lot_sections(pages if isinstance(pages, list) else [])
+    section_by_lot = {int(sec.get("lot_number") or 0): sec for sec in lot_sections if isinstance(sec, dict)}
+
+    note_specs = [
+        (
+            "non agibile / abitabilità assente",
+            "Non agibile",
+            "REAL_BLOCKER",
+            100,
+            [
+                r"non\s+(?:risulta|è|e)\s+agibil\w+",
+                r"non\s+è\s+presente\s+l[’']?abitabilit",
+            ],
+            lambda lot: (
+                lot.get("evidence", {}).get("note", [])
+                if isinstance(lot.get("evidence"), dict) else []
+            ),
+        ),
+        (
+            "non conformità / difformità catastali-edilizie",
+            "Non conformità / catastale-edilizia",
+            "REAL_BLOCKER",
+            98,
+            [
+                r"difformit",
+                r"mancata\s+corrispondenza\s+(?:delle\s+)?mappe\s+catastali",
+                r"non\s+regolar",
+            ],
+            lambda lot: (
+                (lot.get("evidence", {}).get("catasto", []) if isinstance(lot.get("evidence"), dict) else [])
+                or (lot.get("evidence", {}).get("note", []) if isinstance(lot.get("evidence"), dict) else [])
+            ),
+        ),
+        (
+            "presenza fibro-cemento / amianto",
+            "Fibro-cemento / bonifica burden",
+            "REAL_BLOCKER",
+            97,
+            [
+                r"fibro[\s-]?cemento",
+                r"amianto",
+            ],
+            lambda lot: (
+                lot.get("evidence", {}).get("note", [])
+                if isinstance(lot.get("evidence"), dict) else []
+            ),
+        ),
+        (
+            "condizioni conservative critiche",
+            "Degrado / condizioni conservative critiche",
+            "REAL_BLOCKER",
+            95,
+            [
+                r"pessim\w+\s+condizion\w+",
+                r"cattiv\w+\s+condizion\w+",
+                r"abbandonat",
+                r"degradat",
+            ],
+            lambda lot: (
+                lot.get("evidence", {}).get("stato_conservativo", [])
+                if isinstance(lot.get("evidence"), dict) else []
+            ) or (
+                lot.get("evidence", {}).get("note", [])
+                if isinstance(lot.get("evidence"), dict) else []
+            ),
+        ),
+        (
+            "servitù e accesso su stradella privata",
+            "Servitù / accesso privato / stradella",
+            "REAL_BLOCKER",
+            99,
+            [
+                r"stradella\s+privata",
+                r"servit[ùu]\s+di\s+pass",
+                r"diritto\s+di\s+pass",
+                r"corte\s+comune",
+            ],
+            lambda lot: (
+                lot.get("evidence", {}).get("diritto_reale", [])
+                if isinstance(lot.get("evidence"), dict) else []
+            ) or (
+                lot.get("evidence", {}).get("shared_rights_note", [])
+                if isinstance(lot.get("evidence"), dict) else []
+            ) or (
+                lot.get("evidence", {}).get("note", [])
+                if isinstance(lot.get("evidence"), dict) else []
+            ),
+        ),
+        (
+            "infiltrazioni / umidità",
+            "Infiltrazioni",
+            "REAL_BLOCKER",
+            96,
+            [
+                r"infiltraz",
+                r"umidit",
+            ],
+            lambda lot: (
+                lot.get("evidence", {}).get("note", [])
+                if isinstance(lot.get("evidence"), dict) else []
+            ),
+        ),
+        (
+            "fabbricato in costruzione / lavori sospesi",
+            "In costruzione / lavori sospesi",
+            "REAL_BLOCKER",
+            100,
+            [
+                r"in\s+costruzione",
+                r"lavori\s+sospesi",
+                r"sospes\w+.{0,30}10\s+anni",
+            ],
+            lambda lot: (
+                lot.get("evidence", {}).get("tipologia", [])
+                if isinstance(lot.get("evidence"), dict) else []
+            ) or (
+                lot.get("evidence", {}).get("note", [])
+                if isinstance(lot.get("evidence"), dict) else []
+            ),
+        ),
+    ]
+
+    top_items: List[Dict[str, Any]] = []
+    seen: set = set()
+    for raw_lot in lots:
+        if not isinstance(raw_lot, dict):
+            continue
+        lot_num = int(raw_lot.get("lot_number") or 0)
+        if lot_num <= 0:
+            continue
+        lot_notes = raw_lot.get("risk_notes") if isinstance(raw_lot.get("risk_notes"), list) else []
+        lot_notes = [str(note).strip() for note in lot_notes if str(note).strip()]
+        section_pages = section_by_lot.get(lot_num, {}).get("pages", []) if section_by_lot.get(lot_num) else []
+        search_pages = section_pages if isinstance(section_pages, list) and section_pages else pages
+        for note_key, label, bucket, score, patterns, evidence_getter in note_specs:
+            if note_key not in lot_notes:
+                continue
+            evidence = _normalize_contract_evidence_list(evidence_getter(raw_lot), max_items=2)
+            if not evidence:
+                for pattern in patterns:
+                    ev = _find_regex_in_specific_pages(search_pages, pattern, re.I, field_key="section_9_legal_killers")
+                    if ev and not _is_toc_like_quote(str(ev.get("quote") or "")):
+                        evidence = _normalize_contract_evidence_list([ev], max_items=2)
+                        break
+            if not evidence:
+                continue
+            killer = f"Lotto {lot_num}: {label}"
+            dedupe_key = killer.lower()
+            if dedupe_key in seen:
+                continue
+            seen.add(dedupe_key)
+            top_items.append({
+                "killer": killer,
+                "status": "ROSSO",
+                "status_it": "CRITICO",
+                "reason_it": f"Blocco prioritario per Lotto {lot_num}: {label}",
+                "evidence": evidence,
+                "decision_bucket": bucket,
+                "decision_score": score,
+            })
+
+    top_items.sort(key=lambda item: (-int(item.get("decision_score", 0)), str(item.get("killer", ""))))
+    return top_items[:12]
 
 
 def _build_conservative_money_box_for_lots(result: Dict[str, Any]) -> None:
@@ -2914,6 +3179,82 @@ def _augment_legal_killers_from_lots(legal_killers_items: List[Dict[str, Any]], 
     return legal_killers_items
 
 
+def _legal_relevance_profile(killer: str) -> Tuple[str, int]:
+    low = str(killer or "").lower()
+    if any(token in low for token in ("non agibile", "non regolare", "difformità", "fibro-cemento", "amianto", "in costruzione", "lavori sospesi", "servitù / accesso privato", "servitù di passaggio", "infiltrazioni")):
+        return "REAL_BLOCKER", 100
+    if any(token in low for token in ("servitù rilevata", "accertamento di conformità", "condizioni conservative", "sicurezza")):
+        return "RELEVANT_SECONDARY", 70
+    if any(token in low for token in ("oneri di cancellazione", "formalità da cancellare", "salva casa")):
+        return "BACKGROUND_NOTE", 20
+    return "RELEVANT_SECONDARY", 50
+
+
+def _lot_risk_cluster_it(lot: Dict[str, Any]) -> str:
+    notes = lot.get("risk_notes") if isinstance(lot.get("risk_notes"), list) else []
+    note_set = set(str(n) for n in notes)
+    tipologia = _normalize_headline_text(str(lot.get("tipologia") or ""))
+    if "fabbricato in costruzione / lavori sospesi" in note_set:
+        return "fabbricato in costruzione con lavori sospesi, costi di completamento e profili di sicurezza/regolarizzazione"
+    if "servitù e accesso su stradella privata" in note_set and "infiltrazioni / umidità" in note_set:
+        if "magazzino" in tipologia.lower():
+            return "magazzino con servitù/accesso privato, infiltrazioni e burden di regolarizzazione"
+        return "accesso su stradella privata, servitù e infiltrazioni da verificare lotto per lotto"
+    if "presenza fibro-cemento / amianto" in note_set:
+        return "degrado severo, fibro-cemento e forte burden di regolarizzazione"
+    if "condizioni conservative critiche" in note_set and "magazzino" not in tipologia.lower():
+        return "condizioni conservative critiche e forte burden di regolarizzazione"
+    if notes:
+        return ", ".join(notes[:2])
+    return "verifica tecnico-legale dedicata"
+
+
+def _lot_risk_cluster_en(lot: Dict[str, Any]) -> str:
+    notes = lot.get("risk_notes") if isinstance(lot.get("risk_notes"), list) else []
+    note_set = set(str(n) for n in notes)
+    tipologia = _normalize_headline_text(str(lot.get("tipologia") or ""))
+    if "fabbricato in costruzione / lavori sospesi" in note_set:
+        return "unfinished construction with suspended works, completion costs and safety/compliance burden"
+    if "servitù e accesso su stradella privata" in note_set and "infiltrazioni / umidità" in note_set:
+        if "magazzino" in tipologia.lower():
+            return "warehouse with private-access easements, infiltration issues and compliance burden"
+        return "private-access road, easements and infiltration issues requiring lot-by-lot review"
+    if "presenza fibro-cemento / amianto" in note_set:
+        return "severe degradation, fibro-cement and major compliance burden"
+    if "condizioni conservative critiche" in note_set and "magazzino" not in tipologia.lower():
+        return "critical building condition and major compliance burden"
+    if notes:
+        return ", ".join(notes[:2])
+    return "dedicated legal/technical review required"
+
+
+def _build_case_aware_narration_payload(result: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    lots = result.get("lots") if isinstance(result.get("lots"), list) else []
+    if len(lots) <= 1:
+        return None
+    fragments_it: List[str] = []
+    fragments_en: List[str] = []
+    bullets_it: List[str] = []
+    bullets_en: List[str] = []
+    for lot in lots[:3]:
+        if not isinstance(lot, dict):
+            continue
+        lot_num = lot.get("lot_number")
+        tipologia = _normalize_headline_text(str(lot.get("tipologia") or "")) or "bene"
+        ubic = _normalize_headline_text(str(lot.get("ubicazione") or "")) or "ubicazione da verificare"
+        fragments_it.append(f"Lotto {lot_num} ({tipologia}, {ubic}): {_lot_risk_cluster_it(lot)}")
+        fragments_en.append(f"Lot {lot_num} ({tipologia}, {ubic}): {_lot_risk_cluster_en(lot)}")
+        bullets_it.append(f"Lotto {lot_num}: {_lot_risk_cluster_it(lot)}.")
+        bullets_en.append(f"Lot {lot_num}: {_lot_risk_cluster_en(lot)}.")
+    return {
+        "it": "Caso multi-lotto. " + " ".join(fragments_it) + " Verifica prudenziale lotto per lotto prima dell'offerta.",
+        "en": "Multi-lot case. " + " ".join(fragments_en) + " Conservative lot-by-lot review is required before bidding.",
+        "bullets_it": bullets_it,
+        "bullets_en": bullets_en,
+        "evidence_refs": [],
+    }
+
+
 def _enrich_lots_from_sections(
     lots: List[Dict[str, Any]],
     pages: List[Dict[str, Any]],
@@ -2950,6 +3291,22 @@ def _enrich_lots_from_sections(
         lot_pages = section.get("pages", []) if isinstance(section, dict) else []
         if lot_pages and not lot["evidence"].get("lotto"):
             lot["evidence"]["lotto"] = section.get("header_evidence", [])
+        identity = _extract_lot_identity_and_rights(lot_pages or normalized_pages, lot_num)
+        if identity.get("ubicazione"):
+            current_loc = _normalize_headline_text(str(lot.get("ubicazione") or ""))
+            candidate_loc = _normalize_headline_text(str(identity.get("ubicazione") or ""))
+            if candidate_loc and (current_loc in {"", "TBD", "NON SPECIFICATO IN PERIZIA"} or len(candidate_loc) > len(current_loc)):
+                lot["ubicazione"] = candidate_loc
+                lot["evidence"]["ubicazione"] = identity.get("ubicazione_evidence", []) or lot["evidence"]["ubicazione"]
+        if identity.get("diritto_reale"):
+            current_right = _normalize_headline_text(str(lot.get("diritto_reale") or ""))
+            candidate_right = _normalize_headline_text(str(identity.get("diritto_reale") or ""))
+            if candidate_right and (current_right in {"", "TBD", "NON SPECIFICATO IN PERIZIA"} or "quota" in candidate_right.lower()):
+                lot["diritto_reale"] = candidate_right
+                lot["evidence"]["diritto_reale"] = identity.get("diritto_reale_evidence", []) or lot["evidence"]["diritto_reale"]
+        if identity.get("shared_rights_note"):
+            lot["shared_rights_note"] = _normalize_headline_text(str(identity.get("shared_rights_note") or ""))
+            lot["evidence"]["shared_rights_note"] = identity.get("shared_rights_evidence", []) or lot["evidence"]["shared_rights_note"]
 
         context_pages = schema_pages or lot_pages or normalized_pages
         price_ev = _find_regex_in_specific_pages(
@@ -3043,9 +3400,11 @@ def _enrich_lots_from_sections(
                     lot["evidence"]["tipologia"] = bene.get("evidence", {}).get("tipologia", []) or lot["evidence"]["tipologia"]
             short_location = _normalize_headline_text(str(bene.get("short_location") or ""))
             if short_location:
-                lot["ubicazione"] = short_location
-                if isinstance(bene.get("evidence"), dict):
-                    lot["evidence"]["ubicazione"] = bene.get("evidence", {}).get("location_piano", []) or lot["evidence"]["ubicazione"]
+                current_loc = _normalize_headline_text(str(lot.get("ubicazione") or ""))
+                if current_loc in {"", "TBD", "NON SPECIFICATO IN PERIZIA"} or len(short_location) > len(current_loc):
+                    lot["ubicazione"] = short_location
+                    if isinstance(bene.get("evidence"), dict):
+                        lot["evidence"]["ubicazione"] = bene.get("evidence", {}).get("location_piano", []) or lot["evidence"]["ubicazione"]
             if bene.get("superficie_mq") not in (None, "") and lot.get("superficie_mq") in ("TBD", None):
                 lot["superficie_mq"] = bene.get("superficie_mq")
             if bene.get("valore_stima_eur") not in (None, "") and lot.get("valore_stima_eur") in (None, ""):
@@ -3066,8 +3425,10 @@ def _enrich_lots_from_sections(
         if dir_ev:
             m_dir = re.search(r"Diritto\s+reale[:\s]*([^\n]{3,120})", str(dir_ev.get("quote", "")), re.I)
             if m_dir:
-                lot["diritto_reale"] = _normalize_headline_text(m_dir.group(1))
-                lot["evidence"]["diritto_reale"] = [dir_ev]
+                dir_val = _normalize_headline_text(m_dir.group(1))
+                if dir_val and str(lot.get("diritto_reale") or "TBD") in {"TBD", "NON SPECIFICATO IN PERIZIA"}:
+                    lot["diritto_reale"] = dir_val
+                    lot["evidence"]["diritto_reale"] = [dir_ev]
 
         risk_notes = _extract_lot_risk_notes(lot_pages)
         if risk_notes:
@@ -4460,6 +4821,17 @@ def _build_panoramica_contract(result: Dict[str, Any], pages: List[Dict[str, Any
             "prezzo_base_eur": prezzo_ev,
         },
     }
+    if isinstance(result.get("report_header"), dict):
+        lotto_obj = result["report_header"].get("lotto")
+        if isinstance(lotto_obj, dict):
+            lotto_obj["value"] = lot_summary.get("lotto_label") or lotto_obj.get("value")
+            if lot_summary.get("evidence", {}).get("lotto_label"):
+                lotto_obj["evidence"] = copy.deepcopy(lot_summary["evidence"]["lotto_label"])
+        elif lot_summary.get("lotto_label"):
+            result["report_header"]["lotto"] = {
+                "value": lot_summary.get("lotto_label"),
+                "evidence": copy.deepcopy(lot_summary.get("evidence", {}).get("lotto_label", [])),
+            }
 
     lot_beni: List[Dict[str, Any]] = []
     if isinstance(selected_lot, dict) and isinstance(selected_lot.get("beni"), list):
@@ -4590,6 +4962,14 @@ def _build_panoramica_contract(result: Dict[str, Any], pages: List[Dict[str, Any
         finale_ev = list(prezzo_wf_ev)
         if dep_value is None and isinstance(dep_pct, (int, float)) and isinstance(stima_value, (int, float)):
             dep_value = max(0.0, stima_value * (float(dep_pct) / 100.0))
+        if (dep_value is None or dep_value <= 0) and isinstance(stima_value, (int, float)) and isinstance(prezzo_wf_value, (int, float)):
+            dep_value = max(0.0, stima_value - prezzo_wf_value)
+        if not stima_ev:
+            stima_ev = _normalize_contract_evidence_list(selected_ev.get("tipologia", []))
+        if not dep_ev:
+            dep_ev = list(stima_ev or prezzo_wf_ev)
+        if not finale_ev:
+            finale_ev = list(prezzo_wf_ev)
     else:
         stima_value, stima_ev = _extract_contract_value_from_obj(dati.get("valore_stima_complessivo"))
         if stima_value is None:
@@ -4668,6 +5048,10 @@ def _build_panoramica_contract(result: Dict[str, Any], pages: List[Dict[str, Any
         "lots_overview": _build_lots_overview(lots),
         "aggregate_valuation": {
             "valore_stima_eur": sum(int(round(_as_float_or_none(l.get("valore_stima_eur")) or 0)) for l in lots if isinstance(l, dict)),
+            "deprezzamenti_eur": sum(
+                int(round(max(0.0, (_as_float_or_none(l.get("valore_stima_eur")) or 0) - (_as_float_or_none(l.get("prezzo_base_value")) or 0))))
+                for l in lots if isinstance(l, dict)
+            ),
             "prezzo_base_eur": sum(int(round(_as_float_or_none(l.get("prezzo_base_value")) or 0)) for l in lots if isinstance(l, dict)),
         } if len(lots) > 1 else None,
     }
@@ -4902,9 +5286,28 @@ def _normalize_legal_killers(result: Dict[str, Any], pages: List[Dict[str, Any]]
                 "sections": ["section_9_legal_killers"]
             }
             it["reason_it"] = it.get("reason_it") or f"Elemento da verificare: {it['killer']}"
+        bucket, score = _legal_relevance_profile(it.get("killer", ""))
+        it["decision_bucket"] = bucket
+        it["decision_score"] = score
         normalized.append(it)
 
+    normalized.sort(key=lambda item: (-int(item.get("decision_score", 0)), str(item.get("killer", ""))))
     section["items"] = normalized
+
+    lots = result.get("lots") if isinstance(result.get("lots"), list) else []
+    lot_driven_top_items = _build_multi_lot_top_legal_items(lots, pages)
+    if lot_driven_top_items:
+        section["top_items"] = lot_driven_top_items
+        return
+
+    section["top_items"] = [
+        item for item in normalized
+        if (
+            str(item.get("decision_bucket")) != "BACKGROUND_NOTE"
+            and isinstance(item.get("evidence"), list)
+            and len(item.get("evidence")) > 0
+        )
+    ][:10]
 
 def _to_iso(value: Any) -> Optional[str]:
     dt = _parse_dt(value)
@@ -6752,6 +7155,7 @@ def create_fallback_analysis(file_name: str, case_id: str, run_id: str, pages: L
     
     result = {
         "schema_version": "nexodify_perizia_scan_v2",
+        "detail_scope": "LOT_FIRST" if len(extracted_lots) > 1 else ("BENE_FIRST" if len(beni_list) > 1 else "SINGLE_ASSET"),
         "run": {
             "run_id": run_id,
             "generated_at_utc": datetime.now(timezone.utc).isoformat(),
@@ -8286,6 +8690,9 @@ async def analyze_perizia(request: Request, file: UploadFile = File(...)):
         result["decision_rapida_narrated"] = narrated_payload
     else:
         result.pop("decision_rapida_narrated", None)
+    case_aware_narration = _build_case_aware_narration_payload(result)
+    if case_aware_narration:
+        result["decision_rapida_narrated"] = case_aware_narration
     logger.info(f"[{request_id}] narrator status={narrator_meta.get('status')} enabled={narrator_meta.get('enabled')}")
     result["debug"] = debug_obj
     logger.info(f"[{request_id}] assemble_output analysis_id={analysis_id}")

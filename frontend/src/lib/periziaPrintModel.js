@@ -300,6 +300,44 @@ const buildClientFacingDriver = (semaforo, decision) => {
 const buildCostBuckets = (result, panoramicaContract) => {
   const moneyBox = result.section_3_money_box?.items ? result.section_3_money_box : (result.money_box || {});
   const valuation = panoramicaContract?.valuation_waterfall || {};
+  if (safeRender(moneyBox?.policy, '').toUpperCase() === 'LOT_CONSERVATIVE') {
+    const lotItemsSource = Array.isArray(moneyBox?.lots) ? moneyBox.lots : [];
+    const flatQualitativeItems = lotItemsSource.flatMap((lot) => {
+      const lotNumber = safeRender(lot?.lot_number, '');
+      const items = Array.isArray(lot?.items)
+        ? lot.items
+        : (Array.isArray(lot?.burdens) ? lot.burdens : []);
+      return items.map((item, index) => ({
+        key: `lot-${lotNumber || 'x'}-${index}`,
+        label: lotNumber ? `Lotto ${lotNumber} - ${safeRender(item?.label_it || item?.label || item?.title, 'Voce qualitativa')}` : safeRender(item?.label_it || item?.label || item?.title, 'Voce qualitativa'),
+        amount: 'Non quantificato',
+        note: safeRender(item?.note_it || item?.note || item?.detail || item?.burden_type || "Oneri potenziali a carico dell'acquirente, non quantificati nella perizia.", ''),
+        evidence: getPrimaryEvidence(item?.evidence, lot?.evidence),
+      }));
+    });
+    const rootQualitativeItems = flatQualitativeItems.length > 0
+      ? flatQualitativeItems
+      : (Array.isArray(moneyBox?.items) ? moneyBox.items : []).map((item, index) => ({
+          key: `qual-${index}`,
+          label: [
+            safeRender(item?.lot_number, '') ? `Lotto ${safeRender(item?.lot_number, '')}` : '',
+            safeRender(item?.label_it || item?.label || item?.title, 'Voce qualitativa')
+          ].filter(Boolean).join(' - '),
+          amount: 'Non quantificato',
+          note: safeRender(item?.note_it || item?.note || item?.detail || "Oneri potenziali a carico dell'acquirente, non quantificati nella perizia.", ''),
+          evidence: getPrimaryEvidence(item?.evidence),
+        }));
+    return {
+      valuationAdjustments: {
+        amount: formatMoney(valuation.deprezzamenti_eur),
+        evidence: getPrimaryEvidence(valuation?.evidence?.deprezzamenti_eur),
+        note: 'Deprezzamento di perizia: catena economica del lotto, non tabella di extra-costi.',
+      },
+      scenarioRange: '',
+      explicitCostMentions: rootQualitativeItems,
+      nexodifyEstimateItems: [],
+    };
+  }
   const items = Array.isArray(moneyBox.items) ? moneyBox.items : [];
   const canonical = items.filter((item) => /^[A-H]$/i.test(safeRender(item?.code || item?.voce, '')));
   const explicitMap = new Map();
@@ -351,7 +389,9 @@ const buildCostBuckets = (result, panoramicaContract) => {
 
 const buildLegalItems = (result) => {
   const fieldStates = result.field_states || {};
-  const section9 = Array.isArray(result.section_9_legal_killers?.items) ? result.section_9_legal_killers.items : [];
+  const section9 = Array.isArray(result.section_9_legal_killers?.top_items) && result.section_9_legal_killers.top_items.length > 0
+    ? result.section_9_legal_killers.top_items
+    : (Array.isArray(result.section_9_legal_killers?.items) ? result.section_9_legal_killers.items : []);
   const items = [];
   const isWeakLegalFallback = (title, detail, evidence) => {
     const combined = `${normalizeComparableText(title)} ${normalizeComparableText(detail)}`;
@@ -402,7 +442,64 @@ const buildLegalItems = (result) => {
   return items;
 };
 
+const buildSharedRightsNote = (lot) => {
+  if (!lot || typeof lot !== 'object') return '';
+  const direct = safeRender(
+    pickFirstNonEmpty(
+      lot?.shared_rights_note,
+      lot?.shared_rights,
+      lot?.quota_note,
+      lot?.note_diritto,
+      lot?.notes_diritto
+    ),
+    ''
+  ).trim();
+  if (direct) return direct;
+  const riskNotes = Array.isArray(lot?.risk_notes) ? lot.risk_notes : [];
+  const match = riskNotes.find((note) => {
+    const text = safeRender(note, '').toLowerCase();
+    return text.includes('stradella') || text.includes('strada privata') || text.includes('quota 1/4') || text.includes('corte comune');
+  });
+  return safeRender(match, '').trim();
+};
+
 const buildDetails = (result) => {
+  const detailScope = safeRender(result.detail_scope, '').toUpperCase();
+  const lots = Array.isArray(result.lots) ? result.lots : [];
+  if (detailScope === 'LOT_FIRST' && lots.length > 1) {
+    return lots.map((lot, index) => {
+      const evidenceObj = lot?.evidence && typeof lot.evidence === 'object' ? lot.evidence : {};
+      const subordinateBeni = Array.isArray(lot?.beni)
+        ? lot.beni.map((bene, beneIndex) => [
+            bene?.bene_number ? `Bene ${bene.bene_number}` : `Bene ${beneIndex + 1}`,
+            safeRender(bene?.tipologia, ''),
+            safeRender(pickFirstNonEmpty(bene?.ubicazione, bene?.indirizzo, bene?.short_location), ''),
+          ].filter(Boolean).join(' - '))
+        : [];
+      const sharedRightsNote = buildSharedRightsNote(lot);
+      return {
+        key: `lot-${lot?.lot_number || index + 1}`,
+        title: `Lotto ${lot?.lot_number || index + 1}${safeRender(lot?.tipologia, '') ? ` - ${safeRender(lot?.tipologia, '')}` : ''}`,
+        location: safeRender(lot?.ubicazione, ''),
+        piano: '',
+        superficie: safeRender(lot?.superficie_mq, '') ? `${safeRender(lot?.superficie_mq, '')} mq` : '',
+        valoreStima: formatMoney(lot?.valore_stima_eur),
+        topEvidence: getPrimaryEvidence(evidenceObj?.ubicazione, evidenceObj?.tipologia, evidenceObj?.superficie, evidenceObj?.valore_stima),
+        detailRows: [
+          { label: 'Diritto reale', value: safeRender(lot?.diritto_reale, ''), evidence: getPrimaryEvidence(evidenceObj?.diritto_reale) },
+          { label: 'Quota / diritti condivisi', value: sharedRightsNote, evidence: getPrimaryEvidence(evidenceObj?.diritto_reale, evidenceObj?.note) },
+          { label: 'Prezzo base', value: safeRender(lot?.prezzo_base_eur, ''), evidence: getPrimaryEvidence(evidenceObj?.prezzo_base) },
+          { label: 'Stato occupativo', value: safeRender(lot?.occupancy_status || lot?.stato_occupativo, ''), evidence: getPrimaryEvidence(evidenceObj?.occupancy_status) },
+          { label: 'Catasto', value: formatCatastoCompact(lot?.catasto) || safeRender(lot?.catasto, ''), evidence: getPrimaryEvidence(evidenceObj?.catasto) },
+          { label: 'Stato conservativo', value: safeRender(lot?.stato_conservativo, ''), evidence: getPrimaryEvidence(evidenceObj?.stato_conservativo) },
+          { label: 'Rischi principali', value: Array.isArray(lot?.risk_notes) ? lot.risk_notes.map((note) => safeRender(note, '')).filter(Boolean).slice(0, 3).join(' | ') : '', evidence: getPrimaryEvidence(evidenceObj?.note) },
+          { label: 'Beni subordinati', value: subordinateBeni.join(' | '), evidence: [] },
+        ].filter((row) => row.value),
+        impiantiRows: [],
+        declarationRows: [],
+      };
+    });
+  }
   const panoramicaContract = result.panoramica_contract || {};
   const contractBeni = Array.isArray(panoramicaContract.lot_composition) ? panoramicaContract.lot_composition : [];
   const sourceBeni = Array.isArray(result.beni) ? result.beni : (Array.isArray(result.lots?.[0]?.beni) ? result.lots[0].beni : []);
@@ -590,16 +687,48 @@ export const buildPeriziaPrintReportModel = (rawAnalysis) => {
   const result = analysis.result || {};
   const reportHeader = result.report_header?.procedure ? result.report_header : (result.case_header || {});
   const semaforo = result.section_1_semaforo_generale?.status ? result.section_1_semaforo_generale : (result.semaforo_generale || {});
+  const narratedDecision = result.decision_rapida_narrated && typeof result.decision_rapida_narrated === 'object'
+    ? result.decision_rapida_narrated
+    : {};
   const decision = result.decision_rapida_client || result.section_2_decisione_rapida || {};
   const summary = result.summary_for_client || {};
   const panoramicaContract = result.panoramica_contract || {};
   const lotSummary = panoramicaContract.lot_summary || {};
   const valuation = panoramicaContract.valuation_waterfall || {};
-  const lotComposition = Array.isArray(panoramicaContract.lot_composition) ? panoramicaContract.lot_composition : [];
+  const lotComposition = Array.isArray(panoramicaContract.lots_overview) && panoramicaContract.lots_overview.length > 0
+    ? panoramicaContract.lots_overview
+    : (Array.isArray(panoramicaContract.lot_composition) ? panoramicaContract.lot_composition : []);
   const details = buildDetails(result);
   const costBuckets = buildCostBuckets(result, panoramicaContract);
   const legalItems = buildLegalItems(result);
   const flags = buildFlags(result);
+  const coverSummaryIt = safeRender(
+    pickFirstNonEmpty(
+      narratedDecision.it,
+      decision.summary_it,
+      summary.summary_it
+    ),
+    ''
+  );
+  const overviewDecisionIt = safeRender(
+    pickFirstNonEmpty(
+      narratedDecision.it,
+      decision.summary_it,
+      summary.summary_it
+    ),
+    ''
+  );
+  const coverAddress = safeRender(
+    pickFirstNonEmpty(
+      lotSummary.ubicazione,
+      lotSummary.address?.value,
+      lotSummary.address,
+      reportHeader.address?.value,
+      reportHeader.address?.full,
+      reportHeader.address
+    ),
+    MISSING_TEXT
+  );
 
   return {
     title: safeRender(analysis.case_title || analysis.file_name, 'Analisi Perizia'),
@@ -609,13 +738,13 @@ export const buildPeriziaPrintReportModel = (rawAnalysis) => {
       procedura: safeRender(reportHeader.procedure?.value || reportHeader.procedure || lotSummary.procedura, MISSING_TEXT),
       tribunale: safeRender(reportHeader.tribunale?.value || reportHeader.tribunale || lotSummary.tribunale, MISSING_TEXT),
       lotto: safeRender(reportHeader.lotto?.value || reportHeader.lotto || lotSummary.lotto_label, MISSING_TEXT),
-      indirizzo: safeRender(reportHeader.address?.value || reportHeader.address?.full || reportHeader.address, MISSING_TEXT),
+      indirizzo: coverAddress,
       semaforo: safeRender(semaforo.status_label || semaforo.status_it || semaforo.status, 'AMBER'),
-      summaryIt: safeRender(summary.summary_it || decision.summary_it, ''),
+      summaryIt: coverSummaryIt,
     },
     overview: {
       driver: buildClientFacingDriver(semaforo, decision),
-      decisionIt: safeRender(decision.summary_it, ''),
+      decisionIt: overviewDecisionIt,
       metrics: [
         { label: 'Numero lotti', value: safeRender(panoramicaContract.lots_count, '') },
         { label: 'Valore di stima', value: formatMoney(valuation.valore_stima_eur) },
@@ -625,13 +754,15 @@ export const buildPeriziaPrintReportModel = (rawAnalysis) => {
       ].filter((item) => item.value && item.value !== MISSING_TEXT),
       composition: lotComposition.map((item, index) => ({
         key: `overview-bene-${index}`,
-        title: item?.bene_number ? `Bene ${item.bene_number}` : `Bene ${index + 1}`,
+        title: item?.lot_number
+          ? `Lotto ${item.lot_number}`
+          : (item?.bene_number ? `Bene ${item.bene_number}` : `Bene ${index + 1}`),
         type: safeRender(item?.tipologia, ''),
-        location: safeRender(item?.short_location, ''),
+        location: safeRender(item?.short_location || item?.ubicazione, ''),
         piano: safeRender(item?.piano, ''),
         superficie: parseNumericEuro(item?.superficie_mq) !== null ? `${parseNumericEuro(item?.superficie_mq).toLocaleString('it-IT')} mq` : '',
-        valoreStima: formatMoney(item?.valore_stima_eur),
-        evidence: getPrimaryEvidence(item?.evidence?.location_piano, item?.evidence?.valore_stima_eur),
+        valoreStima: formatMoney(item?.valore_stima_eur || item?.prezzo_base_eur),
+        evidence: getPrimaryEvidence(item?.evidence?.location_piano, item?.evidence?.valore_stima_eur, item?.evidence?.ubicazione),
       })),
     },
     costs: costBuckets,

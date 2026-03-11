@@ -823,6 +823,8 @@ const AnalysisResult = () => {
   // Get lots array for multi-lot support
   const lots = result.lots || [];
   const isMultiLot = lots.length > 1;
+  const detailScope = safeRender(result.detail_scope, '').toUpperCase();
+  const isLotFirstDetailScope = detailScope === 'LOT_FIRST' && isMultiLot;
   const selectedLot = lots[selectedLotIndex] || null;
   
   // Map to display variables - prioritize NEW format, fallback to OLD
@@ -862,7 +864,12 @@ const AnalysisResult = () => {
   const occupativo = section6.status ? section6 : (result.stato_occupativo || {});
   const conservativo = section7.condizione_generale ? section7 : (result.stato_conservativo || {});
   const formalita = section8.ipoteche ? section8 : (result.formalita || {});
-  const legalKillers = section9.items ? section9 : (result.legal_killers_checklist || {});
+  const legalKillerItems = Array.isArray(section9.top_items) && section9.top_items.length > 0
+    ? section9.top_items
+    : (Array.isArray(section9.items) ? section9.items : []);
+  const legalKillers = legalKillerItems.length > 0
+    ? { ...section9, items: legalKillerItems }
+    : (result.legal_killers_checklist || {});
   const indice = section10.prezzo_base ? section10 : (result.indice_di_convenienza || {});
   const redFlags = Array.isArray(section11) && section11.length > 0 ? section11 : 
                    (Array.isArray(result.red_flags_operativi) ? result.red_flags_operativi : []);
@@ -1365,6 +1372,107 @@ const AnalysisResult = () => {
       ]
     };
   });
+
+  const buildSharedRightsNote = (lot) => {
+    if (!lot || typeof lot !== 'object') return '';
+    const directNote = safeRender(
+      pickFirstNonEmpty(
+        lot.shared_rights_note,
+        lot.shared_rights,
+        lot.quota_note,
+        lot.note_diritto,
+        lot.notes_diritto
+      ),
+      ''
+    ).trim();
+    if (directNote) return directNote;
+    const notes = Array.isArray(lot.risk_notes) ? lot.risk_notes : [];
+    const match = notes.find((note) => {
+      const text = safeRender(note, '').toLowerCase();
+      return text.includes('stradella') || text.includes('strada privata') || text.includes('quota 1/4') || text.includes('corte comune');
+    });
+    return safeRender(match, '').trim();
+  };
+
+  const detailsLotCards = isLotFirstDetailScope
+    ? lots.map((lot, idx) => {
+        const lotEvidence = lot?.evidence && typeof lot.evidence === 'object' ? lot.evidence : {};
+        const lotRiskNotes = Array.isArray(lot?.risk_notes)
+          ? lot.risk_notes.map((note) => safeRender(note, '')).filter(Boolean)
+          : [];
+        const subordinateBeni = Array.isArray(lot?.beni)
+          ? lot.beni.map((bene, beneIdx) => ({
+              key: `${lot?.lot_number || idx + 1}-${bene?.bene_number || beneIdx + 1}`,
+              title: bene?.bene_number ? `Bene ${bene.bene_number}` : `Bene ${beneIdx + 1}`,
+              value: [
+                safeRender(bene?.tipologia, ''),
+                safeRender(pickFirstNonEmpty(bene?.ubicazione, bene?.indirizzo, bene?.short_location), ''),
+                safeRender(bene?.superficie_mq, '')
+                  ? `${safeRender(bene?.superficie_mq, '')} mq`
+                  : ''
+              ].filter(Boolean).join(' | ')
+            })).filter((bene) => bene.value)
+          : [];
+        const sharedRightsNote = buildSharedRightsNote(lot);
+        return {
+          key: `lot-detail-${lot?.lot_number || idx + 1}`,
+          lotNumber: lot?.lot_number || idx + 1,
+          tipologia: safeRender(lot?.tipologia, ''),
+          shortLocation: safeRender(lot?.ubicazione, ''),
+          superficie: safeRender(lot?.superficie_mq, '')
+            ? `${safeRender(lot?.superficie_mq, '')} mq`
+            : '',
+          valoreStima: lot?.valore_stima_eur ? formatMoney(lot.valore_stima_eur) : '',
+          prezzoBase: lot?.prezzo_base_eur || '',
+          topEvidence: mergeEvidence(
+            lotEvidence?.ubicazione,
+            lotEvidence?.tipologia,
+            lotEvidence?.superficie,
+            lotEvidence?.valore_stima,
+            lotEvidence?.prezzo_base
+          ),
+          detailRows: [
+            {
+              key: 'diritto_reale',
+              label: 'Diritto reale',
+              value: normalizeDettagliValue(lot?.diritto_reale),
+              evidence: mergeEvidence(lotEvidence?.diritto_reale)
+            },
+            {
+              key: 'shared_rights',
+              label: 'Quota / diritti condivisi',
+              value: sharedRightsNote,
+              evidence: mergeEvidence(lotEvidence?.diritto_reale, lotEvidence?.note)
+            },
+            {
+              key: 'stato_occupativo',
+              label: 'Stato occupativo',
+              value: normalizeDettagliValue(lot?.occupancy_status || lot?.stato_occupativo),
+              evidence: mergeEvidence(lotEvidence?.occupancy_status)
+            },
+            {
+              key: 'catasto',
+              label: 'Catasto',
+              value: normalizeDettagliValue(safeRender(lot?.catasto, '')),
+              evidence: mergeEvidence(lotEvidence?.catasto)
+            },
+            {
+              key: 'stato_conservativo',
+              label: 'Stato conservativo',
+              value: normalizeDettagliValue(lot?.stato_conservativo),
+              evidence: mergeEvidence(lotEvidence?.stato_conservativo)
+            },
+            {
+              key: 'note_rischio',
+              label: 'Note / rischi principali',
+              value: lotRiskNotes.slice(0, 3).join(' | '),
+              evidence: mergeEvidence(lotEvidence?.note)
+            }
+          ].filter((row) => row.value),
+          subordinateBeni
+        };
+      })
+    : [];
 
   const contractWaterfall = panoramicaContract?.valuation_waterfall && typeof panoramicaContract.valuation_waterfall === 'object'
     ? panoramicaContract.valuation_waterfall
@@ -3063,14 +3171,18 @@ const AnalysisResult = () => {
 
             {/* Per-bene detailed cards (contract-first, deterministic only) */}
             <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-6">
-              <h2 className="text-xl font-serif font-bold text-zinc-100 mb-4">Dettagli per bene</h2>
-              {detailsBeneCards.length > 0 ? (
+              <h2 className="text-xl font-serif font-bold text-zinc-100 mb-4">
+                {isLotFirstDetailScope ? 'Dettagli per lotto' : 'Dettagli per bene'}
+              </h2>
+              {(isLotFirstDetailScope ? detailsLotCards.length > 0 : detailsBeneCards.length > 0) ? (
                 <div className="space-y-4">
-                  {detailsBeneCards.map((card) => (
+                  {(isLotFirstDetailScope ? detailsLotCards : detailsBeneCards).map((card) => (
                     <div key={card.key} className="p-4 bg-zinc-950 rounded-lg border border-zinc-800">
                       <div className="flex items-start justify-between gap-3">
                         <p className="text-sm font-semibold text-zinc-100">
-                          Bene {card.beneNumber}{card.tipologia ? ` - ${card.tipologia}` : ''}
+                          {isLotFirstDetailScope
+                            ? `Lotto ${card.lotNumber}${card.tipologia ? ` - ${card.tipologia}` : ''}`
+                            : `Bene ${card.beneNumber}${card.tipologia ? ` - ${card.tipologia}` : ''}`}
                         </p>
                         {card.topEvidence.length > 0 && <EvidenceBadge evidence={card.topEvidence} />}
                       </div>
@@ -3078,11 +3190,13 @@ const AnalysisResult = () => {
                       <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mt-3">
                         {card.shortLocation && (
                           <div>
-                            <p className="text-[11px] uppercase tracking-wide text-zinc-500">Short location</p>
+                            <p className="text-[11px] uppercase tracking-wide text-zinc-500">
+                              {isLotFirstDetailScope ? 'Ubicazione' : 'Short location'}
+                            </p>
                             <p className="text-sm text-zinc-200">{card.shortLocation}</p>
                           </div>
                         )}
-                        {card.piano && (
+                        {!isLotFirstDetailScope && card.piano && (
                           <div>
                             <p className="text-[11px] uppercase tracking-wide text-zinc-500">Piano</p>
                             <p className="text-sm text-zinc-200">{card.piano}</p>
@@ -3096,8 +3210,16 @@ const AnalysisResult = () => {
                         )}
                         {card.valoreStima && (
                           <div>
-                            <p className="text-[11px] uppercase tracking-wide text-zinc-500">Valore stima bene</p>
+                            <p className="text-[11px] uppercase tracking-wide text-zinc-500">
+                              {isLotFirstDetailScope ? 'Valore di stima lotto' : 'Valore stima bene'}
+                            </p>
                             <p className="text-sm font-mono text-gold">{card.valoreStima}</p>
+                          </div>
+                        )}
+                        {isLotFirstDetailScope && card.prezzoBase && (
+                          <div>
+                            <p className="text-[11px] uppercase tracking-wide text-zinc-500">Prezzo base</p>
+                            <p className="text-sm font-mono text-emerald-300">{card.prezzoBase}</p>
                           </div>
                         )}
                       </div>
@@ -3116,7 +3238,21 @@ const AnalysisResult = () => {
                         ))}
                       </div>
 
-                      {Array.isArray(card.declarationRows) && card.declarationRows.some((row) => row?.value) && (
+                      {isLotFirstDetailScope && Array.isArray(card.subordinateBeni) && card.subordinateBeni.length > 0 && (
+                        <div className="mt-4 pt-3 border-t border-zinc-800">
+                          <p className="text-[11px] uppercase tracking-wide text-zinc-500 mb-3">Beni subordinati</p>
+                          <div className="space-y-2">
+                            {card.subordinateBeni.map((bene) => (
+                              <div key={`${card.key}_${bene.key}`} className="p-3 rounded border border-zinc-800 bg-zinc-900/70">
+                                <p className="text-sm text-zinc-100 font-medium">{bene.title}</p>
+                                <p className="text-sm text-zinc-300 mt-1">{bene.value}</p>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+
+                      {!isLotFirstDetailScope && Array.isArray(card.declarationRows) && card.declarationRows.some((row) => row?.value) && (
                         <div className="mt-4 pt-3 border-t border-zinc-800">
                           <p className="text-[11px] uppercase tracking-wide text-zinc-500 mb-3">Certificazioni / Dichiarazioni</p>
                           <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
@@ -3135,7 +3271,7 @@ const AnalysisResult = () => {
                         </div>
                       )}
 
-                      {Array.isArray(card.impiantiRows) && card.impiantiRows.some((row) => row?.value) && (
+                      {!isLotFirstDetailScope && Array.isArray(card.impiantiRows) && card.impiantiRows.some((row) => row?.value) && (
                         <div className="mt-4 pt-3 border-t border-zinc-800">
                           <div className="flex items-center justify-between gap-2 mb-3">
                             <p className="text-[11px] uppercase tracking-wide text-zinc-500">Impianti</p>
@@ -3162,7 +3298,11 @@ const AnalysisResult = () => {
                   ))}
                 </div>
               ) : (
-                <p className="text-zinc-500">Beni non disponibili nell'estrazione corrente.</p>
+                <p className="text-zinc-500">
+                  {isLotFirstDetailScope
+                    ? 'Lotti non disponibili nell\'estrazione corrente.'
+                    : 'Beni non disponibili nell\'estrazione corrente.'}
+                </p>
               )}
             </div>
 
