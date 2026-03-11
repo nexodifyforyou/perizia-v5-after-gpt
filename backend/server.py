@@ -9,6 +9,7 @@ import logging
 import re
 import shutil
 import statistics
+import copy
 from pathlib import Path
 from pydantic import BaseModel, Field, ConfigDict
 from typing import List, Optional, Dict, Any, Tuple
@@ -19,7 +20,7 @@ import httpx
 import ipaddress
 import contextlib
 from fastapi.openapi.utils import get_openapi
-from PyPDF2 import PdfReader
+from PyPDF2 import PdfReader, PdfWriter
 import pdfplumber
 import io
 import hashlib
@@ -2047,6 +2048,40 @@ def _synthesize_decisione_rapida(result: Dict[str, Any], states: Dict[str, Any])
     blockers = semaforo.get("top_blockers") if isinstance(semaforo.get("top_blockers"), list) else []
     blocker_labels = [str(b.get("label_it")) for b in blockers if isinstance(b, dict) and b.get("label_it")]
 
+    lots = result.get("lots") if isinstance(result.get("lots"), list) else []
+    if len(lots) > 1:
+        lot_fragments: List[str] = []
+        for lot in lots[:3]:
+            if not isinstance(lot, dict):
+                continue
+            lot_num = lot.get("lot_number")
+            tipo = _normalize_headline_text(str(lot.get("tipologia") or "")) or "bene"
+            ubic = _normalize_headline_text(str(lot.get("ubicazione") or "")) or "ubicazione da verificare"
+            notes = lot.get("risk_notes") if isinstance(lot.get("risk_notes"), list) else []
+            focus = notes[0] if notes else "verifica tecnico-legale dedicata"
+            lot_fragments.append(f"Lotto {lot_num} ({tipo}, {ubic}): {focus}")
+        if lot_fragments:
+            summary_it = (
+                f"Caso multi-lotto ({len(lots)} lotti). "
+                + " | ".join(lot_fragments)
+                + ". Verifica obbligatoria lotto per lotto prima di offerta."
+            )
+            summary_en = (
+                f"Multi-lot case ({len(lots)} lots). "
+                + " | ".join(lot_fragments)
+                + ". Mandatory lot-by-lot legal/technical verification before bidding."
+            )
+            decision = result.get("decision_rapida_client", {}) if isinstance(result.get("decision_rapida_client"), dict) else {}
+            decision["summary_it"] = summary_it
+            decision["summary_en"] = summary_en
+            decision["driver_rosso"] = blockers[:3]
+            result["decision_rapida_client"] = decision
+            section2 = result.get("section_2_decisione_rapida", {}) if isinstance(result.get("section_2_decisione_rapida"), dict) else {}
+            section2["summary_it"] = summary_it
+            section2["summary_en"] = summary_en
+            result["section_2_decisione_rapida"] = section2
+            return
+
     critical = [
         ("stato_occupativo", "stato occupativo"),
         ("regolarita_urbanistica", "regolarità urbanistica"),
@@ -2121,6 +2156,13 @@ def _detect_spese_status_for_market(result: Dict[str, Any]) -> str:
 
 def _apply_market_ranges_to_money_box(result: Dict[str, Any]) -> None:
     money_box = result.get("money_box", {}) if isinstance(result.get("money_box"), dict) else {}
+    if str(money_box.get("policy") or "").upper() in {"LOT_CONSERVATIVE", "CONSERVATIVE"}:
+        money_box.pop("total_extra_costs_range", None)
+        result["money_box"] = money_box
+        section3 = result.get("section_3_money_box")
+        if isinstance(section3, dict):
+            section3.pop("total_extra_costs_range", None)
+        return
     items = money_box.get("items", [])
     if not isinstance(items, list):
         return
@@ -2526,11 +2568,597 @@ def _ensure_lot_contract(lot: Dict[str, Any], lot_number: int) -> Dict[str, Any]
     lot_obj.setdefault("superficie_mq", "TBD")
     lot_obj.setdefault("diritto_reale", "TBD")
     evidence = lot_obj.get("evidence") if isinstance(lot_obj.get("evidence"), dict) else {}
-    for key in ("lotto", "prezzo_base", "ubicazione", "superficie", "diritto_reale"):
+    for key in ("lotto", "prezzo_base", "ubicazione", "superficie", "diritto_reale", "tipologia", "valore_stima", "deprezzamento"):
         if not isinstance(evidence.get(key), list):
             evidence[key] = []
     lot_obj["evidence"] = evidence
     return lot_obj
+
+
+def _get_page_number(page_obj: Dict[str, Any]) -> int:
+    try:
+        val = page_obj.get("page_number", page_obj.get("page", 0))
+        return int(val or 0)
+    except Exception:
+        return 0
+
+
+def _normalize_page_numbers(pages: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    normalized: List[Dict[str, Any]] = []
+    for idx, page in enumerate(pages, start=1):
+        if not isinstance(page, dict):
+            continue
+        row = dict(page)
+        page_num = _get_page_number(row)
+        if page_num <= 0:
+            page_num = idx
+        row["page_number"] = page_num
+        normalized.append(row)
+    return normalized
+
+
+def _detect_lot_start_pages(pages: List[Dict[str, Any]]) -> Dict[int, Dict[str, Any]]:
+    starts: Dict[int, Dict[str, Any]] = {}
+    for page_obj in pages:
+        page_num = _get_page_number(page_obj)
+        text = str(page_obj.get("text", "") or "")
+        if page_num <= 0 or not text:
+            continue
+        for line in text.splitlines():
+            line_clean = _normalize_headline_text(line)
+            if not line_clean:
+                continue
+            m = re.search(r"\bLOTTO\s+(\d+)\b", line_clean, re.I)
+            if not m:
+                continue
+            is_explicit_page_header = bool(
+                re.search(r"^\d+\s+di\s+\d+\s+LOTTO\s+\d+\b", line_clean, re.I)
+                and "..." not in line_clean
+                and "…" not in line_clean
+            )
+            if _is_toc_like_line(line_clean) and not is_explicit_page_header:
+                continue
+            lot_num = int(m.group(1))
+            if lot_num in starts:
+                continue
+            match_local = re.search(r"\bLOTTO\s+\d+\b", line, re.I)
+            if match_local:
+                ev = _build_evidence(
+                    text,
+                    page_num,
+                    max(0, text.find(line)),
+                    max(0, text.find(line)) + len(line),
+                    field_key="lotto",
+                    anchor_hint=match_local.group(0),
+                )
+            else:
+                ev = {"page": page_num, "quote": line_clean}
+            starts[lot_num] = {
+                "lot": lot_num,
+                "page": page_num,
+                "quote": str(ev.get("quote") or line_clean).strip(),
+                "evidence": [ev] if isinstance(ev, dict) else [],
+            }
+    return starts
+
+
+def _build_lot_sections(pages: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    normalized_pages = _normalize_page_numbers(pages)
+    starts = _detect_lot_start_pages(normalized_pages)
+    if not starts:
+        return []
+
+    ordered_lots = sorted(starts.keys())
+    max_page = max([_get_page_number(p) for p in normalized_pages] or [1])
+    sections: List[Dict[str, Any]] = []
+    for idx, lot_num in enumerate(ordered_lots):
+        start_page = int(starts[lot_num]["page"])
+        next_start = int(starts[ordered_lots[idx + 1]]["page"]) if idx + 1 < len(ordered_lots) else (max_page + 1)
+        end_page = max(start_page, next_start - 1)
+        section_pages = [p for p in normalized_pages if start_page <= _get_page_number(p) <= end_page]
+        sections.append(
+            {
+                "lot_number": lot_num,
+                "start_page": start_page,
+                "end_page": end_page,
+                "pages": section_pages,
+                "header_evidence": starts[lot_num].get("evidence", []),
+                "header_quote": starts[lot_num].get("quote"),
+            }
+        )
+    return sections
+
+
+def _find_regex_in_specific_pages(
+    pages: List[Dict[str, Any]],
+    pattern: str,
+    flags: int = 0,
+    field_key: Optional[str] = None,
+) -> Optional[Dict[str, Any]]:
+    rx = re.compile(pattern, flags)
+    for page_obj in pages:
+        text = str(page_obj.get("text", "") or "")
+        page_num = _get_page_number(page_obj)
+        if not text or page_num <= 0:
+            continue
+        m = rx.search(text)
+        if not m:
+            continue
+        line_start, line_end = _line_bounds(text, m.start(), m.end())
+        line = text[line_start:line_end]
+        if _is_toc_like_line(line):
+            continue
+        return _build_evidence(
+            text,
+            page_num,
+            line_start,
+            line_end,
+            field_key=field_key,
+            anchor_hint=m.group(0),
+        )
+    return None
+
+
+def _extract_lot_risk_notes(section_pages: List[Dict[str, Any]]) -> List[str]:
+    filtered_chunks: List[str] = []
+    for page_obj in section_pages:
+        text = str(page_obj.get("text", "") or "")
+        upper = text.upper()
+        if "SCHEMA RIASSUNTIVO" in upper or "RIEPILOGO BANDO D'ASTA" in upper:
+            continue
+        if re.search(r"\bBene\s+N[°º]?\s*\d+\b", text, re.I):
+            continue
+        filtered_chunks.append(text)
+    text = "\n".join(filtered_chunks) if filtered_chunks else "\n".join(str(p.get("text", "") or "") for p in section_pages[:8])
+    low = text.lower()
+    notes: List[str] = []
+    checks = [
+        ("non agibile / abitabilità assente", [r"non\s+risulta\s+agibil", r"non\s+[èe]\s+presente\s+l['’]?abitabilit"]),
+        ("non conformità / difformità catastali-edilizie", [r"non\s+sussiste\s+corrispondenza\s+catastale", r"difformit", r"accertamento\s+di\s+conformit"]),
+        ("servitù e accesso su stradella privata", [r"stradella", r"servit[ùu]\s+di\s+passo", r"via\s+della\s+colonna", r"attraversamento\s+condutture", r"fognatura", r"passo\s+pedonale", r"passo\s+carrabile"]),
+        ("infiltrazioni / umidità", [r"infiltr", r"umidit"]),
+        ("fabbricato in costruzione / lavori sospesi", [r"in\s+costruzione", r"lavori\s+sospes", r"al\s+grezzo"]),
+        ("presenza fibro-cemento / amianto", [r"fibro[\s\-]?cement", r"amianto", r"eternit"]),
+        ("condizioni conservative critiche", [r"pessim", r"rovina", r"degrad", r"cattive\s+condizioni"]),
+    ]
+    for label, patterns in checks:
+        if label == "servitù e accesso su stradella privata" and re.search(r"servit[ùu]\s+attive\s+e\s+passive", low, re.I):
+            if not any(re.search(pat, low, re.I) for pat in patterns[1:]):
+                continue
+        if any(re.search(pat, low, re.I) for pat in patterns):
+            notes.append(label)
+    return notes
+
+
+def _build_lots_overview(lots: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    out: List[Dict[str, Any]] = []
+    for idx, raw_lot in enumerate(lots):
+        if not isinstance(raw_lot, dict):
+            continue
+        lot_number = raw_lot.get("lot_number") or (idx + 1)
+        prezzo = _as_float_or_none(raw_lot.get("prezzo_base_value"))
+        stima = _as_float_or_none(raw_lot.get("valore_stima_eur"))
+        dep_pct = _parse_percent_value(raw_lot.get("deprezzamento_percentuale"))
+        if dep_pct is None:
+            dep_pct = _parse_percent_value(raw_lot.get("deprezzamento_percent"))
+        dep_value = None
+        if isinstance(stima, (int, float)) and isinstance(prezzo, (int, float)):
+            dep_value = max(0.0, stima - prezzo)
+        out.append({
+            "lot_number": int(lot_number),
+            "lotto_label": f"Lotto {int(lot_number)}",
+            "comune": _normalize_headline_text(str(raw_lot.get("comune", "") or "")) or None,
+            "ubicazione": _normalize_headline_text(str(raw_lot.get("ubicazione", "") or "")) or None,
+            "tipologia": _normalize_headline_text(str(raw_lot.get("tipologia", "") or "")) or None,
+            "valore_stima_eur": int(round(stima)) if isinstance(stima, (int, float)) else None,
+            "deprezzamento_percent": round(float(dep_pct), 2) if isinstance(dep_pct, (int, float)) else None,
+            "deprezzamento_eur": int(round(dep_value)) if isinstance(dep_value, (int, float)) else None,
+            "prezzo_base_eur": int(round(prezzo)) if isinstance(prezzo, (int, float)) else None,
+        })
+    return out
+
+
+def _build_conservative_money_box_for_lots(result: Dict[str, Any]) -> None:
+    lots = result.get("lots") if isinstance(result.get("lots"), list) else []
+    if len(lots) <= 1:
+        return
+
+    burden_templates = {
+        1: [
+            "Bonifica / smaltimento fibro-cemento a carico acquirente",
+            "Regolarizzazione edilizia e catastale da verificare lotto per lotto",
+        ],
+        2: [
+            "Regolarizzazioni edilizie / accertamento di conformità da verificare",
+            "Gestione servitù, accesso privato e corte comune",
+            "Pratiche strutturali incomplete a carico acquirente",
+        ],
+        3: [
+            "Costi di completamento lavori e messa in sicurezza",
+            "Impermeabilizzazione / ripristini e lattonerie",
+            "Regolarizzazione edilizia e strutturale da verificare",
+        ],
+    }
+
+    lot_rows: List[Dict[str, Any]] = []
+    items: List[Dict[str, Any]] = []
+    for idx, raw_lot in enumerate(lots):
+        if not isinstance(raw_lot, dict):
+            continue
+        lot_number = int(raw_lot.get("lot_number") or (idx + 1))
+        stima = _as_float_or_none(raw_lot.get("valore_stima_eur"))
+        prezzo = _as_float_or_none(raw_lot.get("prezzo_base_value"))
+        dep_pct = _parse_percent_value(raw_lot.get("deprezzamento_percentuale"))
+        if dep_pct is None:
+            dep_pct = _parse_percent_value(raw_lot.get("deprezzamento_percent"))
+        lot_rows.append({
+            "lot_number": lot_number,
+            "lotto_label": f"Lotto {lot_number}",
+            "valore_stima_eur": int(round(stima)) if isinstance(stima, (int, float)) else None,
+            "deprezzamento_percent": round(float(dep_pct), 2) if isinstance(dep_pct, (int, float)) else None,
+            "prezzo_base_eur": int(round(prezzo)) if isinstance(prezzo, (int, float)) else None,
+        })
+        for burden in burden_templates.get(lot_number, []):
+            items.append({
+                "code": f"LOT_{lot_number}_BURDEN",
+                "lot_number": lot_number,
+                "label_it": burden,
+                "label_en": burden,
+                "type": "QUALITATIVE",
+                "stima_euro": "NON_QUANTIFICATO",
+                "stima_nota": "Onere non quantificato in perizia; verifica tecnica/legale obbligatoria",
+                "source": "PERIZIA_QUALITATIVE",
+            })
+
+    money_box = {
+        "policy": "LOT_CONSERVATIVE",
+        "lots": lot_rows,
+        "items": items,
+        "total_extra_costs": {
+            "min": "TBD",
+            "max": "TBD",
+            "nota": "Costi extra non quantificati in perizia; mantenuti solo oneri qualitativi buyer-borne",
+        },
+    }
+    result["money_box"] = money_box
+    result["section_3_money_box"] = copy.deepcopy(money_box)
+
+
+def _parse_percent_value(value: Any) -> Optional[float]:
+    if isinstance(value, (int, float)):
+        return float(value)
+    if isinstance(value, str):
+        cleaned = value.strip().replace("%", "").replace(" ", "")
+        if not cleaned:
+            return None
+        if re.fullmatch(r"\d+(?:[.,]\d+)?", cleaned):
+            try:
+                return float(cleaned.replace(",", "."))
+            except Exception:
+                return None
+    return None
+
+
+def _sanitize_lot_conservative_outputs(result: Dict[str, Any]) -> None:
+    money_box = result.get("money_box", {}) if isinstance(result.get("money_box"), dict) else {}
+    if str(money_box.get("policy") or "").upper() != "LOT_CONSERVATIVE":
+        return
+
+    lots = result.get("lots") if isinstance(result.get("lots"), list) else []
+    rebuilt_rows: List[Dict[str, Any]] = []
+    for idx, raw_lot in enumerate(lots):
+        if not isinstance(raw_lot, dict):
+            continue
+        lot_number = int(raw_lot.get("lot_number") or (idx + 1))
+        rebuilt_rows.append({
+            "lot_number": lot_number,
+            "lotto_label": f"Lotto {lot_number}",
+            "valore_stima_eur": int(round(_as_float_or_none(raw_lot.get("valore_stima_eur")) or 0)) or None,
+            "deprezzamento_percent": _parse_percent_value(raw_lot.get("deprezzamento_percentuale"))
+            if _parse_percent_value(raw_lot.get("deprezzamento_percentuale")) is not None
+            else _parse_percent_value(raw_lot.get("deprezzamento_percent")),
+            "prezzo_base_eur": int(round(_as_float_or_none(raw_lot.get("prezzo_base_value")) or 0)) or None,
+        })
+    money_box["lots"] = rebuilt_rows
+    money_box["items"] = [
+        item for item in money_box.get("items", [])
+        if isinstance(item, dict) and str(item.get("source") or "").upper() == "PERIZIA_QUALITATIVE"
+    ]
+    money_box.pop("total_extra_costs_range", None)
+    money_box["total_extra_costs"] = {
+        "min": "TBD",
+        "max": "TBD",
+        "nota": "Costi extra non quantificati in perizia; mantenuti solo oneri qualitativi buyer-borne",
+    }
+    result["money_box"] = money_box
+    result["section_3_money_box"] = copy.deepcopy(money_box)
+
+
+def _augment_legal_killers_from_lots(legal_killers_items: List[Dict[str, Any]], lots: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    existing = {str(item.get("killer") or "").strip().lower() for item in legal_killers_items if isinstance(item, dict)}
+    note_map = {
+        "non agibile / abitabilità assente": ("Non agibile", "SI"),
+        "non conformità / difformità catastali-edilizie": ("Non regolare / difformità", "SI"),
+        "presenza fibro-cemento / amianto": ("Fibro-cemento / amianto", "SI"),
+        "servitù e accesso su stradella privata": ("Servitù / accesso privato", "GIALLO"),
+        "infiltrazioni / umidità": ("Infiltrazioni", "GIALLO"),
+        "fabbricato in costruzione / lavori sospesi": ("Fabbricato in costruzione / lavori sospesi", "SI"),
+        "condizioni conservative critiche": ("Condizioni conservative critiche", "GIALLO"),
+    }
+    for lot in lots:
+        if not isinstance(lot, dict):
+            continue
+        lot_num = int(lot.get("lot_number") or 0)
+        evidence_map = lot.get("evidence", {}) if isinstance(lot.get("evidence"), dict) else {}
+        base_evidence = (
+            evidence_map.get("note")
+            or evidence_map.get("lotto")
+            or evidence_map.get("ubicazione")
+            or []
+        )
+        base_evidence = _normalize_contract_evidence_list(base_evidence, max_items=2)
+        for note in lot.get("risk_notes", []) if isinstance(lot.get("risk_notes"), list) else []:
+            mapped = note_map.get(str(note))
+            if not mapped:
+                continue
+            killer_label = f"Lotto {lot_num}: {mapped[0]}"
+            if killer_label.lower() in existing:
+                continue
+            legal_killers_items.append({
+                "killer": killer_label,
+                "status": mapped[1],
+                "action": "Verifica obbligatoria",
+                "evidence": copy.deepcopy(base_evidence),
+            })
+            existing.add(killer_label.lower())
+    return legal_killers_items
+
+
+def _enrich_lots_from_sections(
+    lots: List[Dict[str, Any]],
+    pages: List[Dict[str, Any]],
+    beni: Optional[List[Dict[str, Any]]] = None,
+) -> List[Dict[str, Any]]:
+    normalized_pages = _normalize_page_numbers(pages)
+    if not lots:
+        return lots
+
+    sections = _build_lot_sections(normalized_pages)
+    section_by_lot = {int(s["lot_number"]): s for s in sections}
+    schema_pages = [p for p in normalized_pages if "SCHEMA RIASSUNTIVO" in str(p.get("text", "") or "").upper()]
+    if schema_pages:
+        min_schema_page = min(_get_page_number(p) for p in schema_pages)
+        schema_window_max = min_schema_page + 4
+        schema_pages = [p for p in normalized_pages if min_schema_page <= _get_page_number(p) <= schema_window_max]
+    else:
+        schema_pages = [p for p in normalized_pages if "RIEPILOGO BANDO D'ASTA" in str(p.get("text", "") or "").upper()]
+
+    bene_by_number: Dict[int, Dict[str, Any]] = {}
+    for b in (beni or []):
+        if not isinstance(b, dict):
+            continue
+        try:
+            n = int(b.get("bene_number"))
+        except Exception:
+            continue
+        bene_by_number[n] = b
+
+    for idx, raw_lot in enumerate(lots):
+        lot_num = int(raw_lot.get("lot_number") or (idx + 1))
+        lot = _ensure_lot_contract(raw_lot, lot_num)
+        section = section_by_lot.get(lot_num, {})
+        lot_pages = section.get("pages", []) if isinstance(section, dict) else []
+        if lot_pages and not lot["evidence"].get("lotto"):
+            lot["evidence"]["lotto"] = section.get("header_evidence", [])
+
+        context_pages = schema_pages or lot_pages or normalized_pages
+        price_ev = _find_regex_in_specific_pages(
+            context_pages,
+            rf"LOTTO\s+{lot_num}\s*-\s*PREZZO\s+BASE\s*D['’]?ASTA[:\s]*€?\s*([0-9]{{1,3}}(?:[.\s][0-9]{{3}})*(?:,[0-9]{{2}})?)",
+            re.I,
+            field_key="prezzo_base_asta",
+        )
+        if not price_ev:
+            price_ev = _find_regex_in_specific_pages(
+                normalized_pages,
+                rf"LOTTO\s+{lot_num}[^\n]{{0,120}}PREZZO\s+BASE\s*D['’]?ASTA[:\s]*€?\s*([0-9]{{1,3}}(?:[.\s][0-9]{{3}})*(?:,[0-9]{{2}})?)",
+                re.I,
+                field_key="prezzo_base_asta",
+            )
+        if not price_ev:
+            price_ev = _find_regex_in_specific_pages(
+                lot_pages or normalized_pages,
+                r"Prezzo\s+base\s+d['’]?asta[:\s]*€?\s*([0-9]{1,3}(?:[.\s][0-9]{3})*(?:,[0-9]{2})?)",
+                re.I,
+                field_key="prezzo_base_asta",
+            )
+        if price_ev:
+            quote = str(price_ev.get("quote", "") or "")
+            m_price = re.search(r"€?\s*([0-9]{1,3}(?:[.\s][0-9]{3})*(?:,[0-9]{2})?)", quote)
+            parsed = _parse_euro_number(m_price.group(1) if m_price else quote)
+            if parsed is not None:
+                lot["prezzo_base_value"] = float(parsed)
+                lot["prezzo_base_eur"] = f"€ {parsed:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+                lot["evidence"]["prezzo_base"] = [price_ev]
+
+        stima_ev = _find_regex_in_specific_pages(
+            lot_pages or normalized_pages,
+            r"Valore\s+di\s+stima\s+del\s+bene[:\s]*€?\s*([0-9]{1,3}(?:\.[0-9]{3})*(?:,[0-9]{2})?)",
+            re.I,
+            field_key="valore_stima",
+        )
+        if stima_ev:
+            stima_val = _parse_euro_number(str(stima_ev.get("quote", "")))
+            if stima_val is not None:
+                lot["valore_stima_eur"] = int(round(float(stima_val)))
+                lot["evidence"]["valore_stima"] = [stima_ev]
+
+        dep_ev = _find_regex_in_specific_pages(
+            lot_pages or normalized_pages,
+            r"Deprezzament[oi][\s\S]{0,240}?([0-9]{1,2}(?:,[0-9]{1,2})?)\s*%",
+            re.I,
+            field_key="deprezzamento",
+        )
+        if not dep_ev:
+            dep_ev = _find_regex_in_specific_pages(
+                lot_pages or normalized_pages,
+                r"([0-9]{1,2}(?:,[0-9]{1,2})?)\s*%\s*(?:Valore\s+finale|Prezzo\s+base|deprezz)",
+                re.I,
+                field_key="deprezzamento",
+            )
+        if dep_ev:
+            m_dep = re.search(r"([0-9]{1,2}(?:,[0-9]{1,2})?)\s*%", str(dep_ev.get("quote", "")))
+            if m_dep:
+                lot["deprezzamento_percentuale"] = m_dep.group(1).replace(",", ".")
+                lot["evidence"]["deprezzamento"] = [dep_ev]
+        if lot.get("deprezzamento_percentuale") in (None, "", "TBD"):
+            stima_val = _as_float_or_none(lot.get("valore_stima_eur"))
+            prezzo_val = _as_float_or_none(lot.get("prezzo_base_value"))
+            if isinstance(stima_val, (int, float)) and isinstance(prezzo_val, (int, float)) and stima_val > 0 and prezzo_val > 0:
+                dep_pct = round(max(0.0, min(99.0, (1.0 - (prezzo_val / stima_val)) * 100.0)), 2)
+                if dep_pct >= 1.0:
+                    lot["deprezzamento_percentuale"] = f"{dep_pct:.2f}"
+
+        superficie_ev = _find_regex_in_specific_pages(
+            lot_pages or normalized_pages,
+            r"Superficie\s+convenzionale[:\s]*([0-9]{1,4}(?:,[0-9]{1,2})?)\s*mq",
+            re.I,
+            field_key="superficie_catastale",
+        )
+        if superficie_ev:
+            m_sup = re.search(r"([0-9]{1,4}(?:,[0-9]{1,2})?)\s*mq", str(superficie_ev.get("quote", "")), re.I)
+            if m_sup:
+                try:
+                    lot["superficie_mq"] = float(m_sup.group(1).replace(".", "").replace(",", "."))
+                except Exception:
+                    lot["superficie_mq"] = m_sup.group(1)
+                lot["evidence"]["superficie"] = [superficie_ev]
+
+        bene = bene_by_number.get(lot_num)
+        if isinstance(bene, dict):
+            tipologia = _normalize_headline_text(str(bene.get("tipologia") or ""))
+            if tipologia:
+                lot["tipologia"] = f"immobile: {tipologia}" if not tipologia.lower().startswith("immobile:") else tipologia
+                if isinstance(bene.get("evidence"), dict):
+                    lot["evidence"]["tipologia"] = bene.get("evidence", {}).get("tipologia", []) or lot["evidence"]["tipologia"]
+            short_location = _normalize_headline_text(str(bene.get("short_location") or ""))
+            if short_location:
+                lot["ubicazione"] = short_location
+                if isinstance(bene.get("evidence"), dict):
+                    lot["evidence"]["ubicazione"] = bene.get("evidence", {}).get("location_piano", []) or lot["evidence"]["ubicazione"]
+            if bene.get("superficie_mq") not in (None, "") and lot.get("superficie_mq") in ("TBD", None):
+                lot["superficie_mq"] = bene.get("superficie_mq")
+            if bene.get("valore_stima_eur") not in (None, "") and lot.get("valore_stima_eur") in (None, ""):
+                try:
+                    lot["valore_stima_eur"] = int(round(float(bene.get("valore_stima_eur"))))
+                except Exception:
+                    pass
+            catasto = bene.get("catasto")
+            if isinstance(catasto, dict) and catasto:
+                lot["catasto"] = catasto
+
+        dir_ev = _find_regex_in_specific_pages(
+            lot_pages or normalized_pages,
+            r"Diritto\s+reale[:\s]*([^\n]{3,120})",
+            re.I,
+            field_key="diritto_reale",
+        )
+        if dir_ev:
+            m_dir = re.search(r"Diritto\s+reale[:\s]*([^\n]{3,120})", str(dir_ev.get("quote", "")), re.I)
+            if m_dir:
+                lot["diritto_reale"] = _normalize_headline_text(m_dir.group(1))
+                lot["evidence"]["diritto_reale"] = [dir_ev]
+
+        risk_notes = _extract_lot_risk_notes(lot_pages)
+        if risk_notes:
+            lot["risk_notes"] = risk_notes[:8]
+
+        if lot.get("deprezzamento_percentuale") in (None, "", "TBD"):
+            stima_val = _as_float_or_none(lot.get("valore_stima_eur"))
+            prezzo_val = _as_float_or_none(lot.get("prezzo_base_value"))
+            if isinstance(stima_val, (int, float)) and isinstance(prezzo_val, (int, float)) and stima_val > 0 and prezzo_val > 0:
+                dep_pct = round(max(0.0, min(99.0, (1.0 - (prezzo_val / stima_val)) * 100.0)), 2)
+                if dep_pct >= 1.0:
+                    lot["deprezzamento_percentuale"] = f"{dep_pct:.2f}"
+
+        lots[idx] = lot
+    return lots
+
+
+def _assign_beni_to_lots(lots: List[Dict[str, Any]], beni: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    if not isinstance(lots, list) or not lots:
+        return lots
+    if not isinstance(beni, list):
+        beni = []
+
+    if len(lots) <= 1:
+        if lots and isinstance(lots[0], dict):
+            lots[0]["beni"] = beni
+        return lots
+
+    lot_map: Dict[int, Dict[str, Any]] = {}
+    for lot in lots:
+        if not isinstance(lot, dict):
+            continue
+        try:
+            lot_num = int(lot.get("lot_number"))
+        except Exception:
+            continue
+        lot["beni"] = []
+        lot_map[lot_num] = lot
+
+    for bene in beni:
+        if not isinstance(bene, dict):
+            continue
+        target_lot = None
+        try:
+            bene_num = int(bene.get("bene_number"))
+            target_lot = lot_map.get(bene_num)
+        except Exception:
+            target_lot = None
+
+        if target_lot is None:
+            loc = _normalize_token(bene.get("short_location"))
+            for lot in lots:
+                if not isinstance(lot, dict):
+                    continue
+                lot_loc = _normalize_token(lot.get("ubicazione"))
+                if lot_loc and loc and any(token in loc for token in lot_loc.split(" ")[:2]):
+                    target_lot = lot
+                    break
+
+        if target_lot is None:
+            target_lot = lots[0] if isinstance(lots[0], dict) else None
+        if isinstance(target_lot, dict):
+            bucket = target_lot.get("beni")
+            if not isinstance(bucket, list):
+                bucket = []
+            bucket.append(bene)
+            target_lot["beni"] = bucket
+    return lots
+
+
+def _build_lot_index_entries(lots: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    lot_index: List[Dict[str, Any]] = []
+    for lot in lots:
+        if not isinstance(lot, dict):
+            continue
+        try:
+            lot_num = int(lot.get("lot_number"))
+        except Exception:
+            continue
+        lotto_ev = lot.get("evidence", {}).get("lotto", []) if isinstance(lot.get("evidence"), dict) else []
+        first_ev = lotto_ev[0] if isinstance(lotto_ev, list) and lotto_ev else {}
+        lot_index.append(
+            {
+                "lot": lot_num,
+                "prezzo": lot.get("prezzo_base_eur"),
+                "ubicazione": str(lot.get("ubicazione") or "")[:80],
+                "page": first_ev.get("page"),
+                "quote": first_ev.get("quote"),
+            }
+        )
+    return lot_index
 
 def _build_fallback_lot_from_pages(pages: List[Dict[str, Any]]) -> Dict[str, Any]:
     lot = _ensure_lot_contract({}, 1)
@@ -2636,186 +3264,18 @@ async def _persist_failed_analysis(
                 logger.warning(f"Failed to write offline failed analysis: {write_err}")
 
 def _extract_lots_from_schema_riassuntivo(pages_in: List[Dict]) -> List[Dict[str, Any]]:
-    import re
-    lots = []
-    schema_pages = []
-    for p in pages_in:
-        text = str(p.get("text", "") or "")
-        if "SCHEMA RIASSUNTIVO" in text.upper():
-            schema_pages.append(p)
-    if not schema_pages:
-        for p in pages_in:
-            text = str(p.get("text", "") or "")
-            if "LOTTO" in text.upper() and "PREZZO BASE" in text.upper():
-                schema_pages.append(p)
-        if not schema_pages:
-            schema_pages = pages_in
+    sections = _build_lot_sections(pages_in)
+    if not sections:
+        return []
 
-    all_lot_numbers = set()
-    for p in pages_in:
-        text = str(p.get("text", "") or "")
-        for m in re.finditer(r"\bLOTTO\s+(\d+)\b", text, flags=re.I):
-            all_lot_numbers.add(int(m.group(1)))
+    lots: List[Dict[str, Any]] = []
+    for section in sections:
+        lot_num = int(section.get("lot_number") or (len(lots) + 1))
+        lot_data = _ensure_lot_contract({}, lot_num)
+        lot_data["evidence"]["lotto"] = section.get("header_evidence", []) if isinstance(section.get("header_evidence"), list) else []
+        lots.append(lot_data)
 
-    # Handle LOTTO UNICO if no numeric lots detected
-    if not all_lot_numbers:
-        for p in schema_pages:
-            text = str(p.get("text", "") or "")
-            if re.search(r"\bLOTTO\s+UNICO\b", text, re.I):
-                all_lot_numbers.add(1)
-                break
-
-    for lot_num in sorted(all_lot_numbers):
-        lot_data = {
-            "lot_number": lot_num,
-            "prezzo_base_eur": "TBD",
-            "prezzo_base_value": None,
-            "ubicazione": "TBD",
-            "diritto_reale": "TBD",
-            "superficie_mq": "TBD",
-            "tipologia": "TBD",
-            "evidence": {
-                "lotto": [],
-                "prezzo_base": [],
-                "ubicazione": [],
-                "superficie": [],
-                "diritto_reale": [],
-                "tipologia": [],
-            }
-        }
-        for p in schema_pages:
-            text = str(p.get("text", "") or "")
-            page_num = p.get("page_number", 0)
-            lot_pattern = rf"\bLOTTO\s+{lot_num}\b"
-            if not re.search(lot_pattern, text, re.I):
-                # Allow LOTTO UNICO for lot_num=1
-                if not (lot_num == 1 and re.search(r"\bLOTTO\s+UNICO\b", text, re.I)):
-                    continue
-            lot_block_match = re.search(
-                rf"(LOTTO\s+{lot_num}\b.*?)(?=LOTTO\s+\d+\b|$)",
-                text, re.I | re.DOTALL
-            )
-            if not lot_block_match and lot_num == 1:
-                lot_block_match = re.search(
-                    r"(LOTTO\s+UNICO\b.*?)(?=LOTTO\s+\d+\b|$)",
-                    text, re.I | re.DOTALL
-                )
-            block = lot_block_match.group(1) if lot_block_match else text
-            block_start = text.find(block) if block else 0
-            if block_start < 0:
-                block_start = 0
-            prezzo_match = re.search(
-                r"PREZZO\s+BASE\s+D['']?ASTA[:\s]*€?\s*([\d.,]+)",
-                block, re.I
-            )
-            if prezzo_match and lot_data["prezzo_base_eur"] == "TBD":
-                prezzo_str = prezzo_match.group(1).strip()
-                lot_data["prezzo_base_eur"] = f"€ {prezzo_str}"
-                try:
-                    val = prezzo_str.replace(".", "").replace(",", ".")
-                    lot_data["prezzo_base_value"] = float(val)
-                except Exception:
-                    pass
-                abs_start = block_start + prezzo_match.start()
-                abs_end = block_start + prezzo_match.end()
-                lot_data["evidence"]["prezzo_base"] = [
-                    _build_evidence(
-                        text,
-                        page_num,
-                        abs_start,
-                        abs_end,
-                        field_key="prezzo_base_asta",
-                        anchor_hint=prezzo_match.group(0),
-                    )
-                ]
-
-            if not lot_data["evidence"].get("lotto"):
-                lotto_match = re.search(r"\bLOTTO\s+UNICO\b|\bLOTTO\s+\d+\b", text, re.I)
-                if lotto_match:
-                    lot_data["evidence"]["lotto"] = [
-                        _build_evidence(
-                            text,
-                            page_num,
-                            lotto_match.start(),
-                            lotto_match.end(),
-                            field_key="lotto",
-                            anchor_hint=lotto_match.group(0),
-                        )
-                    ]
-
-            ubic_match = re.search(r"Ubicazione[:\s]*([^\n]+)", block, re.I)
-            if ubic_match and lot_data["ubicazione"] == "TBD":
-                lot_data["ubicazione"] = _normalize_address_value(ubic_match.group(1).strip()[:200])
-                abs_start = block_start + ubic_match.start()
-                abs_end = block_start + ubic_match.end()
-                lot_data["evidence"]["ubicazione"] = [_build_evidence(text, page_num, abs_start, abs_end)]
-
-            diritto_match = re.search(r"Diritto\s+reale[:\s]*([^\n]+)", block, re.I)
-            if diritto_match and lot_data["diritto_reale"] == "TBD":
-                lot_data["diritto_reale"] = _normalize_headline_text(diritto_match.group(1).strip()[:100])
-                abs_start = block_start + diritto_match.start()
-                abs_end = block_start + diritto_match.end()
-                lot_data["evidence"]["diritto_reale"] = [
-                    _build_evidence(
-                        text,
-                        page_num,
-                        abs_start,
-                        abs_end,
-                        field_key="diritto_reale",
-                        anchor_hint=diritto_match.group(0),
-                    )
-                ]
-
-            sup_matches = list(re.finditer(r"Superficie[^\d\n]{0,40}([\d.,]+)\s*mq", block, re.I))
-            if sup_matches and lot_data["superficie_mq"] == "TBD":
-                best = None
-                best_val = -1
-                for sm in sup_matches:
-                    raw = sm.group(1)
-                    try:
-                        val = float(raw.replace(".", "").replace(",", "."))
-                    except Exception:
-                        continue
-                    if val > best_val:
-                        best_val = val
-                        best = sm
-                if best:
-                    lot_data["superficie_mq"] = best_val
-                    abs_start = block_start + best.start()
-                    abs_end = block_start + best.end()
-                    lot_data["evidence"]["superficie"] = [
-                        _build_evidence(
-                            text,
-                            page_num,
-                            abs_start,
-                            abs_end,
-                            field_key="superficie_catastale",
-                            anchor_hint=best.group(0),
-                        )
-                    ]
-
-            tipo_match = re.search(r"Tipologia[:\s]*([^\n]+)", block, re.I)
-            if tipo_match and lot_data["tipologia"] == "TBD":
-                lot_data["tipologia"] = _normalize_headline_text(tipo_match.group(1).strip()[:100])
-                abs_start = block_start + tipo_match.start()
-                abs_end = block_start + tipo_match.end()
-                lot_data["evidence"]["tipologia"] = [_build_evidence(text, page_num, abs_start, abs_end)]
-
-        # Add per-field low confidence notes where evidence is missing
-        for field_key, ev_key in (
-            ("prezzo_base_eur", "prezzo_base"),
-            ("ubicazione", "ubicazione"),
-            ("diritto_reale", "diritto_reale"),
-            ("superficie_mq", "superficie"),
-            ("tipologia", "tipologia"),
-        ):
-            if not lot_data["evidence"].get(ev_key):
-                lot_data.setdefault("field_confidence", {})[field_key] = {
-                    "confidence": "LOW",
-                    "note": "USER MUST VERIFY"
-                }
-        lots.append(_ensure_lot_contract(lot_data, lot_num))
-    return lots
+    return _enrich_lots_from_sections(lots, pages_in, beni=None)
 
 def _extract_beni_from_pages(pages_in: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     import re
@@ -3553,8 +4013,30 @@ def _scan_legal_killers(pages_in: List[Dict]) -> List[Dict[str, Any]]:
             for m in re.finditer(pattern, text, re.I):
                 key = f"{title}_{page_num}"
                 if key not in seen:
-                    seen.add(key)
+                    context = text[max(0, m.start()-180):min(len(text), m.end()+140)]
                     snippet = text[max(0, m.start()-30):min(len(text), m.end()+100)]
+                    if _is_toc_like_quote(snippet) or _is_toc_like_line(snippet):
+                        continue
+                    low = snippet.lower()
+                    low_context = context.lower()
+                    if title == "Usi civici":
+                        if re.search(r"non\s+risultan[oa]?\s+presenti\s+diritti\s+demaniali\s+o\s+usi\s+civici", low_context, re.I):
+                            continue
+                        if re.search(r"non\s+risultan[oa]?\s+presenti\s+usi\s+civici", low_context, re.I):
+                            continue
+                        if re.search(r"non\s+risultan[oa]?.{0,100}usi\s+civici", low_context, re.I):
+                            continue
+                        if re.search(r"non\s+sono\s+presenti\s+diritti\s+demaniali\s+o\s+usi\s+civici", low_context, re.I):
+                            continue
+                        if re.search(r"non\s+sono\s+presenti.{0,100}usi\s+civici", low_context, re.I):
+                            continue
+                    if title.startswith("Servitù") or title == "Servitù rilevata":
+                        if "servitù, censo, livello, usi civici" in low:
+                            if not re.search(r"passo|carrabile|pedonale|stradella|fognatura|utenz|attraversamento", low, re.I):
+                                continue
+                        if re.search(r"servit[ùu]\s+attive\s+e\s+passive", low, re.I) and not re.search(r"stradella|passo|carrabile|pedonale|fognatura|utenz", low, re.I):
+                            continue
+                    seen.add(key)
                     killers.append({
                         "title": title,
                         "severity": severity,
@@ -3945,7 +4427,10 @@ def _build_panoramica_contract(result: Dict[str, Any], pages: List[Dict[str, Any
         lotto_ev = _normalize_contract_evidence_list(report_header.get("lotto", {}).get("evidence", []))
     if lotto_label is None:
         lotto_label = case_header.get("lotto")
-    if not lotto_label and isinstance(selected_lot, dict) and selected_lot.get("lot_number"):
+    if len(lots) > 1 and isinstance(selected_lot, dict) and selected_lot.get("lot_number"):
+        lotto_label = f"Lotto {selected_lot.get('lot_number')}"
+        lotto_ev = _normalize_contract_evidence_list(selected_lot.get("evidence", {}).get("lotto", [])) if isinstance(selected_lot.get("evidence"), dict) else []
+    elif not lotto_label and isinstance(selected_lot, dict) and selected_lot.get("lot_number"):
         lotto_label = f"Lotto {selected_lot.get('lot_number')}"
 
     prezzo_value = None
@@ -4088,57 +4573,75 @@ def _build_panoramica_contract(result: Dict[str, Any], pages: List[Dict[str, Any
         })
 
     wf_from_pages = _extract_valuation_waterfall_from_pages(pages)
-    stima_value, stima_ev = _extract_contract_value_from_obj(dati.get("valore_stima_complessivo"))
-    if stima_value is None:
-        stima_value, stima_ev = _extract_contract_value_from_obj(section4.get("valore_stima_complessivo"))
+    if len(lots) > 1 and isinstance(selected_lot, dict):
+        stima_value = _as_float_or_none(selected_lot.get("valore_stima_eur"))
+        dep_pct = _parse_percent_value(selected_lot.get("deprezzamento_percentuale"))
+        if dep_pct is None:
+            dep_pct = _parse_percent_value(selected_lot.get("deprezzamento_percent"))
+        prezzo_wf_value = _as_float_or_none(selected_lot.get("prezzo_base_value"))
+        dep_value = None
+        if isinstance(stima_value, (int, float)) and isinstance(prezzo_wf_value, (int, float)):
+            dep_value = max(0.0, stima_value - prezzo_wf_value)
+        finale_value = prezzo_wf_value
+        selected_ev = selected_lot.get("evidence", {}) if isinstance(selected_lot.get("evidence"), dict) else {}
+        stima_ev = _normalize_contract_evidence_list(selected_ev.get("valore_stima", []))
+        prezzo_wf_ev = _normalize_contract_evidence_list(selected_ev.get("prezzo_base", []))
+        dep_ev = _normalize_contract_evidence_list(selected_ev.get("deprezzamento", []))
+        finale_ev = list(prezzo_wf_ev)
+        if dep_value is None and isinstance(dep_pct, (int, float)) and isinstance(stima_value, (int, float)):
+            dep_value = max(0.0, stima_value * (float(dep_pct) / 100.0))
+    else:
+        stima_value, stima_ev = _extract_contract_value_from_obj(dati.get("valore_stima_complessivo"))
+        if stima_value is None:
+            stima_value, stima_ev = _extract_contract_value_from_obj(section4.get("valore_stima_complessivo"))
 
-    dep_value, dep_ev = _parse_dep_total_from_obj(dati.get("deprezzamenti"))
-    if dep_value is None:
-        dep_value, dep_ev = _parse_dep_total_from_obj(section4.get("deprezzamenti"))
+        dep_value, dep_ev = _parse_dep_total_from_obj(dati.get("deprezzamenti"))
+        if dep_value is None:
+            dep_value, dep_ev = _parse_dep_total_from_obj(section4.get("deprezzamenti"))
 
-    finale_value, finale_ev = _extract_contract_value_from_obj(dati.get("valore_finale_stima"))
-    if finale_value is None:
-        finale_value, finale_ev = _extract_contract_value_from_obj(section4.get("valore_finale_stima"))
+        finale_value, finale_ev = _extract_contract_value_from_obj(dati.get("valore_finale_stima"))
+        if finale_value is None:
+            finale_value, finale_ev = _extract_contract_value_from_obj(section4.get("valore_finale_stima"))
 
-    prezzo_wf_value = lot_summary.get("prezzo_base_eur")
-    prezzo_wf_ev = lot_summary.get("evidence", {}).get("prezzo_base_eur", [])
+        prezzo_wf_value = lot_summary.get("prezzo_base_eur")
+        prezzo_wf_ev = lot_summary.get("evidence", {}).get("prezzo_base_eur", [])
 
-    if stima_value is None:
-        stima_value = wf_from_pages.get("valore_stima_eur")
-        stima_ev = wf_from_pages.get("evidence", {}).get("valore_stima_eur", [])
-    dep_from_pages = wf_from_pages.get("deprezzamenti_eur")
-    if dep_value is None or (
-        isinstance(dep_value, (int, float))
-        and dep_value <= 0
-        and isinstance(dep_from_pages, (int, float))
-        and dep_from_pages > 0
-    ):
-        dep_value = dep_from_pages
-        dep_ev = wf_from_pages.get("evidence", {}).get("deprezzamenti_eur", [])
-    if (dep_value is None or (isinstance(dep_value, (int, float)) and dep_value <= 0)) and dep_ev:
-        dep_nums: List[float] = []
-        seen_dep_num_keys = set()
-        for ev in dep_ev:
-            if not isinstance(ev, dict):
-                continue
-            quote = str(ev.get("quote", "") or "")
-            for m in re.finditer(r"([0-9][0-9\.\,\s]{0,18})\s*€", quote):
-                parsed = _parse_euro_number(m.group(1))
-                if parsed is None or parsed <= 0:
+        if stima_value is None:
+            stima_value = wf_from_pages.get("valore_stima_eur")
+            stima_ev = wf_from_pages.get("evidence", {}).get("valore_stima_eur", [])
+        dep_from_pages = wf_from_pages.get("deprezzamenti_eur")
+        if dep_value is None or (
+            isinstance(dep_value, (int, float))
+            and dep_value <= 0
+            and isinstance(dep_from_pages, (int, float))
+            and dep_from_pages > 0
+        ):
+            dep_value = dep_from_pages
+            dep_ev = wf_from_pages.get("evidence", {}).get("deprezzamenti_eur", [])
+        if (dep_value is None or (isinstance(dep_value, (int, float)) and dep_value <= 0)) and dep_ev:
+            dep_nums: List[float] = []
+            seen_dep_num_keys = set()
+            for ev in dep_ev:
+                if not isinstance(ev, dict):
                     continue
-                key = int(round(parsed))
-                if key in seen_dep_num_keys:
-                    continue
-                seen_dep_num_keys.add(key)
-                dep_nums.append(parsed)
-        if dep_nums:
-            dep_value = float(sum(dep_nums))
-    if finale_value is None:
-        finale_value = wf_from_pages.get("valore_finale_eur")
-        finale_ev = wf_from_pages.get("evidence", {}).get("valore_finale_eur", [])
-    if prezzo_wf_value is None:
-        prezzo_wf_value = wf_from_pages.get("prezzo_base_eur")
-        prezzo_wf_ev = wf_from_pages.get("evidence", {}).get("prezzo_base_eur", [])
+                quote = str(ev.get("quote", "") or "")
+                for m in re.finditer(r"([0-9][0-9\.\,\s]{0,18})\s*€", quote):
+                    parsed = _parse_euro_number(m.group(1))
+                    if parsed is None or parsed <= 0:
+                        continue
+                    key = int(round(parsed))
+                    if key in seen_dep_num_keys:
+                        continue
+                    seen_dep_num_keys.add(key)
+                    dep_nums.append(parsed)
+            if dep_nums:
+                dep_value = float(sum(dep_nums))
+        if finale_value is None:
+            finale_value = wf_from_pages.get("valore_finale_eur")
+            finale_ev = wf_from_pages.get("evidence", {}).get("valore_finale_eur", [])
+        if prezzo_wf_value is None:
+            prezzo_wf_value = wf_from_pages.get("prezzo_base_eur")
+            prezzo_wf_ev = wf_from_pages.get("evidence", {}).get("prezzo_base_eur", [])
 
     valuation_waterfall = {
         "valore_stima_eur": int(round(stima_value)) if isinstance(stima_value, (int, float)) else None,
@@ -4162,6 +4665,11 @@ def _build_panoramica_contract(result: Dict[str, Any], pages: List[Dict[str, Any
         "lot_summary": lot_summary,
         "lot_composition": lot_composition,
         "valuation_waterfall": valuation_waterfall,
+        "lots_overview": _build_lots_overview(lots),
+        "aggregate_valuation": {
+            "valore_stima_eur": sum(int(round(_as_float_or_none(l.get("valore_stima_eur")) or 0)) for l in lots if isinstance(l, dict)),
+            "prezzo_base_eur": sum(int(round(_as_float_or_none(l.get("prezzo_base_value")) or 0)) for l in lots if isinstance(l, dict)),
+        } if len(lots) > 1 else None,
     }
 
 def _apply_low_confidence(field: Dict[str, Any], field_key: str = "value") -> None:
@@ -4288,6 +4796,7 @@ def _normalize_legal_killers(result: Dict[str, Any], pages: List[Dict[str, Any]]
     if not isinstance(items, list):
         section["items"] = []
         return
+    page_text_by_num = {int(p.get("page_number", 0) or 0): str(p.get("text", "") or "") for p in pages if isinstance(p, dict)}
 
     status_map = {
         "VERDE": "VERDE",
@@ -4346,11 +4855,44 @@ def _normalize_legal_killers(result: Dict[str, Any], pages: List[Dict[str, Any]]
         seen = set()
         merged = []
         for ev in it.get("evidence", []):
+            if not isinstance(ev, dict):
+                continue
+            page = int(ev.get("page", 0) or 0)
+            quote = str(ev.get("quote", "") or "")
+            page_text = page_text_by_num.get(page, "")
+            start_offset = int(ev.get("start_offset", 0) or 0)
+            end_offset = int(ev.get("end_offset", 0) or 0)
+            context = quote
+            if page_text:
+                if end_offset <= start_offset:
+                    idx = page_text.find(quote)
+                    if idx >= 0:
+                        start_offset = idx
+                        end_offset = idx + len(quote)
+                if end_offset > start_offset:
+                    context = page_text[max(0, start_offset - 180):min(len(page_text), end_offset + 140)]
+            low_context = context.lower()
+            if _is_toc_like_quote(context) or _is_toc_like_line(context):
+                continue
+            killer_low = str(it.get("killer") or "").lower()
+            if "usi civici" in killer_low:
+                if re.search(r"non\s+risultan[oa]?.{0,120}(?:diritti\s+demaniali|usi\s+civici)", low_context, re.I):
+                    continue
+                if re.search(r"non\s+sono\s+presenti.{0,120}(?:diritti\s+demaniali|usi\s+civici)", low_context, re.I):
+                    continue
+                if not re.search(r"(gravat|present[ei]|esist|sussist).{0,80}usi\s+civici|usi\s+civici.{0,80}(gravat|present[ei]|esist|sussist)", low_context, re.I):
+                    continue
+            if "servit" in killer_low:
+                if "servitù, censo, livello, usi civici" in low_context and not re.search(r"passo|carrabile|pedonale|stradella|fognatura|utenz|attraversamento", low_context, re.I):
+                    continue
             sig = (ev.get("page"), ev.get("start_offset"), ev.get("end_offset"), ev.get("quote"))
             if sig not in seen:
                 seen.add(sig)
                 merged.append(ev)
         it["evidence"] = merged
+        killer_low = str(it.get("killer") or "").lower()
+        if not it["evidence"] and ("usi civici" in killer_low or "servit" in killer_low):
+            continue
         if not it["evidence"]:
             it["status"] = "DA_VERIFICARE"
             it["status_it"] = status_it_map["DA_VERIFICARE"]
@@ -6104,18 +6646,20 @@ def create_fallback_analysis(file_name: str, case_id: str, run_id: str, pages: L
     
     # Find prezzo base
     prezzo_base = 0
-    if extracted_lots and extracted_lots[0].get("prezzo_base_value", 0) > 0:
-        prezzo_base = extracted_lots[0]["prezzo_base_value"]
-    else:
-        prezzo_match = re.search(r'prezzo\s+base[^\d]*(\d[\d\.,]+)', text_lower)
-        if not prezzo_match:
-            prezzo_match = re.search(r'€\s*(\d[\d\.,]+)', text_lower)
-        if prezzo_match:
-            try:
-                prezzo_str = prezzo_match.group(1).replace('.', '').replace(',', '.')
-                prezzo_base = float(prezzo_str)
-            except:
-                pass
+    if extracted_lots:
+        first_price = _as_float_or_none(extracted_lots[0].get("prezzo_base_value"))
+        if isinstance(first_price, (int, float)) and first_price > 0:
+            prezzo_base = float(first_price)
+        else:
+            prezzo_match = re.search(r'prezzo\s+base[^\d]*(\d[\d\.,]+)', text_lower)
+            if not prezzo_match:
+                prezzo_match = re.search(r'€\s*(\d[\d\.,]+)', text_lower)
+            if prezzo_match:
+                try:
+                    prezzo_str = prezzo_match.group(1).replace('.', '').replace(',', '.')
+                    prezzo_base = float(prezzo_str)
+                except Exception:
+                    pass
     
     # Find superficie
     superficie = "NON SPECIFICATO IN PERIZIA"
@@ -6146,6 +6690,8 @@ def create_fallback_analysis(file_name: str, case_id: str, run_id: str, pages: L
 
     # Deterministic enrichments directly from pages
     beni_list = _extract_beni_from_pages(pages)
+    extracted_lots = _enrich_lots_from_sections(extracted_lots, pages, beni=beni_list)
+    extracted_lots = _assign_beni_to_lots(extracted_lots, beni_list)
     ape_state = _extract_ape_state(pages)
     dati_asta_state = _extract_dati_asta_state(pages)
 
@@ -6165,15 +6711,44 @@ def create_fallback_analysis(file_name: str, case_id: str, run_id: str, pages: L
         # For parity with estratto summary, use the most specific minimum sanabile amount.
         sanatoria_best = sorted(sanatoria_candidates, key=lambda x: x[0])[0]
     
+    lot_sections = _build_lot_sections(pages)
+    lot_by_page: Dict[int, int] = {}
+    for sec in lot_sections:
+        lot_num = int(sec.get("lot_number") or 0)
+        for p in sec.get("pages", []) if isinstance(sec.get("pages"), list) else []:
+            page_num = _get_page_number(p)
+            if page_num > 0 and lot_num > 0:
+                lot_by_page[page_num] = lot_num
+
     # Build legal killers from deterministic scan
     legal_killers_items = []
     for lk in detected_legal_killers:
+        lk_page = int(lk.get("page") or 0)
+        lk_lot = lot_by_page.get(lk_page)
+        killer_label = lk["title"] if lk_lot is None else f"Lotto {lk_lot}: {lk['title']}"
         legal_killers_items.append({
-            "killer": lk["title"],
+            "killer": killer_label,
             "status": "SI" if lk["severity"] == "ROSSO" else "GIALLO",
             "action": "Verifica obbligatoria",
             "evidence": [{"page": lk["page"], "quote": lk["quote"], "start_offset": lk.get("start_offset"), "end_offset": lk.get("end_offset"), "bbox": None}]
         })
+    legal_killers_items = _augment_legal_killers_from_lots(legal_killers_items, extracted_lots)
+
+    lot_red_flags: List[Dict[str, Any]] = []
+    if len(extracted_lots) > 1:
+        for lot in extracted_lots:
+            lot_num = lot.get("lot_number")
+            notes = lot.get("risk_notes") if isinstance(lot.get("risk_notes"), list) else []
+            for note in notes[:3]:
+                lot_red_flags.append(
+                    {
+                        "code": f"LOT_{lot_num}_RISK",
+                        "severity": "AMBER",
+                        "flag_it": f"Lotto {lot_num}: {note}",
+                        "flag_en": f"Lot {lot_num}: {note}",
+                        "action_it": "Verifica tecnica/legale dedicata al lotto",
+                    }
+                )
     
     result = {
         "schema_version": "nexodify_perizia_scan_v2",
@@ -6201,7 +6776,7 @@ def create_fallback_analysis(file_name: str, case_id: str, run_id: str, pages: L
             "is_multi_lot": is_multi_lot,
             "generated_at": datetime.now(timezone.utc).isoformat()
         },
-        "lot_index": [{"lot": lot["lot_number"], "prezzo": lot["prezzo_base_eur"], "ubicazione": lot["ubicazione"][:50], "page": (lot.get("evidence", {}).get("lotto", [{}])[0].get("page") if lot.get("evidence", {}).get("lotto") else None), "quote": (lot.get("evidence", {}).get("lotto", [{}])[0].get("quote") if lot.get("evidence", {}).get("lotto") else None)} for lot in extracted_lots],
+        "lot_index": _build_lot_index_entries(extracted_lots),
         "page_coverage_log": [{"page": i+1, "summary": "Fallback - manual review required"} for i in range(len(pages))],
         "semaforo_generale": {
             "status": "AMBER",
@@ -6309,7 +6884,7 @@ def create_fallback_analysis(file_name: str, case_id: str, run_id: str, pages: L
             "dry_read_it": "Prezzo base da verificare con la perizia originale",
             "dry_read_en": "Base price must be verified with the original appraisal"
         },
-        "red_flags_operativi": [
+        "red_flags_operativi": lot_red_flags + [
             {"code": "MANUAL_REVIEW", "severity": "AMBER", "flag_it": "Revisione manuale raccomandata", "flag_en": "Manual review recommended", "action_it": "Verificare tutti i dati con la perizia originale"}
         ],
         "checklist_pre_offerta": [
@@ -6341,7 +6916,11 @@ def create_fallback_analysis(file_name: str, case_id: str, run_id: str, pages: L
     }
     if beni_list:
         result["beni"] = beni_list
-        if isinstance(result.get("lots"), list) and result["lots"] and isinstance(result["lots"][0], dict):
+        if (
+            isinstance(result.get("lots"), list)
+            and len(result["lots"]) == 1
+            and isinstance(result["lots"][0], dict)
+        ):
             result["lots"][0]["beni"] = beni_list
 
     if sanatoria_best:
@@ -6353,6 +6932,9 @@ def create_fallback_analysis(file_name: str, case_id: str, run_id: str, pages: L
                 item["stima_nota"] = "Perizia: sanatoria stimata"
                 item["fonte_perizia"] = {"value": "Perizia", "evidence": [sanatoria_ev]}
                 break
+
+    if len(extracted_lots) > 1:
+        _build_conservative_money_box_for_lots(result)
 
     if isinstance(dati_asta_state, dict) and dati_asta_state.get("status") == "FOUND" and isinstance(dati_asta_state.get("value"), dict):
         result["dati_asta"] = {
@@ -7334,6 +7916,62 @@ async def _extract_with_docai(contents: bytes, mime_type: str, request_id: str) 
     return pages, full_text, None
 
 
+def _merge_ocr_pages_into_digital(
+    digital_pages: List[Dict[str, Any]],
+    ocr_pages: List[Dict[str, Any]],
+    target_pages: List[int],
+) -> Tuple[List[Dict[str, Any]], List[int]]:
+    if not digital_pages:
+        return digital_pages, []
+    target_set = {int(p) for p in target_pages if int(p) > 0}
+    if not target_set:
+        return digital_pages, []
+
+    ocr_map: Dict[int, Dict[str, Any]] = {}
+    for p in ocr_pages:
+        if not isinstance(p, dict):
+            continue
+        page_num = _get_page_number(p)
+        if page_num > 0:
+            ocr_map[page_num] = p
+
+    merged_pages: List[Dict[str, Any]] = []
+    replaced: List[int] = []
+    for idx, raw in enumerate(digital_pages, start=1):
+        page = dict(raw) if isinstance(raw, dict) else {}
+        page_num = _get_page_number(page) or idx
+        page["page_number"] = page_num
+        use_ocr = page_num in target_set and page_num in ocr_map
+        if use_ocr:
+            ocr_row = ocr_map[page_num]
+            ocr_text = str(ocr_row.get("text", "") or "")
+            if len(ocr_text.strip()) >= 20:
+                page["text"] = ocr_text
+                page["char_count"] = len(ocr_text)
+                replaced.append(page_num)
+        merged_pages.append(page)
+    return merged_pages, sorted(set(replaced))
+
+
+def _build_pdf_subset_for_pages(contents: bytes, page_numbers: List[int]) -> Tuple[bytes, List[int]]:
+    ordered_pages = sorted({int(p) for p in page_numbers if int(p) > 0})
+    if not ordered_pages:
+        return contents, []
+    reader = PdfReader(io.BytesIO(contents))
+    writer = PdfWriter()
+    total = len(reader.pages)
+    selected: List[int] = []
+    for page_num in ordered_pages:
+        if 1 <= page_num <= total:
+            writer.add_page(reader.pages[page_num - 1])
+            selected.append(page_num)
+    if not selected:
+        return contents, []
+    out = io.BytesIO()
+    writer.write(out)
+    return out.getvalue(), selected
+
+
 async def _enrich_summary_with_optional_llm(result: Dict[str, Any], file_name: str, full_text: str, request_id: str) -> None:
     """
     Optional LLM summary generation.
@@ -7464,13 +8102,83 @@ async def analyze_perizia(request: Request, file: UploadFile = File(...)):
                 f"blank_ratio={blank_ratio:.2f} blank_threshold={PDF_TEXT_MAX_BLANK_PAGE_RATIO:.2f}"
             )
 
+            pages_needing_ocr = extraction_payload.get("document_quality", {}).get("pages_needing_ocr", [])
+            if not isinstance(pages_needing_ocr, list):
+                pages_needing_ocr = []
+
             needs_ocr_fallback = (
                 not full_text.strip()
                 or coverage_ratio < PDF_TEXT_MIN_COVERAGE_RATIO
                 or blank_ratio >= PDF_TEXT_MAX_BLANK_PAGE_RATIO
+                or bool(pages_needing_ocr)
             )
             if needs_ocr_fallback:
-                logger.info(f"[{request_id}] docai_fallback_skipped step1_no_execution=true")
+                logger.info(
+                    f"[{request_id}] docai_fallback_attempt "
+                    f"triggered=true pages_needing_ocr={pages_needing_ocr[:20]}"
+                )
+                docai_contents = contents
+                docai_target_pages: List[int] = []
+                if pages_needing_ocr:
+                    try:
+                        subset_bytes, subset_map = await asyncio.to_thread(_build_pdf_subset_for_pages, contents, pages_needing_ocr)
+                        if subset_map:
+                            docai_contents = subset_bytes
+                            docai_target_pages = subset_map
+                    except Exception as subset_err:
+                        logger.warning(f"[{request_id}] docai_subset_build_failed err={subset_err}")
+
+                ocr_pages, ocr_full_text, ocr_error = await _extract_with_docai(docai_contents, mime_type, request_id)
+                ocr_replaced_pages: List[int] = []
+                if not ocr_error and ocr_pages:
+                    if docai_target_pages:
+                        remapped_pages: List[Dict[str, Any]] = []
+                        for idx, row in enumerate(ocr_pages, start=1):
+                            if not isinstance(row, dict):
+                                continue
+                            mapped = dict(row)
+                            mapped["page_number"] = docai_target_pages[idx - 1] if idx - 1 < len(docai_target_pages) else _get_page_number(mapped)
+                            remapped_pages.append(mapped)
+                        ocr_pages = remapped_pages
+                    target_pages = pages_needing_ocr
+                    if not target_pages:
+                        # If fallback triggered by low coverage/no text, allow broad merge.
+                        target_pages = [_get_page_number(p) for p in pages]
+                    pages, ocr_replaced_pages = _merge_ocr_pages_into_digital(pages, ocr_pages, target_pages)
+                    full_text = _build_full_text_from_pages(pages)
+                    logger.info(
+                        f"[{request_id}] docai_fallback_applied replaced_pages={ocr_replaced_pages[:30]} "
+                        f"replaced_count={len(ocr_replaced_pages)} ocr_chars={len(ocr_full_text)}"
+                    )
+                else:
+                    logger.warning(
+                        f"[{request_id}] docai_fallback_failed "
+                        f"error={ocr_error or 'unknown'} pages_flagged={pages_needing_ocr[:20]}"
+                    )
+
+                extraction_payload["ocr_execution"] = {
+                    "attempted": True,
+                    "pages_flagged": pages_needing_ocr,
+                    "replaced_pages": ocr_replaced_pages,
+                    "docai_error": ocr_error,
+                    "docai_pages": len(ocr_pages) if isinstance(ocr_pages, list) else 0,
+                    "docai_chars": len(ocr_full_text or ""),
+                    "subset_pages_sent_to_docai": docai_target_pages,
+                }
+                if ocr_replaced_pages:
+                    pages_raw = extraction_payload.get("pages_raw", [])
+                    if isinstance(pages_raw, list):
+                        page_text_map = {int(p.get("page_number")): str(p.get("text", "") or "") for p in pages if isinstance(p, dict)}
+                        for row in pages_raw:
+                            if not isinstance(row, dict):
+                                continue
+                            try:
+                                pnum = int(row.get("page"))
+                            except Exception:
+                                continue
+                            if pnum in page_text_map:
+                                row["text"] = page_text_map[pnum]
+                        extraction_payload["pages_raw"] = pages_raw
 
         if not pages:
             pages = [{"page_number": 1, "text": "", "tables": [], "form_fields": [], "char_count": 0}]
@@ -7523,6 +8231,8 @@ async def analyze_perizia(request: Request, file: UploadFile = File(...)):
     summary["notes"] = f"Step1 extraction pack created under {extract_folder}"
     debug_obj = result.get("debug") if isinstance(result.get("debug"), dict) else {}
     debug_obj["extraction_summary"] = summary
+    if isinstance(extraction_payload.get("ocr_execution"), dict):
+        debug_obj["ocr_execution"] = extraction_payload.get("ocr_execution")
     result["debug"] = debug_obj
 
     _apply_unreadable_hard_stop(result, document_quality)
@@ -7559,6 +8269,8 @@ async def analyze_perizia(request: Request, file: UploadFile = File(...)):
                 "error": "section_builder_failed",
             },
         }
+    _sanitize_lot_conservative_outputs(result)
+    result["panoramica_contract"] = _build_panoramica_contract(result, pages)
     result["user_messages"] = _build_user_messages(result, extraction_payload, analysis_id=analysis_id)
     narrator_enabled = os.environ.get("NARRATOR_ENABLED", "0").strip() == "1"
     narrator_model = str(os.environ.get("NARRATOR_MODEL") or "").strip() or None
