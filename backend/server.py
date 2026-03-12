@@ -769,6 +769,7 @@ def _normalize_tribunale_value(value: Optional[str]) -> Optional[str]:
     if not value:
         return value
     cleaned = _normalize_headline_text(str(value))
+    cleaned = re.sub(r"TRIBUNA\s+LE", "TRIBUNALE", cleaned, flags=re.I)
     cleaned = re.split(r"S\s*E\s*Z", cleaned, flags=re.I)[0].strip()
     cleaned = re.sub(r"TRIBUNALE\s*DI", "TRIBUNALE DI", cleaned, flags=re.I)
     cleaned = re.sub(r"\bDI([A-ZÀ-Ù])", r"DI \1", cleaned)
@@ -793,7 +794,13 @@ def _normalize_address_value(value: Optional[str]) -> Optional[str]:
         return value
     cleaned = _normalize_headline_text(str(value))
     cleaned = re.sub(r"^Ubicazione[:\s]*", "", cleaned, flags=re.I).strip()
+    cleaned = re.sub(r"\b(Via|Viale|Piazza|Corso|Largo|Vicolo)([A-ZÀ-Ù])", r"\1 \2", cleaned)
     cleaned = re.sub(r"\b([A-ZÀ-Ù])\s+([a-zà-ù]{2,})\b", r"\1\2", cleaned)
+    cleaned = re.sub(
+        r"\b(Via|Viale|Piazza|Corso|Largo|Vicolo)\s+([A-ZÀ-Ù][a-zà-ù]+)([A-ZÀ-Ù][a-zà-ù]+)\b",
+        r"\1 \2 \3",
+        cleaned,
+    )
     cleaned = re.sub(r"\s*-\s*([a-zà-ù])", r"-\1", cleaned)
     return cleaned
 
@@ -1420,6 +1427,14 @@ def _extract_diritto_reale_state(pages: List[Dict[str, Any]]) -> Dict[str, Any]:
     keywords = ["proprietà", "nuda proprietà", "usufrutto", "diritto di"]
     pattern = re.compile(r"\b(Nuda\s+proprietà|Piena\s+proprietà|Proprietà|Usufrutto|Diritto\s+di\s+[^\n]{0,40})\b", re.I)
     schema_pattern = re.compile(r"Diritto\s+reale[:\s]*([^\n]{3,60})", re.I)
+    def _normalize_right_value(raw_value: str, text: str, start: int, end: int) -> str:
+        value = _normalize_headline_text(raw_value)
+        window = text[max(0, start - 120):min(len(text), end + 120)]
+        if re.search(r"\b(propriet[àa]|piena\s+propriet[àa])\b", value, re.I):
+            if re.search(r"\b(?:quota\s+)?1\s*/\s*1\b|\bper\s+1\s*/\s*1\b|\(propriet[àa]\s+1\s*/\s*1\)", window, re.I):
+                return "Proprietà 1/1"
+        return value
+
     schema_pages = []
     for p in pages:
         text_upper = str(p.get("text", "") or "").upper()
@@ -1440,7 +1455,7 @@ def _extract_diritto_reale_state(pages: List[Dict[str, Any]]) -> Dict[str, Any]:
                     anchor_hint=m.group(0),
                 )
             ]
-            value = _normalize_headline_text(m.group(1))
+            value = _normalize_right_value(m.group(1), text, start, end)
             searched_in = _make_searched_in(pages, keywords, "FOUND", field_key="stato_occupativo")
             return _build_field_state(value=value, status="FOUND", evidence=evidence, searched_in=searched_in)
     for p in pages:
@@ -1459,7 +1474,7 @@ def _extract_diritto_reale_state(pages: List[Dict[str, Any]]) -> Dict[str, Any]:
                 anchor_hint=m.group(0),
             )
         ]
-        value = _normalize_headline_text(m.group(0))
+        value = _normalize_right_value(m.group(0), text, start, end)
         searched_in = _make_searched_in(pages, keywords, "FOUND", field_key="stato_occupativo")
         return _build_field_state(value=value, status="FOUND", evidence=evidence, searched_in=searched_in)
     searched_in = _make_searched_in(pages, keywords, "NOT_FOUND", field_key="stato_occupativo")
@@ -1469,13 +1484,14 @@ def _extract_stato_occupativo_state(pages: List[Dict[str, Any]]) -> Dict[str, An
     keywords = ["occupato", "libero", "detenuto", "contratto di locazione", "rilascio"]
     ambiguous_markers = ["si presume", "non è noto", "non e' noto", "non risulta", "da verificare", "da accertare", "presumibilmente", "non è dato sapere", "non e' dato sapere"]
     patterns = [
+        (re.compile(r"\boccupat[oa]\b[^\n]{0,160}\bterzi\b[^\n]{0,120}\b(senza\s+titolo|contratt\w+[^\n]{0,60}scadut\w*|natura\s+transitoria\s+scadut\w*)\b", re.I), "OCCUPATO DA TERZI SENZA TITOLO"),
         (re.compile(r"\boccupat[oa]\b[^\n]{0,120}\b(debitore|debitori\s+esecutati)\b", re.I), "OCCUPATO DAL DEBITORE"),
         (re.compile(r"\b(non\s+occupato|libero|libera\s+disponibilit[aà])\b", re.I), "LIBERO"),
         (re.compile(r"\b(occupato|detenuto|locato|locazione|contratto\s+di\s+locazione|inquilino)\b", re.I), "OCCUPATO"),
     ]
     candidates: List[Tuple[int, int, str, str, Dict[str, Any]]] = []
-    # priority: OCCUPATO DAL DEBITORE > OCCUPATO > LIBERO
-    pri = {"OCCUPATO DAL DEBITORE": 3, "OCCUPATO": 2, "LIBERO": 1}
+    # priority: OCCUPATO DA TERZI SENZA TITOLO > OCCUPATO DAL DEBITORE > OCCUPATO > LIBERO
+    pri = {"OCCUPATO DA TERZI SENZA TITOLO": 4, "OCCUPATO DAL DEBITORE": 3, "OCCUPATO": 2, "LIBERO": 1}
     for p in pages:
         text = str(p.get("text", "") or "")
         for pat, label in patterns:
@@ -1549,6 +1565,7 @@ def _extract_agibilita_state(pages: List[Dict[str, Any]]) -> Dict[str, Any]:
     absent_patterns = [
         re.compile(r"(non\s+[èe]\s+presente\s+l['’]?abitabilit[aà][^\n]{0,120})", re.I),
         re.compile(r"(non\s+risulta\s+agibil[ei][^\n]{0,120})", re.I),
+        re.compile(r"(non\s+risulta\s+rilasciat\w*[^\n]{0,80}certificato\s+di\s+agibilit[aà][^\n]{0,120})", re.I),
         re.compile(r"(agibilit[aà][^\n]{0,120}(assente|non\s+presente))", re.I),
     ]
     present_patterns = [
@@ -1924,6 +1941,7 @@ def _apply_decision_states_to_result(result: Dict[str, Any], states: Dict[str, A
     status_it_map = {
         "LIBERO": "Libero",
         "OCCUPATO": "Occupato",
+        "OCCUPATO DA TERZI SENZA TITOLO": "Occupato da terzi senza titolo",
         "OCCUPATO DAL DEBITORE": "Occupato dal debitore",
         "DA VERIFICARE": "Da verificare",
         "NON SPECIFICATO IN PERIZIA": "Non specificato in perizia",
@@ -1931,6 +1949,7 @@ def _apply_decision_states_to_result(result: Dict[str, Any], states: Dict[str, A
     status_en_map = {
         "LIBERO": "Free",
         "OCCUPATO": "Occupied",
+        "OCCUPATO DA TERZI SENZA TITOLO": "Occupied by third parties without title",
         "OCCUPATO DAL DEBITORE": "Occupied by debtor",
         "DA VERIFICARE": "To verify",
         "NON SPECIFICATO IN PERIZIA": "Not specified in appraisal",
@@ -2019,6 +2038,25 @@ def _ensure_semaforo_top_blockers(result: Dict[str, Any], states: Dict[str, Any]
     }
 
     blockers: List[Dict[str, Any]] = []
+
+    legal_top_items = (
+        result.get("section_9_legal_killers", {}).get("top_items", [])
+        if isinstance(result.get("section_9_legal_killers"), dict)
+        else []
+    )
+    if isinstance(legal_top_items, list):
+        for item in legal_top_items[:6]:
+            if not isinstance(item, dict):
+                continue
+            blockers.append({
+                "key": str(item.get("killer") or "").strip().lower().replace(" ", "_")[:60],
+                "label_it": str(item.get("killer") or "Criticità legale").strip(),
+                "status": item.get("status"),
+                "value": str(item.get("reason_it") or item.get("status_it") or "").strip(),
+                "evidence": item.get("evidence", []) if isinstance(item.get("evidence"), list) else [],
+                "searched_in": item.get("searched_in", []),
+            })
+
     for key, cfg in key_config.items():
         state = states.get(key) if isinstance(states.get(key), dict) else {}
         status = state.get("status")
@@ -2040,7 +2078,16 @@ def _ensure_semaforo_top_blockers(result: Dict[str, Any], states: Dict[str, Any]
             "searched_in": searched_in,
         })
 
-    semaforo["top_blockers"] = blockers[:10]
+    deduped: List[Dict[str, Any]] = []
+    seen_labels: set = set()
+    for blocker in blockers:
+        label = str(blocker.get("label_it") or "").strip().lower()
+        if not label or label in seen_labels:
+            continue
+        seen_labels.add(label)
+        deduped.append(blocker)
+
+    semaforo["top_blockers"] = deduped[:10]
 
 def _synthesize_decisione_rapida(result: Dict[str, Any], states: Dict[str, Any]) -> None:
     semaforo = result.get("semaforo_generale") if isinstance(result.get("semaforo_generale"), dict) else {}
@@ -2154,7 +2201,245 @@ def _detect_spese_status_for_market(result: Dict[str, Any]) -> str:
     return raw.upper()
 
 
+def _normalize_signal_text(value: Any) -> str:
+    text = str(value or "")
+    text = text.replace("\u2019", "'").replace("\u2018", "'")
+    text = text.replace("\u2013", "-").replace("\u2014", "-")
+    text = re.sub(r"\s+", " ", text).strip().lower()
+    return text
+
+
+def _legal_subject_negated(text: str, subject_pattern: str) -> bool:
+    normalized = _normalize_signal_text(text)
+    if not normalized:
+        return False
+    return bool(
+        re.search(rf"(non\s+(?:sono|risult\w+|emerg\w+|sussist\w+)|assenza\s+di)[^.]{{0,140}}{subject_pattern}", normalized, re.I)
+    )
+
+
+def _build_state_driven_legal_killers(result: Dict[str, Any], pages: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    specs = [
+        (
+            "Immobile non regolare ediliziamente",
+            "ROSSO",
+            "CRITICO",
+            125,
+            [r"immobile\s+non\s+risulta\s+regolare", r"non\s+regolare\s+per\s+la\s+legge", r"unit[àa]\s+immobiliare\s+non\s+[èe]\s+conforme"],
+            "Criticità urbanistico-edilizia determinante",
+        ),
+        (
+            "Agibilità assente / non rilasciata",
+            "ROSSO",
+            "CRITICO",
+            120,
+            [r"non\s+risulta\s+rilasciato\s+il\s+certificato\s+di\s+agibilit", r"non\s+risulta\s+agibil", r"non\s+[èe]\s+presente\s+l['’]?abitabilit"],
+            "Agibilità/abitabilità assente o non rilasciata",
+        ),
+        (
+            "Sanatoria / condono non perfezionati",
+            "ROSSO",
+            "CRITICO",
+            118,
+            [r"concessione\s+in\s+sanatoria\s+non\s+[èe]\s+stata[^\n]{0,120}rilasciat", r"iter\s+di\s+rilascio[^\n]{0,120}sanatoria[^\n]{0,120}non\s+si\s+[èe]\s+ancora\s+perfezionat", r"condono[^\n]{0,160}non\s+risulterebbe[^\n]{0,120}possibile"],
+            "Sanatoria/condono non perfezionati",
+        ),
+        (
+            "Uso residenziale non legittimato",
+            "ROSSO",
+            "CRITICO",
+            116,
+            [r"destinazione\s+d['’]?uso[^\n]{0,160}non\s+[èe]\s+quella\s+residenziale", r"destinazione\s+d['’]?uso[^\n]{0,120}non\s+sono[^\n]{0,120}legittimat", r"uso\s+residenziale\s+non\s+legittimat"],
+            "Destinazione d'uso residenziale non legittimata",
+        ),
+        (
+            "Occupato da terzi senza titolo",
+            "ROSSO",
+            "CRITICO",
+            114,
+            [r"occupat[oa]\s+da\s+terzi\s+senza\s+titolo", r"occupat[oa][^\n]{0,120}terzi[^\n]{0,120}contratt\w+[^\n]{0,60}scadut"],
+            "Occupazione da terzi senza titolo opponibile",
+        ),
+        (
+            "Accertamento di conformità richiesto",
+            "GIALLO",
+            "ATTENZIONE",
+            88,
+            [r"accertamento\s+di\s+conformit"],
+            "Accertamento di conformità richiesto",
+        ),
+    ]
+    out: List[Dict[str, Any]] = []
+    seen: set = set()
+    for label, status, status_it, score, patterns, reason in specs:
+        for pattern in patterns:
+            ev = _find_regex_in_pages(pages, pattern, re.I, field_key="section_9_legal_killers")
+            if not ev:
+                continue
+            quote = str(ev.get("quote") or "")
+            if _is_toc_like_quote(quote) or _is_toc_like_line(quote):
+                continue
+            key = label.lower()
+            if key in seen:
+                continue
+            seen.add(key)
+            out.append({
+                "killer": label,
+                "status": status,
+                "status_it": status_it,
+                "reason_it": reason,
+                "evidence": _normalize_contract_evidence_list([ev], max_items=1),
+                "decision_bucket": "REAL_BLOCKER" if status == "ROSSO" else "RELEVANT_SECONDARY",
+                "decision_score": score,
+            })
+            break
+    return out
+
+
+def _is_buyer_burden_quote(text: str) -> bool:
+    normalized = _normalize_signal_text(text)
+    if not normalized:
+        return False
+    if re.search(r"(prezzo\s+base|valore\s+di\s+stima|valore\s+finale|€/mq|quota\s+in\s+vendita|totale\s+in\s+vendita|rendita|reg\.\s*gen\.|reg\.\s*part\.|importo\s*:|ipoteca|mutuo\s+fondiario|pignoramento|formalit[àa]\s+a\s+carico)", normalized, re.I):
+        return False
+    if re.search(r"(deprezzament|rischio\s+assunto\s+per\s+mancata\s+garanzia)", normalized, re.I):
+        return False
+    return bool(
+        re.search(r"(regolarizzazione\s+urbanistica|sanatoria|spese\s+condominiali|liberazione|completamento|bonifica|messa\s+in\s+sicurezza|ripristin|allineamento\s+catastal|pratiche\s+tecniche)", normalized, re.I)
+    )
+
+
+def _sanitize_money_box_for_customer(result: Dict[str, Any]) -> None:
+    money_box = result.get("money_box", {}) if isinstance(result.get("money_box"), dict) else {}
+    items = money_box.get("items", [])
+    if not isinstance(items, list):
+        return
+
+    cleaned_items: List[Dict[str, Any]] = []
+    supported_numeric_total = 0.0
+    has_document_backed_buyer_burden = False
+    is_multi_lot = bool(result.get("is_multi_lot")) or len(result.get("lots", []) if isinstance(result.get("lots"), list) else []) > 1
+
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        code = str(item.get("code") or item.get("voce") or "").strip().upper()
+        if code.startswith("S3C"):
+            continue
+
+        fonte = item.get("fonte_perizia", {}) if isinstance(item.get("fonte_perizia"), dict) else {}
+        evidence = _normalize_contract_evidence_list(fonte.get("evidence", []), max_items=2)
+        if not evidence:
+            evidence = _normalize_contract_evidence_list(item.get("evidence", []), max_items=2)
+        quote_blob = " ".join(
+            [
+                str(item.get("label_it") or ""),
+                str(item.get("label_en") or ""),
+                str(item.get("stima_nota") or ""),
+            ] + [str(ev.get("quote") or "") for ev in evidence]
+        )
+
+        if evidence and not _is_buyer_burden_quote(quote_blob):
+            if code not in {"G"}:
+                continue
+
+        if evidence and _is_buyer_burden_quote(quote_blob):
+            has_document_backed_buyer_burden = True
+            stima_val = _as_float_or_none(item.get("stima_euro"))
+            if isinstance(stima_val, float) and stima_val > 0:
+                supported_numeric_total += stima_val
+
+        cleaned_items.append(item)
+
+    money_box["items"] = cleaned_items
+
+    if not is_multi_lot and not has_document_backed_buyer_burden:
+        money_box["policy"] = "CONSERVATIVE"
+        money_box.pop("total_extra_costs_range", None)
+        for item in cleaned_items:
+            item.pop("market_range_eur", None)
+            item.pop("source_market", None)
+            note = str(item.get("stima_nota") or "").strip()
+            note = re.sub(r"\s*—\s*Stima indicativa di mercato \(non presente in perizia\)\s*", "", note, flags=re.I).strip()
+            if note:
+                item["stima_nota"] = note
+            if str(item.get("source") or "").upper() == "MARKET_ESTIMATE":
+                item["source"] = "TBD"
+        money_box["total_extra_costs"] = {
+            "range": {"min": "TBD", "max": "TBD"},
+            "max_is_open": True,
+            "note": "TBD because document-backed buyer burdens are not quantified safely",
+        }
+        if isinstance(result.get("section_3_money_box"), dict):
+            result["section_3_money_box"]["items"] = copy.deepcopy(cleaned_items)
+            result["section_3_money_box"].pop("total_extra_costs_range", None)
+            result["section_3_money_box"]["totale_extra_budget"] = {
+                "min": "TBD",
+                "max": "TBD",
+                "nota": "TBD — Costi extra non quantificati in modo customer-safe",
+            }
+    elif supported_numeric_total > 0:
+        money_box["total_extra_costs"] = {
+            "range": {"min": int(round(supported_numeric_total)), "max": int(round(supported_numeric_total))},
+            "max_is_open": False,
+            "note": "Document-backed buyer burdens only",
+        }
+        if isinstance(result.get("section_3_money_box"), dict):
+            result["section_3_money_box"]["items"] = copy.deepcopy(cleaned_items)
+            result["section_3_money_box"]["totale_extra_budget"] = {
+                "min": int(round(supported_numeric_total)),
+                "max": int(round(supported_numeric_total)),
+                "nota": "EUR document-backed buyer burdens only",
+            }
+
+    result["money_box"] = money_box
+
+
+def _apply_customer_headline_fallbacks(result: Dict[str, Any]) -> None:
+    states = result.get("field_states", {}) if isinstance(result.get("field_states"), dict) else {}
+    report_header = result.get("report_header", {}) if isinstance(result.get("report_header"), dict) else {}
+    case_header = result.get("case_header", {}) if isinstance(result.get("case_header"), dict) else {}
+
+    def _state_text(key: str) -> Optional[str]:
+        state = states.get(key) if isinstance(states.get(key), dict) else {}
+        value = state.get("value")
+        evidence = state.get("evidence") if isinstance(state.get("evidence"), list) else []
+        if value in (None, "", "DA VERIFICARE", "NON SPECIFICATO IN PERIZIA"):
+            return None
+        if not evidence:
+            return None
+        text = str(value).strip()
+        if not text:
+            return None
+        if key == "tribunale":
+            text = _normalize_tribunale_value(text) or text
+        elif key == "procedura":
+            text = _normalize_procedura_value(text) or text
+        elif key == "address":
+            text = _normalize_address_value(text) or text
+        else:
+            text = _normalize_headline_text(text) or text
+        return text
+
+    for key, report_key, case_key in (
+        ("tribunale", "tribunale", "tribunale"),
+        ("procedura", "procedure", "procedure_id"),
+        ("lotto", "lotto", "lotto"),
+        ("address", "address", "address"),
+    ):
+        text = _state_text(key)
+        if not text:
+            continue
+        evidence = states.get(key, {}).get("evidence", [])
+        report_header[report_key] = {"value": text, "evidence": copy.deepcopy(evidence)}
+        case_header[case_key] = text
+
+    result["report_header"] = report_header
+    result["case_header"] = case_header
+
+
 def _apply_market_ranges_to_money_box(result: Dict[str, Any]) -> None:
+    _sanitize_money_box_for_customer(result)
     money_box = result.get("money_box", {}) if isinstance(result.get("money_box"), dict) else {}
     if str(money_box.get("policy") or "").upper() in {"LOT_CONSERVATIVE", "CONSERVATIVE"}:
         money_box.pop("total_extra_costs_range", None)
@@ -2182,6 +2467,8 @@ def _apply_market_ranges_to_money_box(result: Dict[str, Any]) -> None:
             continue
 
         code = str(item.get("code") or item.get("voce") or "").strip().upper()
+        if len(code) != 1:
+            continue
         market = market_range_for_item(code=code, occupancy_status=occ_status, spese_status=spese_status)
         if not market:
             continue
@@ -2485,6 +2772,12 @@ def _apply_headline_field_states(result: Dict[str, Any], pages: List[Dict[str, A
 def _normalize_override_value(field: str, value: Any) -> Any:
     if value is None:
         return None
+    if field == "tribunale" and isinstance(value, str):
+        return (_normalize_tribunale_value(value) or value).strip()
+    if field == "procedura" and isinstance(value, str):
+        return (_normalize_procedura_value(value) or value).strip()
+    if field == "address" and isinstance(value, str):
+        return (_normalize_address_value(value) or value).strip()
     if field == "prezzo_base_asta":
         if isinstance(value, (int, float)):
             return float(value)
@@ -3181,6 +3474,8 @@ def _augment_legal_killers_from_lots(legal_killers_items: List[Dict[str, Any]], 
 
 def _legal_relevance_profile(killer: str) -> Tuple[str, int]:
     low = str(killer or "").lower()
+    if any(token in low for token in ("immobile non regolare", "agibilità assente", "agibilita assente", "sanatoria / condono", "uso residenziale non legittimato", "occupato da terzi senza titolo")):
+        return "REAL_BLOCKER", 125
     if any(token in low for token in ("non agibile", "non regolare", "difformità", "fibro-cemento", "amianto", "in costruzione", "lavori sospesi", "servitù / accesso privato", "servitù di passaggio", "infiltrazioni")):
         return "REAL_BLOCKER", 100
     if any(token in low for token in ("servitù rilevata", "accertamento di conformità", "condizioni conservative", "sicurezza")):
@@ -3253,6 +3548,140 @@ def _build_case_aware_narration_payload(result: Dict[str, Any]) -> Optional[Dict
         "bullets_en": bullets_en,
         "evidence_refs": [],
     }
+
+
+def _refresh_red_flags_operativi(result: Dict[str, Any]) -> None:
+    existing_flags = result.get("red_flags_operativi")
+    existing_list = existing_flags if isinstance(existing_flags, list) else []
+    preserved: List[Dict[str, Any]] = []
+    seen_codes: set = set()
+
+    for flag in existing_list:
+        if not isinstance(flag, dict):
+            continue
+        code = str(flag.get("code") or "").strip().upper()
+        if code == "MANUAL_REVIEW":
+            continue
+        if code and code not in seen_codes:
+            preserved.append(copy.deepcopy(flag))
+            seen_codes.add(code)
+
+    top_items = []
+    if isinstance(result.get("section_9_legal_killers"), dict):
+        maybe_items = result["section_9_legal_killers"].get("top_items", [])
+        if isinstance(maybe_items, list):
+            top_items = maybe_items
+
+    derived_map = {
+        "immobile non regolare ediliziamente": {
+            "code": "URBANISTICA_NON_REGOLARE",
+            "severity": "RED",
+            "flag_it": "Immobile non regolare ediliziamente",
+            "flag_en": "Building not legally compliant",
+            "action_it": "Verificare immediatamente la regolarizzazione urbanistico-edilizia.",
+        },
+        "agibilità assente / non rilasciata": {
+            "code": "AGIBILITA_ASSENTE",
+            "severity": "RED",
+            "flag_it": "Agibilità assente o non rilasciata",
+            "flag_en": "Habitability certificate absent or not issued",
+            "action_it": "Verificare agibilità/abitabilità e impatto sulla commerciabilità.",
+        },
+        "sanatoria / condono non perfezionati": {
+            "code": "SANATORIA_NON_PERFEZIONATA",
+            "severity": "RED",
+            "flag_it": "Sanatoria / condono non perfezionati",
+            "flag_en": "Sanatoria / amnesty not perfected",
+            "action_it": "Verificare stato e fattibilità della sanatoria prima dell'offerta.",
+        },
+        "uso residenziale non legittimato": {
+            "code": "USO_NON_LEGITTIMATO",
+            "severity": "RED",
+            "flag_it": "Uso residenziale non legittimato",
+            "flag_en": "Residential use not lawfully legitimized",
+            "action_it": "Verificare destinazione d'uso e commerciabilità del bene.",
+        },
+        "occupato da terzi senza titolo": {
+            "code": "OCCUPAZIONE_SENZA_TITOLO",
+            "severity": "RED",
+            "flag_it": "Occupato da terzi senza titolo",
+            "flag_en": "Occupied by third parties without title",
+            "action_it": "Valutare tempi, costi e rischi di liberazione dell'immobile.",
+        },
+    }
+
+    for item in top_items[:8]:
+        if not isinstance(item, dict):
+            continue
+        killer = str(item.get("killer") or "").strip().lower()
+        payload = derived_map.get(killer)
+        if not payload:
+            continue
+        code = payload["code"]
+        if code in seen_codes:
+            continue
+        flag = copy.deepcopy(payload)
+        evidence = item.get("evidence", []) if isinstance(item.get("evidence"), list) else []
+        if evidence:
+            flag["evidence"] = copy.deepcopy(evidence[:2])
+        preserved.append(flag)
+        seen_codes.add(code)
+
+    if "MANUAL_REVIEW" not in seen_codes:
+        preserved.append({
+            "code": "MANUAL_REVIEW",
+            "severity": "AMBER",
+            "flag_it": "Revisione manuale raccomandata",
+            "flag_en": "Manual review recommended",
+            "action_it": "Verificare tutti i dati con la perizia originale",
+        })
+
+    result["red_flags_operativi"] = preserved
+
+
+def _refresh_customer_facing_result_on_read(
+    result: Dict[str, Any],
+    pages: List[Dict[str, Any]],
+    *,
+    analysis_id: str = "",
+    headline_overrides: Optional[Dict[str, Any]] = None,
+    field_overrides: Optional[Dict[str, Any]] = None,
+) -> None:
+    if not isinstance(result, dict):
+        return
+
+    safe_pages = pages if isinstance(pages, list) and pages else [{"page_number": 1, "text": ""}]
+
+    _apply_headline_field_states(result, safe_pages)
+    _apply_decision_field_states(result, safe_pages)
+    _apply_headline_overrides(result, headline_overrides or {})
+    _apply_field_overrides(result, field_overrides or {})
+    _enforce_field_states_contract(result, safe_pages)
+    _apply_customer_headline_fallbacks(result)
+
+    _normalize_legal_killers(result, safe_pages)
+    states = result.get("field_states", {}) if isinstance(result.get("field_states"), dict) else {}
+    _ensure_semaforo_top_blockers(result, states, safe_pages)
+    _synthesize_decisione_rapida(result, states)
+
+    _apply_market_ranges_to_money_box(result)
+    _sanitize_lot_conservative_outputs(result)
+    _normalize_evidence_offsets(result, safe_pages)
+    result["panoramica_contract"] = _build_panoramica_contract(result, safe_pages)
+
+    document_quality = result.get("document_quality", {}) if isinstance(result.get("document_quality"), dict) else {}
+    _apply_unreadable_hard_stop(result, document_quality)
+
+    case_aware_narration = _build_case_aware_narration_payload(result)
+    if case_aware_narration:
+        result["decision_rapida_narrated"] = case_aware_narration
+    else:
+        result.pop("decision_rapida_narrated", None)
+
+    _refresh_red_flags_operativi(result)
+
+    if analysis_id:
+        result["user_messages"] = _build_user_messages(result, {}, analysis_id=analysis_id)
 
 
 def _enrich_lots_from_sections(
@@ -4381,17 +4810,11 @@ def _scan_legal_killers(pages_in: List[Dict]) -> List[Dict[str, Any]]:
                     low = snippet.lower()
                     low_context = context.lower()
                     if title == "Usi civici":
-                        if re.search(r"non\s+risultan[oa]?\s+presenti\s+diritti\s+demaniali\s+o\s+usi\s+civici", low_context, re.I):
-                            continue
-                        if re.search(r"non\s+risultan[oa]?\s+presenti\s+usi\s+civici", low_context, re.I):
-                            continue
-                        if re.search(r"non\s+risultan[oa]?.{0,100}usi\s+civici", low_context, re.I):
-                            continue
-                        if re.search(r"non\s+sono\s+presenti\s+diritti\s+demaniali\s+o\s+usi\s+civici", low_context, re.I):
-                            continue
-                        if re.search(r"non\s+sono\s+presenti.{0,100}usi\s+civici", low_context, re.I):
+                        if _legal_subject_negated(low_context, r"(diritti\s+demaniali|usi\s+civici)"):
                             continue
                     if title.startswith("Servitù") or title == "Servitù rilevata":
+                        if _legal_subject_negated(low_context, r"servit[ùu]"):
+                            continue
                         if "servitù, censo, livello, usi civici" in low:
                             if not re.search(r"passo|carrabile|pedonale|stradella|fognatura|utenz|attraversamento", low, re.I):
                                 continue
@@ -4765,6 +5188,20 @@ def _build_panoramica_contract(result: Dict[str, Any], pages: List[Dict[str, Any
     case_header = result.get("case_header", {}) if isinstance(result.get("case_header"), dict) else {}
     dati = result.get("dati_certi_del_lotto", {}) if isinstance(result.get("dati_certi_del_lotto"), dict) else {}
     section4 = result.get("section_4_dati_certi", {}) if isinstance(result.get("section_4_dati_certi"), dict) else {}
+    states = result.get("field_states", {}) if isinstance(result.get("field_states"), dict) else {}
+    abusi = result.get("abusi_edilizi_conformita", {}) if isinstance(result.get("abusi_edilizi_conformita"), dict) else {}
+
+    agibilita_state = states.get("agibilita") if isinstance(states.get("agibilita"), dict) else {}
+    agibilita_contract_value = _field_state_display_value(agibilita_state)
+    agibilita_contract_evidence = _normalize_contract_evidence_list(agibilita_state.get("evidence", []))
+    if agibilita_contract_value == "NON SPECIFICATO IN PERIZIA":
+        agibilita_obj = abusi.get("agibilita") if isinstance(abusi.get("agibilita"), dict) else {}
+        fallback_value = str(agibilita_obj.get("status") or "").strip()
+        fallback_evidence = _normalize_contract_evidence_list(agibilita_obj.get("evidence", []))
+        if fallback_value:
+            agibilita_contract_value = fallback_value
+        if fallback_evidence:
+            agibilita_contract_evidence = fallback_evidence
 
     tribunale = None
     procedura = None
@@ -4912,6 +5349,7 @@ def _build_panoramica_contract(result: Dict[str, Any], pages: List[Dict[str, Any
             "piano": piano,
             "superficie_mq": round(float(superficie), 2) if isinstance(superficie, (int, float)) else None,
             "valore_stima_eur": int(round(valore_stima)) if isinstance(valore_stima, (int, float)) else None,
+            "agibilita": agibilita_contract_value if agibilita_contract_value != "NON SPECIFICATO IN PERIZIA" else None,
             "ape": _normalize_headline_text(str(ape_value or "")) or None,
             "dichiarazioni_impianti": {
                 "elettrico": _normalize_headline_text(str(dichiarazioni_impianti.get("elettrico") or "")) or None,
@@ -4930,6 +5368,7 @@ def _build_panoramica_contract(result: Dict[str, Any], pages: List[Dict[str, Any
                 "valore_stima_eur": _normalize_contract_evidence_list(evidence_map.get("valore_stima", [])),
                 "catasto": _normalize_contract_evidence_list(evidence_map.get("catasto", [])),
                 "note": _normalize_contract_evidence_list(evidence_map.get("note", []), max_items=2),
+                "agibilita": copy.deepcopy(agibilita_contract_evidence),
                 "ape": _normalize_contract_evidence_list(ape_evidence_raw),
                 "dichiarazioni_impianti": {
                     "elettrico": _normalize_contract_evidence_list(dichiarazioni_impianti_evidence_raw.get("elettrico", [])),
@@ -5180,7 +5619,11 @@ def _normalize_legal_killers(result: Dict[str, Any], pages: List[Dict[str, Any]]
     if not isinstance(items, list):
         section["items"] = []
         return
-    page_text_by_num = {int(p.get("page_number", 0) or 0): str(p.get("text", "") or "") for p in pages if isinstance(p, dict)}
+    page_text_by_num = {
+        int(p.get("page_number", p.get("page", 0)) or 0): str(p.get("text", "") or "")
+        for p in pages
+        if isinstance(p, dict)
+    }
 
     status_map = {
         "VERDE": "VERDE",
@@ -5260,13 +5703,13 @@ def _normalize_legal_killers(result: Dict[str, Any], pages: List[Dict[str, Any]]
                 continue
             killer_low = str(it.get("killer") or "").lower()
             if "usi civici" in killer_low:
-                if re.search(r"non\s+risultan[oa]?.{0,120}(?:diritti\s+demaniali|usi\s+civici)", low_context, re.I):
-                    continue
-                if re.search(r"non\s+sono\s+presenti.{0,120}(?:diritti\s+demaniali|usi\s+civici)", low_context, re.I):
+                if _legal_subject_negated(low_context, r"(diritti\s+demaniali|usi\s+civici)"):
                     continue
                 if not re.search(r"(gravat|present[ei]|esist|sussist).{0,80}usi\s+civici|usi\s+civici.{0,80}(gravat|present[ei]|esist|sussist)", low_context, re.I):
                     continue
             if "servit" in killer_low:
+                if _legal_subject_negated(low_context, r"servit[ùu]"):
+                    continue
                 if "servitù, censo, livello, usi civici" in low_context and not re.search(r"passo|carrabile|pedonale|stradella|fognatura|utenz|attraversamento", low_context, re.I):
                     continue
             sig = (ev.get("page"), ev.get("start_offset"), ev.get("end_offset"), ev.get("quote"))
@@ -5290,6 +5733,14 @@ def _normalize_legal_killers(result: Dict[str, Any], pages: List[Dict[str, Any]]
         it["decision_bucket"] = bucket
         it["decision_score"] = score
         normalized.append(it)
+
+    existing_keys = {str(item.get("killer") or "").strip().lower() for item in normalized if isinstance(item, dict)}
+    for item in _build_state_driven_legal_killers(result, pages):
+        killer_key = str(item.get("killer") or "").strip().lower()
+        if not killer_key or killer_key in existing_keys:
+            continue
+        normalized.append(item)
+        existing_keys.add(killer_key)
 
     normalized.sort(key=lambda item: (-int(item.get("decision_score", 0)), str(item.get("killer", ""))))
     section["items"] = normalized
@@ -10625,26 +11076,13 @@ async def _get_perizia_analysis_for_user(analysis_id: str, user: User) -> Dict[s
     if isinstance(result, dict):
         pages_hint = int(analysis.get("pages_count", 0) or 0)
         pages_for_proof = _load_pages_for_analysis(analysis_id, pages_hint)
-        if not isinstance(result.get("field_states"), dict):
-            _apply_headline_field_states(result, pages_for_proof)
-            _apply_decision_field_states(result, pages_for_proof)
-        else:
-            decision_keys = {
-                "prezzo_base_asta",
-                "superficie",
-                "diritto_reale",
-                "stato_occupativo",
-                "regolarita_urbanistica",
-                "conformita_catastale",
-                "spese_condominiali_arretrate",
-                "formalita_pregiudizievoli",
-            }
-            if not decision_keys.issubset(set(result.get("field_states", {}).keys())):
-                _apply_decision_field_states(result, pages_for_proof)
-        _apply_headline_overrides(result, analysis.get("headline_overrides") or {})
-        _apply_field_overrides(result, analysis.get("field_overrides") or {})
-        _enforce_field_states_contract(result, pages_for_proof)
-        result["panoramica_contract"] = _build_panoramica_contract(result, pages_for_proof)
+        _refresh_customer_facing_result_on_read(
+            result,
+            pages_for_proof,
+            analysis_id=analysis_id,
+            headline_overrides=analysis.get("headline_overrides") or {},
+            field_overrides=analysis.get("field_overrides") or {},
+        )
         states = result.get("field_states")
         if isinstance(states, dict):
             if "superficie" not in states and "superficie_catastale" in states:
