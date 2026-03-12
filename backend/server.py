@@ -2087,6 +2087,7 @@ def _ensure_semaforo_top_blockers(result: Dict[str, Any], states: Dict[str, Any]
         seen_labels.add(label)
         deduped.append(blocker)
 
+    deduped.sort(key=_semaforo_blocker_sort_key)
     semaforo["top_blockers"] = deduped[:10]
 
 def _synthesize_decisione_rapida(result: Dict[str, Any], states: Dict[str, Any]) -> None:
@@ -2207,6 +2208,192 @@ def _normalize_signal_text(value: Any) -> str:
     text = text.replace("\u2013", "-").replace("\u2014", "-")
     text = re.sub(r"\s+", " ", text).strip().lower()
     return text
+
+
+def _extract_lot_number_from_label(value: Any) -> Optional[int]:
+    match = re.match(r"\s*lotto\s+(\d+)\s*:", str(value or ""), re.I)
+    if not match:
+        return None
+    try:
+        return int(match.group(1))
+    except Exception:
+        return None
+
+
+def _selected_lot_number_for_semaforo(result: Dict[str, Any]) -> Optional[int]:
+    panoramica = result.get("panoramica_contract") if isinstance(result.get("panoramica_contract"), dict) else {}
+    selected = panoramica.get("selected_lot_number")
+    if isinstance(selected, int) and selected > 0:
+        return selected
+
+    report_header = result.get("report_header") if isinstance(result.get("report_header"), dict) else {}
+    lotto = report_header.get("lotto") if isinstance(report_header.get("lotto"), dict) else {}
+    lotto_value = str(lotto.get("value") or "").strip()
+    match = re.search(r"\blotto\s+(\d+)\b", lotto_value, re.I)
+    if not match:
+        return None
+    try:
+        return int(match.group(1))
+    except Exception:
+        return None
+
+
+def _semaforo_blocker_profile(blocker: Dict[str, Any]) -> Dict[str, Any]:
+    label = str(
+        blocker.get("label_it")
+        or blocker.get("killer")
+        or blocker.get("key")
+        or blocker.get("title")
+        or ""
+    ).strip()
+    normalized = _normalize_signal_text(
+        " ".join(
+            [
+                label,
+                str(blocker.get("value") or ""),
+                str(blocker.get("reason_it") or ""),
+            ]
+        )
+    )
+    status = str(blocker.get("status") or "").strip().upper()
+    evidence = blocker.get("evidence") if isinstance(blocker.get("evidence"), list) else []
+    searched_in = blocker.get("searched_in") if isinstance(blocker.get("searched_in"), list) else []
+    low_signal_status = status in {"NOT_FOUND", "LOW_CONFIDENCE", "DA_VERIFICARE", "UNKNOWN"}
+
+    evidence_rank = 0
+    if evidence:
+        evidence_rank = 3 if not low_signal_status else 2
+    elif searched_in:
+        evidence_rank = 1
+
+    severity = "WEAK"
+    family = "generic"
+    if any(token in normalized for token in ("immobile non regolare ediliziamente", "sanatoria / condono non perfezionati", "uso residenziale non legittimato", "occupato da terzi senza titolo")):
+        severity = "EXTREME"
+    elif any(token in normalized for token in ("agibilita assente / non rilasciata", "agibilità assente / non rilasciata", "non agibile", "in costruzione / lavori sospesi", "fabbricato in costruzione / lavori sospesi")):
+        severity = "MAJOR"
+    elif any(token in normalized for token in ("non conformita", "non conformità", "difformit", "servitu / accesso privato", "servitù / accesso privato", "servitu rilevata", "servitù rilevata", "fibro-cemento", "amianto", "infiltrazioni", "condizioni conservative critiche", "accertamento di conformita", "accertamento di conformità")):
+        severity = "MODERATE"
+    elif any(token in normalized for token in ("ape", "dati asta", "formalita", "formalità", "ipoteca", "pignoramento")):
+        severity = "WEAK"
+    elif status in {"ROSSO", "SI", "YES", "RED"}:
+        severity = "MODERATE"
+
+    if any(token in normalized for token in ("immobile non regolare", "sanatoria", "condono", "non conformita", "non conformità", "difformit", "accertamento di conformita", "accertamento di conformità")):
+        family = "urbanistic"
+    elif any(token in normalized for token in ("agibilita", "agibilità", "abitabilit", "non agibile")):
+        family = "agibilita"
+    elif any(token in normalized for token in ("uso residenziale non legittimato", "destinazione d'uso")):
+        family = "use"
+    elif any(token in normalized for token in ("occupato", "occupazione", "stato occupativo", "liberazione")):
+        family = "occupancy"
+    elif any(token in normalized for token in ("in costruzione", "lavori sospesi", "completamento")):
+        family = "completion"
+    elif "servit" in normalized or "stradella" in normalized or "accesso" in normalized:
+        family = "servitude"
+
+    return {
+        "label": label,
+        "severity": severity,
+        "family": family,
+        "evidence_rank": evidence_rank,
+        "lot_number": _extract_lot_number_from_label(label),
+    }
+
+
+def _semaforo_blocker_sort_key(blocker: Dict[str, Any]) -> Tuple[int, int, str]:
+    profile = _semaforo_blocker_profile(blocker)
+    severity_rank = {"EXTREME": 4, "MAJOR": 3, "MODERATE": 2, "WEAK": 1}
+    return (
+        -severity_rank.get(profile["severity"], 0),
+        -int(profile["evidence_rank"]),
+        profile["label"].lower(),
+    )
+
+
+def _recompute_semaforo_status(result: Dict[str, Any]) -> None:
+    semaforo = result.get("semaforo_generale") if isinstance(result.get("semaforo_generale"), dict) else {}
+    if not semaforo:
+        semaforo = result.get("section_1_semaforo_generale") if isinstance(result.get("section_1_semaforo_generale"), dict) else {}
+    if not semaforo:
+        semaforo = {}
+        result["semaforo_generale"] = semaforo
+
+    top_blockers = semaforo.get("top_blockers") if isinstance(semaforo.get("top_blockers"), list) else []
+    blocker_items = [item for item in top_blockers if isinstance(item, dict)]
+    selected_lot_number = _selected_lot_number_for_semaforo(result)
+    panoramica = result.get("panoramica_contract") if isinstance(result.get("panoramica_contract"), dict) else {}
+    is_multi_lot = bool(panoramica.get("is_multi_lot")) or len(result.get("lots", []) if isinstance(result.get("lots"), list) else []) > 1
+
+    scoped: List[Tuple[Dict[str, Any], Dict[str, Any]]] = []
+    for blocker in blocker_items:
+        profile = _semaforo_blocker_profile(blocker)
+        if is_multi_lot and profile["lot_number"] is not None and selected_lot_number is not None and profile["lot_number"] != selected_lot_number:
+            continue
+        scoped.append((blocker, profile))
+    if not scoped:
+        scoped = [(blocker, _semaforo_blocker_profile(blocker)) for blocker in blocker_items]
+
+    extreme_count = sum(1 for _, p in scoped if p["severity"] == "EXTREME" and p["evidence_rank"] >= 2)
+    major_count = sum(1 for _, p in scoped if p["severity"] == "MAJOR" and p["evidence_rank"] >= 2)
+    moderate_count = sum(1 for _, p in scoped if p["severity"] == "MODERATE" and p["evidence_rank"] >= 1)
+    weak_count = sum(1 for _, p in scoped if p["severity"] == "WEAK")
+    cluster_families = {
+        p["family"]
+        for _, p in scoped
+        if p["family"] in {"urbanistic", "agibilita", "use", "occupancy", "completion"} and p["evidence_rank"] >= 2
+    }
+    has_completion_cluster = any(p["family"] == "completion" and p["evidence_rank"] >= 2 for _, p in scoped)
+
+    status = "GREEN"
+    if (
+        extreme_count >= 2
+        or len(cluster_families) >= 3
+        or (extreme_count >= 1 and major_count >= 2)
+        or (has_completion_cluster and major_count >= 1 and moderate_count >= 1)
+    ):
+        status = "RED"
+    elif extreme_count >= 1 or major_count >= 1 or moderate_count >= 2 or weak_count >= 2:
+        status = "AMBER"
+
+    ordered_labels = [p["label"] for _, p in scoped if p["label"]][:3]
+    if status == "RED":
+        reason_it = "Cluster di blocker maggiori con evidenza diretta"
+    elif status == "AMBER":
+        reason_it = "Presenza di criticità rilevanti da verificare prima dell'offerta"
+    else:
+        reason_it = "Non emergono blocker maggiori; restano verifiche ordinarie"
+    if ordered_labels:
+        reason_it = f"{reason_it}: {', '.join(ordered_labels[:2])}"
+
+    reason_en = {
+        "GREEN": "No major blockers detected; routine checks remain.",
+        "AMBER": "Relevant issues remain to be verified before bidding.",
+        "RED": "A major blocker cluster is supported by direct evidence.",
+    }[status]
+    if ordered_labels:
+        reason_en = f"{reason_en} Drivers: {', '.join(ordered_labels[:2])}."
+
+    status_it = {"GREEN": "VERDE", "AMBER": "GIALLO", "RED": "ROSSO"}[status]
+    status_en = {"GREEN": "GREEN", "AMBER": "CAUTION", "RED": "RED"}[status]
+
+    semaforo["status"] = status
+    semaforo["status_it"] = status_it
+    semaforo["status_en"] = status_en
+    semaforo["reason_it"] = reason_it
+    semaforo["reason_en"] = reason_en
+    semaforo["driver"] = {"value": reason_it}
+
+    section1 = result.get("section_1_semaforo_generale")
+    if isinstance(section1, dict):
+        section1["status"] = status
+        section1["status_it"] = status_it
+        section1["status_en"] = status_en
+        section1["reason_it"] = reason_it
+        section1["reason_en"] = reason_en
+        semaforo_complessivo = section1.get("semaforo_complessivo")
+        if isinstance(semaforo_complessivo, dict):
+            semaforo_complessivo["value"] = status_it
 
 
 def _legal_subject_negated(text: str, subject_pattern: str) -> bool:
@@ -3662,6 +3849,7 @@ def _refresh_customer_facing_result_on_read(
     _normalize_legal_killers(result, safe_pages)
     states = result.get("field_states", {}) if isinstance(result.get("field_states"), dict) else {}
     _ensure_semaforo_top_blockers(result, states, safe_pages)
+    _recompute_semaforo_status(result)
     _synthesize_decisione_rapida(result, states)
 
     _apply_market_ranges_to_money_box(result)
