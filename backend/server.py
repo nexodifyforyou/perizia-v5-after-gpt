@@ -913,6 +913,26 @@ def _is_toc_like_quote(quote: str) -> bool:
     return _is_toc_like_line(quote)
 
 
+def _find_anchored_span(text: str, *snippets: Any) -> Optional[Tuple[int, int]]:
+    raw_text = str(text or "")
+    if not raw_text:
+        return None
+    for raw_snippet in snippets:
+        snippet = str(raw_snippet or "").strip()
+        if not snippet:
+            continue
+        idx = raw_text.find(snippet)
+        if idx >= 0:
+            return idx, idx + len(snippet)
+        parts = [re.escape(part) for part in re.split(r"\s+", snippet) if part]
+        if not parts:
+            continue
+        match = re.search(r"\s+".join(parts), raw_text)
+        if match:
+            return match.start(), match.end()
+    return None
+
+
 def _is_cost_table_context(line: str) -> bool:
     low = str(line or "").lower()
     return any(
@@ -5874,20 +5894,31 @@ def _normalize_legal_killers(result: Dict[str, Any], pages: List[Dict[str, Any]]
                 continue
             page = int(ev.get("page", 0) or 0)
             quote = str(ev.get("quote", "") or "")
+            search_hint = str(ev.get("search_hint", "") or "")
             page_text = page_text_by_num.get(page, "")
             start_offset = int(ev.get("start_offset", 0) or 0)
             end_offset = int(ev.get("end_offset", 0) or 0)
             context = quote
+            local_anchor = quote
+            local_context = quote
             if page_text:
-                if end_offset <= start_offset:
-                    idx = page_text.find(quote)
-                    if idx >= 0:
-                        start_offset = idx
-                        end_offset = idx + len(quote)
+                slice_text = page_text[start_offset:end_offset] if end_offset > start_offset else ""
+                anchor_span = None
+                if quote and end_offset > start_offset and slice_text == quote:
+                    anchor_span = (start_offset, end_offset)
+                else:
+                    anchor_span = _find_anchored_span(page_text, quote, search_hint)
+                if anchor_span:
+                    start_offset, end_offset = anchor_span
                 if end_offset > start_offset:
+                    local_anchor = page_text[start_offset:end_offset]
+                    local_context = page_text[max(0, start_offset - 60):min(len(page_text), end_offset + 60)]
                     context = page_text[max(0, start_offset - 180):min(len(page_text), end_offset + 140)]
+                elif quote:
+                    local_context = quote
+            local_toc_probe = local_anchor if str(local_anchor or "").strip() else local_context
             low_context = context.lower()
-            if _is_toc_like_quote(context) or _is_toc_like_line(context):
+            if _is_toc_like_quote(local_toc_probe) or _is_toc_like_line(local_toc_probe):
                 continue
             killer_low = str(it.get("killer") or "").lower()
             if "usi civici" in killer_low:
