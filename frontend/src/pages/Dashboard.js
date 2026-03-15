@@ -27,6 +27,7 @@ const API_URL = process.env.REACT_APP_BACKEND_URL;
 
 // Sidebar Navigation Component
 const Sidebar = ({ user, logout }) => {
+  const navigate = useNavigate();
   const featureAccess = getFeatureAccess(user);
   
   const navItems = [
@@ -46,6 +47,11 @@ const Sidebar = ({ user, logout }) => {
     { icon: <MessageSquare className="w-5 h-5" />, label: 'Assistente', path: '/admin/assistant' },
     { icon: <CreditCard className="w-5 h-5" />, label: 'Transazioni', path: '/admin/transactions' },
   ];
+
+  const handleLogout = async () => {
+    await logout();
+    navigate('/', { replace: true });
+  };
 
   return (
     <aside className="fixed left-0 top-0 h-screen w-64 bg-zinc-950 border-r border-zinc-800 flex flex-col z-40">
@@ -125,7 +131,7 @@ const Sidebar = ({ user, logout }) => {
         </div>
         <Button 
           variant="outline" 
-          onClick={logout}
+          onClick={handleLogout}
           data-testid="logout-btn"
           className="w-full border-zinc-700 text-zinc-400 hover:text-zinc-100 hover:bg-zinc-800"
         >

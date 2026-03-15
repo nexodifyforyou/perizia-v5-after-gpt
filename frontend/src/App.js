@@ -5,6 +5,10 @@ import { toast } from "sonner";
 
 // Pages
 import Landing from "./pages/Landing";
+import Pacchetti from "./pages/Pacchetti";
+import Supporto from "./pages/Supporto";
+import Termini from "./pages/Termini";
+import Privacy from "./pages/Privacy";
 import Dashboard from "./pages/Dashboard";
 import NewAnalysis from "./pages/NewAnalysis";
 import AnalysisResult from "./pages/AnalysisResult";
@@ -142,6 +146,10 @@ function AppRouter() {
   return (
     <Routes>
       <Route path="/" element={<Landing />} />
+      <Route path="/pacchetti" element={<Pacchetti />} />
+      <Route path="/supporto" element={<Supporto />} />
+      <Route path="/termini" element={<Termini />} />
+      <Route path="/privacy" element={<Privacy />} />
       <Route path="/dashboard" element={
         <ProtectedRoute><Dashboard /></ProtectedRoute>
       } />

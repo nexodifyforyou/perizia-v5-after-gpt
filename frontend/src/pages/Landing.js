@@ -1,5 +1,5 @@
-import React, { useState, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
+import React, { useEffect } from 'react';
+import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { Button } from '../components/ui/button';
 import { 
@@ -7,7 +7,6 @@ import {
   Shield, 
   Eye, 
   MessageSquare, 
-  CheckCircle2, 
   ArrowRight,
   Scale,
   Building2,
@@ -15,30 +14,17 @@ import {
   AlertTriangle,
   Sparkles
 } from 'lucide-react';
-import axios from 'axios';
-
-const API_URL = process.env.REACT_APP_BACKEND_URL;
+import PublicPlansGrid from '../components/PublicPlansGrid';
 
 const Landing = () => {
   const { user, login } = useAuth();
   const navigate = useNavigate();
-  const [plans, setPlans] = useState([]);
 
   useEffect(() => {
     if (user) {
       navigate('/dashboard');
     }
-    fetchPlans();
   }, [user, navigate]);
-
-  const fetchPlans = async () => {
-    try {
-      const response = await axios.get(`${API_URL}/api/plans`);
-      setPlans(response.data.plans);
-    } catch (error) {
-      console.error('Failed to fetch plans:', error);
-    }
-  };
 
   const features = [
     {
@@ -85,14 +71,6 @@ const Landing = () => {
     }
   ];
 
-  const creditBands = [
-    '1-20 pagine = 4 crediti',
-    '21-40 pagine = 7 crediti',
-    '41-60 pagine = 10 crediti',
-    '61-80 pagine = 13 crediti',
-    '81-100 pagine = 16 crediti'
-  ];
-
   return (
     <div className="min-h-screen bg-[#09090b]">
       {/* Header */}
@@ -131,15 +109,11 @@ const Landing = () => {
           </div>
           
           <h1 className="text-5xl md:text-7xl font-serif font-bold text-zinc-100 tracking-tight leading-none mb-6">
-            Analisi strutturata della
-            <br />
-            <span className="text-gold">perizia d'asta</span>
+            Analisi strutturata della perizia.
           </h1>
           
           <p className="text-lg md:text-xl text-zinc-400 max-w-3xl mx-auto mb-12 leading-relaxed">
-            PeriziaScan ti aiuta a orientarti piu rapidamente dentro perizie lunghe e complesse con una logica proprietaria che struttura rischi, criticita e costi da verificare.
-            <br className="hidden md:block" />
-            Le conclusioni sono supportate da riferimenti di pagina e calcoli trasparenti, dove applicabile, per permetterti di controllare da dove arriva ogni indicazione.
+            Con focus iniziale sulle perizie d’asta, PeriziaScan trasforma documenti lunghi e opachi in una lettura chiara e tracciabile: semaforo rischio, criticità legali, costi/oneri da verificare e riferimenti puntuali alle pagine.
           </p>
           
           <div className="flex flex-col sm:flex-row gap-4 justify-center">
@@ -258,91 +232,18 @@ const Landing = () => {
               Accesso e Pacchetti
             </h2>
             <p className="text-zinc-400 text-lg">
-              Scegli il livello di accesso piu adatto al tuo flusso di analisi iniziale, senza modificare il tuo processo di verifica professionale
+              Una sintesi commerciale pulita dei pacchetti pubblici. Il dettaglio completo di crediti, validita e perimetro del prodotto attuale e disponibile nella pagina Pacchetti.
             </p>
           </div>
-          
-          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-5 gap-6">
-            {plans.map((plan) => (
-              <div 
-                key={plan.plan_id}
-                data-testid={`plan-card-${plan.plan_id}`}
-                className={`relative bg-zinc-900 border rounded-2xl p-8 transition-all duration-300 ${
-                  plan.plan_id === 'solo' 
-                    ? 'border-gold gold-glow' 
-                    : 'border-zinc-800 hover:border-zinc-600'
-                }`}
-              >
-                {plan.plan_id === 'solo' && (
-                  <div className="absolute -top-4 left-1/2 -translate-x-1/2">
-                    <span className="premium-badge">Core attuale</span>
-                  </div>
-                )}
-                
-                <h3 className="text-2xl font-serif font-bold text-zinc-100 mb-2">
-                  {plan.name_it}
-                </h3>
+          <PublicPlansGrid />
 
-                <p className="text-xs font-mono uppercase tracking-wider text-zinc-500 mb-4">
-                  {plan.plan_type_label_it}
-                </p>
-                
-                <div className="flex items-baseline gap-1 mb-6">
-                  <span className="text-4xl font-bold text-gold">
-                    €{plan.price.toFixed(0)}
-                  </span>
-                  {plan.price_suffix_it && (
-                    <span className="text-zinc-500">{plan.price_suffix_it}</span>
-                  )}
-                </div>
-
-                <div className="space-y-2 mb-6 text-sm">
-                  <p className="text-zinc-200 font-medium">{plan.credits_label_it}</p>
-                  {plan.validity_label_it && (
-                    <p className="text-zinc-500">{plan.validity_label_it}</p>
-                  )}
-                  {plan.support_level_it && (
-                    <p className="text-zinc-500">{plan.support_level_it}</p>
-                  )}
-                </div>
-                
-                <ul className="space-y-3 mb-8">
-                  {plan.features_it.map((feature, i) => (
-                    <li key={i} className="flex items-start gap-3 text-sm text-zinc-300">
-                      <CheckCircle2 className="w-5 h-5 text-emerald-400 flex-shrink-0 mt-0.5" />
-                      {feature}
-                    </li>
-                  ))}
-                </ul>
-                
-                <Button 
-                  onClick={login}
-                  data-testid={`plan-${plan.plan_id}-btn`}
-                  className={`w-full ${
-                    plan.plan_id === 'solo'
-                      ? 'bg-gold text-zinc-950 hover:bg-gold-dim'
-                      : 'bg-zinc-800 text-zinc-100 hover:bg-zinc-700'
-                  }`}
-                >
-                  {plan.cta_label_it}
-                </Button>
-              </div>
-            ))}
-          </div>
-
-          <div className="mt-8 max-w-5xl mx-auto bg-zinc-950/70 border border-zinc-800 rounded-2xl p-6">
-            <h3 className="text-lg font-semibold text-zinc-100 mb-2">Come funzionano i crediti</h3>
-            <p className="text-sm text-zinc-500 mb-4">
-              I crediti vengono consumati in base alla lunghezza della perizia analizzata.
+          <div className="mt-10 flex flex-col items-center gap-4 text-center">
+            <p className="max-w-3xl text-sm text-zinc-500">
+              Il valore attuale dei pacchetti riguarda il core product documentale. Assistente sulla Perizia e Image Forensics non sono inclusi oggi nel valore attivo dei pacchetti.
             </p>
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3 text-sm">
-              {creditBands.map((band) => (
-                <div key={band} className="rounded-xl border border-zinc-800 bg-zinc-900/60 px-4 py-3 text-zinc-300">
-                  {band}
-                </div>
-              ))}
-            </div>
-            <p className="text-xs text-zinc-600 mt-4">Crediti extra disponibili.</p>
+            <Button asChild variant="outline" className="border-gold/30 text-gold hover:bg-gold/10 px-6">
+              <Link to="/pacchetti">Vedi dettagli pacchetti e crediti</Link>
+            </Button>
           </div>
         </div>
       </section>
@@ -415,10 +316,20 @@ const Landing = () => {
             <span className="font-serif font-bold text-zinc-100">Nexodify</span>
           </div>
           <div className="flex flex-wrap items-center justify-center gap-4 text-sm text-zinc-500">
-            <span className="px-3 py-1 rounded-full border border-zinc-800 bg-zinc-900/50">Pacchetti</span>
-            <span className="px-3 py-1 rounded-full border border-zinc-800 bg-zinc-900/50">Supporto</span>
-            <span className="px-3 py-1 rounded-full border border-zinc-800 bg-zinc-900/50">Termini</span>
-            <span className="px-3 py-1 rounded-full border border-zinc-800 bg-zinc-900/50">Privacy</span>
+            {[
+              { label: 'Pacchetti', to: '/pacchetti' },
+              { label: 'Supporto', to: '/supporto' },
+              { label: 'Termini', to: '/termini' },
+              { label: 'Privacy', to: '/privacy' }
+            ].map((item) => (
+              <Link
+                key={item.to}
+                to={item.to}
+                className="px-3 py-1 rounded-full border border-zinc-800 bg-zinc-900/50 text-zinc-500 transition-colors hover:text-zinc-100 hover:border-zinc-700"
+              >
+                {item.label}
+              </Link>
+            ))}
           </div>
           <div className="text-center md:text-right">
             <p className="text-zinc-500 text-sm">

@@ -1,4 +1,5 @@
 import React from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { Sidebar } from './Dashboard';
 import { Button } from '../components/ui/button';
@@ -12,6 +13,12 @@ import {
 
 const Profile = () => {
   const { user, logout } = useAuth();
+  const navigate = useNavigate();
+
+  const handleLogout = async () => {
+    await logout();
+    navigate('/', { replace: true });
+  };
 
   return (
     <div className="min-h-screen bg-[#09090b]">
@@ -92,7 +99,7 @@ const Profile = () => {
             {/* Logout Button */}
             <div className="mt-8 pt-8 border-t border-zinc-800">
               <Button 
-                onClick={logout}
+                onClick={handleLogout}
                 data-testid="profile-logout-btn"
                 variant="outline"
                 className="border-red-500/30 text-red-400 hover:bg-red-500/10"

@@ -53,6 +53,7 @@ export const AuthProvider = ({ children }) => {
     } catch (error) {
       console.error('Logout error:', error);
     } finally {
+      localStorage.removeItem('last_path');
       setUser(null);
     }
   };
