@@ -1613,7 +1613,13 @@ const AnalysisResult = () => {
   const moneyBoxTotalRange = moneyBox.total_extra_costs_range;
   const moneyBoxTotalMin = moneyBoxTotal?.min;
   const moneyBoxTotalMax = moneyBoxTotal?.max;
-  const isTotalTBD = moneyBoxTotalMin === 'TBD' || moneyBoxTotalMax === 'TBD';
+  const moneyPolicy = safeRender(moneyBox.policy, '').toUpperCase();
+  const isConservativeCostMode = moneyPolicy === 'CONSERVATIVE' || moneyPolicy === 'LOT_CONSERVATIVE';
+  const isTotalTBD =
+    moneyBoxTotalMin === 'TBD' ||
+    moneyBoxTotalMax === 'TBD' ||
+    moneyBoxTotalMin === 'NON_QUANTIFICATO_IN_PERIZIA' ||
+    moneyBoxTotalMax === 'NON_QUANTIFICATO_IN_PERIZIA';
   const hasMoneyBoxTotalRange = typeof moneyBoxTotalRange?.min_eur === 'number' && typeof moneyBoxTotalRange?.max_eur === 'number';
   const prezzoBaseValue =
     parseNumericEuro(selectedLot?.prezzo_base_value) ??
@@ -1625,8 +1631,21 @@ const AnalysisResult = () => {
     ? panoramicaContract.valuation_waterfall
     : null;
   const valuationDeprezzamentiValue = parseNumericEuro(valuationWaterfall?.deprezzamenti_eur);
+  const valuationDeprezzamentiMeta = valuationWaterfall?.deprezzamenti_meta && typeof valuationWaterfall.deprezzamenti_meta === 'object'
+    ? valuationWaterfall.deprezzamenti_meta
+    : null;
   const valuationDeprezzamentiEvidence = Array.isArray(valuationWaterfall?.evidence?.deprezzamenti_eur)
     ? valuationWaterfall.evidence.deprezzamenti_eur
+    : [];
+  const valuationDeprezzamentiIsComputed = valuationDeprezzamentiMeta?.mode === 'COMPUTED';
+  const valuationDeprezzamentiGrossValue = parseNumericEuro(valuationDeprezzamentiMeta?.gross_value_eur);
+  const valuationDeprezzamentiFinalValue = parseNumericEuro(valuationDeprezzamentiMeta?.final_value_eur);
+  const valuationDeprezzamentiComputedValue = parseNumericEuro(valuationDeprezzamentiMeta?.computed_difference_eur);
+  const valuationDeprezzamentiGrossEvidence = Array.isArray(valuationDeprezzamentiMeta?.gross_evidence)
+    ? valuationDeprezzamentiMeta.gross_evidence
+    : [];
+  const valuationDeprezzamentiFinalEvidence = Array.isArray(valuationDeprezzamentiMeta?.final_evidence)
+    ? valuationDeprezzamentiMeta.final_evidence
     : [];
 
   const isJunkOrValuationSummaryCost = (item) => {
@@ -1711,6 +1730,20 @@ const AnalysisResult = () => {
       const bCode = safeRender(b?.code || b?.voce, '').toUpperCase();
       return aCode.localeCompare(bCode);
     });
+  const qualitativeBurdens = (() => {
+    const sourceItems = Array.isArray(moneyBox.qualitative_burdens) && moneyBox.qualitative_burdens.length > 0
+      ? moneyBox.qualitative_burdens
+      : moneyBoxItems.filter((item) => safeRender(item?.type, '').toUpperCase() === 'QUALITATIVE');
+    const seen = new Set();
+    return sourceItems.filter((item) => {
+      const label = safeRender(item?.label_it || item?.label || item?.voce, '').trim();
+      if (!label) return false;
+      const key = label.toLowerCase();
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+  })();
   const moneyBoxBreakdown = canonicalMoneyBoxItems.reduce((acc, item) => {
     const euroValue = parseNumericEuro(item?.stima_euro);
     const marketRange = item?.market_range_eur && typeof item.market_range_eur === 'object'
@@ -3001,7 +3034,41 @@ const AnalysisResult = () => {
                 {valuationDeprezzamentiValue !== null ? (
                   <>
                     <p className="text-lg font-mono font-semibold text-amber-300">- €{valuationDeprezzamentiValue.toLocaleString()}</p>
-                    {valuationDeprezzamentiEvidence.length > 0 && (
+                    {valuationDeprezzamentiIsComputed ? (
+                      <div className="mt-3 rounded-md border border-amber-500/20 bg-zinc-950/70 p-3">
+                        <p className="text-xs font-medium uppercase tracking-wide text-amber-300">
+                          {safeRender(valuationDeprezzamentiMeta?.label_it, 'Deprezzamento totale calcolato da valori in perizia')}
+                        </p>
+                        <div className="mt-2 space-y-2 text-sm text-zinc-300">
+                          {valuationDeprezzamentiGrossValue !== null && (
+                            <div>
+                              <p className="flex items-center gap-1">
+                                <span>{safeRender(valuationDeprezzamentiMeta?.gross_label_it, 'Valore di stima lordo')}: €{valuationDeprezzamentiGrossValue.toLocaleString()}</span>
+                                {valuationDeprezzamentiGrossEvidence.length > 0 && <EvidenceBadge evidence={valuationDeprezzamentiGrossEvidence} />}
+                              </p>
+                            </div>
+                          )}
+                          {valuationDeprezzamentiFinalValue !== null && (
+                            <div>
+                              <p className="flex items-center gap-1">
+                                <span>{safeRender(valuationDeprezzamentiMeta?.final_label_it, 'Valore finale / prezzo base')}: €{valuationDeprezzamentiFinalValue.toLocaleString()}</span>
+                                {valuationDeprezzamentiFinalEvidence.length > 0 && <EvidenceBadge evidence={valuationDeprezzamentiFinalEvidence} />}
+                              </p>
+                            </div>
+                          )}
+                          {valuationDeprezzamentiGrossValue !== null && valuationDeprezzamentiFinalValue !== null && valuationDeprezzamentiComputedValue !== null && (
+                            <p className="font-mono text-xs text-zinc-400">
+                              Calcolo: €{valuationDeprezzamentiGrossValue.toLocaleString()} - €{valuationDeprezzamentiFinalValue.toLocaleString()} = €{valuationDeprezzamentiComputedValue.toLocaleString()}
+                            </p>
+                          )}
+                        </div>
+                        {valuationDeprezzamentiEvidence.length > 0 && (
+                          <div className="mt-3">
+                            <EvidenceDetail evidence={valuationDeprezzamentiEvidence} />
+                          </div>
+                        )}
+                      </div>
+                    ) : valuationDeprezzamentiEvidence.length > 0 && (
                       <div className="mt-2">
                         <EvidenceDetail evidence={valuationDeprezzamentiEvidence} />
                       </div>
@@ -3044,7 +3111,24 @@ const AnalysisResult = () => {
                 <p className="text-xs text-zinc-500 mb-3">
                   Voci canoniche A-H mostrate come stime/assunzioni operative, non come dichiarazioni dirette della perizia.
                 </p>
-                {nexodifyEstimateItems.length > 0 ? (
+                {isConservativeCostMode ? (
+                  qualitativeBurdens.length > 0 ? (
+                    <div className="space-y-2">
+                      {qualitativeBurdens.map((item, index) => (
+                        <div key={`burden_${index}`} className="rounded-lg border border-zinc-800 bg-zinc-950/60 px-4 py-3">
+                          <p className="text-sm font-medium text-zinc-100">
+                            {safeRender(item?.label_it || item?.label || item?.voce, 'Onere qualitativo da verificare')}
+                          </p>
+                          <p className="text-xs text-zinc-500 mt-1">
+                            Onere grounded lato acquirente, non quantificato in modo difendibile dalla perizia.
+                          </p>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <p className="text-zinc-500 text-sm">Nessun onere qualitativo grounded disponibile.</p>
+                  )
+                ) : nexodifyEstimateItems.length > 0 ? (
                   <div className="space-y-3">
                     {nexodifyEstimateItems.map((item, index) => (
                       <MoneyBoxItem key={`nexo_${index}`} item={item} />
@@ -3062,7 +3146,7 @@ const AnalysisResult = () => {
                     <span className="text-lg font-semibold text-zinc-100">Totale stima extra-costi (escl. deprezzamenti)</span>
                     <span className={`text-2xl font-mono font-bold ${isTotalTBD ? 'text-amber-400' : 'text-gold'}`}>
                       {isTotalTBD ? (
-                        'Non disponibile'
+                        'NON QUANTIFICATO IN PERIZIA'
                       ) : moneyBoxTotal?.min !== undefined ? (
                         `€${(typeof moneyBoxTotal.min === 'number' ? moneyBoxTotal.min : 0).toLocaleString()} - €${(typeof moneyBoxTotal.max === 'number' ? moneyBoxTotal.max : 0).toLocaleString()}`
                       ) : (
@@ -3076,7 +3160,7 @@ const AnalysisResult = () => {
                   )}
                   {isTotalTBD && (
                     <p className="text-xs text-amber-400 mt-2">
-                      ⚠️ Costi non quantificati in perizia — Verifica tecnico/legale obbligatoria
+                      Costi non quantificati in perizia. Verifica tecnico/legale obbligatoria.
                     </p>
                   )}
                 </div>

@@ -2516,6 +2516,87 @@ def _is_buyer_burden_quote(text: str) -> bool:
     )
 
 
+def _translated_cost_burden_label(text: str) -> Optional[str]:
+    normalized = _normalize_signal_text(text)
+    if not normalized:
+        return None
+    if any(token in normalized for token in ("immobile non regolare ediliziamente", "immobile non regolare", "difformit", "non conformita", "non conformità", "regolarizzazione urbanistica", "accertamento di conformita", "accertamento di conformità")):
+        return "Regolarizzazione edilizia / urbanistica da verificare"
+    if any(token in normalized for token in ("sanatoria / condono non perfezionati", "sanatoria", "condono")):
+        return "Completamento o perfezionamento sanatoria / condono da verificare"
+    if any(token in normalized for token in ("uso residenziale non legittimato", "destinazione d'uso")):
+        return "Verifica conseguenze della destinazione d'uso non legittimata"
+    if any(token in normalized for token in ("occupato da terzi senza titolo", "occupato", "occupazione", "liberazione")):
+        return "Eventuali costi connessi alla liberazione dell'immobile"
+    if any(token in normalized for token in ("in costruzione", "lavori sospesi", "completamento", "messa in sicurezza", "abitabilit", "agibilit")):
+        return "Completamento lavori / messa in sicurezza e pratiche tecniche da verificare"
+    if any(token in normalized for token in ("ripristin", "conservativ", "infiltrazioni", "umidit", "degrado", "fibro-cemento", "amianto", "bonifica")):
+        return "Eventuali ripristini / problemi conservativi segnalati in perizia"
+    if any(token in normalized for token in ("allineamento catastal", "catastal")):
+        return "Allineamento catastale da verificare"
+    if "spese condominiali" in normalized or "condominial" in normalized:
+        return "Eventuali arretrati condominiali da verificare"
+    if "formalita da cancellare" in normalized or "cancellazione formalita" in normalized:
+        return "Costi di formalita da verificare in sede di trasferimento"
+    return None
+
+
+def _build_conservative_cost_burdens(result: Dict[str, Any], items: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    burdens: List[Dict[str, Any]] = []
+    seen_labels: set = set()
+
+    def _push(label: Optional[str], evidence: List[Dict[str, Any]], source: str) -> None:
+        if not label:
+            return
+        key = _normalize_signal_text(label)
+        if not key or key in seen_labels:
+            return
+        seen_labels.add(key)
+        burdens.append({
+            "code": f"QB_{len(burdens) + 1}",
+            "label_it": label,
+            "label_en": label,
+            "type": "QUALITATIVE",
+            "stima_euro": "NON_QUANTIFICATO",
+            "stima_nota": "Onere buyer-side segnalato dalla perizia ma non quantificato in modo difendibile",
+            "source": source,
+            "evidence": _normalize_contract_evidence_list(evidence, max_items=2),
+        })
+
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        evidence = item.get("fonte_perizia", {}).get("evidence", []) if isinstance(item.get("fonte_perizia"), dict) else []
+        if not evidence:
+            evidence = item.get("evidence", []) if isinstance(item.get("evidence"), list) else []
+        text_blob = " ".join([
+            str(item.get("label_it") or ""),
+            str(item.get("label_en") or ""),
+            str(item.get("stima_nota") or ""),
+            " ".join(str(ev.get("quote") or "") for ev in evidence if isinstance(ev, dict)),
+        ])
+        _push(_translated_cost_burden_label(text_blob), evidence, "PERIZIA_QUALITATIVE")
+
+    legal_killers = result.get("section_9_legal_killers", {}) if isinstance(result.get("section_9_legal_killers"), dict) else {}
+    top_items = legal_killers.get("top_items", []) if isinstance(legal_killers.get("top_items"), list) else []
+    for item in top_items[:8]:
+        if not isinstance(item, dict):
+            continue
+        _push(
+            _translated_cost_burden_label(
+                " ".join([
+                    str(item.get("killer") or ""),
+                    str(item.get("reason_it") or ""),
+                    str(item.get("action") or ""),
+                ])
+            ),
+            item.get("evidence", []) if isinstance(item.get("evidence"), list) else [],
+            "LEGAL_KILLER_QUALITATIVE",
+        )
+
+    return burdens
+
+
 def _sanitize_money_box_for_customer(result: Dict[str, Any]) -> None:
     money_box = result.get("money_box", {}) if isinstance(result.get("money_box"), dict) else {}
     items = money_box.get("items", [])
@@ -2561,29 +2642,25 @@ def _sanitize_money_box_for_customer(result: Dict[str, Any]) -> None:
     money_box["items"] = cleaned_items
 
     if not is_multi_lot and not has_document_backed_buyer_burden:
+        qualitative_burdens = _build_conservative_cost_burdens(result, cleaned_items)
         money_box["policy"] = "CONSERVATIVE"
         money_box.pop("total_extra_costs_range", None)
-        for item in cleaned_items:
-            item.pop("market_range_eur", None)
-            item.pop("source_market", None)
-            note = str(item.get("stima_nota") or "").strip()
-            note = re.sub(r"\s*—\s*Stima indicativa di mercato \(non presente in perizia\)\s*", "", note, flags=re.I).strip()
-            if note:
-                item["stima_nota"] = note
-            if str(item.get("source") or "").upper() == "MARKET_ESTIMATE":
-                item["source"] = "TBD"
+        money_box["items"] = qualitative_burdens
+        money_box["qualitative_burdens"] = copy.deepcopy(qualitative_burdens)
         money_box["total_extra_costs"] = {
-            "range": {"min": "TBD", "max": "TBD"},
-            "max_is_open": True,
-            "note": "TBD because document-backed buyer burdens are not quantified safely",
+            "min": "NON_QUANTIFICATO_IN_PERIZIA",
+            "max": "NON_QUANTIFICATO_IN_PERIZIA",
+            "max_is_open": False,
+            "note": "Buyer-side extra cost burdens are grounded, but the perizia does not support a defensible numeric total",
         }
         if isinstance(result.get("section_3_money_box"), dict):
-            result["section_3_money_box"]["items"] = copy.deepcopy(cleaned_items)
+            result["section_3_money_box"]["items"] = copy.deepcopy(qualitative_burdens)
+            result["section_3_money_box"]["qualitative_burdens"] = copy.deepcopy(qualitative_burdens)
             result["section_3_money_box"].pop("total_extra_costs_range", None)
             result["section_3_money_box"]["totale_extra_budget"] = {
-                "min": "TBD",
-                "max": "TBD",
-                "nota": "TBD — Costi extra non quantificati in modo customer-safe",
+                "min": "NON_QUANTIFICATO_IN_PERIZIA",
+                "max": "NON_QUANTIFICATO_IN_PERIZIA",
+                "nota": "Costi extra non quantificati in perizia; mantenuti solo oneri qualitativi grounded",
             }
     elif supported_numeric_total > 0:
         money_box["total_extra_costs"] = {
@@ -3579,9 +3656,10 @@ def _build_conservative_money_box_for_lots(result: Dict[str, Any]) -> None:
         "policy": "LOT_CONSERVATIVE",
         "lots": lot_rows,
         "items": items,
+        "qualitative_burdens": copy.deepcopy(items),
         "total_extra_costs": {
-            "min": "TBD",
-            "max": "TBD",
+            "min": "NON_QUANTIFICATO_IN_PERIZIA",
+            "max": "NON_QUANTIFICATO_IN_PERIZIA",
             "nota": "Costi extra non quantificati in perizia; mantenuti solo oneri qualitativi buyer-borne",
         },
     }
@@ -3629,10 +3707,11 @@ def _sanitize_lot_conservative_outputs(result: Dict[str, Any]) -> None:
         item for item in money_box.get("items", [])
         if isinstance(item, dict) and str(item.get("source") or "").upper() == "PERIZIA_QUALITATIVE"
     ]
+    money_box["qualitative_burdens"] = copy.deepcopy(money_box["items"])
     money_box.pop("total_extra_costs_range", None)
     money_box["total_extra_costs"] = {
-        "min": "TBD",
-        "max": "TBD",
+        "min": "NON_QUANTIFICATO_IN_PERIZIA",
+        "max": "NON_QUANTIFICATO_IN_PERIZIA",
         "nota": "Costi extra non quantificati in perizia; mantenuti solo oneri qualitativi buyer-borne",
     }
     result["money_box"] = money_box
@@ -5592,6 +5671,8 @@ def _build_panoramica_contract(result: Dict[str, Any], pages: List[Dict[str, Any
         })
 
     wf_from_pages = _extract_valuation_waterfall_from_pages(pages)
+    dep_mode = "DIRECT"
+    dep_meta: Optional[Dict[str, Any]] = None
     if len(lots) > 1 and isinstance(selected_lot, dict):
         stima_value = _as_float_or_none(selected_lot.get("valore_stima_eur"))
         dep_pct = _parse_percent_value(selected_lot.get("deprezzamento_percentuale"))
@@ -5611,6 +5692,7 @@ def _build_panoramica_contract(result: Dict[str, Any], pages: List[Dict[str, Any
             dep_value = max(0.0, stima_value * (float(dep_pct) / 100.0))
         if (dep_value is None or dep_value <= 0) and isinstance(stima_value, (int, float)) and isinstance(prezzo_wf_value, (int, float)):
             dep_value = max(0.0, stima_value - prezzo_wf_value)
+            dep_mode = "COMPUTED"
         if not stima_ev:
             stima_ev = _normalize_contract_evidence_list(selected_ev.get("tipologia", []))
         if not dep_ev:
@@ -5669,12 +5751,45 @@ def _build_panoramica_contract(result: Dict[str, Any], pages: List[Dict[str, Any
         if prezzo_wf_value is None:
             prezzo_wf_value = wf_from_pages.get("prezzo_base_eur")
             prezzo_wf_ev = wf_from_pages.get("evidence", {}).get("prezzo_base_eur", [])
+        if (dep_value is None or (isinstance(dep_value, (int, float)) and dep_value <= 0)) and isinstance(stima_value, (int, float)) and isinstance(prezzo_wf_value, (int, float)):
+            dep_value = max(0.0, float(stima_value) - float(prezzo_wf_value))
+            dep_mode = "COMPUTED"
+        if not dep_ev and isinstance(selected_lot, dict):
+            selected_ev = selected_lot.get("evidence", {}) if isinstance(selected_lot.get("evidence"), dict) else {}
+            dep_ev = _normalize_contract_evidence_list(selected_ev.get("deprezzamento", []))
+        if not dep_ev and dep_value and dep_value > 0:
+            dep_ev = list(stima_ev or prezzo_wf_ev)
+
+    if (
+        dep_mode == "COMPUTED"
+        and isinstance(dep_value, (int, float))
+        and dep_value > 0
+        and isinstance(stima_value, (int, float))
+        and isinstance(prezzo_wf_value, (int, float))
+    ):
+        dep_meta = {
+            "mode": "COMPUTED",
+            "label_it": "Deprezzamento totale calcolato da valori in perizia",
+            "gross_value_eur": int(round(stima_value)),
+            "gross_label_it": "Valore di stima lordo",
+            "gross_evidence": _normalize_contract_evidence_list(stima_ev),
+            "final_value_eur": int(round(prezzo_wf_value)),
+            "final_label_it": "Valore finale / prezzo base",
+            "final_evidence": _normalize_contract_evidence_list(prezzo_wf_ev or finale_ev),
+            "computed_difference_eur": int(round(dep_value)),
+            "formula_it": "Valore di stima lordo - Valore finale / prezzo base = Deprezzamento totale",
+        }
+    elif isinstance(dep_value, (int, float)) and dep_value > 0:
+        dep_meta = {
+            "mode": "DIRECT",
+        }
 
     valuation_waterfall = {
         "valore_stima_eur": int(round(stima_value)) if isinstance(stima_value, (int, float)) else None,
         "deprezzamenti_eur": int(round(dep_value)) if isinstance(dep_value, (int, float)) else None,
         "valore_finale_eur": int(round(finale_value)) if isinstance(finale_value, (int, float)) else None,
         "prezzo_base_eur": int(round(prezzo_wf_value)) if isinstance(prezzo_wf_value, (int, float)) else None,
+        "deprezzamenti_meta": dep_meta,
         "evidence": {
             "valore_stima_eur": _normalize_contract_evidence_list(stima_ev),
             "deprezzamenti_eur": _normalize_contract_evidence_list(dep_ev),
