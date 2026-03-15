@@ -21,18 +21,19 @@ import {
 } from 'lucide-react';
 import axios from 'axios';
 import { toast } from 'sonner';
+import { getFeatureAccess } from '../lib/featureAccess';
 
 const API_URL = process.env.REACT_APP_BACKEND_URL;
 
 // Sidebar Navigation Component
 const Sidebar = ({ user, logout }) => {
-  const navigate = useNavigate();
+  const featureAccess = getFeatureAccess(user);
   
   const navItems = [
     { icon: <FileText className="w-5 h-5" />, label: 'Dashboard', path: '/dashboard' },
     { icon: <Plus className="w-5 h-5" />, label: 'Nuova Analisi', path: '/analysis/new' },
-    { icon: <Image className="w-5 h-5" />, label: 'Image Forensics', path: '/forensics' },
-    { icon: <MessageSquare className="w-5 h-5" />, label: 'Assistente', path: '/assistant' },
+    { icon: <Image className="w-5 h-5" />, label: 'Image Forensics', path: '/forensics', disabled: !featureAccess.canUseImageForensics, badge: 'Solo admin' },
+    { icon: <MessageSquare className="w-5 h-5" />, label: 'Assistente', path: '/assistant', disabled: !featureAccess.canUseAssistant, badge: 'In arrivo' },
     { icon: <History className="w-5 h-5" />, label: 'Storico', path: '/history' },
     { icon: <CreditCard className="w-5 h-5" />, label: 'Abbonamento', path: '/billing' },
     { icon: <User className="w-5 h-5" />, label: 'Profilo', path: '/profile' },
@@ -63,14 +64,27 @@ const Sidebar = ({ user, logout }) => {
             key={item.path}
             to={item.path}
             data-testid={`nav-${item.path.replace(/\//g, '-').replace(/^-/, '')}`}
+            onClick={(event) => {
+              if (!item.disabled) return;
+              event.preventDefault();
+              toast.info(`${item.label}: funzionalita non ancora disponibile`);
+            }}
             className={`flex items-center gap-3 px-4 py-3 rounded-lg text-sm font-medium transition-all ${
               window.location.pathname === item.path || window.location.pathname.startsWith(item.path + '/')
                 ? 'bg-gold/10 text-gold'
-                : 'text-zinc-400 hover:text-zinc-100 hover:bg-zinc-900'
+                : item.disabled
+                  ? 'text-zinc-600 bg-zinc-950/70 cursor-not-allowed'
+                  : 'text-zinc-400 hover:text-zinc-100 hover:bg-zinc-900'
             }`}
+            aria-disabled={item.disabled ? 'true' : 'false'}
           >
             {item.icon}
-            {item.label}
+            <span className="flex-1">{item.label}</span>
+            {item.badge && (
+              <span className={`text-[10px] font-mono uppercase tracking-wider ${item.disabled ? 'text-zinc-500' : 'text-zinc-600'}`}>
+                {item.badge}
+              </span>
+            )}
           </Link>
         ))}
         {user?.is_master_admin && (
@@ -153,6 +167,7 @@ const SemaforoBadge = ({ status }) => {
 const Dashboard = () => {
   const { user, logout } = useAuth();
   const navigate = useNavigate();
+  const featureAccess = getFeatureAccess(user);
   const [stats, setStats] = useState(null);
   const [loading, setLoading] = useState(true);
 
@@ -171,6 +186,10 @@ const Dashboard = () => {
     } finally {
       setLoading(false);
     }
+  };
+
+  const handleLockedFeatureClick = (featureName) => {
+    toast.info(`${featureName}: funzionalita non ancora disponibile`);
   };
 
   return (
@@ -244,21 +263,37 @@ const Dashboard = () => {
           </Button>
           
           <Button 
-            onClick={() => navigate('/forensics')}
+            onClick={() => (
+              featureAccess.canUseImageForensics
+                ? navigate('/forensics')
+                : handleLockedFeatureClick('Image Forensics')
+            )}
             data-testid="quick-image-forensics-btn"
             className="bg-zinc-900 border border-zinc-800 text-zinc-100 hover:bg-zinc-800 h-auto py-6 flex-col gap-2"
+            variant="outline"
           >
-            <Image className="w-8 h-8 text-indigo-400" />
+            <Image className={`w-8 h-8 ${featureAccess.canUseImageForensics ? 'text-indigo-400' : 'text-zinc-600'}`} />
             <span className="font-semibold">Image Forensics</span>
+            {!featureAccess.canUseImageForensics && (
+              <span className="text-[10px] font-mono uppercase tracking-wider text-zinc-500">Solo admin</span>
+            )}
           </Button>
           
           <Button 
-            onClick={() => navigate('/assistant')}
+            onClick={() => (
+              featureAccess.canUseAssistant
+                ? navigate('/assistant')
+                : handleLockedFeatureClick('Assistente')
+            )}
             data-testid="quick-assistant-btn"
             className="bg-zinc-900 border border-zinc-800 text-zinc-100 hover:bg-zinc-800 h-auto py-6 flex-col gap-2"
+            variant="outline"
           >
-            <MessageSquare className="w-8 h-8 text-emerald-400" />
+            <MessageSquare className={`w-8 h-8 ${featureAccess.canUseAssistant ? 'text-emerald-400' : 'text-zinc-600'}`} />
             <span className="font-semibold">Chiedi all'Assistente</span>
+            {!featureAccess.canUseAssistant && (
+              <span className="text-[10px] font-mono uppercase tracking-wider text-zinc-500">In arrivo</span>
+            )}
           </Button>
         </div>
         

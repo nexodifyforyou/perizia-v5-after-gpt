@@ -85,6 +85,14 @@ const Landing = () => {
     }
   ];
 
+  const creditBands = [
+    '1-20 pagine = 4 crediti',
+    '21-40 pagine = 7 crediti',
+    '41-60 pagine = 10 crediti',
+    '61-80 pagine = 13 crediti',
+    '81-100 pagine = 16 crediti'
+  ];
+
   return (
     <div className="min-h-screen bg-[#09090b]">
       {/* Header */}
@@ -254,33 +262,47 @@ const Landing = () => {
             </p>
           </div>
           
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-8 max-w-5xl mx-auto">
-            {plans.map((plan, index) => (
+          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-5 gap-6">
+            {plans.map((plan) => (
               <div 
                 key={plan.plan_id}
                 data-testid={`plan-card-${plan.plan_id}`}
                 className={`relative bg-zinc-900 border rounded-2xl p-8 transition-all duration-300 ${
-                  plan.plan_id === 'pro' 
-                    ? 'border-gold gold-glow scale-105' 
+                  plan.plan_id === 'solo' 
+                    ? 'border-gold gold-glow' 
                     : 'border-zinc-800 hover:border-zinc-600'
                 }`}
               >
-                {plan.plan_id === 'pro' && (
+                {plan.plan_id === 'solo' && (
                   <div className="absolute -top-4 left-1/2 -translate-x-1/2">
-                    <span className="premium-badge">Più Popolare</span>
+                    <span className="premium-badge">Core attuale</span>
                   </div>
                 )}
                 
                 <h3 className="text-2xl font-serif font-bold text-zinc-100 mb-2">
                   {plan.name_it}
                 </h3>
+
+                <p className="text-xs font-mono uppercase tracking-wider text-zinc-500 mb-4">
+                  {plan.plan_type_label_it}
+                </p>
                 
                 <div className="flex items-baseline gap-1 mb-6">
                   <span className="text-4xl font-bold text-gold">
                     €{plan.price.toFixed(0)}
                   </span>
-                  {plan.price > 0 && (
-                    <span className="text-zinc-500">/mese</span>
+                  {plan.price_suffix_it && (
+                    <span className="text-zinc-500">{plan.price_suffix_it}</span>
+                  )}
+                </div>
+
+                <div className="space-y-2 mb-6 text-sm">
+                  <p className="text-zinc-200 font-medium">{plan.credits_label_it}</p>
+                  {plan.validity_label_it && (
+                    <p className="text-zinc-500">{plan.validity_label_it}</p>
+                  )}
+                  {plan.support_level_it && (
+                    <p className="text-zinc-500">{plan.support_level_it}</p>
                   )}
                 </div>
                 
@@ -297,15 +319,30 @@ const Landing = () => {
                   onClick={login}
                   data-testid={`plan-${plan.plan_id}-btn`}
                   className={`w-full ${
-                    plan.plan_id === 'pro'
+                    plan.plan_id === 'solo'
                       ? 'bg-gold text-zinc-950 hover:bg-gold-dim'
                       : 'bg-zinc-800 text-zinc-100 hover:bg-zinc-700'
                   }`}
                 >
-                  {plan.price === 0 ? 'Inizia Gratis' : 'Abbonati'}
+                  {plan.cta_label_it}
                 </Button>
               </div>
             ))}
+          </div>
+
+          <div className="mt-8 max-w-5xl mx-auto bg-zinc-950/70 border border-zinc-800 rounded-2xl p-6">
+            <h3 className="text-lg font-semibold text-zinc-100 mb-2">Come funzionano i crediti</h3>
+            <p className="text-sm text-zinc-500 mb-4">
+              I crediti vengono consumati in base alla lunghezza della perizia analizzata.
+            </p>
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3 text-sm">
+              {creditBands.map((band) => (
+                <div key={band} className="rounded-xl border border-zinc-800 bg-zinc-900/60 px-4 py-3 text-zinc-300">
+                  {band}
+                </div>
+              ))}
+            </div>
+            <p className="text-xs text-zinc-600 mt-4">Crediti extra disponibili.</p>
           </div>
         </div>
       </section>

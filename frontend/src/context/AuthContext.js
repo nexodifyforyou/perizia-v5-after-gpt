@@ -1,5 +1,6 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
 import axios from 'axios';
+import { getFeatureAccess } from '../lib/featureAccess';
 
 const AuthContext = createContext(null);
 
@@ -72,6 +73,7 @@ export const AuthProvider = ({ children }) => {
   return (
     <AuthContext.Provider value={{ 
       user, 
+      featureAccess: getFeatureAccess(user),
       loading, 
       login, 
       logout, 

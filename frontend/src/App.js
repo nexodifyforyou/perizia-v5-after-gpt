@@ -1,6 +1,7 @@
 import React, { useEffect } from "react";
 import { BrowserRouter, Routes, Route, useLocation, Navigate } from "react-router-dom";
 import { Toaster } from "./components/ui/sonner";
+import { toast } from "sonner";
 
 // Pages
 import Landing from "./pages/Landing";
@@ -21,6 +22,7 @@ import AdminPerizie from "./pages/admin/AdminPerizie";
 import AdminImages from "./pages/admin/AdminImages";
 import AdminAssistant from "./pages/admin/AdminAssistant";
 import AdminTransactions from "./pages/admin/AdminTransactions";
+import { Sidebar } from "./pages/Dashboard";
 
 // Context
 import { AuthProvider, useAuth } from "./context/AuthContext";
@@ -82,10 +84,44 @@ const AdminRoute = ({ children }) => {
   return children;
 };
 
+const FeatureUnavailablePage = ({ featureName }) => {
+  const { user, logout } = useAuth();
+
+  return (
+    <div className="min-h-screen bg-[#09090b]">
+      <Sidebar user={user} logout={logout} />
+      <main className="ml-64 p-8">
+        <div className="max-w-2xl bg-zinc-900 border border-zinc-800 rounded-2xl p-8">
+          <p className="text-xs font-mono uppercase tracking-wider text-zinc-500 mb-3">In arrivo</p>
+          <h1 className="text-3xl font-serif font-bold text-zinc-100 mb-3">{featureName}</h1>
+          <p className="text-zinc-400 mb-2">Funzionalita non ancora disponibile.</p>
+          <p className="text-sm text-zinc-500">Accesso non abilitato per questo account.</p>
+        </div>
+      </main>
+    </div>
+  );
+};
+
+const FeatureRoute = ({ children, canAccess, featureName }) => {
+  const location = useLocation();
+
+  useEffect(() => {
+    if (!canAccess) {
+      toast.error(`${featureName}: accesso non abilitato`);
+    }
+  }, [canAccess, featureName, location.pathname]);
+
+  if (!canAccess) {
+    return <FeatureUnavailablePage featureName={featureName} />;
+  }
+
+  return children;
+};
+
 // App Router Component
 function AppRouter() {
   const location = useLocation();
-  const { user } = useAuth();
+  const { user, featureAccess } = useAuth();
   
   // REMINDER: DO NOT HARDCODE THE URL, OR ADD ANY FALLBACKS OR REDIRECT URLS, THIS BREAKS THE AUTH
   // Check URL fragment OR query params for session_id (Emergent Auth callback)
@@ -119,10 +155,18 @@ function AppRouter() {
         <ProtectedRoute><AnalysisPrintView /></ProtectedRoute>
       } />
       <Route path="/forensics" element={
-        <ProtectedRoute><ImageForensics /></ProtectedRoute>
+        <ProtectedRoute>
+          <FeatureRoute canAccess={featureAccess.canUseImageForensics} featureName="Image Forensics">
+            <ImageForensics />
+          </FeatureRoute>
+        </ProtectedRoute>
       } />
       <Route path="/assistant" element={
-        <ProtectedRoute><Assistant /></ProtectedRoute>
+        <ProtectedRoute>
+          <FeatureRoute canAccess={featureAccess.canUseAssistant} featureName="Assistente">
+            <Assistant />
+          </FeatureRoute>
+        </ProtectedRoute>
       } />
       <Route path="/history" element={
         <ProtectedRoute><History /></ProtectedRoute>

@@ -139,6 +139,16 @@ class SubscriptionPlan(BaseModel):
     name_it: str
     price: float
     currency: str = "eur"
+    plan_type: str = "subscription"
+    plan_type_label_it: str = "Abbonamento"
+    price_suffix_it: str = "/mese"
+    credits: int = 0
+    credits_label_it: str = ""
+    validity_label_it: Optional[str] = None
+    support_level_it: Optional[str] = None
+    usage_hint_it: Optional[str] = None
+    cta_label_it: str = "Abbonati"
+    public: bool = True
     features: List[str]
     features_it: List[str]
     quota: Dict[str, int]
@@ -214,34 +224,176 @@ class FieldOverrideRequest(BaseModel):
     formalita_pregiudizievoli: Optional[Any] = None
 
 # Subscription Plans
+FEATURE_PREVIEW_ADMIN_EMAIL = "nexodifyforyou@gmail.com"
+
 SUBSCRIPTION_PLANS = {
     "free": SubscriptionPlan(
         plan_id="free",
-        name="Free Trial",
-        name_it="Prova Gratuita",
+        name="Free",
+        name_it="Free",
         price=0.0,
-        features=["3 Perizia Scans", "5 Image Analyses", "10 Assistant Messages", "Basic Reports"],
-        features_it=["3 Scansioni Perizia", "5 Analisi Immagini", "10 Messaggi Assistente", "Report Base"],
-        quota={"perizia_scans_remaining": 3, "image_scans_remaining": 5, "assistant_messages_remaining": 10}
+        plan_type="free",
+        plan_type_label_it="Gratis",
+        price_suffix_it="",
+        credits=4,
+        credits_label_it="4 crediti una tantum",
+        validity_label_it="Fino a 20 pagine per una sola analisi breve",
+        support_level_it="Supporto base",
+        usage_hint_it="Per provare il prodotto con una perizia breve",
+        cta_label_it="Inizia gratis",
+        features=[
+            "Perizia analysis up to 20 pages",
+            "Risk traffic light",
+            "Legal issues to verify",
+            "Costs and charges to verify",
+            "Page references and structured report",
+            "Basic export",
+        ],
+        features_it=[
+            "Analisi perizia fino a 20 pagine",
+            "Semaforo rischio",
+            "Criticita legali da verificare",
+            "Costi e oneri da verificare",
+            "Riferimenti di pagina e report strutturato",
+            "Export base",
+        ],
+        quota={"perizia_scans_remaining": 4, "image_scans_remaining": 0, "assistant_messages_remaining": 0},
+    ),
+    "starter": SubscriptionPlan(
+        plan_id="starter",
+        name="Starter",
+        name_it="Starter",
+        price=19.00,
+        plan_type="one_time",
+        plan_type_label_it="Pack una tantum",
+        price_suffix_it="una tantum",
+        credits=8,
+        credits_label_it="8 crediti",
+        validity_label_it="Validita 12 mesi",
+        support_level_it="Supporto best effort via email",
+        usage_hint_it="Per 1 perizia media o 2 perizie brevi",
+        cta_label_it="Acquista pack",
+        features=[
+            "Perizia analysis",
+            "Risk traffic light",
+            "Legal issues to verify",
+            "Costs and charges to verify",
+            "Page references and structured report",
+            "Email support",
+        ],
+        features_it=[
+            "Analisi perizia",
+            "Semaforo rischio",
+            "Criticita legali da verificare",
+            "Costi e oneri da verificare",
+            "Riferimenti di pagina e report strutturato",
+            "Supporto best effort via email",
+        ],
+        quota={"perizia_scans_remaining": 8, "image_scans_remaining": 0, "assistant_messages_remaining": 0},
+    ),
+    "solo": SubscriptionPlan(
+        plan_id="solo",
+        name="Solo",
+        name_it="Solo",
+        price=49.00,
+        plan_type="subscription",
+        plan_type_label_it="Abbonamento mensile",
+        price_suffix_it="/mese",
+        credits=28,
+        credits_label_it="28 crediti al mese",
+        validity_label_it="I crediti scadono ogni mese",
+        support_level_it="Supporto standard",
+        usage_hint_it="Core product attuale per uso continuativo",
+        cta_label_it="Abbonati",
+        features=[
+            "Perizia analysis",
+            "Risk traffic light",
+            "Legal issues to verify",
+            "Costs and charges to verify",
+            "Page references",
+            "Structured report",
+        ],
+        features_it=[
+            "Analisi perizia",
+            "Semaforo rischio",
+            "Criticita legali da verificare",
+            "Costi e oneri da verificare",
+            "Riferimenti di pagina",
+            "Report strutturato",
+        ],
+        quota={"perizia_scans_remaining": 28, "image_scans_remaining": 0, "assistant_messages_remaining": 0},
     ),
     "pro": SubscriptionPlan(
         plan_id="pro",
-        name="Professional",
-        name_it="Professionale",
-        price=49.00,
-        features=["50 Perizia Scans/month", "100 Image Analyses/month", "Unlimited Assistant", "Premium Reports", "Priority Support"],
-        features_it=["50 Scansioni Perizia/mese", "100 Analisi Immagini/mese", "Assistente Illimitato", "Report Premium", "Supporto Prioritario"],
-        quota={"perizia_scans_remaining": 50, "image_scans_remaining": 100, "assistant_messages_remaining": 9999}
+        name="Pro",
+        name_it="Pro",
+        price=129.00,
+        plan_type="subscription",
+        plan_type_label_it="Abbonamento mensile",
+        price_suffix_it="/mese",
+        credits=84,
+        credits_label_it="84 crediti al mese",
+        validity_label_it="I crediti scadono ogni mese",
+        support_level_it="Supporto prioritario",
+        usage_hint_it="Tutto cio che e incluso in Solo, con volume superiore",
+        cta_label_it="Abbonati",
+        features=[
+            "Everything in Solo",
+            "Higher monthly volume",
+            "Priority support",
+        ],
+        features_it=[
+            "Tutto cio che e incluso in Solo",
+            "Maggior volume mensile",
+            "Supporto prioritario",
+        ],
+        quota={"perizia_scans_remaining": 84, "image_scans_remaining": 0, "assistant_messages_remaining": 0},
+    ),
+    "studio": SubscriptionPlan(
+        plan_id="studio",
+        name="Studio",
+        name_it="Studio",
+        price=299.00,
+        plan_type="subscription",
+        plan_type_label_it="Abbonamento mensile",
+        price_suffix_it="/mese",
+        credits=210,
+        credits_label_it="210 crediti al mese",
+        validity_label_it="I crediti scadono ogni mese",
+        support_level_it="Supporto prioritario",
+        usage_hint_it="Per flussi piu intensi e utilizzo di team",
+        cta_label_it="Abbonati",
+        features=[
+            "Everything in Pro",
+            "High-volume usage",
+            "Suitable for team workflows",
+        ],
+        features_it=[
+            "Tutto cio che e incluso in Pro",
+            "Volume elevato",
+            "Adatto a flussi di lavoro di studio o team",
+        ],
+        quota={"perizia_scans_remaining": 210, "image_scans_remaining": 0, "assistant_messages_remaining": 0},
     ),
     "enterprise": SubscriptionPlan(
         plan_id="enterprise",
         name="Enterprise",
         name_it="Enterprise",
         price=199.00,
-        features=["Unlimited Perizia Scans", "Unlimited Image Analyses", "Unlimited Assistant", "Custom Reports", "API Access", "Dedicated Support"],
-        features_it=["Scansioni Perizia Illimitate", "Analisi Immagini Illimitate", "Assistente Illimitato", "Report Personalizzati", "Accesso API", "Supporto Dedicato"],
-        quota={"perizia_scans_remaining": 9999, "image_scans_remaining": 9999, "assistant_messages_remaining": 9999}
-    )
+        plan_type="internal",
+        plan_type_label_it="Interno",
+        price_suffix_it="",
+        credits=9999,
+        credits_label_it="Uso interno",
+        validity_label_it="Solo uso admin interno",
+        support_level_it="Supporto dedicato",
+        usage_hint_it="Non esposto al pubblico",
+        cta_label_it="Interno",
+        public=False,
+        features=["Internal admin access"],
+        features_it=["Accesso admin interno"],
+        quota={"perizia_scans_remaining": 9999, "image_scans_remaining": 9999, "assistant_messages_remaining": 9999},
+    ),
 }
 
 # ===================
@@ -300,6 +452,31 @@ async def require_master_admin(request: Request) -> User:
     if user.email.lower() != MASTER_ADMIN_EMAIL.lower():
         raise HTTPException(status_code=403, detail="Forbidden")
     return user
+
+
+def _is_preview_feature_admin(user: Optional[User]) -> bool:
+    return bool(user and user.email and user.email.lower() == FEATURE_PREVIEW_ADMIN_EMAIL.lower())
+
+
+def _feature_access_flags(user: Optional[User]) -> Dict[str, bool]:
+    can_use_preview_features = _is_preview_feature_admin(user)
+    return {
+        "can_use_assistant": can_use_preview_features,
+        "can_use_image_forensics": can_use_preview_features,
+    }
+
+
+def _require_preview_feature_access(user: User, feature_label_it: str, access_flag: str) -> None:
+    if _feature_access_flags(user).get(access_flag):
+        return
+    raise HTTPException(
+        status_code=403,
+        detail={
+            "code": "FEATURE_DISABLED",
+            "message_it": f"{feature_label_it} non e ancora disponibile per questo account.",
+            "message_en": f"{feature_label_it} is not yet available for this account.",
+        },
+    )
 
 def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
@@ -6301,7 +6478,8 @@ async def logout(request: Request, response: Response):
 @api_router.get("/plans")
 async def get_plans():
     """Get all subscription plans"""
-    return {"plans": [plan.model_dump() for plan in SUBSCRIPTION_PLANS.values()]}
+    public_plans = [plan.model_dump() for plan in SUBSCRIPTION_PLANS.values() if plan.public]
+    return {"plans": public_plans}
 
 @api_router.post("/checkout/create")
 async def create_checkout(request: Request):
@@ -10167,6 +10345,7 @@ OUTPUT JSON:
 async def analyze_images(request: Request, files: List[UploadFile] = File(...)):
     """Analyze uploaded property images with evidence-locked findings"""
     user = await require_auth(request)
+    _require_preview_feature_access(user, "Image Forensics", "can_use_image_forensics")
     
     # Check quota
     if user.quota.get("image_scans_remaining", 0) <= 0 and not user.is_master_admin:
@@ -10394,6 +10573,7 @@ Formato risposta JSON:
 async def assistant_qa(request: Request):
     """Answer user questions about perizia/real estate - with evidence-locked responses"""
     user = await require_auth(request)
+    _require_preview_feature_access(user, "Assistente", "can_use_assistant")
     data = await request.json()
     question = data.get("question")
     related_case_id = data.get("related_case_id")
