@@ -1,5 +1,5 @@
 import React from 'react';
-import { useNavigate } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { Sidebar } from './Dashboard';
 import { Button } from '../components/ui/button';
@@ -12,7 +12,7 @@ import {
 } from 'lucide-react';
 
 const Profile = () => {
-  const { user, logout } = useAuth();
+  const { user, logout, accountState } = useAuth();
   const navigate = useNavigate();
 
   const handleLogout = async () => {
@@ -81,7 +81,7 @@ const Profile = () => {
                 </div>
                 <div>
                   <p className="text-xs text-zinc-500">Piano</p>
-                  <p className="text-zinc-100 capitalize">{user?.plan || 'Free'}</p>
+                  <p className="text-zinc-100 capitalize">{accountState.planLabel}</p>
                 </div>
               </div>
 
@@ -98,15 +98,20 @@ const Profile = () => {
 
             {/* Logout Button */}
             <div className="mt-8 pt-8 border-t border-zinc-800">
-              <Button 
-                onClick={handleLogout}
-                data-testid="profile-logout-btn"
-                variant="outline"
-                className="border-red-500/30 text-red-400 hover:bg-red-500/10"
-              >
-                <LogOut className="w-4 h-4 mr-2" />
-                Disconnetti
-              </Button>
+              <div className="flex flex-wrap gap-3">
+                <Button asChild className="bg-gold text-zinc-950 hover:bg-gold-dim">
+                  <Link to="/billing">Ricarica crediti</Link>
+                </Button>
+                <Button 
+                  onClick={handleLogout}
+                  data-testid="profile-logout-btn"
+                  variant="outline"
+                  className="border-red-500/30 text-red-400 hover:bg-red-500/10"
+                >
+                  <LogOut className="w-4 h-4 mr-2" />
+                  Disconnetti
+                </Button>
+              </div>
             </div>
           </div>
 
@@ -116,19 +121,19 @@ const Profile = () => {
             <div className="grid grid-cols-3 gap-4">
               <div className="text-center p-4 bg-zinc-950 rounded-lg">
                 <p className="text-2xl font-mono font-bold text-gold">
-                  {user?.quota?.perizia_scans_remaining || 0}
+                  {accountState.quota.perizia_scans_remaining}
                 </p>
                 <p className="text-xs text-zinc-500 mt-1">Perizie</p>
               </div>
               <div className="text-center p-4 bg-zinc-950 rounded-lg">
                 <p className="text-2xl font-mono font-bold text-indigo-400">
-                  {user?.quota?.image_scans_remaining || 0}
+                  {accountState.quota.image_scans_remaining}
                 </p>
                 <p className="text-xs text-zinc-500 mt-1">Immagini</p>
               </div>
               <div className="text-center p-4 bg-zinc-950 rounded-lg">
                 <p className="text-2xl font-mono font-bold text-emerald-400">
-                  {user?.quota?.assistant_messages_remaining || 0}
+                  {accountState.quota.assistant_messages_remaining}
                 </p>
                 <p className="text-xs text-zinc-500 mt-1">Messaggi</p>
               </div>

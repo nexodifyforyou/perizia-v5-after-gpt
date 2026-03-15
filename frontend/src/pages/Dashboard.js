@@ -21,19 +21,20 @@ import {
 } from 'lucide-react';
 import axios from 'axios';
 import { toast } from 'sonner';
-import { getFeatureAccess } from '../lib/featureAccess';
+import { getAccountState } from '../lib/featureAccess';
 
 const API_URL = process.env.REACT_APP_BACKEND_URL;
 
 // Sidebar Navigation Component
 const Sidebar = ({ user, logout }) => {
   const navigate = useNavigate();
-  const featureAccess = getFeatureAccess(user);
+  const accountState = getAccountState(user);
+  const featureAccess = accountState.featureAccess;
   
   const navItems = [
     { icon: <FileText className="w-5 h-5" />, label: 'Dashboard', path: '/dashboard' },
     { icon: <Plus className="w-5 h-5" />, label: 'Nuova Analisi', path: '/analysis/new' },
-    { icon: <Image className="w-5 h-5" />, label: 'Image Forensics', path: '/forensics', disabled: !featureAccess.canUseImageForensics, badge: 'Solo admin' },
+    { icon: <Image className="w-5 h-5" />, label: 'Image Forensics', path: '/forensics', disabled: !featureAccess.canUseImageForensics, badge: 'In arrivo' },
     { icon: <MessageSquare className="w-5 h-5" />, label: 'Assistente', path: '/assistant', disabled: !featureAccess.canUseAssistant, badge: 'In arrivo' },
     { icon: <History className="w-5 h-5" />, label: 'Storico', path: '/history' },
     { icon: <CreditCard className="w-5 h-5" />, label: 'Abbonamento', path: '/billing' },
@@ -129,6 +130,25 @@ const Sidebar = ({ user, logout }) => {
             <p className="text-xs text-zinc-500 truncate">{user?.email}</p>
           </div>
         </div>
+        <div className="mb-4 rounded-xl border border-zinc-800 bg-zinc-900/80 p-4">
+          <div className="flex items-start justify-between gap-3 mb-3">
+            <div>
+              <p className="text-[11px] font-mono uppercase tracking-[0.24em] text-zinc-500">Piano attuale</p>
+              <p className="mt-1 text-sm font-semibold text-zinc-100">{accountState.planLabel}</p>
+            </div>
+            <CreditCard className="w-4 h-4 text-gold flex-shrink-0 mt-0.5" />
+          </div>
+          <div className="flex items-end justify-between gap-3 mb-3">
+            <div>
+              <p className="text-[11px] font-mono uppercase tracking-[0.24em] text-zinc-500">Crediti residui</p>
+              <p className="mt-1 text-xl font-mono font-bold text-gold">{accountState.quota.perizia_scans_remaining}</p>
+            </div>
+            <span className="text-[11px] text-zinc-500">Perizie</span>
+          </div>
+          <Button asChild className="w-full bg-zinc-100 text-zinc-950 hover:bg-zinc-200">
+            <Link to="/billing">Ricarica crediti</Link>
+          </Button>
+        </div>
         <Button 
           variant="outline" 
           onClick={handleLogout}
@@ -171,9 +191,9 @@ const SemaforoBadge = ({ status }) => {
 };
 
 const Dashboard = () => {
-  const { user, logout } = useAuth();
+  const { user, logout, accountState } = useAuth();
   const navigate = useNavigate();
-  const featureAccess = getFeatureAccess(user);
+  const featureAccess = accountState.featureAccess;
   const [stats, setStats] = useState(null);
   const [loading, setLoading] = useState(true);
 
@@ -245,14 +265,14 @@ const Dashboard = () => {
           <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-6">
             <div className="flex items-center justify-between mb-4">
               <span className={`px-2 py-1 rounded text-xs font-mono font-bold uppercase ${
-                user?.plan === 'enterprise' ? 'bg-gold/20 text-gold' :
-                user?.plan === 'pro' ? 'bg-indigo-500/20 text-indigo-400' :
+                accountState.planId === 'enterprise' ? 'bg-gold/20 text-gold' :
+                accountState.planId === 'pro' ? 'bg-indigo-500/20 text-indigo-400' :
                 'bg-zinc-800 text-zinc-400'
               }`}>
-                {user?.plan || 'free'}
+                {accountState.planLabel}
               </span>
             </div>
-            <p className="text-3xl font-bold text-zinc-100">{stats?.quota?.perizia_scans_remaining || 0}</p>
+            <p className="text-3xl font-bold text-zinc-100">{accountState.quota.perizia_scans_remaining}</p>
             <p className="text-sm text-zinc-500">Scansioni rimanenti</p>
           </div>
         </div>
@@ -281,7 +301,7 @@ const Dashboard = () => {
             <Image className={`w-8 h-8 ${featureAccess.canUseImageForensics ? 'text-indigo-400' : 'text-zinc-600'}`} />
             <span className="font-semibold">Image Forensics</span>
             {!featureAccess.canUseImageForensics && (
-              <span className="text-[10px] font-mono uppercase tracking-wider text-zinc-500">Solo admin</span>
+              <span className="text-[10px] font-mono uppercase tracking-wider text-zinc-500">In arrivo</span>
             )}
           </Button>
           
@@ -351,13 +371,13 @@ const Dashboard = () => {
         </div>
         
         {/* Quota Warning */}
-        {stats?.quota?.perizia_scans_remaining <= 1 && user?.plan === 'free' && (
+        {accountState.quota.perizia_scans_remaining <= 1 && accountState.planId === 'free' && (
           <div className="mt-8 bg-amber-500/10 border border-amber-500/30 rounded-xl p-6 flex items-center gap-4">
             <AlertTriangle className="w-8 h-8 text-amber-400 flex-shrink-0" />
             <div className="flex-1">
               <p className="text-amber-400 font-semibold mb-1">Quota quasi esaurita</p>
               <p className="text-zinc-400 text-sm">
-                Hai ancora {stats?.quota?.perizia_scans_remaining || 0} scansioni disponibili. 
+                Hai ancora {accountState.quota.perizia_scans_remaining} scansioni disponibili. 
                 Passa a Pro per continuare senza limiti.
               </p>
             </div>

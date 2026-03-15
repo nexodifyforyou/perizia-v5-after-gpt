@@ -94,8 +94,12 @@ const PublicPlansGrid = ({ detailed = false }) => {
             </div>
 
             <div className="flex items-end gap-2 mb-5">
-              <span className="text-4xl font-bold text-gold">€{Number(plan.price).toFixed(0)}</span>
-              {plan.price_suffix_it && <span className="text-zinc-500 mb-1">{plan.price_suffix_it}</span>}
+              {plan.plan_id === 'studio' ? (
+                <span className="text-3xl font-bold text-gold">Richiedi un'offerta</span>
+              ) : (
+                <span className="text-4xl font-bold text-gold">€{Number(plan.price).toFixed(0)}</span>
+              )}
+              {plan.plan_id !== 'studio' && plan.price_suffix_it && <span className="text-zinc-500 mb-1">{plan.price_suffix_it}</span>}
             </div>
 
             <div className="space-y-2 text-sm mb-6">

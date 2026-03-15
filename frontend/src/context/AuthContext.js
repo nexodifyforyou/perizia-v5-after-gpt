@@ -1,6 +1,6 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
 import axios from 'axios';
-import { getFeatureAccess } from '../lib/featureAccess';
+import { getAccountState } from '../lib/featureAccess';
 
 const AuthContext = createContext(null);
 
@@ -9,6 +9,7 @@ const API_URL = process.env.REACT_APP_BACKEND_URL;
 export const AuthProvider = ({ children }) => {
   const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
+  const accountState = getAccountState(user);
 
   useEffect(() => {
     checkAuth();
@@ -74,7 +75,8 @@ export const AuthProvider = ({ children }) => {
   return (
     <AuthContext.Provider value={{ 
       user, 
-      featureAccess: getFeatureAccess(user),
+      featureAccess: accountState.featureAccess,
+      accountState,
       loading, 
       login, 
       logout, 

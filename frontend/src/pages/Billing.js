@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { useSearchParams } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { Sidebar } from './Dashboard';
 import { Button } from '../components/ui/button';
@@ -14,9 +14,14 @@ import axios from 'axios';
 import { toast } from 'sonner';
 
 const API_URL = process.env.REACT_APP_BACKEND_URL;
+const INTERNAL_PLAN_DETAILS = {
+  name_it: 'Enterprise',
+  plan_type_label_it: 'Interno',
+  support_level_it: 'Supporto dedicato',
+};
 
 const Billing = () => {
-  const { user, logout, refreshUser } = useAuth();
+  const { user, logout, refreshUser, accountState } = useAuth();
   const [searchParams] = useSearchParams();
   const [plans, setPlans] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -89,10 +94,11 @@ const Billing = () => {
     }
   };
 
-  const currentPlan = plans.find((plan) => plan.plan_id === user?.plan);
+  const currentPlan = plans.find((plan) => plan.plan_id === accountState.planId);
+  const currentPlanDetails = currentPlan || (accountState.isMasterAdmin ? INTERNAL_PLAN_DETAILS : null);
 
   const handlePlanAction = (plan) => {
-    if (plan.plan_id === 'free' || plan.plan_id === user?.plan) return;
+    if (plan.plan_id === 'free' || plan.plan_id === accountState.planId) return;
     toast.info(`${plan.cta_label_it} non ancora abilitato in questa versione.`);
   };
 
@@ -129,9 +135,9 @@ const Billing = () => {
               <p className="text-sm text-zinc-500 mb-1">Piano attuale</p>
               <div className="flex items-center gap-3">
                 <h2 className="text-2xl font-serif font-bold text-zinc-100 capitalize">
-                  {currentPlan?.name_it || user?.plan || 'Free'}
+                  {currentPlanDetails?.name_it || accountState.planLabel}
                 </h2>
-                {user?.is_master_admin && (
+                {accountState.isMasterAdmin && (
                   <span className="px-2 py-1 bg-gold/20 text-gold text-xs font-mono rounded">
                     MASTER ADMIN
                   </span>
@@ -139,8 +145,8 @@ const Billing = () => {
               </div>
             </div>
             <Crown className={`w-8 h-8 ${
-              user?.plan === 'enterprise' ? 'text-gold' :
-              user?.plan === 'pro' ? 'text-indigo-400' :
+              accountState.planId === 'enterprise' ? 'text-gold' :
+              accountState.planId === 'pro' ? 'text-indigo-400' :
                 'text-zinc-600'
             }`} />
           </div>
@@ -149,28 +155,33 @@ const Billing = () => {
             <div className="p-4 bg-zinc-950 rounded-lg">
               <p className="text-xs text-zinc-500 mb-1">Crediti disponibili</p>
               <p className="text-2xl font-mono font-bold text-gold">
-                {user?.quota?.perizia_scans_remaining || 0}
+                {accountState.quota.perizia_scans_remaining}
               </p>
             </div>
             <div className="p-4 bg-zinc-950 rounded-lg">
               <p className="text-xs text-zinc-500 mb-1">Tipo piano</p>
               <p className="text-sm font-semibold text-zinc-200">
-                {currentPlan?.plan_type_label_it || (user?.plan === 'enterprise' ? 'Interno' : 'Non disponibile')}
+                {currentPlanDetails?.plan_type_label_it || 'Non disponibile'}
               </p>
             </div>
             <div className="p-4 bg-zinc-950 rounded-lg">
               <p className="text-xs text-zinc-500 mb-1">Supporto</p>
               <p className="text-sm font-semibold text-zinc-200">
-                {currentPlan?.support_level_it || (user?.plan === 'enterprise' ? 'Supporto dedicato' : 'Supporto base')}
+                {currentPlanDetails?.support_level_it || 'Supporto base'}
               </p>
             </div>
+          </div>
+          <div className="mt-6 flex justify-start">
+            <Button asChild className="bg-gold text-zinc-950 hover:bg-gold-dim">
+              <Link to="#billing-plans">Ricarica crediti</Link>
+            </Button>
           </div>
         </div>
 
         {/* Plans Grid */}
         <h3 className="text-xl font-serif font-bold text-zinc-100 mb-6">Piani Disponibili</h3>
         
-        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-5 gap-6">
+        <div id="billing-plans" className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-5 gap-6">
           {loading ? (
             <div className="col-span-full text-center py-12">
               <Loader2 className="w-8 h-8 text-gold animate-spin mx-auto" />
@@ -181,14 +192,14 @@ const Billing = () => {
                 key={plan.plan_id}
                 data-testid={`billing-plan-${plan.plan_id}`}
                 className={`relative bg-zinc-900 border rounded-2xl p-6 transition-all duration-300 ${
-                  plan.plan_id === user?.plan 
+                  plan.plan_id === accountState.planId 
                     ? 'border-gold ring-2 ring-gold/20' 
                     : plan.plan_id === 'solo'
                       ? 'border-indigo-500/50'
                       : 'border-zinc-800 hover:border-zinc-600'
                 }`}
               >
-                {plan.plan_id === user?.plan && (
+                {plan.plan_id === accountState.planId && (
                   <div className="absolute -top-3 left-1/2 -translate-x-1/2">
                     <span className="px-3 py-1 bg-gold text-zinc-950 text-xs font-bold rounded-full">
                       ATTIVO
@@ -205,10 +216,14 @@ const Billing = () => {
                 </p>
                 
                 <div className="flex items-baseline gap-1 mb-6">
-                  <span className="text-3xl font-bold text-gold">
-                    €{plan.price.toFixed(0)}
-                  </span>
-                  {plan.price_suffix_it && (
+                  {plan.plan_id === 'studio' ? (
+                    <span className="text-2xl font-bold text-gold">Richiedi un'offerta</span>
+                  ) : (
+                    <span className="text-3xl font-bold text-gold">
+                      €{plan.price.toFixed(0)}
+                    </span>
+                  )}
+                  {plan.plan_id !== 'studio' && plan.price_suffix_it && (
                     <span className="text-zinc-500">{plan.price_suffix_it}</span>
                   )}
                 </div>
@@ -232,7 +247,7 @@ const Billing = () => {
                   ))}
                 </ul>
                 
-                {plan.plan_id === user?.plan ? (
+                {plan.plan_id === accountState.planId ? (
                   <Button disabled className="w-full bg-zinc-800 text-zinc-500 cursor-not-allowed">
                     Piano Attuale
                   </Button>
@@ -253,7 +268,7 @@ const Billing = () => {
                   >
                     <>
                       <CreditCard className="w-4 h-4 mr-2" />
-                      {plan.cta_label_it}
+                      {plan.plan_id === 'studio' ? "Richiedi un'offerta" : plan.cta_label_it}
                     </>
                   </Button>
                 )}
