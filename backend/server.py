@@ -165,6 +165,57 @@ class PaymentTransaction(BaseModel):
     payment_status: str
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
+class CreditLedgerEntry(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    ledger_id: str
+    user_id: str
+    user_email: str
+    quota_field: str
+    direction: str
+    amount: int
+    balance_before: int
+    balance_after: int
+    entry_type: str
+    reference_type: str
+    reference_id: str
+    description_it: str
+    metadata: Dict[str, Any] = Field(default_factory=dict)
+    actor_user_id: Optional[str] = None
+    actor_email: Optional[str] = None
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+class BillingRecord(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    billing_record_id: str
+    user_id: str
+    user_email: str
+    customer_type: str
+    customer_name: str
+    company_name: Optional[str] = None
+    billing_email: str
+    country_code: str
+    billing_address: Optional[Dict[str, Any]] = None
+    tax_code: Optional[str] = None
+    vat_number: Optional[str] = None
+    plan_id: str
+    purchase_type: str
+    amount_subtotal: float
+    amount_tax: float
+    amount_total: float
+    currency: str
+    status: str
+    payment_provider: str
+    payment_reference: Optional[str] = None
+    checkout_reference: Optional[str] = None
+    invoice_status: str
+    invoice_number: Optional[str] = None
+    invoice_reference: Optional[str] = None
+    description_it: str
+    metadata: Dict[str, Any] = Field(default_factory=dict)
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    paid_at: Optional[datetime] = None
+
 class PeriziaAnalysis(BaseModel):
     model_config = ConfigDict(extra="ignore")
     analysis_id: str
@@ -404,6 +455,24 @@ ACCOUNT_QUOTA_FIELDS = (
     "assistant_messages_remaining",
 )
 
+LEDGER_ENTRY_TYPES = {
+    "opening_balance",
+    "perizia_upload",
+    "image_forensics",
+    "assistant_message",
+    "plan_purchase",
+    "top_up",
+    "admin_adjustment",
+    "subscription_reset",
+    "system_correction",
+}
+
+LEDGER_DIRECTIONS = {"credit", "debit"}
+
+BILLING_RECORD_STATUSES = {"draft", "pending", "paid", "failed", "refunded", "cancelled"}
+BILLING_PROVIDER_TYPES = {"none", "stripe", "manual"}
+BILLING_INVOICE_STATUSES = {"not_applicable", "pending", "ready", "issued", "failed"}
+
 PERIZIA_CREDIT_BANDS: Tuple[Tuple[int, int, int], ...] = (
     (1, 20, 4),
     (21, 40, 7),
@@ -542,6 +611,7 @@ async def get_current_user(request: Request) -> Optional[User]:
         return None
 
     normalized_user_doc = await _apply_normalized_account_state(user_doc, persist=True)
+    await _ensure_opening_balance_baseline_for_user_doc(normalized_user_doc)
     return User(**normalized_user_doc)
 
 async def require_auth(request: Request) -> User:
@@ -6395,6 +6465,357 @@ def _to_iso(value: Any) -> Optional[str]:
         return value
     return None
 
+def _quota_snapshot(quota: Optional[Dict[str, Any]]) -> Dict[str, int]:
+    source = quota if isinstance(quota, dict) else {}
+    return {field: int(source.get(field, 0) or 0) for field in ACCOUNT_QUOTA_FIELDS}
+
+def _sanitize_metadata(metadata: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+    if not isinstance(metadata, dict):
+        return {}
+    cleaned: Dict[str, Any] = {}
+    for key, value in metadata.items():
+        if value is None:
+            continue
+        if isinstance(value, datetime):
+            cleaned[key] = value.isoformat()
+        else:
+            cleaned[key] = value
+    return cleaned
+
+def _serialize_datetime_fields(doc: Dict[str, Any], *fields: str) -> Dict[str, Any]:
+    serialized = dict(doc)
+    for field in fields:
+        if serialized.get(field) is not None:
+            serialized[field] = _to_iso(serialized.get(field))
+    return serialized
+
+def _billing_purchase_type_for_plan(plan: SubscriptionPlan) -> str:
+    if plan.plan_type == "subscription":
+        return "subscription"
+    if plan.plan_type == "one_time":
+        return "pack"
+    return "top_up"
+
+async def _insert_credit_ledger_entry(
+    *,
+    user_id: str,
+    user_email: str,
+    quota_field: str,
+    direction: str,
+    amount: int,
+    balance_before: int,
+    balance_after: int,
+    entry_type: str,
+    reference_type: str,
+    reference_id: str,
+    description_it: str,
+    metadata: Optional[Dict[str, Any]] = None,
+    actor_user: Optional[User] = None,
+) -> Dict[str, Any]:
+    if quota_field not in ACCOUNT_QUOTA_FIELDS:
+        raise ValueError(f"Unsupported ledger quota field: {quota_field}")
+    if direction not in LEDGER_DIRECTIONS:
+        raise ValueError(f"Unsupported ledger direction: {direction}")
+    if entry_type not in LEDGER_ENTRY_TYPES:
+        raise ValueError(f"Unsupported ledger entry type: {entry_type}")
+
+    entry = CreditLedgerEntry(
+        ledger_id=f"ledger_{uuid.uuid4().hex[:16]}",
+        user_id=user_id,
+        user_email=str(user_email or "").strip().lower(),
+        quota_field=quota_field,
+        direction=direction,
+        amount=abs(int(amount or 0)),
+        balance_before=int(balance_before or 0),
+        balance_after=int(balance_after or 0),
+        entry_type=entry_type,
+        reference_type=str(reference_type or "system"),
+        reference_id=str(reference_id or "n/a"),
+        description_it=str(description_it or "").strip() or "Movimento crediti",
+        metadata=_sanitize_metadata(metadata),
+        actor_user_id=actor_user.user_id if actor_user else None,
+        actor_email=actor_user.email if actor_user else None,
+    )
+    entry_dict = _serialize_datetime_fields(entry.model_dump(), "created_at")
+    await db.credit_ledger.insert_one(entry_dict)
+    return entry_dict
+
+async def _ensure_opening_balance_baseline_for_user_doc(user_doc: Dict[str, Any]) -> None:
+    user_id = str(user_doc.get("user_id") or "").strip()
+    if not user_id:
+        return
+    if user_doc.get("credit_ledger_baseline_initialized_at"):
+        return
+
+    user_email = str(user_doc.get("email") or "").strip().lower()
+    quota_snapshot = _quota_snapshot(user_doc.get("quota"))
+    for field, current_balance in quota_snapshot.items():
+        if current_balance <= 0:
+            continue
+        existing = await db.credit_ledger.find_one(
+            {"user_id": user_id, "quota_field": field, "entry_type": "opening_balance"},
+            {"_id": 0, "ledger_id": 1},
+        )
+        if existing:
+            continue
+        await _insert_credit_ledger_entry(
+            user_id=user_id,
+            user_email=user_email,
+            quota_field=field,
+            direction="credit",
+            amount=current_balance,
+            balance_before=0,
+            balance_after=current_balance,
+            entry_type="opening_balance",
+            reference_type="system",
+            reference_id=f"opening_balance:{user_id}:{field}",
+            description_it="Saldo iniziale registrato all'attivazione del ledger crediti",
+            metadata={
+                "baseline_reason": (
+                    "Baseline iniziale creata quando il ledger crediti e stato attivato per questo account; "
+                    "i movimenti storici precedenti potrebbero non essere ricostruibili."
+                )
+            },
+        )
+
+    baseline_initialized_at = _now_iso()
+    await db.users.update_one(
+        {"user_id": user_id},
+        {"$set": {"credit_ledger_baseline_initialized_at": baseline_initialized_at}},
+    )
+    user_doc["credit_ledger_baseline_initialized_at"] = baseline_initialized_at
+
+async def _ensure_opening_balance_baseline_for_user_id(user_id: str) -> Optional[Dict[str, Any]]:
+    user_doc = await db.users.find_one({"user_id": user_id}, {"_id": 0})
+    if not user_doc:
+        return None
+    normalized_user_doc = await _apply_normalized_account_state(user_doc, persist=True)
+    await _ensure_opening_balance_baseline_for_user_doc(normalized_user_doc)
+    return normalized_user_doc
+
+async def _record_quota_change_entries(
+    *,
+    user_doc: Dict[str, Any],
+    before_quota: Dict[str, Any],
+    after_quota: Dict[str, Any],
+    entry_type: str,
+    reference_type: str,
+    reference_id: str,
+    description_it: str,
+    metadata: Optional[Dict[str, Any]] = None,
+    actor_user: Optional[User] = None,
+) -> List[Dict[str, Any]]:
+    await _ensure_opening_balance_baseline_for_user_doc(user_doc)
+
+    user_id = str(user_doc.get("user_id") or "")
+    user_email = str(user_doc.get("email") or "").strip().lower()
+    before_snapshot = _quota_snapshot(before_quota)
+    after_snapshot = _quota_snapshot(after_quota)
+    base_metadata = _sanitize_metadata(metadata)
+    entries: List[Dict[str, Any]] = []
+
+    for field in ACCOUNT_QUOTA_FIELDS:
+        balance_before = before_snapshot[field]
+        balance_after = after_snapshot[field]
+        delta = balance_after - balance_before
+        if delta == 0:
+            continue
+        entry = await _insert_credit_ledger_entry(
+            user_id=user_id,
+            user_email=user_email,
+            quota_field=field,
+            direction="credit" if delta > 0 else "debit",
+            amount=abs(delta),
+            balance_before=balance_before,
+            balance_after=balance_after,
+            entry_type=entry_type,
+            reference_type=reference_type,
+            reference_id=reference_id,
+            description_it=description_it,
+            metadata={**base_metadata, "quota_delta": delta},
+            actor_user=actor_user,
+        )
+        entries.append(entry)
+    return entries
+
+async def _apply_quota_debit_with_ledger(
+    user: User,
+    *,
+    field: str,
+    amount: int,
+    entry_type: str,
+    reference_type: str,
+    reference_id: str,
+    description_it: str,
+    metadata: Optional[Dict[str, Any]] = None,
+) -> bool:
+    if user.is_master_admin:
+        return False
+    debit_amount = int(amount or 0)
+    if debit_amount <= 0 or field not in ACCOUNT_QUOTA_FIELDS:
+        return False
+
+    await _ensure_opening_balance_baseline_for_user_id(user.user_id)
+    balance_before = int(user.quota.get(field, 0) or 0)
+    balance_after = balance_before - debit_amount
+
+    await db.users.update_one(
+        {"user_id": user.user_id},
+        {"$inc": {f"quota.{field}": -debit_amount}},
+    )
+    await _insert_credit_ledger_entry(
+        user_id=user.user_id,
+        user_email=user.email,
+        quota_field=field,
+        direction="debit",
+        amount=debit_amount,
+        balance_before=balance_before,
+        balance_after=balance_after,
+        entry_type=entry_type,
+        reference_type=reference_type,
+        reference_id=reference_id,
+        description_it=description_it,
+        metadata=metadata,
+    )
+    user.quota[field] = balance_after
+    return True
+
+async def _create_billing_record(
+    *,
+    user_doc: Dict[str, Any],
+    plan: SubscriptionPlan,
+    plan_id: str,
+    purchase_type: str,
+    status: str,
+    payment_provider: str,
+    description_it: str,
+    checkout_reference: Optional[str] = None,
+    payment_reference: Optional[str] = None,
+    amount_subtotal: Optional[float] = None,
+    amount_tax: Optional[float] = None,
+    amount_total: Optional[float] = None,
+    customer_type: str = "individual",
+    company_name: Optional[str] = None,
+    billing_email: Optional[str] = None,
+    billing_address: Optional[Dict[str, Any]] = None,
+    tax_code: Optional[str] = None,
+    vat_number: Optional[str] = None,
+    invoice_status: str = "pending",
+    metadata: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    if status not in BILLING_RECORD_STATUSES:
+        raise ValueError(f"Unsupported billing status: {status}")
+    if payment_provider not in BILLING_PROVIDER_TYPES:
+        raise ValueError(f"Unsupported billing provider: {payment_provider}")
+    if invoice_status not in BILLING_INVOICE_STATUSES:
+        raise ValueError(f"Unsupported invoice status: {invoice_status}")
+
+    subtotal = float(plan.price if amount_subtotal is None else amount_subtotal)
+    tax_amount = float(0.0 if amount_tax is None else amount_tax)
+    total_amount = float(subtotal + tax_amount if amount_total is None else amount_total)
+
+    record = BillingRecord(
+        billing_record_id=f"bill_{uuid.uuid4().hex[:16]}",
+        user_id=str(user_doc.get("user_id") or ""),
+        user_email=str(user_doc.get("email") or "").strip().lower(),
+        customer_type=customer_type,
+        customer_name=str(user_doc.get("name") or "").strip() or str(user_doc.get("email") or ""),
+        company_name=company_name,
+        billing_email=str(billing_email or user_doc.get("email") or "").strip().lower(),
+        country_code=str(user_doc.get("country_code") or "IT").upper(),
+        billing_address=billing_address,
+        tax_code=tax_code,
+        vat_number=vat_number,
+        plan_id=plan_id,
+        purchase_type=purchase_type,
+        amount_subtotal=subtotal,
+        amount_tax=tax_amount,
+        amount_total=total_amount,
+        currency=str(plan.currency or "eur").lower(),
+        status=status,
+        payment_provider=payment_provider,
+        payment_reference=payment_reference,
+        checkout_reference=checkout_reference,
+        invoice_status=invoice_status,
+        description_it=description_it,
+        metadata=_sanitize_metadata(metadata),
+    )
+    record_dict = _serialize_datetime_fields(record.model_dump(), "created_at", "updated_at", "paid_at")
+    await db.billing_records.insert_one(record_dict)
+    return record_dict
+
+async def _mark_billing_record_paid(
+    *,
+    user_id: str,
+    checkout_reference: str,
+    payment_reference: Optional[str],
+    metadata: Optional[Dict[str, Any]] = None,
+) -> None:
+    update_fields: Dict[str, Any] = {
+        "status": "paid",
+        "payment_reference": payment_reference,
+        "invoice_status": "ready",
+        "updated_at": _now_iso(),
+        "paid_at": _now_iso(),
+    }
+    if metadata:
+        update_fields["metadata"] = _sanitize_metadata(metadata)
+    await db.billing_records.update_one(
+        {"user_id": user_id, "checkout_reference": checkout_reference},
+        {"$set": update_fields},
+    )
+
+async def _create_admin_manual_billing_record(
+    *,
+    admin_user: User,
+    target_user_doc: Dict[str, Any],
+    billing_payload: Dict[str, Any],
+) -> Optional[Dict[str, Any]]:
+    if not isinstance(billing_payload, dict):
+        return None
+    amount_total = float(billing_payload.get("amount_total", 0) or 0)
+    amount_tax = float(billing_payload.get("amount_tax", 0) or 0)
+    amount_subtotal = float(billing_payload.get("amount_subtotal", amount_total - amount_tax) or 0)
+    currency = str(billing_payload.get("currency") or "eur").lower()
+    description_it = str(billing_payload.get("description_it") or "Registrazione manuale amministrativa").strip()
+    plan_id = str(billing_payload.get("plan_id") or target_user_doc.get("plan") or "manual").strip()
+    record = BillingRecord(
+        billing_record_id=f"bill_{uuid.uuid4().hex[:16]}",
+        user_id=str(target_user_doc.get("user_id") or ""),
+        user_email=str(target_user_doc.get("email") or "").strip().lower(),
+        customer_type=str(billing_payload.get("customer_type") or "individual"),
+        customer_name=str(billing_payload.get("customer_name") or target_user_doc.get("name") or target_user_doc.get("email") or "").strip(),
+        company_name=billing_payload.get("company_name"),
+        billing_email=str(billing_payload.get("billing_email") or target_user_doc.get("email") or "").strip().lower(),
+        country_code=str(billing_payload.get("country_code") or target_user_doc.get("country_code") or "IT").upper(),
+        billing_address=billing_payload.get("billing_address"),
+        tax_code=billing_payload.get("tax_code"),
+        vat_number=billing_payload.get("vat_number"),
+        plan_id=plan_id,
+        purchase_type="admin_manual",
+        amount_subtotal=amount_subtotal,
+        amount_tax=amount_tax,
+        amount_total=amount_total,
+        currency=currency,
+        status=str(billing_payload.get("status") or "paid"),
+        payment_provider="manual",
+        payment_reference=billing_payload.get("payment_reference"),
+        checkout_reference=billing_payload.get("checkout_reference"),
+        invoice_status=str(billing_payload.get("invoice_status") or "pending"),
+        description_it=description_it,
+        metadata=_sanitize_metadata(
+            {
+                **(billing_payload.get("metadata") or {}),
+                "admin_user_id": admin_user.user_id,
+                "admin_email": admin_user.email,
+            }
+        ),
+        paid_at=datetime.now(timezone.utc) if str(billing_payload.get("status") or "paid") == "paid" else None,
+    )
+    record_dict = _serialize_datetime_fields(record.model_dump(), "created_at", "updated_at", "paid_at")
+    await db.billing_records.insert_one(record_dict)
+    return record_dict
+
 def _merge_query(base: Dict[str, Any], extra: Dict[str, Any]) -> Dict[str, Any]:
     if not base:
         return extra
@@ -6441,16 +6862,15 @@ async def _write_admin_audit(
         logger.warning(f"Admin audit log insert failed: {e}")
 
 async def _decrement_quota_if_applicable(user: User, field: str, amount: int = 1) -> bool:
-    if user.is_master_admin:
-        return False
-    decrement_amount = int(amount or 0)
-    if decrement_amount <= 0:
-        return False
-    await db.users.update_one(
-        {"user_id": user.user_id},
-        {"$inc": {f"quota.{field}": -decrement_amount}}
+    return await _apply_quota_debit_with_ledger(
+        user,
+        field=field,
+        amount=amount,
+        entry_type="system_correction",
+        reference_type="legacy_helper",
+        reference_id=f"{user.user_id}:{field}",
+        description_it="Addebito crediti registrato dal helper legacy",
     )
-    return True
 
 ADMIN_NOTE_STATUSES = {"OK", "WATCH", "BLOCKED"}
 ADMIN_QUOTA_FIELDS = {"perizia_scans_remaining", "image_scans_remaining", "assistant_messages_remaining"}
@@ -6501,6 +6921,7 @@ async def create_session(request: Request, response: Response):
 
         updated_user = await db.users.find_one({"user_id": user_id}, {"_id": 0})
         normalized_user = await _apply_normalized_account_state(updated_user, persist=True)
+        await _ensure_opening_balance_baseline_for_user_doc(normalized_user)
         user = User(**normalized_user)
     else:
         user_id = f"user_{uuid.uuid4().hex[:12]}"
@@ -6517,6 +6938,7 @@ async def create_session(request: Request, response: Response):
         user_dict = new_user.model_dump()
         user_dict["created_at"] = user_dict["created_at"].isoformat()
         await db.users.insert_one(user_dict)
+        await _ensure_opening_balance_baseline_for_user_doc(user_dict)
         user = new_user
     
     # Create session
@@ -6641,6 +7063,23 @@ async def create_checkout(request: Request):
     txn_dict = transaction.model_dump()
     txn_dict["created_at"] = txn_dict["created_at"].isoformat()
     await db.payment_transactions.insert_one(txn_dict)
+
+    await _create_billing_record(
+        user_doc=user.model_dump(),
+        plan=plan,
+        plan_id=plan_id,
+        purchase_type=_billing_purchase_type_for_plan(plan),
+        status="pending",
+        payment_provider="stripe",
+        checkout_reference=session.id,
+        description_it=f"Acquisto piano {plan.name_it}",
+        invoice_status="pending",
+        metadata={
+            "checkout_session_id": session.id,
+            "payment_transaction_id": transaction.transaction_id,
+            "plan_type": plan.plan_type,
+        },
+    )
     
     return {"url": session.url, "session_id": session.id}
 
@@ -6670,9 +7109,38 @@ async def get_checkout_status(session_id: str, request: Request):
         plan_id = txn.get("plan_id")
         if plan_id in SUBSCRIPTION_PLANS:
             plan = SUBSCRIPTION_PLANS[plan_id]
-            await db.users.update_one(
-                {"user_id": user.user_id},
-                {"$set": {"plan": plan_id, "quota": plan.quota.copy()}}
+            user_doc = await _ensure_opening_balance_baseline_for_user_id(user.user_id)
+            if user_doc:
+                before_quota = _quota_snapshot(user_doc.get("quota"))
+                after_quota = plan.quota.copy()
+                await db.users.update_one(
+                    {"user_id": user.user_id},
+                    {"$set": {"plan": plan_id, "quota": after_quota}}
+                )
+                await _record_quota_change_entries(
+                    user_doc=user_doc,
+                    before_quota=before_quota,
+                    after_quota=after_quota,
+                    entry_type="plan_purchase",
+                    reference_type="checkout_session",
+                    reference_id=session_id,
+                    description_it=f"Accredito crediti per acquisto piano {plan.name_it}",
+                    metadata={
+                        "checkout_session_id": session_id,
+                        "payment_transaction_id": txn.get("transaction_id"),
+                        "old_plan": user_doc.get("plan"),
+                        "new_plan": plan_id,
+                    },
+                )
+            await _mark_billing_record_paid(
+                user_id=user.user_id,
+                checkout_reference=session_id,
+                payment_reference=str(getattr(status, "payment_intent", None) or session_id),
+                metadata={
+                    "checkout_session_id": session_id,
+                    "payment_status": status.payment_status,
+                    "status": status.status,
+                },
             )
     
     return {
@@ -6712,17 +7180,49 @@ async def stripe_webhook(request: Request):
                 user_id = metadata.get("user_id")
                 plan_id = metadata.get("plan_id")
             
-                if user_id and plan_id and plan_id in SUBSCRIPTION_PLANS:
+                txn = None
+                if session_id:
+                    txn = await db.payment_transactions.find_one({"session_id": session_id}, {"_id": 0})
+
+                if user_id and plan_id and plan_id in SUBSCRIPTION_PLANS and txn and txn.get("payment_status") != "paid":
                     plan = SUBSCRIPTION_PLANS[plan_id]
-                    await db.users.update_one(
-                        {"user_id": user_id},
-                        {"$set": {"plan": plan_id, "quota": plan.quota.copy()}}
-                    )
-                    if session_id:
-                        await db.payment_transactions.update_one(
-                            {"session_id": session_id},
-                            {"$set": {"status": "complete", "payment_status": "paid"}}
+                    user_doc = await _ensure_opening_balance_baseline_for_user_id(user_id)
+                    if user_doc:
+                        before_quota = _quota_snapshot(user_doc.get("quota"))
+                        after_quota = plan.quota.copy()
+                        await db.users.update_one(
+                            {"user_id": user_id},
+                            {"$set": {"plan": plan_id, "quota": after_quota}}
                         )
+                        await _record_quota_change_entries(
+                            user_doc=user_doc,
+                            before_quota=before_quota,
+                            after_quota=after_quota,
+                            entry_type="plan_purchase",
+                            reference_type="checkout_session",
+                            reference_id=session_id,
+                            description_it=f"Accredito crediti per acquisto piano {plan.name_it}",
+                            metadata={
+                                "checkout_session_id": session_id,
+                                "payment_transaction_id": txn.get("transaction_id"),
+                                "old_plan": user_doc.get("plan"),
+                                "new_plan": plan_id,
+                            },
+                        )
+                    await db.payment_transactions.update_one(
+                        {"session_id": session_id},
+                        {"$set": {"status": "complete", "payment_status": "paid"}}
+                    )
+                    await _mark_billing_record_paid(
+                        user_id=user_id,
+                        checkout_reference=session_id,
+                        payment_reference=str(data_object.get("payment_intent") or session_id),
+                        metadata={
+                            "checkout_session_id": session_id,
+                            "payment_status": payment_status,
+                            "event_type": event_type,
+                        },
+                    )
         
         return {"received": True}
     except Exception as e:
@@ -9826,7 +10326,22 @@ async def analyze_perizia(request: Request, file: UploadFile = File(...)):
         logger.info(f"[{request_id}] persist_done analysis_id={analysis_id}")
 
         # Decrement exact perizia credits band only after successful persistence.
-        await _decrement_quota_if_applicable(user, "perizia_scans_remaining", amount=required_perizia_credits)
+        await _apply_quota_debit_with_ledger(
+            user,
+            field="perizia_scans_remaining",
+            amount=required_perizia_credits,
+            entry_type="perizia_upload",
+            reference_type="analysis",
+            reference_id=analysis.analysis_id,
+            description_it="Addebito crediti per analisi perizia completata",
+            metadata={
+                "analysis_id": analysis.analysis_id,
+                "case_id": case_id,
+                "pages_count": uploaded_pages_count,
+                "required_credits": required_perizia_credits,
+                "file_name": file.filename,
+            },
+        )
 
     logger.info(f"[{request_id}] respond_ok analysis_id={analysis_id}")
     return {
@@ -10637,7 +11152,20 @@ Output JSON secondo lo schema specificato."""
     await db.image_forensics.insert_one(forensics_dict)
     
     # Decrement quota if not master admin
-    await _decrement_quota_if_applicable(user, "image_scans_remaining")
+    await _apply_quota_debit_with_ledger(
+        user,
+        field="image_scans_remaining",
+        amount=1,
+        entry_type="image_forensics",
+        reference_type="forensics",
+        reference_id=forensics.forensics_id,
+        description_it="Addebito credito per analisi immagini",
+        metadata={
+            "forensics_id": forensics.forensics_id,
+            "case_id": case_id,
+            "image_count": len(files),
+        },
+    )
     
     return result
 
@@ -10905,7 +11433,20 @@ Output JSON secondo lo schema specificato."""
     await db.assistant_qa.insert_one(qa_dict)
     
     # Decrement quota if not master admin
-    await _decrement_quota_if_applicable(user, "assistant_messages_remaining")
+    await _apply_quota_debit_with_ledger(
+        user,
+        field="assistant_messages_remaining",
+        amount=1,
+        entry_type="assistant_message",
+        reference_type="assistant_qa",
+        reference_id=qa.qa_id,
+        description_it="Addebito credito per messaggio assistente",
+        metadata={
+            "qa_id": qa.qa_id,
+            "case_id": related_case_id,
+            "question_preview": _truncate(question, 120),
+        },
+    )
     
     return result
 
@@ -11271,16 +11812,20 @@ async def admin_user_update(user_id: str, request: Request):
     admin_user = await require_master_admin(request)
     payload = await request.json()
 
-    target_user = await db.users.find_one({"user_id": user_id}, {"_id": 0})
+    target_user_raw = await db.users.find_one({"user_id": user_id}, {"_id": 0})
+    target_user = await _apply_normalized_account_state(target_user_raw, persist=True) if target_user_raw else None
     if not target_user:
         raise HTTPException(status_code=404, detail="User not found")
+
+    await _ensure_opening_balance_baseline_for_user_doc(target_user)
 
     update_data: Dict[str, Any] = {}
     plan = payload.get("plan")
     quota = payload.get("quota") or {}
+    billing_payload = payload.get("billing_record")
 
     before_plan = target_user.get("plan")
-    before_quota = target_user.get("quota", {}).copy()
+    before_quota = _quota_snapshot(target_user.get("quota"))
 
     if plan:
         if plan not in SUBSCRIPTION_PLANS:
@@ -11301,7 +11846,7 @@ async def admin_user_update(user_id: str, request: Request):
         quota_updates[key] = value
 
     if quota_updates:
-        new_quota = target_user.get("quota", {}).copy()
+        new_quota = before_quota.copy()
         new_quota.update(quota_updates)
         update_data["quota"] = new_quota
 
@@ -11327,6 +11872,29 @@ async def admin_user_update(user_id: str, request: Request):
         )
 
     updated = await db.users.find_one({"user_id": user_id}, {"_id": 0})
+    updated = await _apply_normalized_account_state(updated, persist=True)
+    updated_quota = _quota_snapshot(updated.get("quota"))
+    await _record_quota_change_entries(
+        user_doc=updated,
+        before_quota=before_quota,
+        after_quota=updated_quota,
+        entry_type="admin_adjustment",
+        reference_type="admin_user_update",
+        reference_id=user_id,
+        description_it="Variazione crediti eseguita da amministratore",
+        metadata={
+            "old_plan": before_plan,
+            "new_plan": updated.get("plan"),
+            "quota_updates": quota_updates,
+        },
+        actor_user=admin_user,
+    )
+    if billing_payload:
+        await _create_admin_manual_billing_record(
+            admin_user=admin_user,
+            target_user_doc=updated,
+            billing_payload=billing_payload,
+        )
     updated["created_at"] = _to_iso(updated.get("created_at"))
     return {"ok": True, "user": updated}
 
@@ -11814,6 +12382,37 @@ async def get_assistant_history(request: Request, limit: int = 50, skip: int = 0
     
     return {"conversations": qas, "total": total, "limit": limit, "skip": skip}
 
+@api_router.get("/billing/ledger")
+async def get_billing_ledger(request: Request, limit: int = 20, skip: int = 0):
+    """Get current user's credit ledger history"""
+    user = await require_auth(request)
+    safe_limit = max(1, min(int(limit or 20), 100))
+    safe_skip = max(0, int(skip or 0))
+
+    entries = await db.credit_ledger.find(
+        {"user_id": user.user_id},
+        {
+            "_id": 0,
+            "ledger_id": 1,
+            "quota_field": 1,
+            "direction": 1,
+            "amount": 1,
+            "balance_before": 1,
+            "balance_after": 1,
+            "entry_type": 1,
+            "reference_type": 1,
+            "reference_id": 1,
+            "description_it": 1,
+            "metadata": 1,
+            "actor_user_id": 1,
+            "actor_email": 1,
+            "created_at": 1,
+        },
+    ).sort("created_at", -1).skip(safe_skip).limit(safe_limit).to_list(safe_limit)
+    total = await db.credit_ledger.count_documents({"user_id": user.user_id})
+
+    return {"entries": entries, "total": total, "limit": safe_limit, "skip": safe_skip}
+
 # ===================
 # DELETE ENDPOINTS
 # ===================
@@ -12034,6 +12633,14 @@ async def ensure_indexes():
         (db.payment_transactions, "user_id"),
         (db.payment_transactions, "created_at"),
         (db.payment_transactions, "status"),
+        (db.credit_ledger, "user_id"),
+        (db.credit_ledger, "created_at"),
+        (db.credit_ledger, "entry_type"),
+        (db.credit_ledger, "reference_id"),
+        (db.billing_records, "user_id"),
+        (db.billing_records, "created_at"),
+        (db.billing_records, "status"),
+        (db.billing_records, "checkout_reference"),
         (db.admin_user_notes, "user_id"),
         (db.admin_audit_log, "created_at"),
         (db.admin_audit_log, "admin_email"),
