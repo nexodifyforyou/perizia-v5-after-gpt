@@ -27,6 +27,10 @@ const sections = [
     text: 'Per richieste relative ai dati o all’uso del servizio puoi scrivere a nexodifyforyou@gmail.com. Le richieste vengono gestite secondo il contesto operativo e normativo applicabile.'
   },
   {
+    title: 'Richieste di cancellazione',
+    text: 'Se elimini un documento dal portale o richiedi la cancellazione dei tuoi dati, PeriziaScan gestisce la rimozione secondo le procedure operative del servizio. L’effettiva eliminazione tecnica puo richiedere tempi di propagazione e puo dipendere da vincoli operativi, di sicurezza o di continuita del servizio. Per richieste specifiche sulla cancellazione dei documenti caricati, puoi contattarci a nexodifyforyou@gmail.com.'
+  },
+  {
     title: '7. Aggiornamenti dell’informativa',
     text: 'Questa informativa pubblica puo essere aggiornata per riflettere cambiamenti di prodotto, processo o assetto operativo. La versione pubblicata sul sito rappresenta il testo corrente.'
   }
