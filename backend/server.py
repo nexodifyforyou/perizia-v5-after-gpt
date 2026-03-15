@@ -5871,7 +5871,12 @@ def enforce_evidence_or_low_confidence(result: Dict[str, Any]) -> Dict[str, Any]
     money_box = result.get("money_box", {})
     if isinstance(money_box, dict):
         total = money_box.get("total_extra_costs", {})
-        if isinstance(total, dict) and not _has_evidence(total.get("evidence", [])):
+        if (
+            isinstance(total, dict)
+            and not _has_evidence(total.get("evidence", []))
+            and total.get("min") != "NON_QUANTIFICATO_IN_PERIZIA"
+            and total.get("max") != "NON_QUANTIFICATO_IN_PERIZIA"
+        ):
             total["min"] = "TBD"
             total["max"] = "TBD"
             total["nota"] = "TBD — Costi non quantificati in perizia"

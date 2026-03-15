@@ -1613,13 +1613,21 @@ const AnalysisResult = () => {
   const moneyBoxTotalRange = moneyBox.total_extra_costs_range;
   const moneyBoxTotalMin = moneyBoxTotal?.min;
   const moneyBoxTotalMax = moneyBoxTotal?.max;
+  const moneyBoxTotalLegacyRangeMin = moneyBoxTotal?.range?.min;
+  const moneyBoxTotalLegacyRangeMax = moneyBoxTotal?.range?.max;
   const moneyPolicy = safeRender(moneyBox.policy, '').toUpperCase();
   const isConservativeCostMode = moneyPolicy === 'CONSERVATIVE' || moneyPolicy === 'LOT_CONSERVATIVE';
-  const isTotalTBD =
-    moneyBoxTotalMin === 'TBD' ||
-    moneyBoxTotalMax === 'TBD' ||
-    moneyBoxTotalMin === 'NON_QUANTIFICATO_IN_PERIZIA' ||
-    moneyBoxTotalMax === 'NON_QUANTIFICATO_IN_PERIZIA';
+  const isTotalTBD = [
+    moneyBoxTotalMin,
+    moneyBoxTotalMax,
+    moneyBoxTotalLegacyRangeMin,
+    moneyBoxTotalLegacyRangeMax
+  ].some((value) => value === 'TBD' || value === 'NON_QUANTIFICATO_IN_PERIZIA');
+  const moneyBoxNumericTotal = typeof moneyBoxTotalMin === 'number' && typeof moneyBoxTotalMax === 'number'
+    ? { min: moneyBoxTotalMin, max: moneyBoxTotalMax }
+    : typeof moneyBoxTotalLegacyRangeMin === 'number' && typeof moneyBoxTotalLegacyRangeMax === 'number'
+      ? { min: moneyBoxTotalLegacyRangeMin, max: moneyBoxTotalLegacyRangeMax }
+      : null;
   const hasMoneyBoxTotalRange = typeof moneyBoxTotalRange?.min_eur === 'number' && typeof moneyBoxTotalRange?.max_eur === 'number';
   const prezzoBaseValue =
     parseNumericEuro(selectedLot?.prezzo_base_value) ??
@@ -3144,21 +3152,19 @@ const AnalysisResult = () => {
                 <div className="mt-6 p-4 bg-gold/10 border border-gold/30 rounded-lg">
                   <div className="flex items-center justify-between">
                     <span className="text-lg font-semibold text-zinc-100">Totale stima extra-costi (escl. deprezzamenti)</span>
-                    <span className={`text-2xl font-mono font-bold ${isTotalTBD ? 'text-amber-400' : 'text-gold'}`}>
-                      {isTotalTBD ? (
+                    <span className={`text-2xl font-mono font-bold ${(isConservativeCostMode || isTotalTBD || !moneyBoxNumericTotal) ? 'text-amber-400' : 'text-gold'}`}>
+                      {isConservativeCostMode || isTotalTBD || !moneyBoxNumericTotal ? (
                         'NON QUANTIFICATO IN PERIZIA'
-                      ) : moneyBoxTotal?.min !== undefined ? (
-                        `€${(typeof moneyBoxTotal.min === 'number' ? moneyBoxTotal.min : 0).toLocaleString()} - €${(typeof moneyBoxTotal.max === 'number' ? moneyBoxTotal.max : 0).toLocaleString()}`
                       ) : (
-                        `€${(moneyBox.total_extra_costs?.range?.min || 0).toLocaleString()} - €${(moneyBox.total_extra_costs?.range?.max || 0).toLocaleString()}`
+                        `€${moneyBoxNumericTotal.min.toLocaleString()} - €${moneyBoxNumericTotal.max.toLocaleString()}`
                       )}
-                      {!isTotalTBD && (moneyBoxTotal?.nota?.includes('+') || moneyBox.total_extra_costs?.max_is_open) && '+'}
+                      {!isConservativeCostMode && !isTotalTBD && moneyBoxNumericTotal && (moneyBoxTotal?.nota?.includes('+') || moneyBox.total_extra_costs?.max_is_open) && '+'}
                     </span>
                   </div>
                   {moneyBoxTotal?.nota && (
                     <p className="text-xs text-zinc-400 mt-2">{moneyBoxTotal.nota}</p>
                   )}
-                  {isTotalTBD && (
+                  {(isConservativeCostMode || isTotalTBD || !moneyBoxNumericTotal) && (
                     <p className="text-xs text-amber-400 mt-2">
                       Costi non quantificati in perizia. Verifica tecnico/legale obbligatoria.
                     </p>
