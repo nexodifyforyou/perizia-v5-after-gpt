@@ -11275,6 +11275,9 @@ async def get_perizia_history(request: Request, limit: int = 20, skip: int = 0):
         {"user_id": user.user_id},
         {"_id": 0, "raw_text": 0}  # Exclude raw_text for performance
     ).sort("created_at", -1).skip(skip).limit(limit).to_list(limit)
+
+    for analysis in analyses:
+        analysis["semaforo_status"] = _refresh_list_analysis_semaforo(analysis)
     
     total = await db.perizia_analyses.count_documents({"user_id": user.user_id})
     
@@ -11431,6 +11434,33 @@ async def _get_perizia_analysis_for_user(analysis_id: str, user: User) -> Dict[s
         analysis["result"] = result
     return analysis
 
+def _refresh_list_analysis_semaforo(analysis: Dict[str, Any]) -> Optional[str]:
+    if not isinstance(analysis, dict):
+        return None
+    result = analysis.get("result")
+    if not isinstance(result, dict):
+        return None
+
+    analysis_id = str(analysis.get("analysis_id") or "")
+    pages_hint = int(analysis.get("pages_count", 0) or 0)
+    pages_for_proof = _load_pages_for_analysis(analysis_id, pages_hint)
+    _refresh_customer_facing_result_on_read(
+        result,
+        pages_for_proof,
+        analysis_id=analysis_id,
+        headline_overrides=analysis.get("headline_overrides") or {},
+        field_overrides=analysis.get("field_overrides") or {},
+    )
+    analysis["result"] = result
+
+    section1 = result.get("section_1_semaforo_generale")
+    semaforo = section1 if isinstance(section1, dict) else result.get("semaforo_generale")
+    if not isinstance(semaforo, dict):
+        return None
+
+    status = str(semaforo.get("status") or "").upper().strip()
+    return status or None
+
 @api_router.get("/history/perizia/{analysis_id}")
 async def get_perizia_detail(analysis_id: str, request: Request):
     """Get specific perizia analysis"""
@@ -11569,8 +11599,11 @@ async def get_dashboard_stats(request: Request):
     # Get recent analyses
     recent_analyses = await db.perizia_analyses.find(
         {"user_id": user.user_id},
-        {"_id": 0, "analysis_id": 1, "case_id": 1, "case_title": 1, "created_at": 1, "result.semaforo_generale": 1}
+        {"_id": 0, "analysis_id": 1, "case_id": 1, "case_title": 1, "created_at": 1, "pages_count": 1, "headline_overrides": 1, "field_overrides": 1, "result.semaforo_generale": 1, "result.section_1_semaforo_generale": 1, "result.field_states": 1}
     ).sort("created_at", -1).limit(5).to_list(5)
+
+    for analysis in recent_analyses:
+        analysis["semaforo_status"] = _refresh_list_analysis_semaforo(analysis)
     
     # Calculate semaforo distribution
     pipeline = [

@@ -321,9 +321,11 @@ const History = () => {
                       </Link>
                       <div className="flex items-center gap-4">
                         <SemaforoBadge status={
+                          analysis.semaforo_status ||
+                          analysis.result?.section_1_semaforo_generale?.status ||
                           analysis.result?.semaforo_generale?.status || 
-                          analysis.result?.result?.semaforo_generale?.status || 
-                          'AMBER'
+                          analysis.result?.result?.section_1_semaforo_generale?.status ||
+                          analysis.result?.result?.semaforo_generale?.status
                         } />
                         <button
                           onClick={(e) => {

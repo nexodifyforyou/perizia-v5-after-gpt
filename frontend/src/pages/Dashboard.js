@@ -124,6 +124,14 @@ const Sidebar = ({ user, logout }) => {
 };
 
 // Semaforo Badge Component
+const normalizeSemaforoStatus = (status) => {
+  const normalized = String(status || '').trim().toUpperCase();
+  if (['GREEN', 'VERDE', 'BASSO RISCHIO'].includes(normalized)) return 'GREEN';
+  if (['RED', 'ROSSO', 'ALTO RISCHIO'].includes(normalized)) return 'RED';
+  if (['AMBER', 'GIALLO', 'ATTENZIONE'].includes(normalized)) return 'AMBER';
+  return null;
+};
+
 const SemaforoBadge = ({ status }) => {
   const config = {
     GREEN: { bg: 'bg-emerald-500/10', text: 'text-emerald-400', border: 'border-emerald-500/30', label: 'Basso Rischio' },
@@ -131,11 +139,12 @@ const SemaforoBadge = ({ status }) => {
     RED: { bg: 'bg-red-500/10', text: 'text-red-400', border: 'border-red-500/30', label: 'Alto Rischio' },
   };
   
-  const c = config[status] || config.AMBER;
+  const normalizedStatus = normalizeSemaforoStatus(status) || 'AMBER';
+  const c = config[normalizedStatus] || config.AMBER;
   
   return (
     <span className={`inline-flex items-center gap-2 px-3 py-1 rounded-full text-xs font-mono font-bold uppercase ${c.bg} ${c.text} border ${c.border}`}>
-      <span className={`w-2 h-2 rounded-full ${status === 'GREEN' ? 'bg-emerald-500' : status === 'RED' ? 'bg-red-500' : 'bg-amber-500'}`} />
+      <span className={`w-2 h-2 rounded-full ${normalizedStatus === 'GREEN' ? 'bg-emerald-500' : normalizedStatus === 'RED' ? 'bg-red-500' : 'bg-amber-500'}`} />
       {c.label}
     </span>
   );
@@ -285,7 +294,7 @@ const Dashboard = () => {
                       </p>
                     </div>
                   </div>
-                  <SemaforoBadge status={analysis.result?.semaforo_generale?.status || analysis.result?.result?.semaforo_generale?.status || 'AMBER'} />
+                  <SemaforoBadge status={analysis.semaforo_status || analysis.result?.section_1_semaforo_generale?.status || analysis.result?.semaforo_generale?.status || analysis.result?.result?.section_1_semaforo_generale?.status || analysis.result?.result?.semaforo_generale?.status} />
                 </Link>
               ))
             ) : (
