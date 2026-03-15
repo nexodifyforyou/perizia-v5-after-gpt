@@ -1,7 +1,8 @@
-import React, { useEffect } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { Button } from '../components/ui/button';
+import PreLoginNoticeDialog from '../components/PreLoginNoticeDialog';
 import { 
   FileText, 
   Shield, 
@@ -19,12 +20,22 @@ import PublicPlansGrid from '../components/PublicPlansGrid';
 const Landing = () => {
   const { user, login } = useAuth();
   const navigate = useNavigate();
+  const [isLoginNoticeOpen, setIsLoginNoticeOpen] = useState(false);
 
   useEffect(() => {
     if (user) {
       navigate('/dashboard');
     }
   }, [user, navigate]);
+
+  const openLoginNotice = () => {
+    setIsLoginNoticeOpen(true);
+  };
+
+  const handleConfirmLogin = () => {
+    setIsLoginNoticeOpen(false);
+    login();
+  };
 
   const features = [
     {
@@ -81,7 +92,7 @@ const Landing = () => {
             <span className="text-xl font-serif font-bold text-zinc-100">Nexodify</span>
           </div>
           <Button 
-            onClick={login}
+            onClick={openLoginNotice}
             data-testid="header-login-btn"
             className="bg-gold text-zinc-950 hover:bg-gold-dim font-semibold px-6"
           >
@@ -118,7 +129,7 @@ const Landing = () => {
           
           <div className="flex flex-col sm:flex-row gap-4 justify-center">
             <Button 
-              onClick={login}
+              onClick={openLoginNotice}
               data-testid="hero-get-started-btn"
               className="bg-gold text-zinc-950 hover:bg-gold-dim font-semibold px-8 py-6 text-lg gold-glow gold-glow-hover"
             >
@@ -299,7 +310,7 @@ const Landing = () => {
             Carica una perizia, individua piu rapidamente le criticita principali e controlla i riferimenti direttamente nel report. Meno tempo perso nella ricerca iniziale, piu efficienza nel pre-screening.
           </p>
           <Button 
-            onClick={login}
+            onClick={openLoginNotice}
             data-testid="cta-start-btn"
             className="bg-gold text-zinc-950 hover:bg-gold-dim font-semibold px-12 py-6 text-lg gold-glow"
           >
@@ -341,6 +352,12 @@ const Landing = () => {
           </div>
         </div>
       </footer>
+
+      <PreLoginNoticeDialog
+        open={isLoginNoticeOpen}
+        onOpenChange={setIsLoginNoticeOpen}
+        onConfirm={handleConfirmLogin}
+      />
     </div>
   );
 };

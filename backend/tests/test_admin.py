@@ -2,6 +2,7 @@ import re
 import os
 import sys
 from datetime import datetime, timezone, timedelta
+import io
 
 import pytest
 import httpx
@@ -335,3 +336,131 @@ async def test_quota_decrement_skipped_for_master_admin(fake_db, monkeypatch):
         )
     assert response.status_code == 200
     assert not any("$inc" in call for call in fake_db.users.update_calls)
+
+
+def _make_pdf_bytes(page_count: int) -> bytes:
+    writer = server.PdfWriter()
+    for _ in range(page_count):
+        writer.add_blank_page(width=612, height=792)
+    out = io.BytesIO()
+    writer.write(out)
+    return out.getvalue()
+
+
+def _stub_perizia_pipeline(monkeypatch):
+    monkeypatch.setattr(server, "_build_step1_extract_payload", lambda contents: {"document_quality": {}, "extraction_summary": {}})
+    monkeypatch.setattr(
+        server,
+        "_extract_pdf_text_digital",
+        lambda contents: {
+            "success": True,
+            "pages": [{"page_number": 1, "text": "testo sufficiente", "tables": [], "form_fields": [], "char_count": 17}],
+            "full_text": "testo sufficiente",
+            "total_pages": 1,
+            "covered_pages": 1,
+            "coverage_ratio": 1.0,
+            "blank_pages": 0,
+            "blank_ratio": 0.0,
+            "error": None,
+        },
+    )
+    monkeypatch.setattr(server, "create_fallback_analysis", lambda *args, **kwargs: {"analysis_status": "COMPLETED", "debug": {}})
+    monkeypatch.setattr(server, "_normalize_legal_killers", lambda *args, **kwargs: None)
+    monkeypatch.setattr(server, "_apply_headline_field_states", lambda *args, **kwargs: None)
+    monkeypatch.setattr(server, "_apply_decision_field_states", lambda *args, **kwargs: None)
+    monkeypatch.setattr(server, "_apply_market_ranges_to_money_box", lambda *args, **kwargs: None)
+    monkeypatch.setattr(server, "_normalize_evidence_offsets", lambda *args, **kwargs: None)
+    monkeypatch.setattr(server, "_build_panoramica_contract", lambda *args, **kwargs: {})
+    monkeypatch.setattr(server, "_apply_unreadable_hard_stop", lambda *args, **kwargs: None)
+    monkeypatch.setattr(server, "_write_extraction_pack", lambda *args, **kwargs: None)
+    monkeypatch.setattr(server, "run_candidate_miner_for_analysis", lambda *args, **kwargs: {"money_count": 0, "date_count": 0, "trigger_count": 0, "low_quality_pages": [], "candidates_folder": "/tmp"})
+    monkeypatch.setattr(server, "build_estratto_quality", lambda *args, **kwargs: {"sections": [], "build_meta": {}})
+    monkeypatch.setattr(server, "_sanitize_lot_conservative_outputs", lambda *args, **kwargs: None)
+    monkeypatch.setattr(server, "_build_user_messages", lambda *args, **kwargs: [])
+
+    async def _fake_summary(*args, **kwargs):
+        return None
+
+    async def _fake_narration(*args, **kwargs):
+        return None, {"status": "disabled", "enabled": False}
+
+    monkeypatch.setattr(server, "_enrich_summary_with_optional_llm", _fake_summary)
+    monkeypatch.setattr(server, "build_decisione_rapida_narration", _fake_narration)
+    monkeypatch.setattr(server, "_build_case_aware_narration_payload", lambda *args, **kwargs: None)
+
+
+def test_required_perizia_credits_bands():
+    assert server._get_required_perizia_credits(1) == 4
+    assert server._get_required_perizia_credits(20) == 4
+    assert server._get_required_perizia_credits(21) == 7
+    assert server._get_required_perizia_credits(40) == 7
+    assert server._get_required_perizia_credits(41) == 10
+    assert server._get_required_perizia_credits(60) == 10
+    assert server._get_required_perizia_credits(61) == 13
+    assert server._get_required_perizia_credits(80) == 13
+    assert server._get_required_perizia_credits(81) == 16
+    assert server._get_required_perizia_credits(100) == 16
+    assert server._get_required_perizia_credits(101) is None
+
+
+@pytest.mark.anyio
+async def test_perizia_upload_blocks_when_band_credits_are_insufficient(fake_db):
+    session_token = _seed_session(fake_db, {
+        "user_id": "user_free",
+        "email": "user@example.com",
+        "name": "User",
+        "plan": "free",
+        "is_master_admin": False,
+        "quota": {"perizia_scans_remaining": 4, "image_scans_remaining": 0, "assistant_messages_remaining": 0}
+    })
+
+    transport = httpx.ASGITransport(app=server.app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        response = await client.post(
+            "/api/analysis/perizia",
+            files={"file": ("perizia_80p.pdf", _make_pdf_bytes(80), "application/pdf")},
+            headers={"Authorization": f"Bearer {session_token}"}
+        )
+
+    assert response.status_code == 403
+    payload = response.json()["detail"]
+    assert payload["code"] == "INSUFFICIENT_PERIZIA_CREDITS"
+    assert payload["required_credits"] == 13
+    assert payload["remaining_credits"] == 4
+    assert payload["pages_count"] == 80
+    assert "Crediti insufficienti" in payload["message_it"]
+    assert fake_db.perizia_analyses.inserted == []
+    assert not any("quota.perizia_scans_remaining" in call.get("$inc", {}) for call in fake_db.users.update_calls)
+    user_doc = next(item for item in fake_db.users.items if item["user_id"] == "user_free")
+    assert user_doc["quota"]["perizia_scans_remaining"] == 4
+
+
+@pytest.mark.anyio
+async def test_perizia_upload_consumes_exact_band_credits_on_success(fake_db, monkeypatch):
+    _stub_perizia_pipeline(monkeypatch)
+    session_token = _seed_session(fake_db, {
+        "user_id": "user_paid",
+        "email": "paid@example.com",
+        "name": "Paid",
+        "plan": "starter",
+        "is_master_admin": False,
+        "quota": {"perizia_scans_remaining": 20, "image_scans_remaining": 0, "assistant_messages_remaining": 0}
+    })
+
+    transport = httpx.ASGITransport(app=server.app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        response = await client.post(
+            "/api/analysis/perizia",
+            files={"file": ("perizia_80p.pdf", _make_pdf_bytes(80), "application/pdf")},
+            headers={"Authorization": f"Bearer {session_token}"}
+        )
+
+    assert response.status_code == 200
+    assert len(fake_db.perizia_analyses.inserted) == 1
+    inserted = fake_db.perizia_analyses.inserted[0]
+    assert inserted["pages_count"] == 80
+    inc_calls = [call for call in fake_db.users.update_calls if "quota.perizia_scans_remaining" in call.get("$inc", {})]
+    assert inc_calls
+    assert inc_calls[-1]["$inc"]["quota.perizia_scans_remaining"] == -13
+    user_doc = next(item for item in fake_db.users.items if item["user_id"] == "user_paid")
+    assert user_doc["quota"]["perizia_scans_remaining"] == 7

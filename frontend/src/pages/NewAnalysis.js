@@ -35,6 +35,75 @@ const formatElapsed = (elapsedSec) => {
   return `${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
 };
 
+const GENERIC_UPLOAD_ERROR = {
+  titleIt: 'Errore durante l’analisi',
+  titleEn: 'Error during analysis',
+  bodyIt: 'Non è stato possibile completare l’upload o l’elaborazione. Riprova tra poco.',
+  bodyEn: 'Could not complete the upload or processing. Please try again shortly.'
+};
+
+const toDisplayString = (value) => {
+  if (typeof value !== 'string') {
+    return null;
+  }
+  const trimmed = value.trim();
+  return trimmed || null;
+};
+
+const buildUploadErrorState = (err) => {
+  const responseData = err?.response?.data;
+  const backendDetail = responseData?.detail;
+  const directMessage = responseData?.message;
+  const directMessageIt = responseData?.message_it;
+  const directMessageEn = responseData?.message_en;
+
+  const messageIt =
+    toDisplayString(backendDetail?.message_it) ||
+    toDisplayString(backendDetail?.message_en) ||
+    toDisplayString(directMessageIt) ||
+    toDisplayString(directMessageEn) ||
+    toDisplayString(directMessage) ||
+    (typeof backendDetail === 'string' ? toDisplayString(backendDetail) : null);
+
+  const messageEn =
+    toDisplayString(backendDetail?.message_en) ||
+    toDisplayString(backendDetail?.message_it) ||
+    toDisplayString(directMessageEn) ||
+    toDisplayString(directMessageIt) ||
+    toDisplayString(directMessage) ||
+    (typeof backendDetail === 'string' ? toDisplayString(backendDetail) : null);
+
+  if (backendDetail?.code === 'INSUFFICIENT_PERIZIA_CREDITS') {
+    const facts = [
+      backendDetail?.pages_count != null ? `Pagine documento: ${backendDetail.pages_count}` : null,
+      backendDetail?.required_credits != null ? `Crediti richiesti: ${backendDetail.required_credits}` : null,
+      backendDetail?.remaining_credits != null ? `Crediti rimanenti: ${backendDetail.remaining_credits}` : null
+    ].filter(Boolean);
+
+    const factsEn = [
+      backendDetail?.pages_count != null ? `Document pages: ${backendDetail.pages_count}` : null,
+      backendDetail?.required_credits != null ? `Required credits: ${backendDetail.required_credits}` : null,
+      backendDetail?.remaining_credits != null ? `Remaining credits: ${backendDetail.remaining_credits}` : null
+    ].filter(Boolean);
+
+    return {
+      titleIt: 'Crediti insufficienti',
+      titleEn: 'Insufficient credits',
+      bodyIt: messageIt || 'Crediti insufficienti per analizzare questa perizia.',
+      bodyEn: messageEn || 'Insufficient credits to analyze this appraisal.',
+      detailsIt: facts,
+      detailsEn: factsEn
+    };
+  }
+
+  return {
+    titleIt: GENERIC_UPLOAD_ERROR.titleIt,
+    titleEn: GENERIC_UPLOAD_ERROR.titleEn,
+    bodyIt: messageIt || GENERIC_UPLOAD_ERROR.bodyIt,
+    bodyEn: messageEn || GENERIC_UPLOAD_ERROR.bodyEn
+  };
+};
+
 const NewAnalysis = () => {
   const { user, logout } = useAuth();
   const navigate = useNavigate();
@@ -185,12 +254,7 @@ const NewAnalysis = () => {
       console.error('Upload error:', err);
       clearUploadTimers();
       setAwaitingResponse(false);
-      setError({
-        titleIt: 'Errore durante l’analisi',
-        titleEn: 'Error during analysis',
-        bodyIt: 'Non è stato possibile completare l’upload o l’elaborazione. Riprova tra poco.',
-        bodyEn: 'Could not complete the upload or processing. Please try again shortly.'
-      });
+      setError(buildUploadErrorState(err));
       setUploading(false);
     }
   };
@@ -362,6 +426,20 @@ const NewAnalysis = () => {
                 <p className="text-red-200/80 text-xs">
                   {error.bodyEn}
                 </p>
+                {error.detailsIt?.length > 0 && (
+                  <div className="pt-2">
+                    {error.detailsIt.map((detail, index) => (
+                      <p key={`it-${index}`} className="text-red-200/90 text-xs">
+                        {detail}
+                      </p>
+                    ))}
+                    {error.detailsEn?.map((detail, index) => (
+                      <p key={`en-${index}`} className="text-red-100/60 text-[11px]">
+                        {detail}
+                      </p>
+                    ))}
+                  </div>
+                )}
               </div>
             </div>
           )}

@@ -404,6 +404,22 @@ ACCOUNT_QUOTA_FIELDS = (
     "assistant_messages_remaining",
 )
 
+PERIZIA_CREDIT_BANDS: Tuple[Tuple[int, int, int], ...] = (
+    (1, 20, 4),
+    (21, 40, 7),
+    (41, 60, 10),
+    (61, 80, 13),
+    (81, 100, 16),
+)
+
+
+def _get_required_perizia_credits(page_count: int) -> Optional[int]:
+    safe_page_count = int(page_count or 0)
+    for min_pages, max_pages, credits in PERIZIA_CREDIT_BANDS:
+        if min_pages <= safe_page_count <= max_pages:
+            return credits
+    return None
+
 
 def _is_master_admin_email(email: Optional[str]) -> bool:
     return bool(email and email.lower() == MASTER_ADMIN_EMAIL.lower())
@@ -6424,12 +6440,15 @@ async def _write_admin_audit(
     except Exception as e:
         logger.warning(f"Admin audit log insert failed: {e}")
 
-async def _decrement_quota_if_applicable(user: User, field: str) -> bool:
+async def _decrement_quota_if_applicable(user: User, field: str, amount: int = 1) -> bool:
     if user.is_master_admin:
+        return False
+    decrement_amount = int(amount or 0)
+    if decrement_amount <= 0:
         return False
     await db.users.update_one(
         {"user_id": user.user_id},
-        {"$inc": {f"quota.{field}": -1}}
+        {"$inc": {f"quota.{field}": -decrement_amount}}
     )
     return True
 
@@ -9507,21 +9526,47 @@ async def analyze_perizia(request: Request, file: UploadFile = File(...)):
     if file.content_type and file.content_type != "application/pdf":
         raise HTTPException(status_code=400, detail="Solo file PDF sono accettati / Only PDF files are accepted")
     
-    # Check quota
-    if user.quota.get("perizia_scans_remaining", 0) <= 0 and not user.is_master_admin:
-        raise HTTPException(
-            status_code=403, 
-            detail={
-                "code": "QUOTA_EXCEEDED",
-                "message_it": "Quota scansioni perizia esaurita. Aggiorna il piano.",
-                "message_en": "Perizia scan quota exceeded. Upgrade your plan."
-            }
-        )
-    
     # Read PDF content
     contents = await file.read()
     input_sha256 = hashlib.sha256(contents).hexdigest()
     logger.info(f"[{request_id}] upload_saved bytes={len(contents)} sha256={input_sha256[:12]}")
+
+    try:
+        uploaded_reader = PdfReader(io.BytesIO(contents))
+        uploaded_pages_count = len(uploaded_reader.pages)
+    except Exception:
+        raise HTTPException(status_code=400, detail="PDF non valido o non leggibile.")
+
+    required_perizia_credits = _get_required_perizia_credits(uploaded_pages_count)
+    if required_perizia_credits is None:
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "code": "PERIZIA_PAGE_COUNT_UNSUPPORTED",
+                "message_it": "La perizia caricata ha un numero di pagine non supportato. Sono accettate solo perizie da 1 a 100 pagine.",
+                "message_en": "The uploaded perizia has an unsupported page count. Only documents between 1 and 100 pages are accepted.",
+            },
+        )
+
+    remaining_perizia_credits = int(user.quota.get("perizia_scans_remaining", 0) or 0)
+    if remaining_perizia_credits < required_perizia_credits and not user.is_master_admin:
+        raise HTTPException(
+            status_code=403,
+            detail={
+                "code": "INSUFFICIENT_PERIZIA_CREDITS",
+                "message_it": (
+                    f"Crediti insufficienti per analizzare questa perizia: {uploaded_pages_count} pagine "
+                    f"richiedono {required_perizia_credits} crediti, ma il tuo account ne ha solo {remaining_perizia_credits}."
+                ),
+                "message_en": (
+                    f"Insufficient credits for this perizia: {uploaded_pages_count} pages require "
+                    f"{required_perizia_credits} credits, but your account only has {remaining_perizia_credits}."
+                ),
+                "required_credits": required_perizia_credits,
+                "remaining_credits": remaining_perizia_credits,
+                "pages_count": uploaded_pages_count,
+            }
+        )
 
     # Generate IDs early for consistent logging + persistence
     case_id = f"case_{uuid.uuid4().hex[:8]}"
@@ -9759,7 +9804,7 @@ async def analyze_perizia(request: Request, file: UploadFile = File(...)):
         case_title=file.filename,
         file_name=file.filename,
         input_sha256=input_sha256,
-        pages_count=len(pages),
+        pages_count=uploaded_pages_count,
         result=result
     )
 
@@ -9780,8 +9825,8 @@ async def analyze_perizia(request: Request, file: UploadFile = File(...)):
         await db.perizia_analyses.insert_one(analysis_dict)
         logger.info(f"[{request_id}] persist_done analysis_id={analysis_id}")
 
-        # Decrement quota if not master admin
-        await _decrement_quota_if_applicable(user, "perizia_scans_remaining")
+        # Decrement exact perizia credits band only after successful persistence.
+        await _decrement_quota_if_applicable(user, "perizia_scans_remaining", amount=required_perizia_credits)
 
     logger.info(f"[{request_id}] respond_ok analysis_id={analysis_id}")
     return {
