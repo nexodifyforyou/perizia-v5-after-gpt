@@ -119,9 +119,9 @@ class User(BaseModel):
     plan: str = "free"
     is_master_admin: bool = False
     quota: Dict[str, int] = Field(default_factory=lambda: {
-        "perizia_scans_remaining": 3,
-        "image_scans_remaining": 5,
-        "assistant_messages_remaining": 10
+        "perizia_scans_remaining": 4,
+        "image_scans_remaining": 0,
+        "assistant_messages_remaining": 0
     })
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
@@ -224,8 +224,6 @@ class FieldOverrideRequest(BaseModel):
     formalita_pregiudizievoli: Optional[Any] = None
 
 # Subscription Plans
-FEATURE_PREVIEW_ADMIN_EMAIL = "nexodifyforyou@gmail.com"
-
 SUBSCRIPTION_PLANS = {
     "free": SubscriptionPlan(
         plan_id="free",
@@ -400,6 +398,106 @@ SUBSCRIPTION_PLANS = {
 # AUTH HELPERS
 # ===================
 
+ACCOUNT_QUOTA_FIELDS = (
+    "perizia_scans_remaining",
+    "image_scans_remaining",
+    "assistant_messages_remaining",
+)
+
+
+def _is_master_admin_email(email: Optional[str]) -> bool:
+    return bool(email and email.lower() == MASTER_ADMIN_EMAIL.lower())
+
+
+def _is_complete_quota(quota: Any) -> bool:
+    if not isinstance(quota, dict):
+        return False
+    for field in ACCOUNT_QUOTA_FIELDS:
+        value = quota.get(field)
+        if not isinstance(value, int) or value < 0:
+            return False
+    return True
+
+
+def _normalize_account_state(user_doc: Dict[str, Any]) -> Dict[str, Any]:
+    normalized_email = str(user_doc.get("email") or "").strip().lower()
+    is_master_admin = _is_master_admin_email(normalized_email)
+
+    if is_master_admin:
+        plan = "enterprise"
+        quota = SUBSCRIPTION_PLANS["enterprise"].quota.copy()
+    else:
+        raw_plan = user_doc.get("plan")
+        raw_quota = user_doc.get("quota")
+        valid_non_admin_plan = (
+            isinstance(raw_plan, str)
+            and raw_plan in SUBSCRIPTION_PLANS
+            and raw_plan != "enterprise"
+        )
+        if valid_non_admin_plan and _is_complete_quota(raw_quota):
+            plan = raw_plan
+            quota = {field: int(raw_quota[field]) for field in ACCOUNT_QUOTA_FIELDS}
+        else:
+            plan = "free"
+            quota = SUBSCRIPTION_PLANS["free"].quota.copy()
+
+    feature_access = {
+        "can_use_assistant": is_master_admin,
+        "can_use_image_forensics": is_master_admin,
+    }
+
+    return {
+        "is_master_admin": is_master_admin,
+        "plan": plan,
+        "quota": quota,
+        "feature_access": feature_access,
+        "account": {
+            "effective_plan": plan,
+            "effective_quota": quota.copy(),
+            "feature_access": feature_access.copy(),
+        },
+    }
+
+
+async def _apply_normalized_account_state(user_doc: Dict[str, Any], persist: bool = False) -> Dict[str, Any]:
+    normalized = _normalize_account_state(user_doc)
+
+    normalized_user_doc = user_doc.copy()
+    normalized_user_doc["is_master_admin"] = normalized["is_master_admin"]
+    normalized_user_doc["plan"] = normalized["plan"]
+    normalized_user_doc["quota"] = normalized["quota"].copy()
+
+    if persist and user_doc.get("user_id"):
+        update_data: Dict[str, Any] = {}
+        if user_doc.get("is_master_admin") != normalized["is_master_admin"]:
+            update_data["is_master_admin"] = normalized["is_master_admin"]
+        if user_doc.get("plan") != normalized["plan"]:
+            update_data["plan"] = normalized["plan"]
+        if user_doc.get("quota") != normalized["quota"]:
+            update_data["quota"] = normalized["quota"].copy()
+        if update_data:
+            await db.users.update_one({"user_id": user_doc["user_id"]}, {"$set": update_data})
+
+    normalized_user_doc["feature_access"] = normalized["feature_access"].copy()
+    normalized_user_doc["account"] = normalized["account"]
+    return normalized_user_doc
+
+
+def _build_user_response(user: User) -> Dict[str, Any]:
+    user_response = user.model_dump()
+    user_response["created_at"] = (
+        user_response["created_at"].isoformat()
+        if isinstance(user_response["created_at"], datetime)
+        else user_response["created_at"]
+    )
+    normalized = _normalize_account_state(user_response)
+    user_response["is_master_admin"] = normalized["is_master_admin"]
+    user_response["plan"] = normalized["plan"]
+    user_response["quota"] = normalized["quota"].copy()
+    user_response["feature_access"] = normalized["feature_access"].copy()
+    user_response["account"] = normalized["account"]
+    return user_response
+
 async def get_current_user(request: Request) -> Optional[User]:
     """Get current user from session token cookie or Authorization header"""
     session_token = request.cookies.get("session_token")
@@ -426,8 +524,9 @@ async def get_current_user(request: Request) -> Optional[User]:
     user_doc = await db.users.find_one({"user_id": session_doc["user_id"]}, {"_id": 0})
     if not user_doc:
         return None
-    
-    return User(**user_doc)
+
+    normalized_user_doc = await _apply_normalized_account_state(user_doc, persist=True)
+    return User(**normalized_user_doc)
 
 async def require_auth(request: Request) -> User:
     """Require authenticated user"""
@@ -449,24 +548,20 @@ async def require_master_admin(request: Request) -> User:
     user = await require_auth(request)
     if not user.is_master_admin:
         raise HTTPException(status_code=403, detail="Forbidden")
-    if user.email.lower() != MASTER_ADMIN_EMAIL.lower():
+    if not _is_master_admin_email(user.email):
         raise HTTPException(status_code=403, detail="Forbidden")
     return user
 
 
-def _is_preview_feature_admin(user: Optional[User]) -> bool:
-    return bool(user and user.email and user.email.lower() == FEATURE_PREVIEW_ADMIN_EMAIL.lower())
-
-
 def _feature_access_flags(user: Optional[User]) -> Dict[str, bool]:
-    can_use_preview_features = _is_preview_feature_admin(user)
+    normalized = _normalize_account_state(user.model_dump() if user else {})
     return {
-        "can_use_assistant": can_use_preview_features,
-        "can_use_image_forensics": can_use_preview_features,
+        "can_use_assistant": normalized["feature_access"]["can_use_assistant"],
+        "can_use_image_forensics": normalized["feature_access"]["can_use_image_forensics"],
     }
 
 
-def _require_preview_feature_access(user: User, feature_label_it: str, access_flag: str) -> None:
+def _require_feature_access(user: User, feature_label_it: str, access_flag: str) -> None:
     if _feature_access_flags(user).get(access_flag):
         return
     raise HTTPException(
@@ -6374,27 +6469,20 @@ async def create_session(request: Request, response: Response):
     
     # Check if user exists or create new one
     existing_user = await db.users.find_one({"email": email}, {"_id": 0})
-    is_master = email.lower() == MASTER_ADMIN_EMAIL.lower()  # Case-insensitive comparison
+    is_master = _is_master_admin_email(email)
     
     if existing_user:
         user_id = existing_user["user_id"]
-        # Update user data - also update master admin status and plan if they're the admin
+        # Update user data before normalizing persisted account state
         update_data = {"name": name, "picture": picture}
-        
-        # If this is the master admin, ensure they have enterprise access
-        if is_master:
-            update_data["is_master_admin"] = True
-            update_data["plan"] = "enterprise"
-            update_data["quota"] = SUBSCRIPTION_PLANS["enterprise"].quota.copy()
-        
         await db.users.update_one(
             {"user_id": user_id},
             {"$set": update_data}
         )
-        
-        # Refresh user data after update
+
         updated_user = await db.users.find_one({"user_id": user_id}, {"_id": 0})
-        user = User(**updated_user)
+        normalized_user = await _apply_normalized_account_state(updated_user, persist=True)
+        user = User(**normalized_user)
     else:
         user_id = f"user_{uuid.uuid4().hex[:12]}"
         
@@ -6445,9 +6533,8 @@ async def create_session(request: Request, response: Response):
         max_age=7 * 24 * 60 * 60
     )
     
-    user_response = user.model_dump()
-    user_response["created_at"] = user_response["created_at"].isoformat() if isinstance(user_response["created_at"], datetime) else user_response["created_at"]
-    
+    user_response = _build_user_response(user)
+
     return {"user": user_response, "session_token": session_token}
 
 @api_router.get("/auth/me")
@@ -6457,9 +6544,7 @@ async def get_me(request: Request):
     if not user:
         raise HTTPException(status_code=401, detail="Not authenticated")
     
-    user_response = user.model_dump()
-    user_response["created_at"] = user_response["created_at"].isoformat() if isinstance(user_response["created_at"], datetime) else user_response["created_at"]
-    return user_response
+    return _build_user_response(user)
 
 @api_router.post("/auth/logout")
 async def logout(request: Request, response: Response):
@@ -10345,7 +10430,7 @@ OUTPUT JSON:
 async def analyze_images(request: Request, files: List[UploadFile] = File(...)):
     """Analyze uploaded property images with evidence-locked findings"""
     user = await require_auth(request)
-    _require_preview_feature_access(user, "Image Forensics", "can_use_image_forensics")
+    _require_feature_access(user, "Image Forensics", "can_use_image_forensics")
     
     # Check quota
     if user.quota.get("image_scans_remaining", 0) <= 0 and not user.is_master_admin:
@@ -10573,7 +10658,7 @@ Formato risposta JSON:
 async def assistant_qa(request: Request):
     """Answer user questions about perizia/real estate - with evidence-locked responses"""
     user = await require_auth(request)
-    _require_preview_feature_access(user, "Assistente", "can_use_assistant")
+    _require_feature_access(user, "Assistente", "can_use_assistant")
     data = await request.json()
     question = data.get("question")
     related_case_id = data.get("related_case_id")
@@ -11155,8 +11240,11 @@ async def admin_user_update(user_id: str, request: Request):
     if plan:
         if plan not in SUBSCRIPTION_PLANS:
             raise HTTPException(status_code=400, detail="Invalid plan")
-        if target_user.get("email", "").lower() == MASTER_ADMIN_EMAIL.lower() and plan != "enterprise":
+        target_is_master = _is_master_admin_email(target_user.get("email"))
+        if target_is_master and plan != "enterprise":
             raise HTTPException(status_code=400, detail="Cannot downgrade master admin plan")
+        if not target_is_master and plan == "enterprise":
+            raise HTTPException(status_code=400, detail="Enterprise plan is reserved for master admin")
         update_data["plan"] = plan
 
     quota_updates: Dict[str, int] = {}
