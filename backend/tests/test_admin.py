@@ -289,6 +289,85 @@ async def test_admin_overview_master_admin(fake_db):
 
 
 @pytest.mark.anyio
+async def test_admin_overview_includes_ledger_and_billing_summaries(fake_db):
+    session_token = _seed_session(fake_db, {
+        "user_id": "user_admin",
+        "email": "admin@nexodify.com",
+        "name": "Admin",
+        "plan": "enterprise",
+        "is_master_admin": True,
+        "quota": {}
+    })
+    fake_db.credit_ledger.items.extend([
+        {
+            "ledger_id": "ledger_1",
+            "user_id": "user_a",
+            "user_email": "a@example.com",
+            "quota_field": "perizia_scans_remaining",
+            "direction": "debit",
+            "amount": 4,
+            "entry_type": "perizia_upload",
+            "description_it": "Addebito perizia",
+            "created_at": datetime.now(timezone.utc).isoformat(),
+        },
+        {
+            "ledger_id": "ledger_2",
+            "user_id": "user_b",
+            "user_email": "b@example.com",
+            "quota_field": "image_scans_remaining",
+            "direction": "debit",
+            "amount": 2,
+            "entry_type": "image_forensics",
+            "description_it": "Addebito immagini",
+            "created_at": datetime.now(timezone.utc).isoformat(),
+        },
+    ])
+    fake_db.billing_records.items.extend([
+        {
+            "billing_record_id": "bill_1",
+            "user_id": "user_a",
+            "user_email": "a@example.com",
+            "plan_id": "pro",
+            "purchase_type": "subscription",
+            "amount_total": 29.0,
+            "currency": "eur",
+            "status": "paid",
+            "description_it": "Acquisto piano Pro",
+            "created_at": datetime.now(timezone.utc).isoformat(),
+            "updated_at": datetime.now(timezone.utc).isoformat(),
+            "paid_at": datetime.now(timezone.utc).isoformat(),
+        },
+        {
+            "billing_record_id": "bill_2",
+            "user_id": "user_b",
+            "user_email": "b@example.com",
+            "plan_id": "solo",
+            "purchase_type": "pack",
+            "amount_total": 19.0,
+            "currency": "eur",
+            "status": "pending",
+            "description_it": "Pack crediti",
+            "created_at": datetime.now(timezone.utc).isoformat(),
+            "updated_at": datetime.now(timezone.utc).isoformat(),
+            "paid_at": None,
+        },
+    ])
+
+    transport = httpx.ASGITransport(app=server.app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        response = await client.get("/api/admin/overview", headers={"Authorization": f"Bearer {session_token}"})
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["credit_ledger_30d"]["total_debits"] == 6
+    assert data["credit_ledger_30d"]["perizia_scans_remaining"] == 4
+    assert data["billing_records_30d"]["status_counts"]["paid"] == 1
+    assert data["billing_records_30d"]["status_counts"]["pending"] == 1
+    assert len(data["latest_credit_movements"]) == 2
+    assert len(data["latest_billing_activity"]) == 2
+
+
+@pytest.mark.anyio
 async def test_admin_patch_user_writes_audit_log(fake_db):
     session_token = _seed_session(fake_db, {
         "user_id": "user_admin",
@@ -315,6 +394,138 @@ async def test_admin_patch_user_writes_audit_log(fake_db):
     assert response.status_code == 200
     actions = [a.get("action") for a in fake_db.admin_audit_log.inserted]
     assert "USER_SET_PLAN" in actions
+
+
+@pytest.mark.anyio
+async def test_admin_user_financial_summaries_and_detail_endpoints(fake_db):
+    session_token = _seed_session(fake_db, {
+        "user_id": "user_admin",
+        "email": "admin@nexodify.com",
+        "name": "Admin",
+        "plan": "enterprise",
+        "is_master_admin": True,
+        "quota": {}
+    })
+    fake_db.users.items.append({
+        "user_id": "user_target",
+        "email": "target@example.com",
+        "name": "Target",
+        "plan": "pro",
+        "quota": {
+            "perizia_scans_remaining": 7,
+            "image_scans_remaining": 1,
+            "assistant_messages_remaining": 3,
+        },
+        "created_at": datetime.now(timezone.utc).isoformat(),
+    })
+    fake_db.credit_ledger.items.extend([
+        {
+            "ledger_id": "ledger_old",
+            "user_id": "user_target",
+            "user_email": "target@example.com",
+            "quota_field": "perizia_scans_remaining",
+            "direction": "credit",
+            "amount": 10,
+            "balance_before": 0,
+            "balance_after": 10,
+            "entry_type": "plan_purchase",
+            "reference_type": "checkout_session",
+            "reference_id": "sess_old",
+            "description_it": "Accredito crediti",
+            "metadata": {},
+            "created_at": "2026-03-10T10:00:00+00:00",
+        },
+        {
+            "ledger_id": "ledger_new",
+            "user_id": "user_target",
+            "user_email": "target@example.com",
+            "quota_field": "perizia_scans_remaining",
+            "direction": "debit",
+            "amount": 3,
+            "balance_before": 10,
+            "balance_after": 7,
+            "entry_type": "perizia_upload",
+            "reference_type": "analysis",
+            "reference_id": "analysis_1",
+            "description_it": "Addebito perizia",
+            "metadata": {"pages_count": 24},
+            "created_at": "2026-03-12T10:00:00+00:00",
+        },
+    ])
+    fake_db.billing_records.items.extend([
+        {
+            "billing_record_id": "bill_old",
+            "user_id": "user_target",
+            "user_email": "target@example.com",
+            "customer_type": "individual",
+            "customer_name": "Target",
+            "billing_email": "target@example.com",
+            "country_code": "IT",
+            "plan_id": "pro",
+            "purchase_type": "subscription",
+            "amount_subtotal": 29.0,
+            "amount_tax": 0.0,
+            "amount_total": 29.0,
+            "currency": "eur",
+            "status": "paid",
+            "payment_provider": "manual",
+            "invoice_status": "ready",
+            "description_it": "Acquisto piano",
+            "metadata": {},
+            "created_at": "2026-03-11T10:00:00+00:00",
+            "updated_at": "2026-03-11T10:00:00+00:00",
+            "paid_at": "2026-03-11T10:00:00+00:00",
+        },
+        {
+            "billing_record_id": "bill_new",
+            "user_id": "user_target",
+            "user_email": "target@example.com",
+            "customer_type": "individual",
+            "customer_name": "Target",
+            "billing_email": "target@example.com",
+            "country_code": "IT",
+            "plan_id": "solo",
+            "purchase_type": "pack",
+            "amount_subtotal": 19.0,
+            "amount_tax": 0.0,
+            "amount_total": 19.0,
+            "currency": "eur",
+            "status": "pending",
+            "payment_provider": "manual",
+            "invoice_status": "pending",
+            "description_it": "Pack crediti",
+            "metadata": {},
+            "created_at": "2026-03-13T10:00:00+00:00",
+            "updated_at": "2026-03-13T10:00:00+00:00",
+            "paid_at": None,
+        },
+    ])
+
+    transport = httpx.ASGITransport(app=server.app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        users_response = await client.get("/api/admin/users", headers={"Authorization": f"Bearer {session_token}"})
+        detail_response = await client.get("/api/admin/users/user_target", headers={"Authorization": f"Bearer {session_token}"})
+        ledger_response = await client.get("/api/admin/users/user_target/ledger?limit=10", headers={"Authorization": f"Bearer {session_token}"})
+        billing_response = await client.get("/api/admin/users/user_target/billing-records?limit=10", headers={"Authorization": f"Bearer {session_token}"})
+
+    assert users_response.status_code == 200
+    users_payload = users_response.json()
+    target_user = next(item for item in users_payload["items"] if item["user_id"] == "user_target")
+    assert target_user["financial_summary"]["latest_credit_movement_at"] == "2026-03-12T10:00:00+00:00"
+    assert target_user["financial_summary"]["latest_billing_status"] == "pending"
+    assert target_user["financial_summary"]["billing_records_count"] == 2
+    assert target_user["financial_summary"]["latest_purchase_type"] == "pack"
+
+    assert detail_response.status_code == 200
+    assert detail_response.json()["user"]["financial_summary"]["latest_billing_status"] == "pending"
+
+    assert ledger_response.status_code == 200
+    assert ledger_response.json()["total"] == 2
+    assert ledger_response.json()["entries"][0]["ledger_id"] == "ledger_new"
+
+    assert billing_response.status_code == 200
+    assert billing_response.json()["total"] == 2
+    assert billing_response.json()["records"][0]["billing_record_id"] == "bill_new"
 
 
 @pytest.mark.anyio

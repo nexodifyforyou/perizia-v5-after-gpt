@@ -11476,6 +11476,125 @@ async def _aggregate_usage(collection, user_ids: List[str], date_query: Optional
     results = await collection.aggregate(pipeline).to_list(len(user_ids))
     return {r["_id"]: {"count": r.get("count", 0), "last_active": r.get("last_active")} for r in results}
 
+def _serialize_admin_ledger_entry(entry: Dict[str, Any]) -> Dict[str, Any]:
+    return _serialize_datetime_fields({
+        "ledger_id": entry.get("ledger_id"),
+        "user_id": entry.get("user_id"),
+        "user_email": entry.get("user_email"),
+        "quota_field": entry.get("quota_field"),
+        "direction": entry.get("direction"),
+        "amount": int(entry.get("amount", 0) or 0),
+        "balance_before": int(entry.get("balance_before", 0) or 0),
+        "balance_after": int(entry.get("balance_after", 0) or 0),
+        "entry_type": entry.get("entry_type"),
+        "reference_type": entry.get("reference_type"),
+        "reference_id": entry.get("reference_id"),
+        "description_it": entry.get("description_it"),
+        "metadata": entry.get("metadata") or {},
+        "actor_user_id": entry.get("actor_user_id"),
+        "actor_email": entry.get("actor_email"),
+        "created_at": entry.get("created_at"),
+    }, "created_at")
+
+def _serialize_admin_billing_record(record: Dict[str, Any]) -> Dict[str, Any]:
+    return _serialize_datetime_fields({
+        "billing_record_id": record.get("billing_record_id"),
+        "user_id": record.get("user_id"),
+        "user_email": record.get("user_email"),
+        "customer_type": record.get("customer_type"),
+        "customer_name": record.get("customer_name"),
+        "company_name": record.get("company_name"),
+        "billing_email": record.get("billing_email"),
+        "country_code": record.get("country_code"),
+        "plan_id": record.get("plan_id"),
+        "purchase_type": record.get("purchase_type"),
+        "amount_subtotal": float(record.get("amount_subtotal", 0) or 0),
+        "amount_tax": float(record.get("amount_tax", 0) or 0),
+        "amount_total": float(record.get("amount_total", 0) or 0),
+        "currency": record.get("currency"),
+        "status": record.get("status"),
+        "payment_provider": record.get("payment_provider"),
+        "payment_reference": record.get("payment_reference"),
+        "checkout_reference": record.get("checkout_reference"),
+        "invoice_status": record.get("invoice_status"),
+        "invoice_number": record.get("invoice_number"),
+        "invoice_reference": record.get("invoice_reference"),
+        "description_it": record.get("description_it"),
+        "metadata": record.get("metadata") or {},
+        "created_at": record.get("created_at"),
+        "updated_at": record.get("updated_at"),
+        "paid_at": record.get("paid_at"),
+    }, "created_at", "updated_at", "paid_at")
+
+def _summarize_credit_debits(entries: List[Dict[str, Any]]) -> Dict[str, int]:
+    summary = {
+        "total_debits": 0,
+        "perizia_scans_remaining": 0,
+        "image_scans_remaining": 0,
+        "assistant_messages_remaining": 0,
+    }
+    for entry in entries:
+        if entry.get("direction") != "debit":
+            continue
+        amount = int(entry.get("amount", 0) or 0)
+        quota_field = entry.get("quota_field")
+        summary["total_debits"] += amount
+        if quota_field in summary:
+            summary[quota_field] += amount
+    return summary
+
+def _summarize_billing_statuses(records: List[Dict[str, Any]]) -> Dict[str, int]:
+    counts = {"pending": 0, "paid": 0, "failed": 0, "refunded": 0}
+    for record in records:
+        status = str(record.get("status") or "").lower()
+        if status in counts:
+            counts[status] += 1
+    return counts
+
+async def _get_admin_user_financial_summary_map(user_ids: List[str]) -> Dict[str, Dict[str, Any]]:
+    summaries: Dict[str, Dict[str, Any]] = {
+        user_id: {
+            "latest_credit_movement_at": None,
+            "latest_billing_status": None,
+            "billing_records_count": 0,
+            "latest_purchase_type": None,
+        }
+        for user_id in user_ids
+        if user_id
+    }
+    if not summaries:
+        return summaries
+
+    user_filter = {"user_id": {"$in": list(summaries.keys())}}
+
+    ledger_count = await db.credit_ledger.count_documents(user_filter)
+    ledger_docs = await db.credit_ledger.find(
+        user_filter,
+        {"_id": 0, "user_id": 1, "created_at": 1}
+    ).sort("created_at", -1).to_list(max(ledger_count, 0))
+
+    for doc in ledger_docs:
+        user_id = doc.get("user_id")
+        if user_id in summaries and not summaries[user_id]["latest_credit_movement_at"]:
+            summaries[user_id]["latest_credit_movement_at"] = _to_iso(doc.get("created_at"))
+
+    billing_count = await db.billing_records.count_documents(user_filter)
+    billing_docs = await db.billing_records.find(
+        user_filter,
+        {"_id": 0, "user_id": 1, "status": 1, "purchase_type": 1, "created_at": 1}
+    ).sort("created_at", -1).to_list(max(billing_count, 0))
+
+    for doc in billing_docs:
+        user_id = doc.get("user_id")
+        if user_id not in summaries:
+            continue
+        summaries[user_id]["billing_records_count"] += 1
+        if not summaries[user_id]["latest_billing_status"]:
+            summaries[user_id]["latest_billing_status"] = doc.get("status")
+            summaries[user_id]["latest_purchase_type"] = doc.get("purchase_type")
+
+    return summaries
+
 def _max_last_active(*values: Any) -> Optional[str]:
     dts = [_parse_dt(v) for v in values if _parse_dt(v)]
     if not dts:
@@ -11535,6 +11654,20 @@ async def admin_overview(request: Request):
     except Exception as e:
         logger.warning(f"Paid EUR aggregation failed: {e}")
 
+    ledger_30d_count = await db.credit_ledger.count_documents(date_query or {})
+    ledger_30d_entries = await db.credit_ledger.find(
+        date_query or {},
+        {"_id": 0, "user_id": 1, "user_email": 1, "quota_field": 1, "direction": 1, "amount": 1, "entry_type": 1, "description_it": 1, "created_at": 1}
+    ).sort("created_at", -1).to_list(max(ledger_30d_count, 0))
+    ledger_30d_summary = _summarize_credit_debits(ledger_30d_entries)
+
+    billing_30d_count = await db.billing_records.count_documents(date_query or {})
+    billing_30d_records = await db.billing_records.find(
+        date_query or {},
+        {"_id": 0, "billing_record_id": 1, "user_id": 1, "user_email": 1, "plan_id": 1, "purchase_type": 1, "amount_total": 1, "currency": 1, "status": 1, "description_it": 1, "created_at": 1}
+    ).sort("created_at", -1).to_list(max(billing_30d_count, 0))
+    billing_status_counts = _summarize_billing_statuses(billing_30d_records)
+
     user_ids = []
     try:
         perizie_map = await _aggregate_usage(db.perizia_analyses, await db.perizia_analyses.distinct("user_id", date_query or {}), date_query)
@@ -11581,6 +11714,18 @@ async def admin_overview(request: Request):
             "active_users": len(active_users_set),
             "paid_eur": paid_eur
         },
+        "credit_ledger_30d": ledger_30d_summary,
+        "billing_records_30d": {
+            "status_counts": billing_status_counts,
+        },
+        "latest_credit_movements": [
+            _serialize_admin_ledger_entry(entry)
+            for entry in ledger_30d_entries[:5]
+        ],
+        "latest_billing_activity": [
+            _serialize_admin_billing_record(record)
+            for record in billing_30d_records[:5]
+        ],
         "top_users_30d": top_users
     }
 
@@ -11635,6 +11780,7 @@ async def admin_users(
 
     notes_docs = await db.admin_user_notes.find({"user_id": {"$in": user_ids}}, {"_id": 0}).to_list(len(user_ids))
     notes_map = {n.get("user_id"): n for n in notes_docs}
+    financial_summary_map = await _get_admin_user_financial_summary_map(user_ids)
 
     enriched_users = []
     for u in users_list:
@@ -11671,7 +11817,13 @@ async def admin_users(
                 "internal_status": notes_map.get(user_id, {}).get("internal_status"),
                 "tags": notes_map.get(user_id, {}).get("tags", []),
                 "note": notes_map.get(user_id, {}).get("note", "")
-            } if notes_map.get(user_id) else None
+            } if notes_map.get(user_id) else None,
+            "financial_summary": financial_summary_map.get(user_id, {
+                "latest_credit_movement_at": None,
+                "latest_billing_status": None,
+                "billing_records_count": 0,
+                "latest_purchase_type": None,
+            }),
         })
 
     if requires_full_scan:
@@ -11800,12 +11952,124 @@ async def admin_user_detail(user_id: str, request: Request):
             "internal_status": notes_doc.get("internal_status"),
             "tags": notes_doc.get("tags", []),
             "note": notes_doc.get("note", "")
-        } if notes_doc else None
+        } if notes_doc else None,
+        "financial_summary": (await _get_admin_user_financial_summary_map([user_id])).get(user_id, {
+            "latest_credit_movement_at": None,
+            "latest_billing_status": None,
+            "billing_records_count": 0,
+            "latest_purchase_type": None,
+        }),
     }
 
     await _write_admin_audit(admin_user, "ADMIN_API_VIEW", meta={"endpoint": "users_detail", "user_id": user_id})
 
     return {"user": user_payload, "recent_activity": recent_activity}
+
+@api_router.get("/admin/users/{user_id}/ledger")
+async def admin_user_ledger(user_id: str, request: Request, limit: int = 20, skip: int = 0):
+    admin_user = await require_master_admin(request)
+
+    user_doc = await db.users.find_one({"user_id": user_id}, {"_id": 0, "user_id": 1})
+    if not user_doc:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    safe_limit = max(1, min(int(limit or 20), 100))
+    safe_skip = max(0, int(skip or 0))
+    query = {"user_id": user_id}
+    total = await db.credit_ledger.count_documents(query)
+    entries = await db.credit_ledger.find(
+        query,
+        {
+            "_id": 0,
+            "ledger_id": 1,
+            "user_id": 1,
+            "user_email": 1,
+            "quota_field": 1,
+            "direction": 1,
+            "amount": 1,
+            "balance_before": 1,
+            "balance_after": 1,
+            "entry_type": 1,
+            "reference_type": 1,
+            "reference_id": 1,
+            "description_it": 1,
+            "metadata": 1,
+            "actor_user_id": 1,
+            "actor_email": 1,
+            "created_at": 1,
+        },
+    ).sort("created_at", -1).skip(safe_skip).limit(safe_limit).to_list(safe_limit)
+
+    await _write_admin_audit(
+        admin_user,
+        "ADMIN_API_VIEW",
+        meta={"endpoint": "users_ledger", "user_id": user_id, "skip": safe_skip, "limit": safe_limit}
+    )
+
+    return {
+        "entries": [_serialize_admin_ledger_entry(entry) for entry in entries],
+        "total": total,
+        "limit": safe_limit,
+        "skip": safe_skip,
+    }
+
+@api_router.get("/admin/users/{user_id}/billing-records")
+async def admin_user_billing_records(user_id: str, request: Request, limit: int = 20, skip: int = 0):
+    admin_user = await require_master_admin(request)
+
+    user_doc = await db.users.find_one({"user_id": user_id}, {"_id": 0, "user_id": 1})
+    if not user_doc:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    safe_limit = max(1, min(int(limit or 20), 100))
+    safe_skip = max(0, int(skip or 0))
+    query = {"user_id": user_id}
+    total = await db.billing_records.count_documents(query)
+    records = await db.billing_records.find(
+        query,
+        {
+            "_id": 0,
+            "billing_record_id": 1,
+            "user_id": 1,
+            "user_email": 1,
+            "customer_type": 1,
+            "customer_name": 1,
+            "company_name": 1,
+            "billing_email": 1,
+            "country_code": 1,
+            "plan_id": 1,
+            "purchase_type": 1,
+            "amount_subtotal": 1,
+            "amount_tax": 1,
+            "amount_total": 1,
+            "currency": 1,
+            "status": 1,
+            "payment_provider": 1,
+            "payment_reference": 1,
+            "checkout_reference": 1,
+            "invoice_status": 1,
+            "invoice_number": 1,
+            "invoice_reference": 1,
+            "description_it": 1,
+            "metadata": 1,
+            "created_at": 1,
+            "updated_at": 1,
+            "paid_at": 1,
+        },
+    ).sort("created_at", -1).skip(safe_skip).limit(safe_limit).to_list(safe_limit)
+
+    await _write_admin_audit(
+        admin_user,
+        "ADMIN_API_VIEW",
+        meta={"endpoint": "users_billing_records", "user_id": user_id, "skip": safe_skip, "limit": safe_limit}
+    )
+
+    return {
+        "records": [_serialize_admin_billing_record(record) for record in records],
+        "total": total,
+        "limit": safe_limit,
+        "skip": safe_skip,
+    }
 
 @api_router.patch("/admin/users/{user_id}")
 async def admin_user_update(user_id: str, request: Request):

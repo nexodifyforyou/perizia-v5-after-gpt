@@ -8,6 +8,18 @@ import { useNavigate } from 'react-router-dom';
 
 const API_URL = process.env.REACT_APP_BACKEND_URL;
 
+const formatDateTime = (value) => {
+  if (!value) return '-';
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return '-';
+  return parsed.toLocaleString('it-IT');
+};
+
+const formatCompactBillingStatus = (value) => {
+  if (!value) return '-';
+  return String(value).replaceAll('_', ' ');
+};
+
 const AdminUsers = () => {
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -154,6 +166,8 @@ const AdminUsers = () => {
                   <th className="py-2">Plan</th>
                   <th className="py-2">Created</th>
                   <th className="py-2">Last Active</th>
+                  <th className="py-2">Ult. mov. crediti</th>
+                  <th className="py-2">Billing</th>
                   <th className="py-2">Usage 30d (P/I/A)</th>
                   <th className="py-2">Lifetime (P/I/A)</th>
                   <th className="py-2">Quota (P/I/A)</th>
@@ -168,7 +182,15 @@ const AdminUsers = () => {
                     <td className="py-2">{u.name}</td>
                     <td className="py-2 capitalize">{u.plan}</td>
                     <td className="py-2">{u.created_at ? new Date(u.created_at).toLocaleDateString() : '-'}</td>
-                    <td className="py-2">{u.last_active_at ? new Date(u.last_active_at).toLocaleString() : '-'}</td>
+                    <td className="py-2">{formatDateTime(u.last_active_at)}</td>
+                    <td className="py-2 text-xs text-zinc-300">{formatDateTime(u.financial_summary?.latest_credit_movement_at)}</td>
+                    <td className="py-2">
+                      <div className="text-xs text-zinc-300">
+                        <div>{formatCompactBillingStatus(u.financial_summary?.latest_billing_status)}</div>
+                        <div className="text-zinc-500">{u.financial_summary?.billing_records_count || 0} record</div>
+                        <div className="text-zinc-500">{u.financial_summary?.latest_purchase_type || '-'}</div>
+                      </div>
+                    </td>
                     <td className="py-2">{u.usage_30d?.perizie || 0}/{u.usage_30d?.images || 0}/{u.usage_30d?.assistant_qas || 0}</td>
                     <td className="py-2">{u.lifetime?.perizie || 0}/{u.lifetime?.images || 0}/{u.lifetime?.assistant_qas || 0}</td>
                     <td className="py-2">{u.quota?.perizia_scans_remaining || 0}/{u.quota?.image_scans_remaining || 0}/{u.quota?.assistant_messages_remaining || 0}</td>
@@ -190,7 +212,7 @@ const AdminUsers = () => {
                 ))}
                 {items.length === 0 && (
                   <tr>
-                    <td colSpan="10" className="py-6 text-center text-zinc-500">Nessun utente</td>
+                    <td colSpan="12" className="py-6 text-center text-zinc-500">Nessun utente</td>
                   </tr>
                 )}
               </tbody>
