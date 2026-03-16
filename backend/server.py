@@ -24,6 +24,7 @@ from PyPDF2 import PdfReader, PdfWriter
 import pdfplumber
 import io
 import hashlib
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 from openai import AsyncOpenAI
 from candidate_miner import run_candidate_miner_for_analysis
 from section_builder import build_estratto_quality
@@ -42,6 +43,12 @@ db = client[os.environ['DB_NAME']]
 # Environment variables
 OPENAI_API_KEY = os.environ.get('OPENAI_API_KEY')
 STRIPE_SECRET_KEY = os.environ.get('STRIPE_SECRET_KEY')
+STRIPE_WEBHOOK_SECRET = os.environ.get("STRIPE_WEBHOOK_SECRET", "").strip()
+STRIPE_PRICE_STARTER = os.environ.get("STRIPE_PRICE_STARTER", "").strip()
+STRIPE_PRICE_SOLO = os.environ.get("STRIPE_PRICE_SOLO", "").strip()
+STRIPE_PRICE_PRO = os.environ.get("STRIPE_PRICE_PRO", "").strip()
+STRIPE_SUCCESS_URL = os.environ.get("STRIPE_SUCCESS_URL", "").strip()
+STRIPE_CANCEL_URL = os.environ.get("STRIPE_CANCEL_URL", "").strip()
 MASTER_ADMIN_EMAIL = os.environ.get('MASTER_ADMIN_EMAIL', 'admin@nexodify.com')
 DOC_AI_TIMEOUT_SECONDS = int(os.environ.get('DOC_AI_TIMEOUT_SECONDS', '30'))
 LLM_TIMEOUT_SECONDS = int(os.environ.get('LLM_TIMEOUT_SECONDS', '45'))
@@ -6496,6 +6503,392 @@ def _billing_purchase_type_for_plan(plan: SubscriptionPlan) -> str:
         return "pack"
     return "top_up"
 
+def _stripe_price_id_for_plan(plan_id: str) -> str:
+    price_map = {
+        "starter": STRIPE_PRICE_STARTER,
+        "solo": STRIPE_PRICE_SOLO,
+        "pro": STRIPE_PRICE_PRO,
+    }
+    price_id = str(price_map.get(plan_id) or "").strip()
+    if not price_id:
+        raise HTTPException(status_code=503, detail=f"Stripe price not configured for plan '{plan_id}'")
+    return price_id
+
+def _plan_id_for_stripe_price_id(price_id: Optional[str]) -> Optional[str]:
+    normalized = str(price_id or "").strip()
+    if not normalized:
+        return None
+    reverse_map = {
+        STRIPE_PRICE_STARTER: "starter",
+        STRIPE_PRICE_SOLO: "solo",
+        STRIPE_PRICE_PRO: "pro",
+    }
+    return reverse_map.get(normalized)
+
+def _stripe_checkout_metadata(*, user_id: str, plan_id: str, billing_reason: str) -> Dict[str, str]:
+    return {
+        "app_user_id": str(user_id or "").strip(),
+        "plan_code": str(plan_id or "").strip(),
+        "billing_reason": str(billing_reason or "").strip(),
+    }
+
+def _with_query_params(base_url: str, params: Dict[str, str]) -> str:
+    split = urlsplit(base_url)
+    existing = dict(parse_qsl(split.query, keep_blank_values=True))
+    existing.update({key: value for key, value in params.items() if value is not None})
+    return urlunsplit((split.scheme, split.netloc, split.path, urlencode(existing), split.fragment))
+
+def _build_stripe_return_urls(origin_url: Optional[str] = None) -> Tuple[str, str]:
+    success_base = STRIPE_SUCCESS_URL or ""
+    cancel_base = STRIPE_CANCEL_URL or ""
+
+    if not success_base and origin_url:
+        success_base = f"{str(origin_url).rstrip('/')}/billing"
+    if not cancel_base and origin_url:
+        cancel_base = f"{str(origin_url).rstrip('/')}/billing"
+
+    if not success_base or not cancel_base:
+        raise HTTPException(status_code=503, detail="Stripe return URLs not configured")
+
+    success_url = success_base
+    if "{CHECKOUT_SESSION_ID}" not in success_url:
+        success_url = _with_query_params(
+            success_url,
+            {"session_id": "{CHECKOUT_SESSION_ID}", "checkout": "success"},
+        )
+    else:
+        success_url = _with_query_params(success_url, {"checkout": "success"})
+
+    cancel_url = _with_query_params(cancel_base, {"checkout": "cancel"})
+    return success_url, cancel_url
+
+async def _update_billing_record(
+    billing_record_id: str,
+    *,
+    status: Optional[str] = None,
+    payment_reference: Optional[str] = None,
+    invoice_status: Optional[str] = None,
+    invoice_reference: Optional[str] = None,
+    metadata_updates: Optional[Dict[str, Any]] = None,
+    paid: bool = False,
+) -> None:
+    update_fields: Dict[str, Any] = {"updated_at": _now_iso()}
+    if status:
+        update_fields["status"] = status
+    if payment_reference is not None:
+        update_fields["payment_reference"] = payment_reference
+    if invoice_status:
+        update_fields["invoice_status"] = invoice_status
+    if invoice_reference is not None:
+        update_fields["invoice_reference"] = invoice_reference
+    if paid:
+        update_fields["paid_at"] = _now_iso()
+    if metadata_updates:
+        existing = await db.billing_records.find_one(
+            {"billing_record_id": billing_record_id},
+            {"_id": 0, "metadata": 1},
+        )
+        merged_metadata = dict((existing or {}).get("metadata") or {})
+        merged_metadata.update(_sanitize_metadata(metadata_updates))
+        update_fields["metadata"] = merged_metadata
+    await db.billing_records.update_one(
+        {"billing_record_id": billing_record_id},
+        {"$set": update_fields},
+    )
+
+async def _find_billing_record_for_checkout(checkout_reference: str, user_id: Optional[str] = None) -> Optional[Dict[str, Any]]:
+    query: Dict[str, Any] = {"checkout_reference": checkout_reference}
+    if user_id:
+        query["user_id"] = user_id
+    return await db.billing_records.find_one(query, {"_id": 0}, sort=[("created_at", -1)])
+
+async def _find_latest_pending_subscription_billing_record(user_id: str, plan_id: str) -> Optional[Dict[str, Any]]:
+    return await db.billing_records.find_one(
+        {"user_id": user_id, "plan_id": plan_id, "purchase_type": "subscription", "status": "pending"},
+        {"_id": 0},
+        sort=[("created_at", -1)],
+    )
+
+async def _payment_transaction_by_session(session_id: str, user_id: Optional[str] = None) -> Optional[Dict[str, Any]]:
+    query: Dict[str, Any] = {"session_id": session_id}
+    if user_id:
+        query["user_id"] = user_id
+    return await db.payment_transactions.find_one(query, {"_id": 0})
+
+async def _set_payment_transaction_state(
+    session_id: str,
+    *,
+    status: Optional[str] = None,
+    payment_status: Optional[str] = None,
+    stripe_customer_id: Optional[str] = None,
+    stripe_subscription_id: Optional[str] = None,
+    stripe_invoice_id: Optional[str] = None,
+    stripe_payment_intent_id: Optional[str] = None,
+) -> None:
+    update_fields: Dict[str, Any] = {}
+    if status is not None:
+        update_fields["status"] = status
+    if payment_status is not None:
+        update_fields["payment_status"] = payment_status
+    if stripe_customer_id is not None:
+        update_fields["stripe_customer_id"] = stripe_customer_id
+    if stripe_subscription_id is not None:
+        update_fields["stripe_subscription_id"] = stripe_subscription_id
+    if stripe_invoice_id is not None:
+        update_fields["stripe_invoice_id"] = stripe_invoice_id
+    if stripe_payment_intent_id is not None:
+        update_fields["stripe_payment_intent_id"] = stripe_payment_intent_id
+    if not update_fields:
+        return
+    await db.payment_transactions.update_one({"session_id": session_id}, {"$set": update_fields})
+
+async def _grant_starter_checkout_if_needed(
+    *,
+    user_id: str,
+    session_id: str,
+    payment_reference: Optional[str],
+    checkout_payload: Optional[Dict[str, Any]] = None,
+) -> bool:
+    existing_entry = await db.credit_ledger.find_one(
+        {"entry_type": "plan_purchase", "reference_type": "checkout_session", "reference_id": session_id},
+        {"_id": 0, "ledger_id": 1},
+    )
+    billing_record = await _find_billing_record_for_checkout(session_id, user_id)
+    metadata_updates = {
+        "stripe_checkout_status": (checkout_payload or {}).get("status"),
+        "stripe_payment_status": (checkout_payload or {}).get("payment_status"),
+        "stripe_payment_intent_id": payment_reference,
+    }
+
+    if existing_entry:
+        if billing_record and billing_record.get("status") != "paid":
+            await _update_billing_record(
+                billing_record["billing_record_id"],
+                status="paid",
+                payment_reference=payment_reference,
+                invoice_status="ready",
+                metadata_updates=metadata_updates,
+                paid=True,
+            )
+        return False
+
+    user_doc = await _ensure_opening_balance_baseline_for_user_id(user_id)
+    if not user_doc:
+        return False
+    before_quota = _quota_snapshot(user_doc.get("quota"))
+    after_quota = before_quota.copy()
+    after_quota["perizia_scans_remaining"] += SUBSCRIPTION_PLANS["starter"].quota["perizia_scans_remaining"]
+
+    await db.users.update_one(
+        {"user_id": user_id},
+        {"$set": {"quota": after_quota}},
+    )
+    await _record_quota_change_entries(
+        user_doc=user_doc,
+        before_quota=before_quota,
+        after_quota=after_quota,
+        entry_type="plan_purchase",
+        reference_type="checkout_session",
+        reference_id=session_id,
+        description_it="Accredito crediti per acquisto pack Starter",
+        metadata={
+            "plan_code": "starter",
+            "billing_reason": "starter_checkout_paid",
+            "stripe_checkout_session_id": session_id,
+            "stripe_payment_intent_id": payment_reference,
+        },
+    )
+
+    if billing_record:
+        await _update_billing_record(
+            billing_record["billing_record_id"],
+            status="paid",
+            payment_reference=payment_reference,
+            invoice_status="ready",
+            metadata_updates=metadata_updates,
+            paid=True,
+        )
+    return True
+
+async def _upsert_subscription_invoice_billing_record(
+    *,
+    user_id: str,
+    plan_id: str,
+    plan: SubscriptionPlan,
+    invoice: Dict[str, Any],
+    payment_reference: Optional[str],
+    stripe_customer_id: Optional[str],
+    stripe_subscription_id: Optional[str],
+) -> Optional[Dict[str, Any]]:
+    invoice_id = str(invoice.get("id") or "").strip() or None
+    invoice_metadata = invoice.get("metadata") or {}
+    amount_total = float((invoice.get("amount_paid") or invoice.get("amount_due") or 0) / 100.0)
+    amount_subtotal = float((invoice.get("subtotal") or invoice.get("amount_paid") or invoice.get("amount_due") or 0) / 100.0)
+    amount_tax = float((invoice.get("tax") or 0) / 100.0)
+    billing_reason = str(invoice.get("billing_reason") or invoice_metadata.get("billing_reason") or "subscription_cycle").strip()
+    description = (
+        f"Pagamento iniziale abbonamento {plan.name_it}"
+        if billing_reason == "subscription_create"
+        else f"Rinnovo abbonamento {plan.name_it}"
+    )
+
+    existing_invoice_record = None
+    if invoice_id:
+        existing_invoice_record = await db.billing_records.find_one(
+            {"user_id": user_id, "invoice_reference": invoice_id},
+            {"_id": 0},
+            sort=[("created_at", -1)],
+        )
+    if existing_invoice_record:
+        await _update_billing_record(
+            existing_invoice_record["billing_record_id"],
+            status="paid",
+            payment_reference=payment_reference,
+            invoice_status="ready",
+            invoice_reference=invoice_id,
+            metadata_updates={
+                "stripe_customer_id": stripe_customer_id,
+                "stripe_subscription_id": stripe_subscription_id,
+                "plan_code": plan_id,
+                "billing_reason": billing_reason,
+            },
+            paid=True,
+        )
+        return existing_invoice_record
+
+    pending_record = await _find_latest_pending_subscription_billing_record(user_id, plan_id)
+    if pending_record:
+        await _update_billing_record(
+            pending_record["billing_record_id"],
+            status="paid",
+            payment_reference=payment_reference,
+            invoice_status="ready",
+            invoice_reference=invoice_id,
+            metadata_updates={
+                "stripe_customer_id": stripe_customer_id,
+                "stripe_subscription_id": stripe_subscription_id,
+                "plan_code": plan_id,
+                "billing_reason": billing_reason,
+            },
+            paid=True,
+        )
+        return pending_record
+
+    user_doc = await db.users.find_one({"user_id": user_id}, {"_id": 0})
+    if not user_doc:
+        return None
+    return await _create_billing_record(
+        user_doc=user_doc,
+        plan=plan,
+        plan_id=plan_id,
+        purchase_type="subscription",
+        status="paid",
+        payment_provider="stripe",
+        payment_reference=payment_reference,
+        amount_subtotal=amount_subtotal,
+        amount_tax=amount_tax,
+        amount_total=amount_total,
+        invoice_status="ready",
+        invoice_reference=invoice_id,
+        metadata={
+            "stripe_customer_id": stripe_customer_id,
+            "stripe_subscription_id": stripe_subscription_id,
+            "plan_code": plan_id,
+            "billing_reason": billing_reason,
+        },
+        description_it=description,
+    )
+
+async def _grant_subscription_invoice_if_needed(
+    *,
+    user_id: str,
+    plan_id: str,
+    invoice: Dict[str, Any],
+    stripe_customer_id: Optional[str],
+    stripe_subscription_id: Optional[str],
+) -> bool:
+    invoice_id = str(invoice.get("id") or "").strip()
+    if not invoice_id or plan_id not in {"solo", "pro"}:
+        return False
+
+    existing_entry = await db.credit_ledger.find_one(
+        {"entry_type": "subscription_reset", "reference_type": "stripe_invoice", "reference_id": invoice_id},
+        {"_id": 0, "ledger_id": 1},
+    )
+    payment_reference = str(invoice.get("payment_intent") or invoice_id)
+    plan = SUBSCRIPTION_PLANS[plan_id]
+    await _upsert_subscription_invoice_billing_record(
+        user_id=user_id,
+        plan_id=plan_id,
+        plan=plan,
+        invoice=invoice,
+        payment_reference=payment_reference,
+        stripe_customer_id=stripe_customer_id,
+        stripe_subscription_id=stripe_subscription_id,
+    )
+    if existing_entry:
+        return False
+
+    user_doc = await _ensure_opening_balance_baseline_for_user_id(user_id)
+    if not user_doc:
+        return False
+    before_quota = _quota_snapshot(user_doc.get("quota"))
+    after_quota = plan.quota.copy()
+
+    await db.users.update_one(
+        {"user_id": user_id},
+        {"$set": {"plan": plan_id, "quota": after_quota}},
+    )
+    billing_reason = str(invoice.get("billing_reason") or "subscription_cycle").strip()
+    description = (
+        f"Attivazione quota abbonamento {plan.name_it}"
+        if billing_reason == "subscription_create"
+        else f"Rinnovo quota abbonamento {plan.name_it}"
+    )
+    await _record_quota_change_entries(
+        user_doc=user_doc,
+        before_quota=before_quota,
+        after_quota=after_quota,
+        entry_type="subscription_reset",
+        reference_type="stripe_invoice",
+        reference_id=invoice_id,
+        description_it=description,
+        metadata={
+            "plan_code": plan_id,
+            "billing_reason": billing_reason,
+            "stripe_invoice_id": invoice_id,
+            "stripe_customer_id": stripe_customer_id,
+            "stripe_subscription_id": stripe_subscription_id,
+            "old_plan": user_doc.get("plan"),
+            "new_plan": plan_id,
+        },
+    )
+    return True
+
+async def _resolve_invoice_context(invoice: Dict[str, Any], stripe_module: Any) -> Tuple[Optional[str], Optional[str], Optional[str]]:
+    metadata = dict(invoice.get("metadata") or {})
+    user_id = str(metadata.get("app_user_id") or "").strip() or None
+    plan_id = str(metadata.get("plan_code") or "").strip() or None
+    subscription_id = str(invoice.get("subscription") or "").strip() or None
+
+    if (not user_id or not plan_id) and subscription_id:
+        try:
+            subscription = stripe_module.Subscription.retrieve(subscription_id)
+            subscription_metadata = dict(getattr(subscription, "metadata", {}) or {})
+            user_id = user_id or str(subscription_metadata.get("app_user_id") or "").strip() or None
+            plan_id = plan_id or str(subscription_metadata.get("plan_code") or "").strip() or None
+        except Exception as exc:
+            logger.warning(f"Stripe subscription lookup failed for invoice context: {exc}")
+
+    if not plan_id:
+        lines = invoice.get("lines", {}).get("data", []) or []
+        for line in lines:
+            price_id = str(((line or {}).get("price") or {}).get("id") or "").strip()
+            plan_id = _plan_id_for_stripe_price_id(price_id)
+            if plan_id:
+                break
+    return user_id, plan_id, subscription_id
+
 async def _insert_credit_ledger_entry(
     *,
     user_id: str,
@@ -6701,6 +7094,7 @@ async def _create_billing_record(
     tax_code: Optional[str] = None,
     vat_number: Optional[str] = None,
     invoice_status: str = "pending",
+    invoice_reference: Optional[str] = None,
     metadata: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     if status not in BILLING_RECORD_STATUSES:
@@ -6737,6 +7131,7 @@ async def _create_billing_record(
         payment_reference=payment_reference,
         checkout_reference=checkout_reference,
         invoice_status=invoice_status,
+        invoice_reference=invoice_reference,
         description_it=description_it,
         metadata=_sanitize_metadata(metadata),
     )
@@ -7014,42 +7409,40 @@ async def create_checkout(request: Request):
     data = await request.json()
     plan_id = data.get("plan_id")
     origin_url = data.get("origin_url")
-    
-    if plan_id not in SUBSCRIPTION_PLANS or plan_id == "free":
+
+    if plan_id not in SUBSCRIPTION_PLANS or plan_id in {"free", "studio", "enterprise"}:
         raise HTTPException(status_code=400, detail="Invalid plan")
-    
+
     plan = SUBSCRIPTION_PLANS[plan_id]
+    if plan.plan_type not in {"one_time", "subscription"}:
+        raise HTTPException(status_code=400, detail="Plan not available for checkout")
 
     if not STRIPE_SECRET_KEY:
         raise HTTPException(status_code=503, detail="Stripe not configured")
+    success_url, cancel_url = _build_stripe_return_urls(origin_url=origin_url)
+    price_id = _stripe_price_id_for_plan(plan_id)
+    metadata = _stripe_checkout_metadata(
+        user_id=user.user_id,
+        plan_id=plan_id,
+        billing_reason="checkout_session_create",
+    )
     import stripe
     stripe.api_key = STRIPE_SECRET_KEY
-    
-    success_url = f"{origin_url}/billing?session_id={{CHECKOUT_SESSION_ID}}"
-    cancel_url = f"{origin_url}/billing"
 
-    session = stripe.checkout.Session.create(
-        mode="payment",
-        success_url=success_url,
-        cancel_url=cancel_url,
-        line_items=[
-            {
-                "price_data": {
-                    "currency": plan.currency,
-                    "product_data": {"name": plan.name},
-                    "unit_amount": int(plan.price * 100),
-                },
-                "quantity": 1,
-            }
-        ],
-        metadata={
-            "user_id": user.user_id,
-            "plan_id": plan_id,
-            "email": user.email,
-        },
-    )
-    
-    # Create payment transaction record
+    session_kwargs: Dict[str, Any] = {
+        "mode": "payment" if plan_id == "starter" else "subscription",
+        "success_url": success_url,
+        "cancel_url": cancel_url,
+        "line_items": [{"price": price_id, "quantity": 1}],
+        "customer_email": user.email,
+        "client_reference_id": user.user_id,
+        "metadata": metadata,
+    }
+    if plan_id in {"solo", "pro"}:
+        session_kwargs["subscription_data"] = {"metadata": metadata}
+
+    session = stripe.checkout.Session.create(**session_kwargs)
+
     transaction = PaymentTransaction(
         transaction_id=f"txn_{uuid.uuid4().hex[:12]}",
         user_id=user.user_id,
@@ -7072,15 +7465,19 @@ async def create_checkout(request: Request):
         status="pending",
         payment_provider="stripe",
         checkout_reference=session.id,
-        description_it=f"Acquisto piano {plan.name_it}",
+        description_it=f"Checkout Stripe {plan.name_it}",
         invoice_status="pending",
         metadata={
             "checkout_session_id": session.id,
             "payment_transaction_id": transaction.transaction_id,
             "plan_type": plan.plan_type,
+            "plan_code": plan_id,
+            "stripe_price_id": price_id,
+            "billing_reason": "checkout_session_create",
+            "stripe_checkout_mode": session_kwargs["mode"],
         },
     )
-    
+
     return {"url": session.url, "session_id": session.id}
 
 @api_router.get("/checkout/status/{session_id}")
@@ -7094,60 +7491,19 @@ async def get_checkout_status(session_id: str, request: Request):
     stripe.api_key = STRIPE_SECRET_KEY
 
     status = stripe.checkout.Session.retrieve(session_id)
-    
-    # Update transaction in database
-    txn = await db.payment_transactions.find_one({"session_id": session_id, "user_id": user.user_id}, {"_id": 0})
-    
-    if txn and txn.get("payment_status") != "paid" and status.payment_status == "paid":
-        # Update transaction
-        await db.payment_transactions.update_one(
-            {"session_id": session_id},
-            {"$set": {"status": status.status, "payment_status": status.payment_status}}
-        )
-        
-        # Upgrade user plan
-        plan_id = txn.get("plan_id")
-        if plan_id in SUBSCRIPTION_PLANS:
-            plan = SUBSCRIPTION_PLANS[plan_id]
-            user_doc = await _ensure_opening_balance_baseline_for_user_id(user.user_id)
-            if user_doc:
-                before_quota = _quota_snapshot(user_doc.get("quota"))
-                after_quota = plan.quota.copy()
-                await db.users.update_one(
-                    {"user_id": user.user_id},
-                    {"$set": {"plan": plan_id, "quota": after_quota}}
-                )
-                await _record_quota_change_entries(
-                    user_doc=user_doc,
-                    before_quota=before_quota,
-                    after_quota=after_quota,
-                    entry_type="plan_purchase",
-                    reference_type="checkout_session",
-                    reference_id=session_id,
-                    description_it=f"Accredito crediti per acquisto piano {plan.name_it}",
-                    metadata={
-                        "checkout_session_id": session_id,
-                        "payment_transaction_id": txn.get("transaction_id"),
-                        "old_plan": user_doc.get("plan"),
-                        "new_plan": plan_id,
-                    },
-                )
-            await _mark_billing_record_paid(
-                user_id=user.user_id,
-                checkout_reference=session_id,
-                payment_reference=str(getattr(status, "payment_intent", None) or session_id),
-                metadata={
-                    "checkout_session_id": session_id,
-                    "payment_status": status.payment_status,
-                    "status": status.status,
-                },
-            )
-    
+    txn = await _payment_transaction_by_session(session_id, user.user_id)
+    billing_record = await _find_billing_record_for_checkout(session_id, user.user_id)
+
     return {
         "status": status.status,
         "payment_status": status.payment_status,
         "amount_total": status.amount_total,
-        "currency": status.currency
+        "currency": status.currency,
+        "mode": getattr(status, "mode", None),
+        "plan_id": (txn or {}).get("plan_id"),
+        "transaction_status": (txn or {}).get("status"),
+        "billing_status": (billing_record or {}).get("status"),
+        "invoice_status": (billing_record or {}).get("invoice_status"),
     }
 
 @api_router.post("/webhook/stripe")
@@ -7160,11 +7516,12 @@ async def stripe_webhook(request: Request):
 
     import stripe
     stripe.api_key = STRIPE_SECRET_KEY
-    webhook_secret = os.environ.get("STRIPE_WEBHOOK_SECRET")
 
     try:
-        if webhook_secret and signature:
-            event = stripe.Webhook.construct_event(payload=body, sig_header=signature, secret=webhook_secret)
+        if STRIPE_WEBHOOK_SECRET:
+            if not signature:
+                raise HTTPException(status_code=400, detail="Missing Stripe signature")
+            event = stripe.Webhook.construct_event(payload=body, sig_header=signature, secret=STRIPE_WEBHOOK_SECRET)
         else:
             event = json.loads(body.decode("utf-8"))
 
@@ -7172,59 +7529,103 @@ async def stripe_webhook(request: Request):
         event_type = event.get("type", "")
 
         if event_type == "checkout.session.completed":
-            payment_status = data_object.get("payment_status")
+            payment_status = str(data_object.get("payment_status") or "").strip()
             metadata = data_object.get("metadata", {}) or {}
-            session_id = data_object.get("id")
+            session_id = str(data_object.get("id") or "").strip()
+            user_id = str(metadata.get("app_user_id") or "").strip()
+            plan_id = str(metadata.get("plan_code") or "").strip()
+            payment_reference = str(data_object.get("payment_intent") or session_id)
+            stripe_customer_id = str(data_object.get("customer") or "").strip() or None
+            stripe_subscription_id = str(data_object.get("subscription") or "").strip() or None
 
-            if payment_status == "paid":
-                user_id = metadata.get("user_id")
-                plan_id = metadata.get("plan_id")
-            
-                txn = None
-                if session_id:
-                    txn = await db.payment_transactions.find_one({"session_id": session_id}, {"_id": 0})
-
-                if user_id and plan_id and plan_id in SUBSCRIPTION_PLANS and txn and txn.get("payment_status") != "paid":
-                    plan = SUBSCRIPTION_PLANS[plan_id]
-                    user_doc = await _ensure_opening_balance_baseline_for_user_id(user_id)
-                    if user_doc:
-                        before_quota = _quota_snapshot(user_doc.get("quota"))
-                        after_quota = plan.quota.copy()
-                        await db.users.update_one(
-                            {"user_id": user_id},
-                            {"$set": {"plan": plan_id, "quota": after_quota}}
-                        )
-                        await _record_quota_change_entries(
-                            user_doc=user_doc,
-                            before_quota=before_quota,
-                            after_quota=after_quota,
-                            entry_type="plan_purchase",
-                            reference_type="checkout_session",
-                            reference_id=session_id,
-                            description_it=f"Accredito crediti per acquisto piano {plan.name_it}",
-                            metadata={
-                                "checkout_session_id": session_id,
-                                "payment_transaction_id": txn.get("transaction_id"),
-                                "old_plan": user_doc.get("plan"),
-                                "new_plan": plan_id,
-                            },
-                        )
-                    await db.payment_transactions.update_one(
-                        {"session_id": session_id},
-                        {"$set": {"status": "complete", "payment_status": "paid"}}
+            if session_id:
+                await _set_payment_transaction_state(
+                    session_id,
+                    status=str(data_object.get("status") or "complete"),
+                    payment_status=payment_status or "complete",
+                    stripe_customer_id=stripe_customer_id,
+                    stripe_subscription_id=stripe_subscription_id,
+                    stripe_payment_intent_id=payment_reference,
+                )
+                billing_record = await _find_billing_record_for_checkout(session_id, user_id or None)
+                if billing_record:
+                    await _update_billing_record(
+                        billing_record["billing_record_id"],
+                        status="paid" if plan_id == "starter" and payment_status == "paid" else None,
+                        payment_reference=payment_reference if plan_id == "starter" and payment_status == "paid" else None,
+                        invoice_status="ready" if plan_id == "starter" and payment_status == "paid" else None,
+                        metadata_updates={
+                            "stripe_customer_id": stripe_customer_id,
+                            "stripe_subscription_id": stripe_subscription_id,
+                            "plan_code": plan_id,
+                            "stripe_checkout_status": data_object.get("status"),
+                            "stripe_payment_status": payment_status,
+                            "billing_reason": "checkout_session_completed",
+                        },
+                        paid=bool(plan_id == "starter" and payment_status == "paid"),
                     )
-                    await _mark_billing_record_paid(
-                        user_id=user_id,
-                        checkout_reference=session_id,
-                        payment_reference=str(data_object.get("payment_intent") or session_id),
-                        metadata={
-                            "checkout_session_id": session_id,
-                            "payment_status": payment_status,
-                            "event_type": event_type,
+
+            if plan_id == "starter" and payment_status == "paid" and user_id and session_id:
+                await _grant_starter_checkout_if_needed(
+                    user_id=user_id,
+                    session_id=session_id,
+                    payment_reference=payment_reference,
+                    checkout_payload=data_object,
+                )
+
+        elif event_type == "invoice.paid":
+            invoice = data_object
+            user_id, plan_id, stripe_subscription_id = await _resolve_invoice_context(invoice, stripe)
+            if user_id and plan_id in {"solo", "pro"}:
+                await _grant_subscription_invoice_if_needed(
+                    user_id=user_id,
+                    plan_id=plan_id,
+                    invoice=invoice,
+                    stripe_customer_id=str(invoice.get("customer") or "").strip() or None,
+                    stripe_subscription_id=stripe_subscription_id,
+                )
+
+        elif event_type == "invoice.payment_failed":
+            invoice = data_object
+            user_id, plan_id, stripe_subscription_id = await _resolve_invoice_context(invoice, stripe)
+            if user_id and plan_id in {"solo", "pro"}:
+                pending_record = await _find_latest_pending_subscription_billing_record(user_id, plan_id)
+                if pending_record:
+                    await _update_billing_record(
+                        pending_record["billing_record_id"],
+                        status="failed",
+                        invoice_status="failed",
+                        invoice_reference=str(invoice.get("id") or "").strip() or None,
+                        metadata_updates={
+                            "stripe_customer_id": str(invoice.get("customer") or "").strip() or None,
+                            "stripe_subscription_id": stripe_subscription_id,
+                            "plan_code": plan_id,
+                            "billing_reason": str(invoice.get("billing_reason") or "subscription_cycle").strip(),
+                        },
+                    )
+
+        elif event_type in {"customer.subscription.updated", "customer.subscription.deleted"}:
+            subscription = data_object
+            metadata = subscription.get("metadata") or {}
+            user_id = str(metadata.get("app_user_id") or "").strip()
+            plan_id = str(metadata.get("plan_code") or "").strip()
+            if user_id and plan_id in {"solo", "pro"}:
+                pending_record = await _find_latest_pending_subscription_billing_record(user_id, plan_id)
+                if pending_record:
+                    await _update_billing_record(
+                        pending_record["billing_record_id"],
+                        metadata_updates={
+                            "stripe_customer_id": str(subscription.get("customer") or "").strip() or None,
+                            "stripe_subscription_id": str(subscription.get("id") or "").strip() or None,
+                            "stripe_subscription_status": subscription.get("status"),
+                            "plan_code": plan_id,
+                            "billing_reason": "subscription_state_sync",
                         },
                     )
         
         return {"received": True}
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Webhook error: {e}")
         return {"received": True}

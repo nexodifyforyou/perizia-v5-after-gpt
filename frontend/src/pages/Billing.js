@@ -131,6 +131,7 @@ const Billing = () => {
   const [searchParams] = useSearchParams();
   const [plans, setPlans] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [checkoutLoadingPlanId, setCheckoutLoadingPlanId] = useState('');
   const [checkingPayment, setCheckingPayment] = useState(false);
   const [ledgerEntries, setLedgerEntries] = useState([]);
   const [ledgerTotal, setLedgerTotal] = useState(0);
@@ -148,9 +149,14 @@ const Billing = () => {
   useEffect(() => {
     fetchPlans();
     fetchLedger({ reset: true });
-    
-    // Check if returning from Stripe
+
+    const checkoutState = searchParams.get('checkout');
     const sessionId = searchParams.get('session_id');
+    if (checkoutState === 'cancel') {
+      toast.info('Checkout annullato. Nessun addebito effettuato.');
+      window.history.replaceState({}, '', window.location.pathname);
+      return;
+    }
     if (sessionId) {
       checkPaymentStatus(sessionId);
     }
@@ -223,16 +229,17 @@ const Billing = () => {
         withCredentials: true
       });
 
-      if (response.data.payment_status === 'paid') {
-        toast.success('Pagamento completato! Il tuo piano è stato aggiornato.');
+      if (response.data.billing_status === 'paid') {
+        toast.success('Pagamento confermato. Account e crediti aggiornati.');
         await refreshUser();
+        await fetchLedger({ reset: true });
         setCheckingPayment(false);
-        // Clear the URL params
         window.history.replaceState({}, '', window.location.pathname);
         return;
       } else if (response.data.status === 'expired') {
         toast.error('Sessione di pagamento scaduta. Riprova.');
         setCheckingPayment(false);
+        window.history.replaceState({}, '', window.location.pathname);
         return;
       }
 
@@ -240,6 +247,7 @@ const Billing = () => {
       setTimeout(() => checkPaymentStatus(sessionId, attempts + 1), pollInterval);
     } catch (error) {
       console.error('Payment check error:', error);
+      toast.error('Impossibile verificare il pagamento in questo momento.');
       setCheckingPayment(false);
     }
   };
@@ -248,9 +256,31 @@ const Billing = () => {
   const currentPlanDetails = currentPlan || (accountState.isMasterAdmin ? INTERNAL_PLAN_DETAILS : null);
   const hasMoreLedgerEntries = ledgerEntries.length < ledgerTotal;
 
-  const handlePlanAction = (plan) => {
+  const handlePlanAction = async (plan) => {
     if (plan.plan_id === 'free' || plan.plan_id === accountState.planId) return;
-    toast.info(`${plan.cta_label_it} non ancora abilitato in questa versione.`);
+    if (plan.plan_id === 'studio') {
+      toast.info("Il piano Studio resta gestito manualmente in questa fase.");
+      return;
+    }
+
+    setCheckoutLoadingPlanId(plan.plan_id);
+    try {
+      const response = await axios.post(
+        `${API_URL}/api/checkout/create`,
+        { plan_id: plan.plan_id, origin_url: window.location.origin },
+        { withCredentials: true }
+      );
+      const checkoutUrl = response.data?.url;
+      if (!checkoutUrl) {
+        throw new Error('Missing checkout url');
+      }
+      window.location.assign(checkoutUrl);
+    } catch (error) {
+      console.error('Checkout create error:', error);
+      const detail = error?.response?.data?.detail;
+      toast.error(typeof detail === 'string' ? detail : 'Impossibile avviare il checkout.');
+      setCheckoutLoadingPlanId('');
+    }
   };
 
   return (
@@ -410,17 +440,24 @@ const Billing = () => {
                   <Button 
                     onClick={() => handlePlanAction(plan)}
                     data-testid={`subscribe-${plan.plan_id}-btn`}
-                    disabled={false}
+                    disabled={Boolean(checkoutLoadingPlanId)}
                     className={`w-full ${
                       plan.plan_id === 'solo'
                         ? 'bg-indigo-600 hover:bg-indigo-700 text-white'
                         : 'bg-gold text-zinc-950 hover:bg-gold-dim'
                     }`}
                   >
-                    <>
-                      <CreditCard className="w-4 h-4 mr-2" />
-                      {plan.plan_id === 'studio' ? "Richiedi un'offerta" : plan.cta_label_it}
-                    </>
+                    {checkoutLoadingPlanId === plan.plan_id ? (
+                      <>
+                        <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                        Reindirizzamento...
+                      </>
+                    ) : (
+                      <>
+                        <CreditCard className="w-4 h-4 mr-2" />
+                        {plan.plan_id === 'studio' ? "Richiedi un'offerta" : plan.cta_label_it}
+                      </>
+                    )}
                   </Button>
                 )}
               </div>
