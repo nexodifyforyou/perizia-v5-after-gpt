@@ -14,10 +14,116 @@ import axios from 'axios';
 import { toast } from 'sonner';
 
 const API_URL = process.env.REACT_APP_BACKEND_URL;
+const LEDGER_PAGE_SIZE = 10;
 const INTERNAL_PLAN_DETAILS = {
   name_it: 'Enterprise',
   plan_type_label_it: 'Interno',
   support_level_it: 'Supporto dedicato',
+};
+const QUOTA_LABELS = {
+  perizia_scans_remaining: 'Crediti perizia',
+  image_scans_remaining: 'Crediti immagini',
+  assistant_messages_remaining: 'Messaggi assistente',
+};
+const ENTRY_TYPE_LABELS = {
+  opening_balance: 'Saldo iniziale',
+  admin_adjustment: 'Variazione admin',
+  plan_purchase: 'Accredito piano',
+  perizia_upload: 'Analisi perizia',
+  image_forensics: 'Analisi immagini',
+  assistant_message: 'Messaggio assistente',
+  system_correction: 'Correzione sistema',
+};
+const REFERENCE_TYPE_LABELS = {
+  analysis: 'Analisi',
+  forensics: 'Analisi immagini',
+  assistant_qa: 'Sessione assistente',
+  checkout_session: 'Checkout',
+  admin_user_update: 'Aggiornamento admin',
+  system: 'Sistema',
+  legacy_helper: 'Sistema',
+};
+
+const formatLedgerDate = (value) => {
+  if (!value) return 'Data non disponibile';
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return 'Data non disponibile';
+  return new Intl.DateTimeFormat('it-IT', {
+    dateStyle: 'medium',
+    timeStyle: 'short',
+  }).format(parsed);
+};
+
+const formatQuotaLabel = (field) => QUOTA_LABELS[field] || 'Credito';
+const formatEntryTypeLabel = (type) => ENTRY_TYPE_LABELS[type] || 'Movimento';
+const formatReferenceLabel = (type) => REFERENCE_TYPE_LABELS[type] || null;
+
+const LedgerRow = ({ entry }) => {
+  const isCredit = entry.direction === 'credit';
+  const directionLabel = isCredit ? '+' : '-';
+  const directionClasses = isCredit
+    ? 'text-emerald-300 bg-emerald-500/10 border-emerald-500/20'
+    : 'text-amber-300 bg-amber-500/10 border-amber-500/20';
+  const pagesCount = entry.metadata?.pages_count;
+  const referenceLabel = formatReferenceLabel(entry.reference_type);
+  const showReferenceId = entry.reference_id && entry.reference_id !== 'n/a';
+
+  return (
+    <div className="rounded-2xl border border-zinc-800 bg-zinc-950/70 p-4 md:p-5">
+      <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
+        <div className="min-w-0">
+          <div className="flex flex-wrap items-center gap-2">
+            <p className="text-sm font-semibold text-zinc-100">{entry.description_it || 'Movimento crediti'}</p>
+            <span className="rounded-full border border-zinc-700 px-2.5 py-1 text-[11px] font-medium uppercase tracking-wide text-zinc-300">
+              {formatEntryTypeLabel(entry.entry_type)}
+            </span>
+          </div>
+          <p className="mt-1 text-sm text-zinc-400">{formatLedgerDate(entry.created_at)}</p>
+          <div className="mt-3 flex flex-wrap gap-2 text-xs text-zinc-300">
+            <span className="rounded-full border border-zinc-800 bg-zinc-900 px-2.5 py-1">
+              {formatQuotaLabel(entry.quota_field)}
+            </span>
+            {referenceLabel && (
+              <span className="rounded-full border border-zinc-800 bg-zinc-900 px-2.5 py-1">
+                {referenceLabel}
+              </span>
+            )}
+            {typeof pagesCount === 'number' && pagesCount > 0 && (
+              <span className="rounded-full border border-zinc-800 bg-zinc-900 px-2.5 py-1">
+                {pagesCount} pagine
+              </span>
+            )}
+            {showReferenceId && (
+              <span className="rounded-full border border-zinc-800 bg-zinc-900 px-2.5 py-1 font-mono text-[11px] text-zinc-400">
+                Rif. {entry.reference_id}
+              </span>
+            )}
+          </div>
+        </div>
+
+        <div className="grid grid-cols-2 gap-3 md:min-w-[320px]">
+          <div className="rounded-xl border border-zinc-800 bg-zinc-900/60 p-3">
+            <p className="text-[11px] uppercase tracking-wide text-zinc-500">Direzione</p>
+            <p className={`mt-1 inline-flex items-center rounded-full border px-2.5 py-1 text-sm font-semibold ${directionClasses}`}>
+              {directionLabel} {entry.amount}
+            </p>
+          </div>
+          <div className="rounded-xl border border-zinc-800 bg-zinc-900/60 p-3">
+            <p className="text-[11px] uppercase tracking-wide text-zinc-500">Saldo prima</p>
+            <p className="mt-1 text-lg font-semibold text-zinc-100">{entry.balance_before}</p>
+          </div>
+          <div className="rounded-xl border border-zinc-800 bg-zinc-900/60 p-3">
+            <p className="text-[11px] uppercase tracking-wide text-zinc-500">Saldo dopo</p>
+            <p className="mt-1 text-lg font-semibold text-zinc-100">{entry.balance_after}</p>
+          </div>
+          <div className="rounded-xl border border-zinc-800 bg-zinc-900/60 p-3">
+            <p className="text-[11px] uppercase tracking-wide text-zinc-500">Tipo credito</p>
+            <p className="mt-1 text-sm font-semibold text-zinc-200">{formatQuotaLabel(entry.quota_field)}</p>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
 };
 
 const Billing = () => {
@@ -26,6 +132,11 @@ const Billing = () => {
   const [plans, setPlans] = useState([]);
   const [loading, setLoading] = useState(true);
   const [checkingPayment, setCheckingPayment] = useState(false);
+  const [ledgerEntries, setLedgerEntries] = useState([]);
+  const [ledgerTotal, setLedgerTotal] = useState(0);
+  const [ledgerLoading, setLedgerLoading] = useState(true);
+  const [ledgerLoadingMore, setLedgerLoadingMore] = useState(false);
+  const [ledgerError, setLedgerError] = useState('');
   const creditBands = [
     '1-20 pagine = 4 crediti',
     '21-40 pagine = 7 crediti',
@@ -36,6 +147,7 @@ const Billing = () => {
 
   useEffect(() => {
     fetchPlans();
+    fetchLedger({ reset: true });
     
     // Check if returning from Stripe
     const sessionId = searchParams.get('session_id');
@@ -53,6 +165,44 @@ const Billing = () => {
       toast.error('Errore nel caricamento dei piani');
     } finally {
       setLoading(false);
+    }
+  };
+
+  const fetchLedger = async ({ reset = false } = {}) => {
+    const nextSkip = reset ? 0 : ledgerEntries.length;
+    if (reset) {
+      setLedgerLoading(true);
+      setLedgerError('');
+    } else {
+      setLedgerLoadingMore(true);
+    }
+
+    try {
+      const response = await axios.get(`${API_URL}/api/billing/ledger`, {
+        params: {
+          limit: LEDGER_PAGE_SIZE,
+          skip: nextSkip,
+        },
+        withCredentials: true,
+      });
+
+      const nextEntries = Array.isArray(response.data?.entries) ? response.data.entries : [];
+      setLedgerTotal(Number(response.data?.total || 0));
+      setLedgerEntries((current) => (reset ? nextEntries : [...current, ...nextEntries]));
+      setLedgerError('');
+    } catch (error) {
+      console.error('Ledger fetch error:', error);
+      setLedgerError('Non è stato possibile caricare i movimenti crediti.');
+      if (reset) {
+        setLedgerEntries([]);
+        setLedgerTotal(0);
+      }
+    } finally {
+      if (reset) {
+        setLedgerLoading(false);
+      } else {
+        setLedgerLoadingMore(false);
+      }
     }
   };
 
@@ -96,6 +246,7 @@ const Billing = () => {
 
   const currentPlan = plans.find((plan) => plan.plan_id === accountState.planId);
   const currentPlanDetails = currentPlan || (accountState.isMasterAdmin ? INTERNAL_PLAN_DETAILS : null);
+  const hasMoreLedgerEntries = ledgerEntries.length < ledgerTotal;
 
   const handlePlanAction = (plan) => {
     if (plan.plan_id === 'free' || plan.plan_id === accountState.planId) return;
@@ -288,6 +439,80 @@ const Billing = () => {
           </div>
           <p className="text-xs text-zinc-600 mt-4">Crediti extra disponibili.</p>
         </div>
+
+        <section className="mt-8 rounded-2xl border border-zinc-800 bg-zinc-900/60 p-6">
+          <div className="flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
+            <div>
+              <h3 className="text-xl font-serif font-bold text-zinc-100">Movimenti crediti</h3>
+              <p className="mt-1 text-sm text-zinc-400">
+                Storico recente dei movimenti registrati sul tuo account.
+              </p>
+            </div>
+            <p className="text-sm text-zinc-500">
+              {ledgerTotal > 0 ? `${ledgerEntries.length} di ${ledgerTotal} movimenti` : 'Nessun movimento registrato'}
+            </p>
+          </div>
+
+          <div className="mt-6">
+            {ledgerLoading ? (
+              <div className="space-y-3">
+                {[0, 1, 2].map((item) => (
+                  <div key={item} className="animate-pulse rounded-2xl border border-zinc-800 bg-zinc-950/70 p-4">
+                    <div className="h-4 w-48 rounded bg-zinc-800" />
+                    <div className="mt-3 h-3 w-32 rounded bg-zinc-800" />
+                    <div className="mt-4 grid grid-cols-2 gap-3 md:grid-cols-4">
+                      {[0, 1, 2, 3].map((block) => (
+                        <div key={block} className="h-16 rounded-xl bg-zinc-900" />
+                      ))}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : ledgerError ? (
+              <div className="rounded-2xl border border-amber-500/20 bg-amber-500/5 p-5">
+                <p className="text-sm font-medium text-amber-200">{ledgerError}</p>
+                <Button
+                  onClick={() => fetchLedger({ reset: true })}
+                  variant="outline"
+                  className="mt-4 border-zinc-700 bg-transparent text-zinc-200 hover:bg-zinc-800"
+                >
+                  Riprova
+                </Button>
+              </div>
+            ) : ledgerEntries.length === 0 ? (
+              <div className="rounded-2xl border border-dashed border-zinc-700 bg-zinc-950/50 p-8 text-center">
+                <p className="text-sm font-medium text-zinc-200">Non ci sono ancora movimenti registrati.</p>
+                <p className="mt-2 text-sm text-zinc-500">I prossimi addebiti o accrediti compariranno qui.</p>
+              </div>
+            ) : (
+              <div className="space-y-4">
+                {ledgerEntries.map((entry) => (
+                  <LedgerRow key={entry.ledger_id} entry={entry} />
+                ))}
+              </div>
+            )}
+          </div>
+
+          {!ledgerLoading && !ledgerError && hasMoreLedgerEntries && (
+            <div className="mt-6 flex justify-center">
+              <Button
+                onClick={() => fetchLedger()}
+                disabled={ledgerLoadingMore}
+                variant="outline"
+                className="border-zinc-700 bg-transparent text-zinc-100 hover:bg-zinc-800"
+              >
+                {ledgerLoadingMore ? (
+                  <>
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    Caricamento...
+                  </>
+                ) : (
+                  'Carica altri movimenti'
+                )}
+              </Button>
+            </div>
+          )}
+        </section>
 
         {/* Info */}
         <div className="mt-8 p-4 bg-zinc-900/50 border border-zinc-800 rounded-lg flex items-start gap-3">
