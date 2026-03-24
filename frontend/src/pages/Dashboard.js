@@ -30,6 +30,10 @@ const Sidebar = ({ user, logout }) => {
   const navigate = useNavigate();
   const accountState = getAccountState(user);
   const featureAccess = accountState.featureAccess;
+  const availablePeriziaCredits =
+    accountState?.periziaCredits?.totalAvailable ??
+    accountState?.quota?.perizia_scans_remaining ??
+    0;
   
   const navItems = [
     { icon: <FileText className="w-5 h-5" />, label: 'Dashboard', path: '/dashboard' },
@@ -141,7 +145,7 @@ const Sidebar = ({ user, logout }) => {
           <div className="flex items-end justify-between gap-3 mb-3">
             <div>
               <p className="text-[11px] font-mono uppercase tracking-[0.24em] text-zinc-500">Crediti disponibili</p>
-              <p className="mt-1 text-xl font-mono font-bold text-gold">{accountState.periziaCredits.totalAvailable}</p>
+              <p className="mt-1 text-xl font-mono font-bold text-gold">{availablePeriziaCredits}</p>
             </div>
             <span className="text-[11px] text-zinc-500">Perizie</span>
           </div>
@@ -194,6 +198,10 @@ const Dashboard = () => {
   const { user, logout, accountState } = useAuth();
   const navigate = useNavigate();
   const featureAccess = accountState.featureAccess;
+  const availablePeriziaCredits =
+    accountState?.periziaCredits?.totalAvailable ??
+    accountState?.quota?.perizia_scans_remaining ??
+    0;
   const [stats, setStats] = useState(null);
   const [loading, setLoading] = useState(true);
 
@@ -272,7 +280,7 @@ const Dashboard = () => {
                 {accountState.planLabel}
               </span>
             </div>
-            <p className="text-3xl font-bold text-zinc-100">{accountState.periziaCredits.totalAvailable}</p>
+            <p className="text-3xl font-bold text-zinc-100">{availablePeriziaCredits}</p>
             <p className="text-sm text-zinc-500">Crediti disponibili</p>
           </div>
         </div>
@@ -371,13 +379,13 @@ const Dashboard = () => {
         </div>
         
         {/* Quota Warning */}
-        {accountState.periziaCredits.totalAvailable <= 1 && accountState.planId === 'free' && (
+        {availablePeriziaCredits <= 1 && accountState.planId === 'free' && (
           <div className="mt-8 bg-amber-500/10 border border-amber-500/30 rounded-xl p-6 flex items-center gap-4">
             <AlertTriangle className="w-8 h-8 text-amber-400 flex-shrink-0" />
             <div className="flex-1">
               <p className="text-amber-400 font-semibold mb-1">Quota quasi esaurita</p>
               <p className="text-zinc-400 text-sm">
-                Hai ancora {accountState.periziaCredits.totalAvailable} crediti disponibili. 
+                Hai ancora {availablePeriziaCredits} crediti disponibili. 
                 Passa a Pro per continuare senza limiti.
               </p>
             </div>
