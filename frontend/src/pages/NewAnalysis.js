@@ -466,9 +466,12 @@ const NewAnalysis = () => {
           {/* Quota Info */}
           <div className="mt-6 p-4 bg-zinc-900/50 border border-zinc-800 rounded-lg">
             <div className="flex items-center justify-between">
-              <span className="text-sm text-zinc-500">Scansioni rimanenti</span>
+              <span className="text-sm text-zinc-500">Crediti disponibili</span>
               <span className="font-mono text-gold font-bold">
-                {user?.quota?.perizia_scans_remaining || 0}
+                {(user?.account?.perizia_credits?.total_available
+                  ?? user?.perizia_credits?.total_available
+                  ?? user?.quota?.perizia_scans_remaining
+                  ?? 0)}
               </span>
             </div>
           </div>

@@ -45,6 +45,7 @@ OPENAI_API_KEY = os.environ.get('OPENAI_API_KEY')
 STRIPE_SECRET_KEY = os.environ.get('STRIPE_SECRET_KEY')
 STRIPE_WEBHOOK_SECRET = os.environ.get("STRIPE_WEBHOOK_SECRET", "").strip()
 STRIPE_PRICE_STARTER = os.environ.get("STRIPE_PRICE_STARTER", "").strip()
+STRIPE_PRICE_PACK_8 = os.environ.get("STRIPE_PRICE_PACK_8", "").strip()
 STRIPE_PRICE_SOLO = os.environ.get("STRIPE_PRICE_SOLO", "").strip()
 STRIPE_PRICE_PRO = os.environ.get("STRIPE_PRICE_PRO", "").strip()
 STRIPE_SUCCESS_URL = os.environ.get("STRIPE_SUCCESS_URL", "").strip()
@@ -289,14 +290,14 @@ SUBSCRIPTION_PLANS = {
         name_it="Free",
         price=0.0,
         plan_type="free",
-        plan_type_label_it="Gratis",
+        plan_type_label_it="Free",
         price_suffix_it="",
         credits=4,
-        credits_label_it="4 crediti una tantum",
-        validity_label_it="Fino a 20 pagine per una sola analisi breve",
-        support_level_it="Supporto base",
-        usage_hint_it="Per provare il prodotto con una perizia breve",
-        cta_label_it="Inizia gratis",
+        credits_label_it="4 trial credits",
+        validity_label_it="For one short perizia up to 20 pages",
+        support_level_it="Basic support",
+        usage_hint_it="Try the product on a short document",
+        cta_label_it="Start free",
         features=[
             "Perizia analysis up to 20 pages",
             "Risk traffic light",
@@ -317,18 +318,18 @@ SUBSCRIPTION_PLANS = {
     ),
     "starter": SubscriptionPlan(
         plan_id="starter",
-        name="Starter",
-        name_it="Starter",
+        name="Credit Pack 8",
+        name_it="Credit Pack 8",
         price=19.00,
         plan_type="one_time",
-        plan_type_label_it="Pack una tantum",
-        price_suffix_it="una tantum",
+        plan_type_label_it="Extra pack",
+        price_suffix_it="one-time",
         credits=8,
-        credits_label_it="8 crediti",
-        validity_label_it="Validita 12 mesi",
-        support_level_it="Supporto best effort via email",
-        usage_hint_it="Per 1 perizia media o 2 perizie brevi",
-        cta_label_it="Acquista pack",
+        credits_label_it="8 extra credits",
+        validity_label_it="Stored with 12-month expiry metadata",
+        support_level_it="Best-effort email support",
+        usage_hint_it="Buy extra capacity at any time",
+        cta_label_it="Buy pack",
         features=[
             "Perizia analysis",
             "Risk traffic light",
@@ -353,14 +354,14 @@ SUBSCRIPTION_PLANS = {
         name_it="Solo",
         price=49.00,
         plan_type="subscription",
-        plan_type_label_it="Abbonamento mensile",
-        price_suffix_it="/mese",
+        plan_type_label_it="Monthly plan",
+        price_suffix_it="/month",
         credits=28,
-        credits_label_it="28 crediti al mese",
-        validity_label_it="I crediti scadono ogni mese",
-        support_level_it="Supporto standard",
-        usage_hint_it="Core product attuale per uso continuativo",
-        cta_label_it="Abbonati",
+        credits_label_it="28 monthly credits",
+        validity_label_it="Refreshes each billing cycle",
+        support_level_it="Standard support",
+        usage_hint_it="Recurring monthly capacity for ongoing use",
+        cta_label_it="Subscribe",
         features=[
             "Perizia analysis",
             "Risk traffic light",
@@ -385,14 +386,14 @@ SUBSCRIPTION_PLANS = {
         name_it="Pro",
         price=129.00,
         plan_type="subscription",
-        plan_type_label_it="Abbonamento mensile",
-        price_suffix_it="/mese",
+        plan_type_label_it="Monthly plan",
+        price_suffix_it="/month",
         credits=84,
-        credits_label_it="84 crediti al mese",
-        validity_label_it="I crediti scadono ogni mese",
-        support_level_it="Supporto prioritario",
-        usage_hint_it="Tutto cio che e incluso in Solo, con volume superiore",
-        cta_label_it="Abbonati",
+        credits_label_it="84 monthly credits",
+        validity_label_it="Refreshes each billing cycle",
+        support_level_it="Priority support",
+        usage_hint_it="Higher recurring monthly capacity",
+        cta_label_it="Subscribe",
         features=[
             "Everything in Solo",
             "Higher monthly volume",
@@ -411,14 +412,14 @@ SUBSCRIPTION_PLANS = {
         name_it="Studio",
         price=299.00,
         plan_type="subscription",
-        plan_type_label_it="Abbonamento mensile",
-        price_suffix_it="/mese",
+        plan_type_label_it="Monthly plan",
+        price_suffix_it="/month",
         credits=210,
-        credits_label_it="210 crediti al mese",
-        validity_label_it="I crediti scadono ogni mese",
-        support_level_it="Supporto prioritario",
-        usage_hint_it="Per flussi piu intensi e utilizzo di team",
-        cta_label_it="Abbonati",
+        credits_label_it="210 monthly credits",
+        validity_label_it="Custom handling in this phase",
+        support_level_it="Priority support",
+        usage_hint_it="For higher-volume or team workflows",
+        cta_label_it="Contact sales",
         features=[
             "Everything in Pro",
             "High-volume usage",
@@ -487,6 +488,9 @@ PERIZIA_CREDIT_BANDS: Tuple[Tuple[int, int, int], ...] = (
     (61, 80, 13),
     (81, 100, 16),
 )
+PERIZIA_CREDIT_WALLET_VERSION = 1
+PERIZIA_PACK_VALIDITY_DAYS = 365
+PAID_RECURRING_PLAN_IDS = {"solo", "pro", "studio"}
 
 
 def _get_required_perizia_credits(page_count: int) -> Optional[int]:
@@ -511,6 +515,250 @@ def _is_complete_quota(quota: Any) -> bool:
     return True
 
 
+def _monthly_perizia_quota_for_plan(plan_id: Optional[str]) -> int:
+    normalized_plan_id = str(plan_id or "").strip().lower()
+    if normalized_plan_id not in PAID_RECURRING_PLAN_IDS:
+        return 0
+    return int(SUBSCRIPTION_PLANS[normalized_plan_id].quota.get("perizia_scans_remaining", 0) or 0)
+
+
+def _make_pack_grant(
+    *,
+    amount: int,
+    source: str,
+    plan_code: Optional[str] = None,
+    reference_id: Optional[str] = None,
+    grant_id: Optional[str] = None,
+    granted_at: Optional[str] = None,
+    expires_at: Optional[str] = None,
+    amount_remaining: Optional[int] = None,
+) -> Dict[str, Any]:
+    granted = max(0, int(amount or 0))
+    remaining = granted if amount_remaining is None else max(0, int(amount_remaining or 0))
+    if granted < remaining:
+        granted = remaining
+    return {
+        "grant_id": str(grant_id or f"pack_{uuid.uuid4().hex[:12]}").strip(),
+        "source": str(source or "unknown").strip(),
+        "plan_code": str(plan_code or "starter").strip(),
+        "reference_id": str(reference_id or "").strip() or None,
+        "amount_granted": granted,
+        "amount_remaining": remaining,
+        "granted_at": str(granted_at or datetime.now(timezone.utc).isoformat()),
+        "expires_at": str(expires_at).strip() if expires_at else None,
+    }
+
+
+def _normalize_pack_grants(raw_grants: Any) -> List[Dict[str, Any]]:
+    normalized: List[Dict[str, Any]] = []
+    if not isinstance(raw_grants, list):
+        return normalized
+    for item in raw_grants:
+        if not isinstance(item, dict):
+            continue
+        grant = _make_pack_grant(
+            amount=item.get("amount_granted", item.get("amount_remaining", item.get("amount", 0))),
+            amount_remaining=item.get("amount_remaining"),
+            source=str(item.get("source") or "unknown"),
+            plan_code=item.get("plan_code"),
+            reference_id=item.get("reference_id"),
+            grant_id=item.get("grant_id"),
+            granted_at=item.get("granted_at"),
+            expires_at=item.get("expires_at"),
+        )
+        if grant["amount_remaining"] <= 0 and grant["amount_granted"] <= 0:
+            continue
+        normalized.append(grant)
+    return normalized
+
+
+def _finalize_perizia_credit_wallet(wallet: Dict[str, Any], *, plan_id: Optional[str], is_master_admin: bool) -> Dict[str, Any]:
+    normalized_plan_id = str(plan_id or "").strip().lower()
+    monthly_remaining = max(0, int((wallet or {}).get("monthly_remaining", 0) or 0))
+    pack_grants = _normalize_pack_grants((wallet or {}).get("pack_grants"))
+    extra_remaining = sum(int(item.get("amount_remaining", 0) or 0) for item in pack_grants)
+    declared_extra_remaining = max(0, int((wallet or {}).get("extra_remaining", 0) or 0))
+    if declared_extra_remaining > extra_remaining:
+        spillover = declared_extra_remaining - extra_remaining
+        pack_grants.append(
+            _make_pack_grant(
+                amount=spillover,
+                amount_remaining=spillover,
+                source="wallet_spillover_recovery",
+                plan_code="starter",
+            )
+        )
+        extra_remaining = declared_extra_remaining
+    monthly_quota = _monthly_perizia_quota_for_plan(normalized_plan_id)
+
+    if is_master_admin:
+        extra_remaining = 0
+        pack_grants = []
+    elif normalized_plan_id in PAID_RECURRING_PLAN_IDS:
+        if monthly_remaining > monthly_quota:
+            spillover = monthly_remaining - monthly_quota
+            monthly_remaining = monthly_quota
+            pack_grants.append(
+                _make_pack_grant(
+                    amount=spillover,
+                    amount_remaining=spillover,
+                    source="normalized_monthly_spillover",
+                    plan_code="starter",
+                )
+            )
+            extra_remaining += spillover
+    else:
+        if monthly_remaining > 0:
+            pack_grants.append(
+                _make_pack_grant(
+                    amount=monthly_remaining,
+                    amount_remaining=monthly_remaining,
+                    source="non_recurring_monthly_rollover",
+                    plan_code="starter",
+                )
+            )
+            extra_remaining += monthly_remaining
+            monthly_remaining = 0
+
+    processed_invoice_ids: List[str] = []
+    for item in (wallet or {}).get("processed_invoice_ids") or []:
+        invoice_id = str(item or "").strip()
+        if invoice_id and invoice_id not in processed_invoice_ids:
+            processed_invoice_ids.append(invoice_id)
+
+    finalized = {
+        "version": PERIZIA_CREDIT_WALLET_VERSION,
+        "monthly_remaining": monthly_remaining,
+        "extra_remaining": extra_remaining,
+        "total_available": monthly_remaining + extra_remaining,
+        "monthly_plan_id": normalized_plan_id if normalized_plan_id in PAID_RECURRING_PLAN_IDS else None,
+        "monthly_refreshed_at": (wallet or {}).get("monthly_refreshed_at"),
+        "pack_expiry_enforced": False,
+        "pack_validity_days": PERIZIA_PACK_VALIDITY_DAYS,
+        "pack_grants": pack_grants,
+        "processed_invoice_ids": processed_invoice_ids[-50:],
+    }
+    return finalized
+
+
+def _build_legacy_perizia_credit_wallet(user_doc: Dict[str, Any], *, plan_id: Optional[str], is_master_admin: bool) -> Dict[str, Any]:
+    legacy_total = max(0, int(((user_doc.get("quota") or {}).get("perizia_scans_remaining", 0)) or 0))
+    normalized_plan_id = str(plan_id or "").strip().lower()
+    monthly_quota = _monthly_perizia_quota_for_plan(normalized_plan_id)
+    monthly_remaining = 0
+    extra_remaining = legacy_total
+    if is_master_admin:
+        monthly_remaining = legacy_total
+        extra_remaining = 0
+    elif normalized_plan_id in PAID_RECURRING_PLAN_IDS:
+        monthly_remaining = min(legacy_total, monthly_quota)
+        extra_remaining = max(0, legacy_total - monthly_remaining)
+
+    pack_grants: List[Dict[str, Any]] = []
+    if extra_remaining > 0:
+        pack_grants.append(
+            _make_pack_grant(
+                amount=extra_remaining,
+                amount_remaining=extra_remaining,
+                source="legacy_migration",
+                plan_code="starter",
+                reference_id=str(user_doc.get("user_id") or "").strip() or None,
+                granted_at=(
+                    user_doc.get("created_at").isoformat()
+                    if isinstance(user_doc.get("created_at"), datetime)
+                    else str(user_doc.get("created_at") or datetime.now(timezone.utc).isoformat())
+                ),
+            )
+        )
+
+    return _finalize_perizia_credit_wallet(
+        {
+            "monthly_remaining": monthly_remaining,
+            "extra_remaining": extra_remaining,
+            "monthly_plan_id": normalized_plan_id if normalized_plan_id in PAID_RECURRING_PLAN_IDS else None,
+            "pack_grants": pack_grants,
+            "processed_invoice_ids": [],
+        },
+        plan_id=normalized_plan_id,
+        is_master_admin=is_master_admin,
+    )
+
+
+def _normalize_perizia_credit_wallet(user_doc: Dict[str, Any], *, plan_id: Optional[str], is_master_admin: bool) -> Dict[str, Any]:
+    raw_wallet = user_doc.get("perizia_credits")
+    if isinstance(raw_wallet, dict):
+        return _finalize_perizia_credit_wallet(raw_wallet, plan_id=plan_id, is_master_admin=is_master_admin)
+    return _build_legacy_perizia_credit_wallet(user_doc, plan_id=plan_id, is_master_admin=is_master_admin)
+
+
+def _append_pack_grant(wallet: Dict[str, Any], *, amount: int, reference_id: str, plan_code: str = "starter") -> Dict[str, Any]:
+    updated_wallet = dict(wallet or {})
+    pack_grants = list(updated_wallet.get("pack_grants") or [])
+    granted_at = datetime.now(timezone.utc)
+    pack_grants.append(
+        _make_pack_grant(
+            amount=amount,
+            amount_remaining=amount,
+            source="stripe_checkout",
+            plan_code=plan_code,
+            reference_id=reference_id,
+            granted_at=granted_at.isoformat(),
+            expires_at=(granted_at + timedelta(days=PERIZIA_PACK_VALIDITY_DAYS)).isoformat(),
+        )
+    )
+    updated_wallet["pack_grants"] = pack_grants
+    return updated_wallet
+
+
+def _consume_extra_pack_grants(pack_grants: List[Dict[str, Any]], amount: int) -> List[Dict[str, Any]]:
+    remaining_to_consume = max(0, int(amount or 0))
+    ordered = sorted(
+        _normalize_pack_grants(pack_grants),
+        key=lambda item: (
+            item.get("expires_at") is None,
+            item.get("expires_at") or "",
+            item.get("granted_at") or "",
+        ),
+    )
+    updated: List[Dict[str, Any]] = []
+    for item in ordered:
+        next_item = dict(item)
+        available = max(0, int(next_item.get("amount_remaining", 0) or 0))
+        if remaining_to_consume > 0 and available > 0:
+            debit = min(available, remaining_to_consume)
+            next_item["amount_remaining"] = available - debit
+            remaining_to_consume -= debit
+        updated.append(next_item)
+    return updated
+
+
+async def _persist_perizia_credit_wallet(
+    *,
+    user_doc: Dict[str, Any],
+    wallet: Dict[str, Any],
+    plan_override: Optional[str] = None,
+) -> Tuple[Dict[str, int], Dict[str, Any]]:
+    finalized_wallet = _finalize_perizia_credit_wallet(
+        wallet,
+        plan_id=plan_override or user_doc.get("plan"),
+        is_master_admin=_is_master_admin_email(user_doc.get("email")),
+    )
+    updated_quota = _quota_snapshot(user_doc.get("quota"))
+    updated_quota["perizia_scans_remaining"] = finalized_wallet["total_available"]
+    update_fields: Dict[str, Any] = {
+        "quota": updated_quota,
+        "perizia_credits": finalized_wallet,
+    }
+    if plan_override is not None:
+        update_fields["plan"] = plan_override
+    await db.users.update_one({"user_id": user_doc["user_id"]}, {"$set": update_fields})
+    user_doc["quota"] = updated_quota.copy()
+    user_doc["perizia_credits"] = finalized_wallet
+    if plan_override is not None:
+        user_doc["plan"] = plan_override
+    return updated_quota, finalized_wallet
+
+
 def _normalize_account_state(user_doc: Dict[str, Any]) -> Dict[str, Any]:
     normalized_email = str(user_doc.get("email") or "").strip().lower()
     is_master_admin = _is_master_admin_email(normalized_email)
@@ -524,7 +772,7 @@ def _normalize_account_state(user_doc: Dict[str, Any]) -> Dict[str, Any]:
         valid_non_admin_plan = (
             isinstance(raw_plan, str)
             and raw_plan in SUBSCRIPTION_PLANS
-            and raw_plan != "enterprise"
+            and raw_plan not in {"enterprise", "starter"}
         )
         if valid_non_admin_plan and _is_complete_quota(raw_quota):
             plan = raw_plan
@@ -532,6 +780,9 @@ def _normalize_account_state(user_doc: Dict[str, Any]) -> Dict[str, Any]:
         else:
             plan = "free"
             quota = SUBSCRIPTION_PLANS["free"].quota.copy()
+
+    perizia_credits = _normalize_perizia_credit_wallet(user_doc, plan_id=plan, is_master_admin=is_master_admin)
+    quota["perizia_scans_remaining"] = perizia_credits["total_available"]
 
     feature_access = {
         "can_use_assistant": is_master_admin,
@@ -542,11 +793,13 @@ def _normalize_account_state(user_doc: Dict[str, Any]) -> Dict[str, Any]:
         "is_master_admin": is_master_admin,
         "plan": plan,
         "quota": quota,
+        "perizia_credits": perizia_credits,
         "feature_access": feature_access,
         "account": {
             "effective_plan": plan,
             "effective_quota": quota.copy(),
             "feature_access": feature_access.copy(),
+            "perizia_credits": perizia_credits,
         },
     }
 
@@ -558,6 +811,7 @@ async def _apply_normalized_account_state(user_doc: Dict[str, Any], persist: boo
     normalized_user_doc["is_master_admin"] = normalized["is_master_admin"]
     normalized_user_doc["plan"] = normalized["plan"]
     normalized_user_doc["quota"] = normalized["quota"].copy()
+    normalized_user_doc["perizia_credits"] = normalized["perizia_credits"]
 
     if persist and user_doc.get("user_id"):
         update_data: Dict[str, Any] = {}
@@ -567,6 +821,8 @@ async def _apply_normalized_account_state(user_doc: Dict[str, Any], persist: boo
             update_data["plan"] = normalized["plan"]
         if user_doc.get("quota") != normalized["quota"]:
             update_data["quota"] = normalized["quota"].copy()
+        if user_doc.get("perizia_credits") != normalized["perizia_credits"]:
+            update_data["perizia_credits"] = normalized["perizia_credits"]
         if update_data:
             await db.users.update_one({"user_id": user_doc["user_id"]}, {"$set": update_data})
 
@@ -586,6 +842,7 @@ def _build_user_response(user: User) -> Dict[str, Any]:
     user_response["is_master_admin"] = normalized["is_master_admin"]
     user_response["plan"] = normalized["plan"]
     user_response["quota"] = normalized["quota"].copy()
+    user_response["perizia_credits"] = normalized["perizia_credits"]
     user_response["feature_access"] = normalized["feature_access"].copy()
     user_response["account"] = normalized["account"]
     return user_response
@@ -6505,7 +6762,7 @@ def _billing_purchase_type_for_plan(plan: SubscriptionPlan) -> str:
 
 def _stripe_price_id_for_plan(plan_id: str) -> str:
     price_map = {
-        "starter": STRIPE_PRICE_STARTER,
+        "starter": STRIPE_PRICE_PACK_8 or STRIPE_PRICE_STARTER,
         "solo": STRIPE_PRICE_SOLO,
         "pro": STRIPE_PRICE_PRO,
     }
@@ -6518,11 +6775,15 @@ def _plan_id_for_stripe_price_id(price_id: Optional[str]) -> Optional[str]:
     normalized = str(price_id or "").strip()
     if not normalized:
         return None
-    reverse_map = {
-        STRIPE_PRICE_STARTER: "starter",
-        STRIPE_PRICE_SOLO: "solo",
-        STRIPE_PRICE_PRO: "pro",
-    }
+    reverse_map = {}
+    for candidate in {STRIPE_PRICE_PACK_8, STRIPE_PRICE_STARTER}:
+        candidate_id = str(candidate or "").strip()
+        if candidate_id:
+            reverse_map[candidate_id] = "starter"
+    if STRIPE_PRICE_SOLO:
+        reverse_map[STRIPE_PRICE_SOLO] = "solo"
+    if STRIPE_PRICE_PRO:
+        reverse_map[STRIPE_PRICE_PRO] = "pro"
     return reverse_map.get(normalized)
 
 def _stripe_checkout_metadata(*, user_id: str, plan_id: str, billing_reason: str) -> Dict[str, str]:
@@ -6661,6 +6922,13 @@ async def _grant_starter_checkout_if_needed(
     }
 
     if existing_entry:
+        logger.info(
+            "Starter grant blocked by idempotency: session_id=%s user_id=%s billing_record_id=%s existing_ledger_id=%s",
+            session_id,
+            user_id,
+            (billing_record or {}).get("billing_record_id"),
+            existing_entry.get("ledger_id"),
+        )
         if billing_record and billing_record.get("status") != "paid":
             await _update_billing_record(
                 billing_record["billing_record_id"],
@@ -6674,14 +6942,34 @@ async def _grant_starter_checkout_if_needed(
 
     user_doc = await _ensure_opening_balance_baseline_for_user_id(user_id)
     if not user_doc:
+        logger.warning(
+            "Starter grant skipped because user was not found: session_id=%s user_id=%s billing_record_id=%s",
+            session_id,
+            user_id,
+            (billing_record or {}).get("billing_record_id"),
+        )
         return False
     before_quota = _quota_snapshot(user_doc.get("quota"))
-    after_quota = before_quota.copy()
-    after_quota["perizia_scans_remaining"] += SUBSCRIPTION_PLANS["starter"].quota["perizia_scans_remaining"]
+    before_wallet = _normalize_perizia_credit_wallet(
+        user_doc,
+        plan_id=user_doc.get("plan"),
+        is_master_admin=_is_master_admin_email(user_doc.get("email")),
+    )
+    after_wallet = _append_pack_grant(
+        before_wallet,
+        amount=SUBSCRIPTION_PLANS["starter"].quota["perizia_scans_remaining"],
+        reference_id=session_id,
+        plan_code="starter",
+    )
+    after_quota, finalized_wallet = await _persist_perizia_credit_wallet(user_doc=user_doc, wallet=after_wallet)
 
-    await db.users.update_one(
-        {"user_id": user_id},
-        {"$set": {"quota": after_quota}},
+    logger.info(
+        "Executing Starter grant: session_id=%s user_id=%s billing_record_id=%s before_total=%s after_total=%s",
+        session_id,
+        user_id,
+        (billing_record or {}).get("billing_record_id"),
+        before_wallet.get("total_available"),
+        finalized_wallet.get("total_available"),
     )
     await _record_quota_change_entries(
         user_doc=user_doc,
@@ -6696,6 +6984,8 @@ async def _grant_starter_checkout_if_needed(
             "billing_reason": "starter_checkout_paid",
             "stripe_checkout_session_id": session_id,
             "stripe_payment_intent_id": payment_reference,
+            "perizia_credit_wallet_before": before_wallet,
+            "perizia_credit_wallet_after": finalized_wallet,
         },
     )
 
@@ -6705,7 +6995,11 @@ async def _grant_starter_checkout_if_needed(
             status="paid",
             payment_reference=payment_reference,
             invoice_status="ready",
-            metadata_updates=metadata_updates,
+            metadata_updates={
+                **metadata_updates,
+                "entitlement_granted": True,
+                "perizia_credit_wallet_after": finalized_wallet,
+            },
             paid=True,
         )
     return True
@@ -6811,13 +7105,9 @@ async def _grant_subscription_invoice_if_needed(
     if not invoice_id or plan_id not in {"solo", "pro"}:
         return False
 
-    existing_entry = await db.credit_ledger.find_one(
-        {"entry_type": "subscription_reset", "reference_type": "stripe_invoice", "reference_id": invoice_id},
-        {"_id": 0, "ledger_id": 1},
-    )
     payment_reference = str(invoice.get("payment_intent") or invoice_id)
     plan = SUBSCRIPTION_PLANS[plan_id]
-    await _upsert_subscription_invoice_billing_record(
+    billing_record = await _upsert_subscription_invoice_billing_record(
         user_id=user_id,
         plan_id=plan_id,
         plan=plan,
@@ -6826,18 +7116,30 @@ async def _grant_subscription_invoice_if_needed(
         stripe_customer_id=stripe_customer_id,
         stripe_subscription_id=stripe_subscription_id,
     )
-    if existing_entry:
-        return False
 
     user_doc = await _ensure_opening_balance_baseline_for_user_id(user_id)
     if not user_doc:
         return False
+    before_wallet = _normalize_perizia_credit_wallet(
+        user_doc,
+        plan_id=user_doc.get("plan"),
+        is_master_admin=_is_master_admin_email(user_doc.get("email")),
+    )
+    if invoice_id in set(before_wallet.get("processed_invoice_ids") or []):
+        return False
     before_quota = _quota_snapshot(user_doc.get("quota"))
-    after_quota = plan.quota.copy()
-
-    await db.users.update_one(
-        {"user_id": user_id},
-        {"$set": {"plan": plan_id, "quota": after_quota}},
+    previous_plan = user_doc.get("plan")
+    after_wallet = dict(before_wallet)
+    after_wallet["monthly_remaining"] = _monthly_perizia_quota_for_plan(plan_id)
+    after_wallet["monthly_plan_id"] = plan_id
+    after_wallet["monthly_refreshed_at"] = _now_iso()
+    processed_invoice_ids = list(after_wallet.get("processed_invoice_ids") or [])
+    processed_invoice_ids.append(invoice_id)
+    after_wallet["processed_invoice_ids"] = processed_invoice_ids
+    after_quota, finalized_wallet = await _persist_perizia_credit_wallet(
+        user_doc=user_doc,
+        wallet=after_wallet,
+        plan_override=plan_id,
     )
     billing_reason = str(invoice.get("billing_reason") or "subscription_cycle").strip()
     description = (
@@ -6859,34 +7161,222 @@ async def _grant_subscription_invoice_if_needed(
             "stripe_invoice_id": invoice_id,
             "stripe_customer_id": stripe_customer_id,
             "stripe_subscription_id": stripe_subscription_id,
-            "old_plan": user_doc.get("plan"),
+            "old_plan": previous_plan,
             "new_plan": plan_id,
+            "perizia_credit_wallet_before": before_wallet,
+            "perizia_credit_wallet_after": finalized_wallet,
         },
     )
+    if billing_record:
+        await _update_billing_record(
+            billing_record["billing_record_id"],
+            metadata_updates={
+                "entitlement_granted": True,
+                "perizia_credit_wallet_after": finalized_wallet,
+            },
+        )
     return True
+
+def _stripe_object_get(obj: Any, key: str) -> Any:
+    if obj is None:
+        return None
+    if isinstance(obj, dict):
+        return obj.get(key)
+    getter = getattr(obj, "get", None)
+    if callable(getter):
+        try:
+            return getter(key)
+        except Exception:
+            pass
+    return getattr(obj, key, None)
+
+
+def _checkout_session_result(
+    *,
+    stripe_status: Optional[str],
+    payment_status: Optional[str],
+    billing_record: Optional[Dict[str, Any]],
+) -> str:
+    billing_status = str((billing_record or {}).get("status") or "").strip().lower()
+    invoice_status = str((billing_record or {}).get("invoice_status") or "").strip().lower()
+    metadata = dict((billing_record or {}).get("metadata") or {})
+    if metadata.get("entitlement_granted"):
+        return "success"
+    if metadata.get("manual_review_required"):
+        return "manual_review"
+    if billing_status in {"failed", "cancelled"} or invoice_status == "failed":
+        return "failed"
+    if str(stripe_status or "").strip().lower() == "expired":
+        return "expired"
+    if billing_status == "paid":
+        return "success"
+    if str(payment_status or "").strip().lower() == "unpaid":
+        return "failed"
+    return "processing"
+
+def _stripe_object_metadata(obj: Any) -> Dict[str, Any]:
+    metadata = _stripe_object_get(obj, "metadata") or {}
+    if isinstance(metadata, dict):
+        return metadata
+    try:
+        return dict(metadata)
+    except Exception:
+        return {}
+
+def _stripe_invoice_line_price_id(line: Dict[str, Any]) -> Optional[str]:
+    price_id = str((((line or {}).get("price") or {}).get("id")) or "").strip()
+    if price_id:
+        return price_id
+    plan_id = str((((line or {}).get("plan") or {}).get("id")) or "").strip()
+    if plan_id:
+        return plan_id
+    pricing_price_id = str(
+        ((((line or {}).get("pricing") or {}).get("price_details") or {}).get("price")) or ""
+    ).strip()
+    return pricing_price_id or None
+
+async def _payment_transaction_for_subscription_context(
+    *,
+    subscription_id: Optional[str] = None,
+    customer_id: Optional[str] = None,
+) -> Optional[Dict[str, Any]]:
+    if subscription_id:
+        transaction = await db.payment_transactions.find_one(
+            {"stripe_subscription_id": subscription_id},
+            {"_id": 0, "user_id": 1, "plan_id": 1, "session_id": 1},
+            sort=[("created_at", -1)],
+        )
+        if transaction:
+            return transaction
+    if customer_id:
+        return await db.payment_transactions.find_one(
+            {"stripe_customer_id": customer_id},
+            {"_id": 0, "user_id": 1, "plan_id": 1, "session_id": 1},
+            sort=[("created_at", -1)],
+        )
+    return None
+
+async def _resolve_starter_checkout_context(
+    *,
+    session_id: str,
+    metadata_user_id: Optional[str],
+    client_reference_id: Optional[str],
+) -> Tuple[Optional[str], Optional[Dict[str, Any]], Optional[Dict[str, Any]], Dict[str, Optional[str]]]:
+    payment_transaction = await _payment_transaction_by_session(session_id)
+    billing_record = await _find_billing_record_for_checkout(session_id)
+    candidates = {
+        "metadata_user_id": str(metadata_user_id or "").strip() or None,
+        "client_reference_id": str(client_reference_id or "").strip() or None,
+        "payment_transaction_user_id": str((payment_transaction or {}).get("user_id") or "").strip() or None,
+        "billing_record_user_id": str((billing_record or {}).get("user_id") or "").strip() or None,
+    }
+    distinct_user_ids = {value for value in candidates.values() if value}
+    if len(distinct_user_ids) > 1:
+        logger.warning(
+            "Starter checkout user resolution conflict: session_id=%s candidates=%s billing_record_id=%s payment_transaction_id=%s",
+            session_id,
+            candidates,
+            (billing_record or {}).get("billing_record_id"),
+            (payment_transaction or {}).get("transaction_id"),
+        )
+        return None, billing_record, payment_transaction, candidates
+    resolved_user_id = next(iter(distinct_user_ids), None)
+    return resolved_user_id, billing_record, payment_transaction, candidates
+
+async def _starter_checkout_payment_confirmed(checkout_session: Dict[str, Any], stripe_module: Any) -> bool:
+    payment_status = str(checkout_session.get("payment_status") or "").strip()
+    payment_intent_id = str(checkout_session.get("payment_intent") or "").strip()
+    if payment_status != "paid" or not payment_intent_id:
+        logger.info(
+            "Starter checkout payment not confirmed from session payload: session_id=%s payment_status=%s payment_intent=%s",
+            str(checkout_session.get("id") or "").strip(),
+            payment_status,
+            payment_intent_id or None,
+        )
+        return False
+    try:
+        payment_intent = stripe_module.PaymentIntent.retrieve(payment_intent_id)
+    except Exception as exc:
+        logger.warning(f"Stripe PaymentIntent lookup failed for starter checkout {payment_intent_id}: {exc}")
+        return False
+    payment_intent_status = str(_stripe_object_get(payment_intent, "status") or "").strip()
+    logger.info(
+        "Starter PaymentIntent retrieved: session_id=%s payment_intent=%s status=%s",
+        str(checkout_session.get("id") or "").strip(),
+        payment_intent_id,
+        payment_intent_status or None,
+    )
+    return payment_intent_status == "succeeded"
 
 async def _resolve_invoice_context(invoice: Dict[str, Any], stripe_module: Any) -> Tuple[Optional[str], Optional[str], Optional[str]]:
     metadata = dict(invoice.get("metadata") or {})
-    user_id = str(metadata.get("app_user_id") or "").strip() or None
-    plan_id = str(metadata.get("plan_code") or "").strip() or None
+    subscription_details = invoice.get("subscription_details") or {}
+    parent_details = ((invoice.get("parent") or {}).get("subscription_details")) or {}
+    merged_metadata = {}
+    merged_metadata.update(_stripe_object_metadata(parent_details))
+    merged_metadata.update(_stripe_object_metadata(subscription_details))
+    merged_metadata.update(metadata)
+    metadata = merged_metadata
     subscription_id = str(invoice.get("subscription") or "").strip() or None
+    customer_id = str(invoice.get("customer") or "").strip() or None
+    user_candidates: Dict[str, Optional[str]] = {
+        "invoice_metadata_user_id": str(metadata.get("app_user_id") or "").strip() or None,
+    }
+    plan_candidates: Dict[str, Optional[str]] = {
+        "invoice_metadata_plan_id": str(metadata.get("plan_code") or "").strip().lower() or None,
+    }
 
-    if (not user_id or not plan_id) and subscription_id:
+    if subscription_id:
         try:
             subscription = stripe_module.Subscription.retrieve(subscription_id)
-            subscription_metadata = dict(getattr(subscription, "metadata", {}) or {})
-            user_id = user_id or str(subscription_metadata.get("app_user_id") or "").strip() or None
-            plan_id = plan_id or str(subscription_metadata.get("plan_code") or "").strip() or None
+            subscription_metadata = _stripe_object_metadata(subscription)
+            user_candidates["subscription_metadata_user_id"] = (
+                str(subscription_metadata.get("app_user_id") or "").strip() or None
+            )
+            plan_candidates["subscription_metadata_plan_id"] = (
+                str(subscription_metadata.get("plan_code") or "").strip().lower() or None
+            )
+            items = _stripe_object_get(subscription, "items") or {}
+            for item in (items.get("data") or []):
+                price_id = str((((item or {}).get("price") or {}).get("id")) or "").strip()
+                plan_id = _plan_id_for_stripe_price_id(price_id)
+                if plan_id:
+                    plan_candidates["subscription_item_plan_id"] = plan_id
+                    break
         except Exception as exc:
             logger.warning(f"Stripe subscription lookup failed for invoice context: {exc}")
 
-    if not plan_id:
-        lines = invoice.get("lines", {}).get("data", []) or []
-        for line in lines:
-            price_id = str(((line or {}).get("price") or {}).get("id") or "").strip()
-            plan_id = _plan_id_for_stripe_price_id(price_id)
-            if plan_id:
-                break
+    transaction = await _payment_transaction_for_subscription_context(
+        subscription_id=subscription_id,
+        customer_id=customer_id,
+    )
+    if transaction:
+        user_candidates["payment_transaction_user_id"] = str(transaction.get("user_id") or "").strip() or None
+        plan_candidates["payment_transaction_plan_id"] = str(transaction.get("plan_id") or "").strip().lower() or None
+
+    lines = invoice.get("lines", {}).get("data", []) or []
+    for line in lines:
+        price_id = _stripe_invoice_line_price_id(line) or ""
+        plan_id = _plan_id_for_stripe_price_id(price_id)
+        if plan_id:
+            plan_candidates["invoice_line_plan_id"] = plan_id
+            break
+
+    distinct_user_ids = {value for value in user_candidates.values() if value}
+    distinct_plan_ids = {value for value in plan_candidates.values() if value}
+    if len(distinct_user_ids) > 1 or len(distinct_plan_ids) > 1:
+        logger.warning(
+            "Invoice context resolution conflict: invoice_id=%s subscription_id=%s customer_id=%s user_candidates=%s plan_candidates=%s",
+            str(invoice.get("id") or "").strip() or None,
+            subscription_id,
+            customer_id,
+            user_candidates,
+            plan_candidates,
+        )
+        return None, None, subscription_id
+
+    user_id = next(iter(distinct_user_ids), None)
+    plan_id = next(iter(distinct_plan_ids), None)
     return user_id, plan_id, subscription_id
 
 async def _insert_credit_ledger_entry(
@@ -7073,6 +7563,67 @@ async def _apply_quota_debit_with_ledger(
     user.quota[field] = balance_after
     return True
 
+
+async def _apply_perizia_credit_debit_with_ledger(
+    user: User,
+    *,
+    amount: int,
+    entry_type: str,
+    reference_type: str,
+    reference_id: str,
+    description_it: str,
+    metadata: Optional[Dict[str, Any]] = None,
+) -> bool:
+    if user.is_master_admin:
+        return False
+    debit_amount = max(0, int(amount or 0))
+    if debit_amount <= 0:
+        return False
+
+    user_doc = await _ensure_opening_balance_baseline_for_user_id(user.user_id)
+    if not user_doc:
+        return False
+    before_wallet = _normalize_perizia_credit_wallet(
+        user_doc,
+        plan_id=user_doc.get("plan"),
+        is_master_admin=_is_master_admin_email(user_doc.get("email")),
+    )
+    if before_wallet["total_available"] < debit_amount:
+        return False
+
+    monthly_before = int(before_wallet.get("monthly_remaining", 0) or 0)
+    debit_from_monthly = min(monthly_before, debit_amount)
+    debit_from_extra = debit_amount - debit_from_monthly
+
+    after_wallet = dict(before_wallet)
+    after_wallet["monthly_remaining"] = monthly_before - debit_from_monthly
+    after_wallet["extra_remaining"] = max(0, int(before_wallet.get("extra_remaining", 0) or 0) - debit_from_extra)
+    after_wallet["pack_grants"] = _consume_extra_pack_grants(
+        list(before_wallet.get("pack_grants") or []),
+        debit_from_extra,
+    )
+
+    before_quota = _quota_snapshot(user_doc.get("quota"))
+    after_quota, finalized_wallet = await _persist_perizia_credit_wallet(user_doc=user_doc, wallet=after_wallet)
+    await _record_quota_change_entries(
+        user_doc=user_doc,
+        before_quota=before_quota,
+        after_quota=after_quota,
+        entry_type=entry_type,
+        reference_type=reference_type,
+        reference_id=reference_id,
+        description_it=description_it,
+        metadata={
+            **(metadata or {}),
+            "perizia_credit_wallet_before": before_wallet,
+            "perizia_credit_wallet_after": finalized_wallet,
+            "debit_from_monthly": debit_from_monthly,
+            "debit_from_extra": debit_from_extra,
+        },
+    )
+    user.quota["perizia_scans_remaining"] = finalized_wallet["total_available"]
+    return True
+
 async def _create_billing_record(
     *,
     user_doc: Dict[str, Any],
@@ -7257,6 +7808,15 @@ async def _write_admin_audit(
         logger.warning(f"Admin audit log insert failed: {e}")
 
 async def _decrement_quota_if_applicable(user: User, field: str, amount: int = 1) -> bool:
+    if field == "perizia_scans_remaining":
+        return await _apply_perizia_credit_debit_with_ledger(
+            user,
+            amount=amount,
+            entry_type="system_correction",
+            reference_type="legacy_helper",
+            reference_id=f"{user.user_id}:{field}",
+            description_it="Addebito crediti registrato dal helper legacy",
+        )
     return await _apply_quota_debit_with_ledger(
         user,
         field=field,
@@ -7416,6 +7976,14 @@ async def create_checkout(request: Request):
     plan = SUBSCRIPTION_PLANS[plan_id]
     if plan.plan_type not in {"one_time", "subscription"}:
         raise HTTPException(status_code=400, detail="Plan not available for checkout")
+    if plan.plan_type == "subscription" and user.plan in {"solo", "pro"}:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "You already have an active monthly plan. Monthly plan changes are not handled through this checkout flow yet. "
+                "Need more capacity now? Buy Credit Pack 8."
+            ),
+        )
 
     if not STRIPE_SECRET_KEY:
         raise HTTPException(status_code=503, detail="Stripe not configured")
@@ -7434,6 +8002,7 @@ async def create_checkout(request: Request):
         "success_url": success_url,
         "cancel_url": cancel_url,
         "line_items": [{"price": price_id, "quantity": 1}],
+        "payment_method_types": ["card"],
         "customer_email": user.email,
         "client_reference_id": user.user_id,
         "metadata": metadata,
@@ -7502,8 +8071,16 @@ async def get_checkout_status(session_id: str, request: Request):
         "mode": getattr(status, "mode", None),
         "plan_id": (txn or {}).get("plan_id"),
         "transaction_status": (txn or {}).get("status"),
+        "purchase_type": (billing_record or {}).get("purchase_type"),
         "billing_status": (billing_record or {}).get("status"),
         "invoice_status": (billing_record or {}).get("invoice_status"),
+        "entitlement_granted": bool(((billing_record or {}).get("metadata") or {}).get("entitlement_granted")),
+        "manual_review_required": bool(((billing_record or {}).get("metadata") or {}).get("manual_review_required")),
+        "session_result": _checkout_session_result(
+            stripe_status=status.status,
+            payment_status=status.payment_status,
+            billing_record=billing_record,
+        ),
     }
 
 @api_router.post("/webhook/stripe")
@@ -7532,42 +8109,112 @@ async def stripe_webhook(request: Request):
             payment_status = str(data_object.get("payment_status") or "").strip()
             metadata = data_object.get("metadata", {}) or {}
             session_id = str(data_object.get("id") or "").strip()
-            user_id = str(metadata.get("app_user_id") or "").strip()
+            metadata_user_id = str(metadata.get("app_user_id") or "").strip()
             plan_id = str(metadata.get("plan_code") or "").strip()
             payment_reference = str(data_object.get("payment_intent") or session_id)
             stripe_customer_id = str(data_object.get("customer") or "").strip() or None
             stripe_subscription_id = str(data_object.get("subscription") or "").strip() or None
+            client_reference_id = str(data_object.get("client_reference_id") or "").strip() or None
+            resolved_user_id = None
+            billing_record = None
+            payment_transaction = None
+            starter_user_candidates: Dict[str, Optional[str]] = {}
+            logger.info(
+                "Stripe checkout.session.completed received: session_id=%s payment_status=%s payment_intent=%s metadata_app_user_id=%s plan_code=%s client_reference_id=%s",
+                session_id,
+                payment_status,
+                payment_reference,
+                metadata_user_id or None,
+                plan_id or None,
+                client_reference_id,
+            )
+            starter_paid = False
+            if plan_id == "starter":
+                starter_paid = await _starter_checkout_payment_confirmed(data_object, stripe)
+                (
+                    resolved_user_id,
+                    billing_record,
+                    payment_transaction,
+                    starter_user_candidates,
+                ) = await _resolve_starter_checkout_context(
+                    session_id=session_id,
+                    metadata_user_id=metadata_user_id,
+                    client_reference_id=client_reference_id,
+                )
+                logger.info(
+                    "Starter checkout user resolution: session_id=%s resolved_user_id=%s candidates=%s billing_record_id=%s payment_transaction_id=%s",
+                    session_id,
+                    resolved_user_id,
+                    starter_user_candidates,
+                    (billing_record or {}).get("billing_record_id"),
+                    (payment_transaction or {}).get("transaction_id"),
+                )
 
             if session_id:
+                transaction_status = str(data_object.get("status") or "complete")
+                local_payment_status = payment_status or "complete"
+                if plan_id == "starter" and not starter_paid:
+                    transaction_status = "failed"
+                    local_payment_status = "failed"
                 await _set_payment_transaction_state(
                     session_id,
-                    status=str(data_object.get("status") or "complete"),
-                    payment_status=payment_status or "complete",
+                    status=transaction_status,
+                    payment_status=local_payment_status,
                     stripe_customer_id=stripe_customer_id,
                     stripe_subscription_id=stripe_subscription_id,
                     stripe_payment_intent_id=payment_reference,
                 )
-                billing_record = await _find_billing_record_for_checkout(session_id, user_id or None)
+                if not billing_record:
+                    billing_record = await _find_billing_record_for_checkout(session_id, resolved_user_id or metadata_user_id or None)
                 if billing_record:
+                    metadata_updates = {
+                        "stripe_customer_id": stripe_customer_id,
+                        "stripe_subscription_id": stripe_subscription_id,
+                        "plan_code": plan_id,
+                        "stripe_checkout_status": data_object.get("status"),
+                        "stripe_payment_status": payment_status,
+                        "billing_reason": "checkout_session_completed",
+                    }
+                    if plan_id == "starter" and starter_paid and not resolved_user_id:
+                        metadata_updates["manual_review_required"] = True
+                    if plan_id == "starter" and not starter_paid:
+                        metadata_updates["entitlement_granted"] = False
                     await _update_billing_record(
                         billing_record["billing_record_id"],
-                        status="paid" if plan_id == "starter" and payment_status == "paid" else None,
-                        payment_reference=payment_reference if plan_id == "starter" and payment_status == "paid" else None,
-                        invoice_status="ready" if plan_id == "starter" and payment_status == "paid" else None,
-                        metadata_updates={
-                            "stripe_customer_id": stripe_customer_id,
-                            "stripe_subscription_id": stripe_subscription_id,
-                            "plan_code": plan_id,
-                            "stripe_checkout_status": data_object.get("status"),
-                            "stripe_payment_status": payment_status,
-                            "billing_reason": "checkout_session_completed",
-                        },
-                        paid=bool(plan_id == "starter" and payment_status == "paid"),
+                        status=(
+                            "paid"
+                            if starter_paid and resolved_user_id
+                            else "failed" if plan_id == "starter" and not starter_paid else None
+                        ),
+                        payment_reference=payment_reference if starter_paid and resolved_user_id else None,
+                        invoice_status=(
+                            "ready"
+                            if starter_paid and resolved_user_id
+                            else "failed" if plan_id == "starter" and not starter_paid else None
+                        ),
+                        metadata_updates=metadata_updates,
+                        paid=starter_paid and bool(resolved_user_id),
                     )
 
-            if plan_id == "starter" and payment_status == "paid" and user_id and session_id:
+            if plan_id == "starter" and not starter_paid:
+                logger.info(
+                    "Starter grant skipped because payment was not confirmed: session_id=%s resolved_user_id=%s billing_record_id=%s payment_transaction_id=%s",
+                    session_id,
+                    resolved_user_id or metadata_user_id or None,
+                    (billing_record or {}).get("billing_record_id"),
+                    (payment_transaction or {}).get("transaction_id"),
+                )
+            if plan_id == "starter" and starter_paid and not resolved_user_id:
+                logger.warning(
+                    "Starter grant skipped because no safe user resolution was possible: session_id=%s candidates=%s billing_record_id=%s payment_transaction_id=%s",
+                    session_id,
+                    starter_user_candidates,
+                    (billing_record or {}).get("billing_record_id"),
+                    (payment_transaction or {}).get("transaction_id"),
+                )
+            if starter_paid and resolved_user_id and session_id:
                 await _grant_starter_checkout_if_needed(
-                    user_id=user_id,
+                    user_id=resolved_user_id,
                     session_id=session_id,
                     payment_reference=payment_reference,
                     checkout_payload=data_object,
@@ -10727,9 +11374,8 @@ async def analyze_perizia(request: Request, file: UploadFile = File(...)):
         logger.info(f"[{request_id}] persist_done analysis_id={analysis_id}")
 
         # Decrement exact perizia credits band only after successful persistence.
-        await _apply_quota_debit_with_ledger(
+        await _apply_perizia_credit_debit_with_ledger(
             user,
-            field="perizia_scans_remaining",
             amount=required_perizia_credits,
             entry_type="perizia_upload",
             reference_type="analysis",

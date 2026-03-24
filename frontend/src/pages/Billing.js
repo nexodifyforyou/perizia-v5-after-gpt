@@ -1,11 +1,11 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { Sidebar } from './Dashboard';
 import { Button } from '../components/ui/button';
-import { 
-  CreditCard, 
-  CheckCircle2, 
+import {
+  CreditCard,
+  CheckCircle2,
   Loader2,
   AlertCircle,
   Crown
@@ -15,6 +15,7 @@ import { toast } from 'sonner';
 
 const API_URL = process.env.REACT_APP_BACKEND_URL;
 const LEDGER_PAGE_SIZE = 10;
+const ACTIVE_CHECKOUT_STORAGE_KEY = 'periziascan.active_checkout_session';
 const INTERNAL_PLAN_DETAILS = {
   name_it: 'Enterprise',
   plan_type_label_it: 'Interno',
@@ -57,6 +58,60 @@ const formatLedgerDate = (value) => {
 const formatQuotaLabel = (field) => QUOTA_LABELS[field] || 'Credito';
 const formatEntryTypeLabel = (type) => ENTRY_TYPE_LABELS[type] || 'Movimento';
 const formatReferenceLabel = (type) => REFERENCE_TYPE_LABELS[type] || null;
+
+const readTrackedCheckoutSession = () => {
+  try {
+    const raw = window.sessionStorage.getItem(ACTIVE_CHECKOUT_STORAGE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === 'object' ? parsed : null;
+  } catch (_error) {
+    return null;
+  }
+};
+
+const writeTrackedCheckoutSession = (payload) => {
+  try {
+    window.sessionStorage.setItem(ACTIVE_CHECKOUT_STORAGE_KEY, JSON.stringify(payload));
+  } catch (_error) {
+    // Ignore sessionStorage errors.
+  }
+};
+
+const clearTrackedCheckoutSession = () => {
+  try {
+    window.sessionStorage.removeItem(ACTIVE_CHECKOUT_STORAGE_KEY);
+  } catch (_error) {
+    // Ignore sessionStorage errors.
+  }
+};
+
+const FEEDBACK_STYLES = {
+  success: {
+    wrapper: 'border-emerald-500/30 bg-emerald-500/10',
+    icon: 'text-emerald-300',
+    title: 'text-zinc-100',
+    body: 'text-emerald-100/80',
+  },
+  error: {
+    wrapper: 'border-red-500/30 bg-red-500/10',
+    icon: 'text-red-300',
+    title: 'text-zinc-100',
+    body: 'text-red-100/80',
+  },
+  info: {
+    wrapper: 'border-zinc-700 bg-zinc-900/70',
+    icon: 'text-zinc-300',
+    title: 'text-zinc-100',
+    body: 'text-zinc-400',
+  },
+  warning: {
+    wrapper: 'border-amber-500/30 bg-amber-500/10',
+    icon: 'text-amber-200',
+    title: 'text-zinc-100',
+    body: 'text-amber-100/80',
+  },
+};
 
 const LedgerRow = ({ entry }) => {
   const isCredit = entry.direction === 'credit';
@@ -133,11 +188,15 @@ const Billing = () => {
   const [loading, setLoading] = useState(true);
   const [checkoutLoadingPlanId, setCheckoutLoadingPlanId] = useState('');
   const [checkingPayment, setCheckingPayment] = useState(false);
+  const [checkoutFeedback, setCheckoutFeedback] = useState(null);
   const [ledgerEntries, setLedgerEntries] = useState([]);
   const [ledgerTotal, setLedgerTotal] = useState(0);
   const [ledgerLoading, setLedgerLoading] = useState(true);
   const [ledgerLoadingMore, setLedgerLoadingMore] = useState(false);
   const [ledgerError, setLedgerError] = useState('');
+  const pollTimeoutRef = useRef(null);
+  const activeCheckoutSessionRef = useRef('');
+  const checkoutRequestRef = useRef(0);
   const creditBands = [
     '1-20 pagine = 4 crediti',
     '21-40 pagine = 7 crediti',
@@ -146,29 +205,75 @@ const Billing = () => {
     '81-100 pagine = 16 crediti'
   ];
 
+  const clearCheckoutPoll = () => {
+    if (pollTimeoutRef.current) {
+      window.clearTimeout(pollTimeoutRef.current);
+      pollTimeoutRef.current = null;
+    }
+  };
+
+  const clearCheckoutUrlState = () => {
+    const url = new URL(window.location.href);
+    url.searchParams.delete('checkout');
+    url.searchParams.delete('session_id');
+    window.history.replaceState({}, '', `${url.pathname}${url.search}${url.hash}`);
+  };
+
   useEffect(() => {
     fetchPlans();
     fetchLedger({ reset: true });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
+  useEffect(() => {
     const checkoutState = searchParams.get('checkout');
     const sessionId = searchParams.get('session_id');
-    if (checkoutState === 'cancel') {
-      toast.info('Checkout annullato. Nessun addebito effettuato.');
-      window.history.replaceState({}, '', window.location.pathname);
-      return;
-    }
+    const trackedSession = readTrackedCheckoutSession();
+    const trackedSessionId = trackedSession?.sessionId || '';
+
+    clearCheckoutPoll();
+    setCheckingPayment(false);
+    setCheckoutFeedback(null);
+    activeCheckoutSessionRef.current = sessionId || '';
+    checkoutRequestRef.current += 1;
+
     if (sessionId) {
-      checkPaymentStatus(sessionId);
+      if (trackedSessionId && trackedSessionId !== sessionId) {
+        activeCheckoutSessionRef.current = '';
+        clearCheckoutUrlState();
+        return undefined;
+      }
+      checkPaymentStatus(sessionId, 0, checkoutRequestRef.current);
+      return undefined;
     }
+
+    if (checkoutState === 'cancel') {
+      const feedback = {
+        type: 'info',
+        title: 'Checkout annullato',
+        body: 'Questo tentativo e stato annullato. Nessun addebito effettuato e nessun credito aggiunto.',
+      };
+      setCheckoutFeedback(feedback);
+      toast.info(feedback.title);
+      clearTrackedCheckoutSession();
+      clearCheckoutUrlState();
+    }
+
+    return () => {
+      clearCheckoutPoll();
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [searchParams]);
+
+  useEffect(() => () => clearCheckoutPoll(), []);
 
   const fetchPlans = async () => {
     try {
       const response = await axios.get(`${API_URL}/api/plans`);
-      setPlans(response.data.plans);
+      setPlans(response.data.plans || []);
     } catch (error) {
       toast.error('Errore nel caricamento dei piani');
+      setPlans([]);
     } finally {
       setLoading(false);
     }
@@ -212,13 +317,51 @@ const Billing = () => {
     }
   };
 
-  const checkPaymentStatus = async (sessionId, attempts = 0) => {
-    const maxAttempts = 5;
+  const handleCheckoutResolution = async ({ result, planId, purchaseType }) => {
+    const isPack = purchaseType === 'pack' || planId === 'starter';
+
+    if (result === 'success') {
+      const feedback = {
+        type: 'success',
+        title: 'Pagamento confermato',
+        body: isPack
+          ? 'I crediti extra di questa sessione sono stati aggiunti correttamente.'
+          : 'Il piano e i crediti di questa sessione sono stati aggiornati correttamente.',
+      };
+      setCheckoutFeedback(feedback);
+      toast.success(feedback.title);
+      await refreshUser();
+      await fetchLedger({ reset: true });
+      return;
+    }
+
+    if (result === 'failed' || result === 'expired') {
+      const feedback = {
+        type: 'error',
+        title: result === 'expired' ? 'Sessione di pagamento scaduta' : 'Pagamento non completato',
+        body: 'Questa sessione non ha prodotto variazioni ai crediti o al piano.',
+      };
+      setCheckoutFeedback(feedback);
+      toast.error(feedback.title);
+      return;
+    }
+
+    if (result === 'manual_review') {
+      const feedback = {
+        type: 'warning',
+        title: 'Pagamento in verifica manuale',
+        body: 'Il pagamento e stato ricevuto ma richiede ancora una verifica manuale prima dell aggiornamento dei crediti.',
+      };
+      setCheckoutFeedback(feedback);
+      toast.warning(feedback.title);
+    }
+  };
+
+  const checkPaymentStatus = async (sessionId, attempts = 0, requestId = checkoutRequestRef.current) => {
+    const maxAttempts = 6;
     const pollInterval = 2000;
 
-    if (attempts >= maxAttempts) {
-      toast.info('Verifica lo stato del pagamento nel tuo account');
-      setCheckingPayment(false);
+    if (!sessionId || activeCheckoutSessionRef.current !== sessionId || checkoutRequestRef.current !== requestId) {
       return;
     }
 
@@ -229,26 +372,60 @@ const Billing = () => {
         withCredentials: true
       });
 
-      if (response.data.billing_status === 'paid') {
-        toast.success('Pagamento confermato. Account e crediti aggiornati.');
-        await refreshUser();
-        await fetchLedger({ reset: true });
-        setCheckingPayment(false);
-        window.history.replaceState({}, '', window.location.pathname);
-        return;
-      } else if (response.data.status === 'expired') {
-        toast.error('Sessione di pagamento scaduta. Riprova.');
-        setCheckingPayment(false);
-        window.history.replaceState({}, '', window.location.pathname);
+      if (activeCheckoutSessionRef.current !== sessionId || checkoutRequestRef.current !== requestId) {
         return;
       }
 
-      // Continue polling
-      setTimeout(() => checkPaymentStatus(sessionId, attempts + 1), pollInterval);
+      const payload = response.data || {};
+      const sessionResult = payload.session_result;
+
+      if (['success', 'failed', 'expired', 'manual_review'].includes(sessionResult)) {
+        await handleCheckoutResolution({
+          result: sessionResult,
+          planId: payload.plan_id,
+          purchaseType: payload.purchase_type,
+        });
+        setCheckingPayment(false);
+        activeCheckoutSessionRef.current = '';
+        clearTrackedCheckoutSession();
+        clearCheckoutUrlState();
+        return;
+      }
+
+      if (attempts >= maxAttempts) {
+        const feedback = {
+          type: 'info',
+          title: 'Checkout ancora in elaborazione',
+          body: 'Questa sessione e ancora in sincronizzazione. Se il saldo non si aggiorna a breve, ricarica la pagina.',
+        };
+        setCheckoutFeedback(feedback);
+        toast.info(feedback.title);
+        setCheckingPayment(false);
+        clearCheckoutUrlState();
+        activeCheckoutSessionRef.current = '';
+        clearTrackedCheckoutSession();
+        return;
+      }
+
+      pollTimeoutRef.current = window.setTimeout(() => {
+        checkPaymentStatus(sessionId, attempts + 1, requestId);
+      }, pollInterval);
     } catch (error) {
-      console.error('Payment check error:', error);
-      toast.error('Impossibile verificare il pagamento in questo momento.');
+      if (activeCheckoutSessionRef.current !== sessionId || checkoutRequestRef.current !== requestId) {
+        return;
+      }
+
+      const feedback = {
+        type: 'info',
+        title: 'Stato checkout in sincronizzazione',
+        body: 'Questa sessione non puo essere verificata adesso. Se il saldo non si aggiorna a breve, ricarica la pagina una volta.',
+      };
+      setCheckoutFeedback(feedback);
+      toast.info(feedback.title);
       setCheckingPayment(false);
+      clearCheckoutUrlState();
+      activeCheckoutSessionRef.current = '';
+      clearTrackedCheckoutSession();
     }
   };
 
@@ -263,6 +440,8 @@ const Billing = () => {
       return;
     }
 
+    clearCheckoutPoll();
+    setCheckoutFeedback(null);
     setCheckoutLoadingPlanId(plan.plan_id);
     try {
       const response = await axios.post(
@@ -271,24 +450,42 @@ const Billing = () => {
         { withCredentials: true }
       );
       const checkoutUrl = response.data?.url;
+      const checkoutSessionId = response.data?.session_id;
       if (!checkoutUrl) {
         throw new Error('Missing checkout url');
+      }
+      if (checkoutSessionId) {
+        writeTrackedCheckoutSession({
+          sessionId: checkoutSessionId,
+          planId: plan.plan_id,
+          createdAt: Date.now(),
+        });
+      } else {
+        clearTrackedCheckoutSession();
       }
       window.location.assign(checkoutUrl);
     } catch (error) {
       console.error('Checkout create error:', error);
       const detail = error?.response?.data?.detail;
+      clearTrackedCheckoutSession();
       toast.error(typeof detail === 'string' ? detail : 'Impossibile avviare il checkout.');
       setCheckoutLoadingPlanId('');
     }
   };
 
+  const feedbackStyle = FEEDBACK_STYLES[checkoutFeedback?.type || 'info'];
+  const totalAvailableCredits =
+    accountState?.periziaCredits?.totalAvailable ??
+    user?.account?.perizia_credits?.total_available ??
+    user?.perizia_credits?.total_available ??
+    accountState?.quota?.perizia_scans_remaining ??
+    0;
+
   return (
     <div className="min-h-screen bg-[#09090b]">
       <Sidebar user={user} logout={logout} />
-      
+
       <main className="ml-64 p-8">
-        {/* Header */}
         <div className="mb-8">
           <h1 className="text-3xl font-serif font-bold text-zinc-100 mb-2">
             Abbonamento
@@ -298,18 +495,26 @@ const Billing = () => {
           </p>
         </div>
 
-        {/* Payment Processing Banner */}
         {checkingPayment && (
           <div className="mb-8 p-4 bg-gold/10 border border-gold/30 rounded-xl flex items-center gap-4">
             <Loader2 className="w-6 h-6 text-gold animate-spin" />
             <div>
               <p className="font-semibold text-zinc-100">Verifica pagamento in corso...</p>
-              <p className="text-sm text-zinc-400">Attendere prego</p>
+              <p className="text-sm text-zinc-400">Controllo limitato alla sessione corrente</p>
             </div>
           </div>
         )}
 
-        {/* Current Plan */}
+        {checkoutFeedback && (
+          <div className={`mb-8 flex items-start gap-4 rounded-xl border p-4 ${feedbackStyle.wrapper}`}>
+            <AlertCircle className={`w-5 h-5 flex-shrink-0 mt-0.5 ${feedbackStyle.icon}`} />
+            <div>
+              <p className={`font-semibold ${feedbackStyle.title}`}>{checkoutFeedback.title}</p>
+              <p className={`mt-1 text-sm ${feedbackStyle.body}`}>{checkoutFeedback.body}</p>
+            </div>
+          </div>
+        )}
+
         <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-6 mb-8">
           <div className="flex items-center justify-between">
             <div>
@@ -331,12 +536,12 @@ const Billing = () => {
                 'text-zinc-600'
             }`} />
           </div>
-          
+
           <div className="mt-6 grid grid-cols-1 md:grid-cols-3 gap-4">
             <div className="p-4 bg-zinc-950 rounded-lg">
               <p className="text-xs text-zinc-500 mb-1">Crediti disponibili</p>
               <p className="text-2xl font-mono font-bold text-gold">
-                {accountState.quota.perizia_scans_remaining}
+                {totalAvailableCredits}
               </p>
             </div>
             <div className="p-4 bg-zinc-950 rounded-lg">
@@ -359,9 +564,8 @@ const Billing = () => {
           </div>
         </div>
 
-        {/* Plans Grid */}
         <h3 className="text-xl font-serif font-bold text-zinc-100 mb-6">Piani Disponibili</h3>
-        
+
         <div id="billing-plans" className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-5 gap-6">
           {loading ? (
             <div className="col-span-full text-center py-12">
@@ -369,12 +573,12 @@ const Billing = () => {
             </div>
           ) : (
             plans.map((plan) => (
-              <div 
+              <div
                 key={plan.plan_id}
                 data-testid={`billing-plan-${plan.plan_id}`}
                 className={`relative bg-zinc-900 border rounded-2xl p-6 transition-all duration-300 ${
-                  plan.plan_id === accountState.planId 
-                    ? 'border-gold ring-2 ring-gold/20' 
+                  plan.plan_id === accountState.planId
+                    ? 'border-gold ring-2 ring-gold/20'
                     : plan.plan_id === 'solo'
                       ? 'border-indigo-500/50'
                       : 'border-zinc-800 hover:border-zinc-600'
@@ -387,7 +591,7 @@ const Billing = () => {
                     </span>
                   </div>
                 )}
-                
+
                 <h3 className="text-xl font-serif font-bold text-zinc-100 mb-2">
                   {plan.name_it}
                 </h3>
@@ -395,7 +599,7 @@ const Billing = () => {
                 <p className="text-xs font-mono uppercase tracking-wider text-zinc-500 mb-4">
                   {plan.plan_type_label_it}
                 </p>
-                
+
                 <div className="flex items-baseline gap-1 mb-6">
                   {plan.plan_id === 'studio' ? (
                     <span className="text-2xl font-bold text-gold">Richiedi un'offerta</span>
@@ -418,7 +622,7 @@ const Billing = () => {
                     <p className="text-zinc-500">{plan.support_level_it}</p>
                   )}
                 </div>
-                
+
                 <ul className="space-y-3 mb-6">
                   {plan.features_it.map((feature, i) => (
                     <li key={i} className="flex items-start gap-3 text-sm text-zinc-300">
@@ -427,7 +631,7 @@ const Billing = () => {
                     </li>
                   ))}
                 </ul>
-                
+
                 {plan.plan_id === accountState.planId ? (
                   <Button disabled className="w-full bg-zinc-800 text-zinc-500 cursor-not-allowed">
                     Piano Attuale
@@ -437,7 +641,7 @@ const Billing = () => {
                     {plan.cta_label_it}
                   </Button>
                 ) : (
-                  <Button 
+                  <Button
                     onClick={() => handlePlanAction(plan)}
                     data-testid={`subscribe-${plan.plan_id}-btn`}
                     disabled={Boolean(checkoutLoadingPlanId)}
@@ -551,7 +755,6 @@ const Billing = () => {
           )}
         </section>
 
-        {/* Info */}
         <div className="mt-8 p-4 bg-zinc-900/50 border border-zinc-800 rounded-lg flex items-start gap-3">
           <AlertCircle className="w-5 h-5 text-zinc-500 flex-shrink-0 mt-0.5" />
           <div className="text-sm text-zinc-500">
