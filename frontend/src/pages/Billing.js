@@ -219,6 +219,13 @@ const Billing = () => {
     window.history.replaceState({}, '', `${url.pathname}${url.search}${url.hash}`);
   };
 
+  const resetTrackedCheckoutState = () => {
+    clearCheckoutPoll();
+    activeCheckoutSessionRef.current = '';
+    clearTrackedCheckoutSession();
+    clearCheckoutUrlState();
+  };
+
   useEffect(() => {
     fetchPlans();
     fetchLedger({ reset: true });
@@ -230,24 +237,38 @@ const Billing = () => {
     const sessionId = searchParams.get('session_id');
     const trackedSession = readTrackedCheckoutSession();
     const trackedSessionId = trackedSession?.sessionId || '';
+    const hasCheckoutParams = Boolean(checkoutState || sessionId);
 
     clearCheckoutPoll();
     setCheckingPayment(false);
-    setCheckoutFeedback(null);
-    activeCheckoutSessionRef.current = sessionId || '';
     checkoutRequestRef.current += 1;
+    activeCheckoutSessionRef.current = '';
+
+    if (!hasCheckoutParams) {
+      return undefined;
+    }
+
+    setCheckoutFeedback(null);
 
     if (sessionId) {
       if (trackedSessionId && trackedSessionId !== sessionId) {
-        activeCheckoutSessionRef.current = '';
-        clearCheckoutUrlState();
+        resetTrackedCheckoutState();
         return undefined;
       }
+      if (!trackedSessionId) {
+        resetTrackedCheckoutState();
+        return undefined;
+      }
+      activeCheckoutSessionRef.current = sessionId;
       checkPaymentStatus(sessionId, 0, checkoutRequestRef.current);
       return undefined;
     }
 
     if (checkoutState === 'cancel') {
+      if (!trackedSessionId) {
+        resetTrackedCheckoutState();
+        return undefined;
+      }
       const feedback = {
         type: 'info',
         title: 'Checkout annullato',
@@ -255,9 +276,11 @@ const Billing = () => {
       };
       setCheckoutFeedback(feedback);
       toast.info(feedback.title);
-      clearTrackedCheckoutSession();
-      clearCheckoutUrlState();
+      resetTrackedCheckoutState();
+      return undefined;
     }
+
+    resetTrackedCheckoutState();
 
     return () => {
       clearCheckoutPoll();
@@ -386,9 +409,7 @@ const Billing = () => {
           purchaseType: payload.purchase_type,
         });
         setCheckingPayment(false);
-        activeCheckoutSessionRef.current = '';
-        clearTrackedCheckoutSession();
-        clearCheckoutUrlState();
+        resetTrackedCheckoutState();
         return;
       }
 
@@ -401,9 +422,7 @@ const Billing = () => {
         setCheckoutFeedback(feedback);
         toast.info(feedback.title);
         setCheckingPayment(false);
-        clearCheckoutUrlState();
-        activeCheckoutSessionRef.current = '';
-        clearTrackedCheckoutSession();
+        resetTrackedCheckoutState();
         return;
       }
 
@@ -423,9 +442,7 @@ const Billing = () => {
       setCheckoutFeedback(feedback);
       toast.info(feedback.title);
       setCheckingPayment(false);
-      clearCheckoutUrlState();
-      activeCheckoutSessionRef.current = '';
-      clearTrackedCheckoutSession();
+      resetTrackedCheckoutState();
     }
   };
 

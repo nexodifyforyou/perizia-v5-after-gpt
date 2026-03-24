@@ -130,7 +130,11 @@ function AppRouter() {
   // REMINDER: DO NOT HARDCODE THE URL, OR ADD ANY FALLBACKS OR REDIRECT URLS, THIS BREAKS THE AUTH
   // Check URL fragment OR query params for session_id (Emergent Auth callback)
   const hasSessionInHash = location.hash?.includes('session_id=');
-  const hasSessionInSearch = location.search?.includes('session_id=');
+  const isBillingCheckoutReturn =
+    location.pathname === '/billing' &&
+    location.search?.includes('checkout=') &&
+    location.search?.includes('session_id=');
+  const hasSessionInSearch = location.search?.includes('session_id=') && !isBillingCheckoutReturn;
 
   useEffect(() => {
     if (user?.is_master_admin) {

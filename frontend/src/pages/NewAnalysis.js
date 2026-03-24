@@ -105,7 +105,7 @@ const buildUploadErrorState = (err) => {
 };
 
 const NewAnalysis = () => {
-  const { user, logout } = useAuth();
+  const { user, logout, refreshUser, accountState } = useAuth();
   const navigate = useNavigate();
   const [file, setFile] = useState(null);
   const [dragging, setDragging] = useState(false);
@@ -244,6 +244,7 @@ const NewAnalysis = () => {
 
       clearUploadTimers();
       setAwaitingResponse(false);
+      await refreshUser();
       setCurrentStage(STAGE_INDEX.FINALIZE);
       await new Promise((resolve) => setTimeout(resolve, 700));
       setCurrentStage(STAGE_INDEX.DONE);
@@ -468,9 +469,10 @@ const NewAnalysis = () => {
             <div className="flex items-center justify-between">
               <span className="text-sm text-zinc-500">Crediti disponibili</span>
               <span className="font-mono text-gold font-bold">
-                {(user?.account?.perizia_credits?.total_available
+                {(accountState?.periziaCredits?.totalAvailable
+                  ?? user?.account?.perizia_credits?.total_available
                   ?? user?.perizia_credits?.total_available
-                  ?? user?.quota?.perizia_scans_remaining
+                  ?? accountState?.quota?.perizia_scans_remaining
                   ?? 0)}
               </span>
             </div>
