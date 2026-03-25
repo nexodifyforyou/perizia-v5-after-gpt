@@ -81,6 +81,10 @@ def _perizia_wallet(fake_db, user_id="user_checkout"):
     return _user_doc(fake_db, user_id).get("perizia_credits") or {}
 
 
+def _subscription_state(fake_db, user_id="user_checkout"):
+    return _user_doc(fake_db, user_id).get("subscription_state") or {}
+
+
 def _seed_default_checkout_user(fake_db, *, plan="free", credits=4):
     return _seed_session(fake_db, {
         "user_id": "user_checkout",
@@ -288,7 +292,7 @@ async def test_active_recurring_plan_guard_blocks_new_subscription_but_allows_pa
         )
 
     assert solo_response.status_code == 409
-    assert "active monthly plan" in solo_response.json()["detail"]
+    assert "abbonamento mensile gestito" in solo_response.json()["detail"]
     assert pack_response.status_code == 200
     assert len(captured) == 1
     assert captured[0]["metadata"]["plan_code"] == "starter"
@@ -1575,8 +1579,8 @@ async def test_pro_user_cannot_buy_solo_but_can_still_buy_pack_and_free_user_can
 
     assert blocked.status_code == 409
     assert blocked.json()["detail"] == (
-        "You already have an active monthly plan. Monthly plan changes are not handled through this checkout flow yet. "
-        "Need more capacity now? Buy Credit Pack 8."
+        "Hai gia un abbonamento mensile gestito. Usa le azioni di cambio piano o cancellazione nella pagina Abbonamento. "
+        "Credit Pack 8 resta acquistabile in qualsiasi momento."
     )
     assert allowed_pack.status_code == 200
     assert allowed_pro.status_code == 200
@@ -1610,8 +1614,8 @@ async def test_solo_user_cannot_buy_pro_but_can_still_buy_pack(fake_db, monkeypa
 
     assert blocked.status_code == 409
     assert blocked.json()["detail"] == (
-        "You already have an active monthly plan. Monthly plan changes are not handled through this checkout flow yet. "
-        "Need more capacity now? Buy Credit Pack 8."
+        "Hai gia un abbonamento mensile gestito. Usa le azioni di cambio piano o cancellazione nella pagina Abbonamento. "
+        "Credit Pack 8 resta acquistabile in qualsiasi momento."
     )
     assert allowed_pack.status_code == 200
     assert len(captured) == 1
@@ -1930,8 +1934,8 @@ async def test_blocked_recurring_checkout_creates_no_transaction_or_billing_junk
 
     assert blocked.status_code == 409
     assert blocked.json()["detail"] == (
-        "You already have an active monthly plan. Monthly plan changes are not handled through this checkout flow yet. "
-        "Need more capacity now? Buy Credit Pack 8."
+        "Hai gia un abbonamento mensile gestito. Usa le azioni di cambio piano o cancellazione nella pagina Abbonamento. "
+        "Credit Pack 8 resta acquistabile in qualsiasi momento."
     )
     _assert_checkout_side_effects_absent(fake_db, before)
 
@@ -2346,3 +2350,417 @@ async def test_hostile_sequence_pack_refresh_replays_failures_reads_and_debits(f
     assert len(_ledger_entries(fake_db, entry_type="plan_purchase", user_id="user_checkout")) == 1
     assert len(_ledger_entries(fake_db, entry_type="subscription_reset", user_id="user_checkout")) == 1
     assert len(_ledger_entries(fake_db, entry_type="perizia_upload", user_id="user_checkout")) == 1
+
+
+@pytest.mark.anyio
+async def test_subscription_lifecycle_state_is_exposed_and_synced(fake_db, monkeypatch):
+    next_event = {}
+
+    class FakeWebhook:
+        @staticmethod
+        def construct_event(payload, sig_header, secret):
+            return next_event
+
+    class FakeSubscriptionApi:
+        subscriptions = {
+            "sub_state_solo": {
+                "id": "sub_state_solo",
+                "customer": "cus_state_solo",
+                "status": "active",
+                "cancel_at_period_end": False,
+                "current_period_end": 1775000000,
+                "metadata": {"app_user_id": "user_checkout", "plan_code": "solo"},
+                "items": {"data": [{"id": "si_state_solo", "price": {"id": "price_solo_env"}}]},
+            }
+        }
+
+        @staticmethod
+        def retrieve(subscription_id):
+            return copy.deepcopy(FakeSubscriptionApi.subscriptions[subscription_id])
+
+    class FakeStripeModule:
+        api_key = None
+        Webhook = FakeWebhook
+        Subscription = FakeSubscriptionApi
+
+    monkeypatch.setitem(sys.modules, "stripe", FakeStripeModule)
+    token = _seed_default_checkout_user(fake_db, plan="free", credits=4)
+    _seed_pending_checkout(fake_db, user_id="user_checkout", plan_id="solo", session_id="cs_state_solo", transaction_id="txn_state_solo", billing_record_id="bill_state_solo")
+
+    transport = httpx.ASGITransport(app=server.app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        next_event = _stripe_event("checkout.session.completed", {
+            "id": "cs_state_solo",
+            "status": "complete",
+            "payment_status": "paid",
+            "subscription": "sub_state_solo",
+            "customer": "cus_state_solo",
+            "metadata": {"app_user_id": "user_checkout", "plan_code": "solo", "billing_reason": "checkout_session_create"},
+        })
+        assert (await client.post("/api/webhook/stripe", content=b"{}", headers={"Stripe-Signature": "sig_test"})).status_code == 200
+
+        next_event = _stripe_event("invoice.paid", {
+            "id": "in_state_solo_1",
+            "subscription": "sub_state_solo",
+            "customer": "cus_state_solo",
+            "payment_intent": "pi_state_solo_1",
+            "billing_reason": "subscription_create",
+            "metadata": {"app_user_id": "user_checkout", "plan_code": "solo"},
+            "lines": {"data": [{"price": {"id": "price_solo_env"}}]},
+        })
+        assert (await client.post("/api/webhook/stripe", content=b"{}", headers={"Stripe-Signature": "sig_test"})).status_code == 200
+
+        me = await client.get("/api/auth/me", headers={"Authorization": f"Bearer {token}"})
+
+    assert me.status_code == 200
+    state = me.json()["account"]["subscription"]
+    assert state["current_plan_id"] == "solo"
+    assert state["stripe_customer_id"] == "cus_state_solo"
+    assert state["stripe_subscription_id"] == "sub_state_solo"
+    assert state["status"] == "active"
+    assert state["cancel_at_period_end"] is False
+    assert state["pending_change"] is False
+    assert state["current_period_end"] is not None
+
+
+@pytest.mark.anyio
+async def test_change_plan_upgrade_and_downgrade_schedule_next_cycle_without_duplicate_subscription(fake_db, monkeypatch):
+    next_event = {}
+
+    class FakeSubscriptionApi:
+        subscriptions = {
+            "sub_plan_change": {
+                "id": "sub_plan_change",
+                "customer": "cus_plan_change",
+                "status": "active",
+                "cancel_at_period_end": False,
+                "current_period_end": 1775000000,
+                "metadata": {"app_user_id": "user_checkout", "plan_code": "solo"},
+                "items": {"data": [{"id": "si_plan_change", "price": {"id": "price_solo_env"}}]},
+            }
+        }
+        modify_calls = []
+
+        @staticmethod
+        def retrieve(subscription_id):
+            return copy.deepcopy(FakeSubscriptionApi.subscriptions[subscription_id])
+
+        @staticmethod
+        def modify(subscription_id, **kwargs):
+            FakeSubscriptionApi.modify_calls.append((subscription_id, copy.deepcopy(kwargs)))
+            subscription = FakeSubscriptionApi.subscriptions[subscription_id]
+            if "items" in kwargs:
+                subscription["items"]["data"][0]["price"]["id"] = kwargs["items"][0]["price"]
+            if "cancel_at_period_end" in kwargs:
+                subscription["cancel_at_period_end"] = kwargs["cancel_at_period_end"]
+            if "metadata" in kwargs:
+                subscription["metadata"] = dict(kwargs["metadata"])
+            return copy.deepcopy(subscription)
+
+    class FakeStripeModule:
+        api_key = None
+        Subscription = FakeSubscriptionApi
+
+    monkeypatch.setitem(sys.modules, "stripe", FakeStripeModule)
+    token = _seed_default_checkout_user(fake_db, plan="solo", credits=40)
+    fake_db.users.items[0]["subscription_state"] = {
+        "stripe_customer_id": "cus_plan_change",
+        "stripe_subscription_id": "sub_plan_change",
+        "status": "active",
+        "current_plan_id": "solo",
+        "stripe_plan_id": "solo",
+        "current_period_end": "2026-04-30T00:00:00+00:00",
+        "cancel_at_period_end": False,
+        "pending_change": False,
+        "pending_plan_id": None,
+    }
+
+    transport = httpx.ASGITransport(app=server.app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        upgrade = await client.post(
+            "/api/billing/subscription/change-plan",
+            json={"plan_id": "pro"},
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        duplicate = await client.post(
+            "/api/billing/subscription/change-plan",
+            json={"plan_id": "solo"},
+            headers={"Authorization": f"Bearer {token}"},
+        )
+
+        next_event = _stripe_event("invoice.paid", {
+            "id": "in_plan_change_pro_1",
+            "subscription": "sub_plan_change",
+            "customer": "cus_plan_change",
+            "payment_intent": "pi_plan_change_pro_1",
+            "billing_reason": "subscription_cycle",
+            "metadata": {"app_user_id": "user_checkout", "plan_code": "pro"},
+            "lines": {"data": [{"price": {"id": "price_pro_env"}}]},
+        })
+        class FakeWebhook:
+            @staticmethod
+            def construct_event(payload, sig_header, secret):
+                return next_event
+        FakeStripeModule.Webhook = FakeWebhook
+        invoice_paid = await client.post("/api/webhook/stripe", content=b"{}", headers={"Stripe-Signature": "sig_test"})
+
+    assert upgrade.status_code == 200
+    assert duplicate.status_code == 409
+    assert invoice_paid.status_code == 200
+    wallet = _perizia_wallet(fake_db)
+    state = _subscription_state(fake_db)
+    assert len(FakeSubscriptionApi.modify_calls) == 1
+    assert FakeSubscriptionApi.modify_calls[0][1]["items"][0]["price"] == "price_pro_env"
+    assert wallet["monthly_remaining"] == 84
+    assert wallet["extra_remaining"] == 12
+    assert _user_doc(fake_db)["plan"] == "pro"
+    assert state["current_plan_id"] == "pro"
+    assert state["pending_change"] is False
+    assert state["pending_plan_id"] is None
+    assert state["stripe_subscription_id"] == "sub_plan_change"
+
+
+@pytest.mark.anyio
+async def test_downgrade_request_preserves_current_cycle_credits_until_next_invoice(fake_db, monkeypatch):
+    class FakeSubscriptionApi:
+        subscriptions = {
+            "sub_downgrade": {
+                "id": "sub_downgrade",
+                "customer": "cus_downgrade",
+                "status": "active",
+                "cancel_at_period_end": False,
+                "current_period_end": 1775000000,
+                "metadata": {"app_user_id": "user_checkout", "plan_code": "pro"},
+                "items": {"data": [{"id": "si_downgrade", "price": {"id": "price_pro_env"}}]},
+            }
+        }
+
+        @staticmethod
+        def retrieve(subscription_id):
+            return copy.deepcopy(FakeSubscriptionApi.subscriptions[subscription_id])
+
+        @staticmethod
+        def modify(subscription_id, **kwargs):
+            subscription = FakeSubscriptionApi.subscriptions[subscription_id]
+            if "items" in kwargs:
+                subscription["items"]["data"][0]["price"]["id"] = kwargs["items"][0]["price"]
+            if "metadata" in kwargs:
+                subscription["metadata"] = dict(kwargs["metadata"])
+            return copy.deepcopy(subscription)
+
+    class FakeWebhook:
+        @staticmethod
+        def construct_event(payload, sig_header, secret):
+            return next_event
+
+    class FakeStripeModule:
+        api_key = None
+        Subscription = FakeSubscriptionApi
+        Webhook = FakeWebhook
+
+    monkeypatch.setitem(sys.modules, "stripe", FakeStripeModule)
+    token = _seed_default_checkout_user(fake_db, plan="pro", credits=84)
+    fake_db.users.items[0]["subscription_state"] = {
+        "stripe_customer_id": "cus_downgrade",
+        "stripe_subscription_id": "sub_downgrade",
+        "status": "active",
+        "current_plan_id": "pro",
+        "stripe_plan_id": "pro",
+        "current_period_end": "2026-04-30T00:00:00+00:00",
+        "cancel_at_period_end": False,
+        "pending_change": False,
+        "pending_plan_id": None,
+    }
+    next_event = {}
+
+    transport = httpx.ASGITransport(app=server.app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        downgrade = await client.post(
+            "/api/billing/subscription/change-plan",
+            json={"plan_id": "solo"},
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        before_invoice_wallet = _perizia_wallet(fake_db)
+
+        next_event = _stripe_event("invoice.paid", {
+            "id": "in_downgrade_solo_1",
+            "subscription": "sub_downgrade",
+            "customer": "cus_downgrade",
+            "payment_intent": "pi_downgrade_solo_1",
+            "billing_reason": "subscription_cycle",
+            "metadata": {"app_user_id": "user_checkout", "plan_code": "solo"},
+            "lines": {"data": [{"price": {"id": "price_solo_env"}}]},
+        })
+        invoice_paid = await client.post("/api/webhook/stripe", content=b"{}", headers={"Stripe-Signature": "sig_test"})
+
+    assert downgrade.status_code == 200
+    assert invoice_paid.status_code == 200
+    assert before_invoice_wallet["monthly_remaining"] == 84
+    assert _perizia_wallet(fake_db)["monthly_remaining"] == 28
+    assert _subscription_state(fake_db)["current_plan_id"] == "solo"
+
+
+@pytest.mark.anyio
+async def test_cancel_at_period_end_and_resume_preserve_credits_and_block_new_refresh_after_delete(fake_db, monkeypatch):
+    next_event = {}
+
+    class FakeWebhook:
+        @staticmethod
+        def construct_event(payload, sig_header, secret):
+            return next_event
+
+    class FakeSubscriptionApi:
+        subscriptions = {
+            "sub_cancel": {
+                "id": "sub_cancel",
+                "customer": "cus_cancel",
+                "status": "active",
+                "cancel_at_period_end": False,
+                "current_period_end": 1775000000,
+                "metadata": {"app_user_id": "user_checkout", "plan_code": "solo"},
+                "items": {"data": [{"id": "si_cancel", "price": {"id": "price_solo_env"}}]},
+            }
+        }
+
+        @staticmethod
+        def retrieve(subscription_id):
+            return copy.deepcopy(FakeSubscriptionApi.subscriptions[subscription_id])
+
+        @staticmethod
+        def modify(subscription_id, **kwargs):
+            subscription = FakeSubscriptionApi.subscriptions[subscription_id]
+            if "cancel_at_period_end" in kwargs:
+                subscription["cancel_at_period_end"] = kwargs["cancel_at_period_end"]
+            if "metadata" in kwargs:
+                subscription["metadata"] = dict(kwargs["metadata"])
+            return copy.deepcopy(subscription)
+
+    class FakeStripeModule:
+        api_key = None
+        Webhook = FakeWebhook
+        Subscription = FakeSubscriptionApi
+
+    monkeypatch.setitem(sys.modules, "stripe", FakeStripeModule)
+    token = _seed_default_checkout_user(fake_db, plan="solo", credits=35)
+    fake_db.users.items[0]["perizia_credits"] = _make_wallet(
+        monthly_remaining=28,
+        extra_grants=[_extra_grant(amount=7, grant_id="g_extra_cancel")],
+        plan_id="solo",
+        processed_invoice_ids=["in_old"],
+    )
+    fake_db.users.items[0]["quota"]["perizia_scans_remaining"] = 35
+    fake_db.users.items[0]["subscription_state"] = {
+        "stripe_customer_id": "cus_cancel",
+        "stripe_subscription_id": "sub_cancel",
+        "status": "active",
+        "current_plan_id": "solo",
+        "stripe_plan_id": "solo",
+        "current_period_end": "2026-04-30T00:00:00+00:00",
+        "cancel_at_period_end": False,
+        "pending_change": False,
+        "pending_plan_id": None,
+    }
+
+    transport = httpx.ASGITransport(app=server.app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        cancel = await client.post("/api/billing/subscription/cancel", headers={"Authorization": f"Bearer {token}"})
+        resume = await client.post("/api/billing/subscription/resume", headers={"Authorization": f"Bearer {token}"})
+        cancel_again = await client.post("/api/billing/subscription/cancel", headers={"Authorization": f"Bearer {token}"})
+
+        next_event = _stripe_event("customer.subscription.deleted", {
+            "id": "sub_cancel",
+            "customer": "cus_cancel",
+            "status": "canceled",
+            "cancel_at_period_end": False,
+            "current_period_end": 1775000000,
+            "metadata": {"app_user_id": "user_checkout", "plan_code": "solo"},
+            "items": {"data": [{"id": "si_cancel", "price": {"id": "price_solo_env"}}]},
+        })
+        deleted = await client.post("/api/webhook/stripe", content=b"{}", headers={"Stripe-Signature": "sig_test"})
+
+        next_event = _stripe_event("invoice.paid", {
+            "id": "in_cancel_after_delete",
+            "subscription": "sub_cancel",
+            "customer": "cus_cancel",
+            "payment_intent": "pi_cancel_after_delete",
+            "billing_reason": "subscription_cycle",
+            "metadata": {"app_user_id": "user_checkout", "plan_code": "solo"},
+            "lines": {"data": [{"price": {"id": "price_solo_env"}}]},
+        })
+        after_delete_invoice = await client.post("/api/webhook/stripe", content=b"{}", headers={"Stripe-Signature": "sig_test"})
+
+    assert cancel.status_code == 200
+    assert resume.status_code == 200
+    assert cancel_again.status_code == 200
+    assert deleted.status_code == 200
+    assert after_delete_invoice.status_code == 200
+    state = _subscription_state(fake_db)
+    wallet = _perizia_wallet(fake_db)
+    assert state["status"] == "canceled"
+    assert _user_doc(fake_db)["plan"] == "free"
+    assert wallet["extra_remaining"] >= 7
+    assert "in_cancel_after_delete" not in wallet["processed_invoice_ids"]
+
+
+@pytest.mark.anyio
+async def test_subscription_update_conflict_fails_closed_and_does_not_mutate_wrong_user(fake_db, monkeypatch):
+    next_event = {}
+
+    class FakeWebhook:
+        @staticmethod
+        def construct_event(payload, sig_header, secret):
+            return next_event
+
+    class FakeStripeModule:
+        api_key = None
+        Webhook = FakeWebhook
+
+    monkeypatch.setitem(sys.modules, "stripe", FakeStripeModule)
+    _seed_default_checkout_user(fake_db, plan="solo", credits=28)
+    _seed_session(fake_db, {
+        "user_id": "user_other",
+        "email": "other@example.com",
+        "name": "Other",
+        "plan": "free",
+        "is_master_admin": False,
+        "quota": {"perizia_scans_remaining": 4, "image_scans_remaining": 0, "assistant_messages_remaining": 0},
+    }, session_token="sess_other")
+    _user_doc(fake_db)["subscription_state"] = {
+        "stripe_customer_id": "cus_conflict",
+        "stripe_subscription_id": "sub_conflict",
+        "status": "active",
+        "current_plan_id": "solo",
+        "stripe_plan_id": "solo",
+        "current_period_end": "2026-04-30T00:00:00+00:00",
+        "cancel_at_period_end": False,
+        "pending_change": False,
+        "pending_plan_id": None,
+    }
+    _user_doc(fake_db, "user_other")["subscription_state"] = {
+        "stripe_customer_id": "cus_conflict",
+        "stripe_subscription_id": "sub_other",
+        "status": "active",
+        "current_plan_id": "pro",
+        "stripe_plan_id": "pro",
+        "current_period_end": "2026-04-30T00:00:00+00:00",
+        "cancel_at_period_end": False,
+        "pending_change": False,
+        "pending_plan_id": None,
+    }
+    before = _snapshot_state(fake_db)
+
+    transport = httpx.ASGITransport(app=server.app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        next_event = _stripe_event("customer.subscription.updated", {
+            "id": "sub_conflict",
+            "customer": "cus_conflict",
+            "status": "active",
+            "cancel_at_period_end": False,
+            "current_period_end": 1775000000,
+            "metadata": {"app_user_id": "user_checkout", "plan_code": "solo"},
+            "items": {"data": [{"id": "si_conflict", "price": {"id": "price_solo_env"}}]},
+        })
+        response = await client.post("/api/webhook/stripe", content=b"{}", headers={"Stripe-Signature": "sig_test"})
+
+    assert response.status_code == 200
+    assert _snapshot_state(fake_db) == before

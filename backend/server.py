@@ -131,6 +131,8 @@ class User(BaseModel):
         "image_scans_remaining": 0,
         "assistant_messages_remaining": 0
     })
+    perizia_credits: Dict[str, Any] = Field(default_factory=dict)
+    subscription_state: Dict[str, Any] = Field(default_factory=dict)
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 class UserSession(BaseModel):
@@ -491,6 +493,9 @@ PERIZIA_CREDIT_BANDS: Tuple[Tuple[int, int, int], ...] = (
 PERIZIA_CREDIT_WALLET_VERSION = 1
 PERIZIA_PACK_VALIDITY_DAYS = 365
 PAID_RECURRING_PLAN_IDS = {"solo", "pro", "studio"}
+SELF_SERVE_RECURRING_PLAN_IDS = {"solo", "pro"}
+SUBSCRIPTION_TERMINAL_STATUSES = {"canceled", "cancelled", "ended", "incomplete_expired", "unpaid"}
+SUBSCRIPTION_MANAGED_STATUSES = {"trialing", "active", "past_due", "incomplete", "paused"}
 
 
 def _get_required_perizia_credits(page_count: int) -> Optional[int]:
@@ -520,6 +525,69 @@ def _monthly_perizia_quota_for_plan(plan_id: Optional[str]) -> int:
     if normalized_plan_id not in PAID_RECURRING_PLAN_IDS:
         return 0
     return int(SUBSCRIPTION_PLANS[normalized_plan_id].quota.get("perizia_scans_remaining", 0) or 0)
+
+
+def _subscription_state_defaults() -> Dict[str, Any]:
+    return {
+        "stripe_customer_id": None,
+        "stripe_subscription_id": None,
+        "status": None,
+        "current_plan_id": None,
+        "stripe_plan_id": None,
+        "current_period_end": None,
+        "cancel_at_period_end": False,
+        "pending_change": False,
+        "pending_plan_id": None,
+        "pending_effective_at": None,
+    }
+
+
+def _normalize_subscription_state(user_doc: Dict[str, Any]) -> Dict[str, Any]:
+    raw_state = user_doc.get("subscription_state")
+    normalized = _subscription_state_defaults()
+    if isinstance(raw_state, dict):
+        for key in normalized.keys():
+            if key in raw_state:
+                normalized[key] = raw_state.get(key)
+
+    normalized_plan = str(user_doc.get("plan") or "").strip().lower()
+    if normalized_plan in SELF_SERVE_RECURRING_PLAN_IDS and not normalized.get("current_plan_id"):
+        normalized["current_plan_id"] = normalized_plan
+    if normalized.get("current_plan_id") not in SELF_SERVE_RECURRING_PLAN_IDS:
+        normalized["current_plan_id"] = None
+    if normalized.get("stripe_plan_id") not in SELF_SERVE_RECURRING_PLAN_IDS:
+        normalized["stripe_plan_id"] = None
+    if normalized.get("pending_plan_id") not in SELF_SERVE_RECURRING_PLAN_IDS:
+        normalized["pending_plan_id"] = None
+    normalized["pending_change"] = bool(normalized.get("pending_change") and normalized.get("pending_plan_id"))
+    normalized["cancel_at_period_end"] = bool(normalized.get("cancel_at_period_end"))
+
+    status = str(normalized.get("status") or "").strip().lower() or None
+    if normalized.get("current_plan_id") and not status:
+        status = "active"
+    normalized["status"] = status
+    normalized["current_period_end"] = _to_iso(normalized.get("current_period_end"))
+    normalized["pending_effective_at"] = _to_iso(normalized.get("pending_effective_at"))
+    return normalized
+
+
+def _subscription_has_recurring_access(subscription_state: Dict[str, Any]) -> bool:
+    current_plan_id = str(subscription_state.get("current_plan_id") or "").strip().lower()
+    status = str(subscription_state.get("status") or "").strip().lower()
+    return current_plan_id in SELF_SERVE_RECURRING_PLAN_IDS and status not in SUBSCRIPTION_TERMINAL_STATUSES
+
+
+def _subscription_checkout_is_blocked(subscription_state: Dict[str, Any]) -> bool:
+    current_plan_id = str(subscription_state.get("current_plan_id") or "").strip().lower()
+    status = str(subscription_state.get("status") or "").strip().lower()
+    if current_plan_id not in SELF_SERVE_RECURRING_PLAN_IDS:
+        return False
+    return bool(
+        subscription_state.get("stripe_subscription_id")
+        or status in SUBSCRIPTION_MANAGED_STATUSES
+        or subscription_state.get("cancel_at_period_end")
+        or subscription_state.get("pending_change")
+    )
 
 
 def _make_pack_grant(
@@ -782,6 +850,7 @@ def _normalize_account_state(user_doc: Dict[str, Any]) -> Dict[str, Any]:
             quota = SUBSCRIPTION_PLANS["free"].quota.copy()
 
     perizia_credits = _normalize_perizia_credit_wallet(user_doc, plan_id=plan, is_master_admin=is_master_admin)
+    subscription_state = _normalize_subscription_state({**user_doc, "plan": plan})
     quota["perizia_scans_remaining"] = perizia_credits["total_available"]
 
     feature_access = {
@@ -794,12 +863,14 @@ def _normalize_account_state(user_doc: Dict[str, Any]) -> Dict[str, Any]:
         "plan": plan,
         "quota": quota,
         "perizia_credits": perizia_credits,
+        "subscription_state": subscription_state,
         "feature_access": feature_access,
         "account": {
             "effective_plan": plan,
             "effective_quota": quota.copy(),
             "feature_access": feature_access.copy(),
             "perizia_credits": perizia_credits,
+            "subscription": subscription_state,
         },
     }
 
@@ -812,6 +883,7 @@ async def _apply_normalized_account_state(user_doc: Dict[str, Any], persist: boo
     normalized_user_doc["plan"] = normalized["plan"]
     normalized_user_doc["quota"] = normalized["quota"].copy()
     normalized_user_doc["perizia_credits"] = normalized["perizia_credits"]
+    normalized_user_doc["subscription_state"] = normalized["subscription_state"]
 
     if persist and user_doc.get("user_id"):
         update_data: Dict[str, Any] = {}
@@ -823,6 +895,8 @@ async def _apply_normalized_account_state(user_doc: Dict[str, Any], persist: boo
             update_data["quota"] = normalized["quota"].copy()
         if user_doc.get("perizia_credits") != normalized["perizia_credits"]:
             update_data["perizia_credits"] = normalized["perizia_credits"]
+        if user_doc.get("subscription_state") != normalized["subscription_state"]:
+            update_data["subscription_state"] = normalized["subscription_state"]
         if update_data:
             await db.users.update_one({"user_id": user_doc["user_id"]}, {"$set": update_data})
 
@@ -843,6 +917,7 @@ def _build_user_response(user: User) -> Dict[str, Any]:
     user_response["plan"] = normalized["plan"]
     user_response["quota"] = normalized["quota"].copy()
     user_response["perizia_credits"] = normalized["perizia_credits"]
+    user_response["subscription_state"] = normalized["subscription_state"]
     user_response["feature_access"] = normalized["feature_access"].copy()
     user_response["account"] = normalized["account"]
     return user_response
@@ -6903,6 +6978,173 @@ async def _set_payment_transaction_state(
         return
     await db.payment_transactions.update_one({"session_id": session_id}, {"$set": update_fields})
 
+
+async def _get_user_doc_by_id(user_id: str) -> Optional[Dict[str, Any]]:
+    if not user_id:
+        return None
+    user_doc = await db.users.find_one({"user_id": user_id}, {"_id": 0})
+    if not user_doc:
+        return None
+    return await _apply_normalized_account_state(user_doc, persist=False)
+
+
+async def _all_user_docs() -> List[Dict[str, Any]]:
+    return await db.users.find({}, {"_id": 0}).to_list(None)
+
+
+async def _find_user_doc_by_subscription_id(subscription_id: Optional[str]) -> Optional[Dict[str, Any]]:
+    normalized_subscription_id = str(subscription_id or "").strip()
+    if not normalized_subscription_id:
+        return None
+    for user_doc in await _all_user_docs():
+        subscription_state = _normalize_subscription_state(user_doc)
+        if str(subscription_state.get("stripe_subscription_id") or "").strip() == normalized_subscription_id:
+            return await _apply_normalized_account_state(user_doc, persist=False)
+    return None
+
+
+async def _find_user_doc_by_customer_id(customer_id: Optional[str]) -> Optional[Dict[str, Any]]:
+    normalized_customer_id = str(customer_id or "").strip()
+    if not normalized_customer_id:
+        return None
+    for user_doc in await _all_user_docs():
+        subscription_state = _normalize_subscription_state(user_doc)
+        if str(subscription_state.get("stripe_customer_id") or "").strip() == normalized_customer_id:
+            return await _apply_normalized_account_state(user_doc, persist=False)
+    return None
+
+
+async def _persist_subscription_state(
+    *,
+    user_doc: Dict[str, Any],
+    subscription_state: Dict[str, Any],
+    plan_override: Optional[str] = None,
+) -> Dict[str, Any]:
+    normalized_state = _normalize_subscription_state({**user_doc, "plan": plan_override or user_doc.get("plan"), "subscription_state": subscription_state})
+    update_fields: Dict[str, Any] = {"subscription_state": normalized_state}
+    if plan_override is not None:
+        update_fields["plan"] = plan_override
+        user_doc["plan"] = plan_override
+    await db.users.update_one({"user_id": user_doc["user_id"]}, {"$set": update_fields})
+    user_doc["subscription_state"] = normalized_state
+    return normalized_state
+
+
+def _stripe_subscription_item_id(subscription: Any) -> Optional[str]:
+    items = _stripe_object_get(subscription, "items") or {}
+    for item in (items.get("data") or []):
+        item_id = str((item or {}).get("id") or "").strip()
+        if item_id:
+            return item_id
+    return None
+
+
+def _stripe_subscription_plan_id(subscription: Any) -> Optional[str]:
+    items = _stripe_object_get(subscription, "items") or {}
+    for item in (items.get("data") or []):
+        price_id = str((((item or {}).get("price") or {}).get("id")) or "").strip()
+        plan_id = _plan_id_for_stripe_price_id(price_id)
+        if plan_id in SELF_SERVE_RECURRING_PLAN_IDS:
+            return plan_id
+    metadata = _stripe_object_metadata(subscription)
+    metadata_plan_id = str(metadata.get("plan_code") or "").strip().lower()
+    return metadata_plan_id if metadata_plan_id in SELF_SERVE_RECURRING_PLAN_IDS else None
+
+
+def _stripe_subscription_period_end_iso(subscription: Any) -> Optional[str]:
+    period_end = _stripe_object_get(subscription, "current_period_end")
+    if isinstance(period_end, (int, float)) and period_end > 0:
+        return datetime.fromtimestamp(period_end, tz=timezone.utc).isoformat()
+    return _to_iso(period_end)
+
+
+async def _resolve_subscription_owner_context(
+    *,
+    subscription: Dict[str, Any],
+    allow_customer_fallback: bool = True,
+) -> Tuple[Optional[Dict[str, Any]], Optional[str]]:
+    metadata = _stripe_object_metadata(subscription)
+    subscription_id = str(subscription.get("id") or "").strip() or None
+    customer_id = str(subscription.get("customer") or "").strip() or None
+    user_candidates: Dict[str, Optional[str]] = {
+        "subscription_metadata_user_id": str(metadata.get("app_user_id") or "").strip() or None,
+    }
+    plan_candidates: Dict[str, Optional[str]] = {
+        "subscription_item_plan_id": _stripe_subscription_plan_id(subscription),
+        "subscription_metadata_plan_id": str(metadata.get("plan_code") or "").strip().lower() or None,
+    }
+    all_user_docs = await _all_user_docs()
+    stored_subscription_user_ids = []
+    stored_customer_user_ids = []
+    for user_doc in all_user_docs:
+        subscription_state = _normalize_subscription_state(user_doc)
+        if subscription_id and str(subscription_state.get("stripe_subscription_id") or "").strip() == subscription_id:
+            stored_subscription_user_ids.append(str(user_doc.get("user_id") or "").strip())
+        if allow_customer_fallback and customer_id and str(subscription_state.get("stripe_customer_id") or "").strip() == customer_id:
+            stored_customer_user_ids.append(str(user_doc.get("user_id") or "").strip())
+    if stored_subscription_user_ids:
+        user_candidates["stored_subscription_user_id"] = stored_subscription_user_ids[0]
+    if len(set(stored_subscription_user_ids)) > 1:
+        user_candidates["stored_subscription_user_conflict"] = "MULTIPLE"
+    if stored_customer_user_ids:
+        user_candidates["stored_customer_user_id"] = stored_customer_user_ids[0]
+    if len(set(stored_customer_user_ids)) > 1:
+        user_candidates["stored_customer_user_conflict"] = "MULTIPLE"
+    transaction = await _payment_transaction_for_subscription_context(
+        subscription_id=subscription_id,
+        customer_id=customer_id,
+    )
+    if transaction:
+        user_candidates["payment_transaction_user_id"] = str(transaction.get("user_id") or "").strip() or None
+        plan_candidates["payment_transaction_plan_id"] = str(transaction.get("plan_id") or "").strip().lower() or None
+
+    distinct_user_ids = {value for value in user_candidates.values() if value}
+    distinct_plan_ids = {value for value in plan_candidates.values() if value}
+    if len(distinct_user_ids) > 1 or len(distinct_plan_ids) > 1:
+        logger.warning(
+            "Subscription context resolution conflict: subscription_id=%s customer_id=%s user_candidates=%s plan_candidates=%s",
+            subscription_id,
+            customer_id,
+            user_candidates,
+            plan_candidates,
+        )
+        return None, None
+    if user_candidates.get("stored_subscription_user_conflict") or user_candidates.get("stored_customer_user_conflict"):
+        return None, None
+    user_id = next(iter(distinct_user_ids), None)
+    plan_id = next(iter(distinct_plan_ids), None)
+    if not user_id:
+        return None, plan_id
+    return await _get_user_doc_by_id(user_id), plan_id
+
+
+async def _sync_subscription_state_from_stripe(
+    *,
+    user_doc: Dict[str, Any],
+    subscription: Dict[str, Any],
+    current_plan_hint: Optional[str] = None,
+) -> Dict[str, Any]:
+    current_state = _normalize_subscription_state(user_doc)
+    stripe_plan_id = _stripe_subscription_plan_id(subscription)
+    current_plan_id = current_state.get("current_plan_id")
+    if not current_plan_id and current_plan_hint in SELF_SERVE_RECURRING_PLAN_IDS:
+        current_plan_id = current_plan_hint
+    next_state = {
+        **current_state,
+        "stripe_customer_id": str(subscription.get("customer") or "").strip() or current_state.get("stripe_customer_id"),
+        "stripe_subscription_id": str(subscription.get("id") or "").strip() or current_state.get("stripe_subscription_id"),
+        "status": str(subscription.get("status") or current_state.get("status") or "").strip().lower() or None,
+        "stripe_plan_id": stripe_plan_id or current_state.get("stripe_plan_id"),
+        "current_period_end": _stripe_subscription_period_end_iso(subscription) or current_state.get("current_period_end"),
+        "cancel_at_period_end": bool(subscription.get("cancel_at_period_end")),
+        "current_plan_id": current_plan_id,
+    }
+    if next_state.get("pending_plan_id") == next_state.get("current_plan_id"):
+        next_state["pending_change"] = False
+        next_state["pending_plan_id"] = None
+        next_state["pending_effective_at"] = None
+    return await _persist_subscription_state(user_doc=user_doc, subscription_state=next_state)
+
 async def _grant_starter_checkout_if_needed(
     *,
     user_id: str,
@@ -7120,6 +7362,36 @@ async def _grant_subscription_invoice_if_needed(
     user_doc = await _ensure_opening_balance_baseline_for_user_id(user_id)
     if not user_doc:
         return False
+    subscription_state = _normalize_subscription_state(user_doc)
+    if stripe_subscription_id and subscription_state.get("stripe_subscription_id") and subscription_state.get("stripe_subscription_id") != stripe_subscription_id:
+        logger.warning(
+            "Subscription invoice grant blocked by subscription mismatch: user_id=%s invoice_id=%s expected_subscription_id=%s actual_subscription_id=%s",
+            user_id,
+            invoice_id,
+            subscription_state.get("stripe_subscription_id"),
+            stripe_subscription_id,
+        )
+        return False
+    if subscription_state.get("status") in SUBSCRIPTION_TERMINAL_STATUSES and not subscription_state.get("pending_change"):
+        logger.warning(
+            "Subscription invoice grant blocked by terminal lifecycle state: user_id=%s invoice_id=%s status=%s",
+            user_id,
+            invoice_id,
+            subscription_state.get("status"),
+        )
+        return False
+    pending_plan_id = subscription_state.get("pending_plan_id")
+    current_plan_id = subscription_state.get("current_plan_id")
+    if pending_plan_id and plan_id not in {current_plan_id, pending_plan_id}:
+        logger.warning(
+            "Subscription invoice grant blocked by pending lifecycle conflict: user_id=%s invoice_id=%s current_plan=%s pending_plan=%s invoice_plan=%s",
+            user_id,
+            invoice_id,
+            current_plan_id,
+            pending_plan_id,
+            plan_id,
+        )
+        return False
     before_wallet = _normalize_perizia_credit_wallet(
         user_doc,
         plan_id=user_doc.get("plan"),
@@ -7175,6 +7447,22 @@ async def _grant_subscription_invoice_if_needed(
                 "perizia_credit_wallet_after": finalized_wallet,
             },
         )
+    await _persist_subscription_state(
+        user_doc=user_doc,
+        subscription_state={
+            **subscription_state,
+            "stripe_customer_id": stripe_customer_id or subscription_state.get("stripe_customer_id"),
+            "stripe_subscription_id": stripe_subscription_id or subscription_state.get("stripe_subscription_id"),
+            "status": "active",
+            "current_plan_id": plan_id,
+            "stripe_plan_id": plan_id,
+            "cancel_at_period_end": False if subscription_state.get("pending_plan_id") == plan_id else subscription_state.get("cancel_at_period_end"),
+            "pending_change": False if subscription_state.get("pending_plan_id") == plan_id else subscription_state.get("pending_change"),
+            "pending_plan_id": None if subscription_state.get("pending_plan_id") == plan_id else subscription_state.get("pending_plan_id"),
+            "pending_effective_at": None if subscription_state.get("pending_plan_id") == plan_id else subscription_state.get("pending_effective_at"),
+        },
+        plan_override=plan_id,
+    )
     return True
 
 def _stripe_object_get(obj: Any, key: str) -> Any:
@@ -7966,6 +8254,7 @@ async def get_plans():
 async def create_checkout(request: Request):
     """Create Stripe checkout session"""
     user = await require_auth(request)
+    user_doc = await _get_user_doc_by_id(user.user_id)
     data = await request.json()
     plan_id = data.get("plan_id")
     origin_url = data.get("origin_url")
@@ -7976,12 +8265,13 @@ async def create_checkout(request: Request):
     plan = SUBSCRIPTION_PLANS[plan_id]
     if plan.plan_type not in {"one_time", "subscription"}:
         raise HTTPException(status_code=400, detail="Plan not available for checkout")
-    if plan.plan_type == "subscription" and user.plan in {"solo", "pro"}:
+    subscription_state = _normalize_subscription_state(user_doc or user.model_dump())
+    if plan.plan_type == "subscription" and _subscription_checkout_is_blocked(subscription_state):
         raise HTTPException(
             status_code=409,
             detail=(
-                "You already have an active monthly plan. Monthly plan changes are not handled through this checkout flow yet. "
-                "Need more capacity now? Buy Credit Pack 8."
+                "Hai gia un abbonamento mensile gestito. Usa le azioni di cambio piano o cancellazione nella pagina Abbonamento. "
+                "Credit Pack 8 resta acquistabile in qualsiasi momento."
             ),
         )
 
@@ -8082,6 +8372,177 @@ async def get_checkout_status(session_id: str, request: Request):
             billing_record=billing_record,
         ),
     }
+
+
+@api_router.post("/billing/subscription/change-plan")
+async def change_subscription_plan(request: Request):
+    user = await require_auth(request)
+    user_doc = await _get_user_doc_by_id(user.user_id)
+    if not user_doc:
+        raise HTTPException(status_code=404, detail="Utente non trovato")
+    data = await request.json()
+    target_plan_id = str(data.get("plan_id") or "").strip().lower()
+    if target_plan_id not in SELF_SERVE_RECURRING_PLAN_IDS:
+        raise HTTPException(status_code=400, detail="Piano non valido")
+    subscription_state = _normalize_subscription_state(user_doc)
+    current_plan_id = str(subscription_state.get("current_plan_id") or "").strip().lower()
+    subscription_id = str(subscription_state.get("stripe_subscription_id") or "").strip()
+    if current_plan_id not in SELF_SERVE_RECURRING_PLAN_IDS or not subscription_id:
+        raise HTTPException(status_code=409, detail="Nessun abbonamento ricorrente gestibile trovato")
+    if current_plan_id == target_plan_id:
+        raise HTTPException(status_code=409, detail="Il piano richiesto e gia quello attivo")
+    if subscription_state.get("cancel_at_period_end"):
+        raise HTTPException(status_code=409, detail="Rimuovi prima la cancellazione a fine periodo")
+    if subscription_state.get("pending_change"):
+        if subscription_state.get("pending_plan_id") == target_plan_id:
+            raise HTTPException(status_code=409, detail="Esiste gia un cambio piano pendente verso questo piano")
+        raise HTTPException(status_code=409, detail="Esiste gia un cambio piano pendente")
+    allowed_changes = {("solo", "pro"), ("pro", "solo")}
+    if (current_plan_id, target_plan_id) not in allowed_changes:
+        raise HTTPException(status_code=400, detail="Cambio piano non supportato")
+    if not STRIPE_SECRET_KEY:
+        raise HTTPException(status_code=503, detail="Stripe non configurato")
+
+    import stripe
+    stripe.api_key = STRIPE_SECRET_KEY
+    subscription = stripe.Subscription.retrieve(subscription_id)
+    item_id = _stripe_subscription_item_id(subscription)
+    if not item_id:
+        raise HTTPException(status_code=409, detail="Subscription item Stripe non trovato")
+    subscription_plan_id = _stripe_subscription_plan_id(subscription)
+    if subscription_plan_id not in {current_plan_id, subscription_state.get("pending_plan_id"), target_plan_id}:
+        raise HTTPException(status_code=409, detail="Stato subscription Stripe incoerente")
+    metadata = _stripe_object_metadata(subscription)
+    metadata.update({
+        "app_user_id": user.user_id,
+        "plan_code": target_plan_id,
+        "pending_plan_id": target_plan_id,
+        "pending_change_mode": "next_cycle",
+    })
+    updated = stripe.Subscription.modify(
+        subscription_id,
+        items=[{"id": item_id, "price": _stripe_price_id_for_plan(target_plan_id)}],
+        proration_behavior="none",
+        metadata=metadata,
+    )
+    synced_state = await _sync_subscription_state_from_stripe(
+        user_doc=user_doc,
+        subscription=updated,
+        current_plan_hint=current_plan_id,
+    )
+    synced_state = await _persist_subscription_state(
+        user_doc=user_doc,
+        subscription_state={
+            **synced_state,
+            "current_plan_id": current_plan_id,
+            "pending_change": True,
+            "pending_plan_id": target_plan_id,
+            "pending_effective_at": synced_state.get("current_period_end"),
+            "stripe_plan_id": target_plan_id,
+        },
+    )
+    return {"ok": True, "subscription": synced_state}
+
+
+@api_router.post("/billing/subscription/cancel")
+async def cancel_subscription_at_period_end(request: Request):
+    user = await require_auth(request)
+    user_doc = await _get_user_doc_by_id(user.user_id)
+    if not user_doc:
+        raise HTTPException(status_code=404, detail="Utente non trovato")
+    subscription_state = _normalize_subscription_state(user_doc)
+    subscription_id = str(subscription_state.get("stripe_subscription_id") or "").strip()
+    if not subscription_id or not _subscription_has_recurring_access(subscription_state):
+        raise HTTPException(status_code=409, detail="Nessun abbonamento ricorrente cancellabile")
+    if subscription_state.get("cancel_at_period_end"):
+        raise HTTPException(status_code=409, detail="La cancellazione a fine periodo e gia attiva")
+    import stripe
+    stripe.api_key = STRIPE_SECRET_KEY
+    subscription = stripe.Subscription.modify(
+        subscription_id,
+        cancel_at_period_end=True,
+        metadata=_stripe_object_metadata(stripe.Subscription.retrieve(subscription_id)),
+    )
+    synced_state = await _sync_subscription_state_from_stripe(
+        user_doc=user_doc,
+        subscription=subscription,
+        current_plan_hint=subscription_state.get("current_plan_id"),
+    )
+    return {"ok": True, "subscription": synced_state}
+
+
+@api_router.post("/billing/subscription/resume")
+async def resume_subscription(request: Request):
+    user = await require_auth(request)
+    user_doc = await _get_user_doc_by_id(user.user_id)
+    if not user_doc:
+        raise HTTPException(status_code=404, detail="Utente non trovato")
+    subscription_state = _normalize_subscription_state(user_doc)
+    subscription_id = str(subscription_state.get("stripe_subscription_id") or "").strip()
+    if not subscription_id or not subscription_state.get("cancel_at_period_end"):
+        raise HTTPException(status_code=409, detail="Nessuna cancellazione a fine periodo da annullare")
+    import stripe
+    stripe.api_key = STRIPE_SECRET_KEY
+    subscription = stripe.Subscription.modify(
+        subscription_id,
+        cancel_at_period_end=False,
+        metadata=_stripe_object_metadata(stripe.Subscription.retrieve(subscription_id)),
+    )
+    synced_state = await _sync_subscription_state_from_stripe(
+        user_doc=user_doc,
+        subscription=subscription,
+        current_plan_hint=subscription_state.get("current_plan_id"),
+    )
+    return {"ok": True, "subscription": synced_state}
+
+
+@api_router.post("/billing/subscription/clear-pending-change")
+async def clear_pending_subscription_change(request: Request):
+    user = await require_auth(request)
+    user_doc = await _get_user_doc_by_id(user.user_id)
+    if not user_doc:
+        raise HTTPException(status_code=404, detail="Utente non trovato")
+    subscription_state = _normalize_subscription_state(user_doc)
+    subscription_id = str(subscription_state.get("stripe_subscription_id") or "").strip()
+    current_plan_id = str(subscription_state.get("current_plan_id") or "").strip().lower()
+    if not subscription_id or not subscription_state.get("pending_change") or current_plan_id not in SELF_SERVE_RECURRING_PLAN_IDS:
+        raise HTTPException(status_code=409, detail="Nessun cambio piano pendente da annullare")
+    import stripe
+    stripe.api_key = STRIPE_SECRET_KEY
+    subscription = stripe.Subscription.retrieve(subscription_id)
+    item_id = _stripe_subscription_item_id(subscription)
+    if not item_id:
+        raise HTTPException(status_code=409, detail="Subscription item Stripe non trovato")
+    metadata = _stripe_object_metadata(subscription)
+    metadata.update({
+        "app_user_id": user.user_id,
+        "plan_code": current_plan_id,
+        "pending_plan_id": "",
+        "pending_change_mode": "",
+    })
+    updated = stripe.Subscription.modify(
+        subscription_id,
+        items=[{"id": item_id, "price": _stripe_price_id_for_plan(current_plan_id)}],
+        proration_behavior="none",
+        metadata=metadata,
+    )
+    synced_state = await _sync_subscription_state_from_stripe(
+        user_doc=user_doc,
+        subscription=updated,
+        current_plan_hint=current_plan_id,
+    )
+    synced_state = await _persist_subscription_state(
+        user_doc=user_doc,
+        subscription_state={
+            **synced_state,
+            "current_plan_id": current_plan_id,
+            "stripe_plan_id": current_plan_id,
+            "pending_change": False,
+            "pending_plan_id": None,
+            "pending_effective_at": None,
+        },
+    )
+    return {"ok": True, "subscription": synced_state}
 
 @api_router.post("/webhook/stripe")
 async def stripe_webhook(request: Request):
@@ -8195,6 +8656,20 @@ async def stripe_webhook(request: Request):
                         metadata_updates=metadata_updates,
                         paid=starter_paid and bool(resolved_user_id),
                     )
+            if plan_id in SELF_SERVE_RECURRING_PLAN_IDS and metadata_user_id and stripe_subscription_id:
+                user_doc = await _get_user_doc_by_id(metadata_user_id)
+                if user_doc:
+                    await _persist_subscription_state(
+                        user_doc=user_doc,
+                        subscription_state={
+                            **_normalize_subscription_state(user_doc),
+                            "stripe_customer_id": stripe_customer_id,
+                            "stripe_subscription_id": stripe_subscription_id,
+                            "status": "pending_initial_invoice",
+                            "current_plan_id": _normalize_subscription_state(user_doc).get("current_plan_id") or plan_id,
+                            "stripe_plan_id": plan_id,
+                        },
+                    )
 
             if plan_id == "starter" and not starter_paid:
                 logger.info(
@@ -8224,18 +8699,41 @@ async def stripe_webhook(request: Request):
             invoice = data_object
             user_id, plan_id, stripe_subscription_id = await _resolve_invoice_context(invoice, stripe)
             if user_id and plan_id in {"solo", "pro"}:
-                await _grant_subscription_invoice_if_needed(
+                granted = await _grant_subscription_invoice_if_needed(
                     user_id=user_id,
                     plan_id=plan_id,
                     invoice=invoice,
                     stripe_customer_id=str(invoice.get("customer") or "").strip() or None,
                     stripe_subscription_id=stripe_subscription_id,
                 )
+                if granted and stripe_subscription_id:
+                    try:
+                        subscription = stripe.Subscription.retrieve(stripe_subscription_id)
+                        user_doc = await _get_user_doc_by_id(user_id)
+                        if user_doc:
+                            await _sync_subscription_state_from_stripe(
+                                user_doc=user_doc,
+                                subscription=subscription,
+                                current_plan_hint=plan_id,
+                            )
+                    except Exception as exc:
+                        logger.warning(f"Stripe subscription sync after invoice.paid failed: {exc}")
 
         elif event_type == "invoice.payment_failed":
             invoice = data_object
             user_id, plan_id, stripe_subscription_id = await _resolve_invoice_context(invoice, stripe)
             if user_id and plan_id in {"solo", "pro"}:
+                user_doc = await _get_user_doc_by_id(user_id)
+                if user_doc:
+                    await _persist_subscription_state(
+                        user_doc=user_doc,
+                        subscription_state={
+                            **_normalize_subscription_state(user_doc),
+                            "stripe_customer_id": str(invoice.get("customer") or "").strip() or None,
+                            "stripe_subscription_id": stripe_subscription_id,
+                            "status": "past_due",
+                        },
+                    )
                 pending_record = await _find_latest_pending_subscription_billing_record(user_id, plan_id)
                 if pending_record:
                     await _update_billing_record(
@@ -8253,11 +8751,34 @@ async def stripe_webhook(request: Request):
 
         elif event_type in {"customer.subscription.updated", "customer.subscription.deleted"}:
             subscription = data_object
-            metadata = subscription.get("metadata") or {}
-            user_id = str(metadata.get("app_user_id") or "").strip()
-            plan_id = str(metadata.get("plan_code") or "").strip()
-            if user_id and plan_id in {"solo", "pro"}:
-                pending_record = await _find_latest_pending_subscription_billing_record(user_id, plan_id)
+            user_doc, stripe_plan_id = await _resolve_subscription_owner_context(subscription=subscription)
+            if user_doc:
+                synced_state = await _sync_subscription_state_from_stripe(
+                    user_doc=user_doc,
+                    subscription=subscription,
+                    current_plan_hint=user_doc.get("plan"),
+                )
+                if event_type == "customer.subscription.deleted":
+                    synced_state = await _persist_subscription_state(
+                        user_doc=user_doc,
+                        subscription_state={
+                            **synced_state,
+                            "status": "canceled",
+                            "cancel_at_period_end": False,
+                            "pending_change": False,
+                            "pending_plan_id": None,
+                            "pending_effective_at": None,
+                            "current_plan_id": None,
+                            "stripe_plan_id": stripe_plan_id,
+                        },
+                        plan_override="free",
+                    )
+                plan_for_record = synced_state.get("current_plan_id") or stripe_plan_id
+                pending_record = (
+                    await _find_latest_pending_subscription_billing_record(user_doc["user_id"], plan_for_record)
+                    if plan_for_record in SELF_SERVE_RECURRING_PLAN_IDS
+                    else None
+                )
                 if pending_record:
                     await _update_billing_record(
                         pending_record["billing_record_id"],
@@ -8265,7 +8786,7 @@ async def stripe_webhook(request: Request):
                             "stripe_customer_id": str(subscription.get("customer") or "").strip() or None,
                             "stripe_subscription_id": str(subscription.get("id") or "").strip() or None,
                             "stripe_subscription_status": subscription.get("status"),
-                            "plan_code": plan_id,
+                            "plan_code": plan_for_record,
                             "billing_reason": "subscription_state_sync",
                         },
                     )

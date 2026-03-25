@@ -55,9 +55,71 @@ const formatLedgerDate = (value) => {
   }).format(parsed);
 };
 
+const formatBillingDate = (value) => {
+  if (!value) return 'Non disponibile';
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return 'Non disponibile';
+  return new Intl.DateTimeFormat('it-IT', {
+    dateStyle: 'medium',
+  }).format(parsed);
+};
+
 const formatQuotaLabel = (field) => QUOTA_LABELS[field] || 'Credito';
 const formatEntryTypeLabel = (type) => ENTRY_TYPE_LABELS[type] || 'Movimento';
 const formatReferenceLabel = (type) => REFERENCE_TYPE_LABELS[type] || null;
+const FALLBACK_PLAN_TYPE_LABELS = {
+  free: 'Accesso iniziale',
+  starter: 'Pacchetto extra',
+  solo: 'Abbonamento mensile',
+  pro: 'Abbonamento mensile',
+  studio: 'Gestione manuale',
+  enterprise: 'Interno',
+};
+const FALLBACK_SUPPORT_LABELS = {
+  free: 'Supporto base',
+  starter: 'Supporto via email',
+  solo: 'Supporto standard',
+  pro: 'Supporto prioritario',
+  studio: 'Supporto dedicato',
+  enterprise: 'Supporto dedicato',
+};
+const FALLBACK_VALIDITY_LABELS = {
+  free: 'Accesso iniziale non ricorrente',
+  starter: 'Crediti extra separati dal piano mensile',
+  solo: 'I crediti mensili si rinnovano a ogni ciclo',
+  pro: 'I crediti mensili si rinnovano a ogni ciclo',
+};
+const FALLBACK_CREDITS_LABELS = {
+  free: '4 crediti iniziali',
+  starter: '8 crediti extra',
+  solo: '28 crediti mensili',
+  pro: '84 crediti mensili',
+  studio: 'Gestione su richiesta',
+};
+
+const localizePlanType = (plan) => (
+  FALLBACK_PLAN_TYPE_LABELS[plan?.plan_id] ||
+  plan?.plan_type_label_it ||
+  'Piano'
+);
+
+const localizeSupport = (plan) => (
+  FALLBACK_SUPPORT_LABELS[plan?.plan_id] ||
+  plan?.support_level_it ||
+  'Supporto'
+);
+
+const localizeValidity = (plan) => (
+  FALLBACK_VALIDITY_LABELS[plan?.plan_id] ||
+  plan?.validity_label_it ||
+  null
+);
+
+const localizeCreditsLabel = (plan) => (
+  FALLBACK_CREDITS_LABELS[plan?.plan_id] ||
+  plan?.credits_label_it ||
+  null
+);
 
 const readTrackedCheckoutSession = () => {
   try {
@@ -189,6 +251,7 @@ const Billing = () => {
   const [checkoutLoadingPlanId, setCheckoutLoadingPlanId] = useState('');
   const [checkingPayment, setCheckingPayment] = useState(false);
   const [checkoutFeedback, setCheckoutFeedback] = useState(null);
+  const [subscriptionActionLoading, setSubscriptionActionLoading] = useState('');
   const [ledgerEntries, setLedgerEntries] = useState([]);
   const [ledgerTotal, setLedgerTotal] = useState(0);
   const [ledgerLoading, setLedgerLoading] = useState(true);
@@ -449,6 +512,21 @@ const Billing = () => {
   const currentPlan = plans.find((plan) => plan.plan_id === accountState.planId);
   const currentPlanDetails = currentPlan || (accountState.isMasterAdmin ? INTERNAL_PLAN_DETAILS : null);
   const hasMoreLedgerEntries = ledgerEntries.length < ledgerTotal;
+  const subscriptionState = accountState.subscription || {};
+  const currentRecurringPlanId = subscriptionState.currentPlanId || accountState.planId;
+  const monthlyCredits = accountState?.periziaCredits?.monthlyRemaining ?? 0;
+  const extraCredits = accountState?.periziaCredits?.extraRemaining ?? 0;
+  const hasManagedSubscription = Boolean(subscriptionState.stripeSubscriptionId && currentRecurringPlanId && ['solo', 'pro'].includes(currentRecurringPlanId));
+  const renewalDateLabel = subscriptionState.currentPeriodEnd ? formatBillingDate(subscriptionState.currentPeriodEnd) : null;
+  const pendingPlanLabel = subscriptionState.pendingPlanId ? subscriptionState.pendingPlanId.toUpperCase() : null;
+  const pendingEffectiveLabel = subscriptionState.pendingEffectiveAt
+    ? formatBillingDate(subscriptionState.pendingEffectiveAt)
+    : renewalDateLabel;
+
+  const refreshAccountData = async () => {
+    await refreshUser();
+    await fetchLedger({ reset: true });
+  };
 
   const handlePlanAction = async (plan) => {
     if (plan.plan_id === 'free' || plan.plan_id === accountState.planId) return;
@@ -487,6 +565,78 @@ const Billing = () => {
       clearTrackedCheckoutSession();
       toast.error(typeof detail === 'string' ? detail : 'Impossibile avviare il checkout.');
       setCheckoutLoadingPlanId('');
+    }
+  };
+
+  const handleSubscriptionAction = async (endpoint, successMessage) => {
+    setSubscriptionActionLoading(endpoint);
+    try {
+      await axios.post(`${API_URL}${endpoint}`, {}, { withCredentials: true });
+      toast.success(successMessage);
+      await refreshAccountData();
+    } catch (error) {
+      const detail = error?.response?.data?.detail;
+      toast.error(typeof detail === 'string' ? detail : 'Operazione non disponibile.');
+    } finally {
+      setSubscriptionActionLoading('');
+    }
+  };
+
+  const getPlanCta = (plan) => {
+    if (plan.plan_id === 'free') {
+      return { disabled: true, label: 'Gia incluso' };
+    }
+    if (plan.plan_id === accountState.planId) {
+      return { disabled: true, label: 'Piano attuale' };
+    }
+    if (plan.plan_id === 'starter') {
+      return { kind: 'checkout', label: 'Acquista Credit Pack 8' };
+    }
+    if (plan.plan_id === 'studio') {
+      return { disabled: true, label: "Gestione manuale" };
+    }
+    if (!hasManagedSubscription) {
+      return { kind: 'checkout', label: plan.plan_id === 'starter' ? 'Acquista ora' : 'Attiva piano' };
+    }
+    if (subscriptionState.pendingChange) {
+      if (plan.plan_id === subscriptionState.pendingPlanId) {
+        return { disabled: true, label: `Gia programmato: ${plan.name_it}` };
+      }
+      return { disabled: true, label: 'Cambio gia programmato' };
+    }
+    if (subscriptionState.cancelAtPeriodEnd && plan.plan_id !== 'starter') {
+      return { disabled: true, label: 'Cancellazione gia programmata' };
+    }
+    if (currentRecurringPlanId === 'solo' && plan.plan_id === 'pro') {
+      return { kind: 'change-plan', label: 'Passa a Pro dal prossimo ciclo' };
+    }
+    if (currentRecurringPlanId === 'pro' && plan.plan_id === 'solo') {
+      return { kind: 'change-plan', label: 'Passa a Solo dal prossimo ciclo' };
+    }
+    return { disabled: true, label: 'Non disponibile qui' };
+  };
+
+  const triggerPlanAction = async (plan, cta) => {
+    if (cta.kind === 'checkout') {
+      await handlePlanAction(plan);
+      return;
+    }
+    if (cta.kind === 'change-plan') {
+      setSubscriptionActionLoading(`change:${plan.plan_id}`);
+      try {
+        await axios.post(
+          `${API_URL}/api/billing/subscription/change-plan`,
+          { plan_id: plan.plan_id },
+          { withCredentials: true }
+        );
+        toast.success('Cambio piano registrato per il prossimo ciclo.');
+        await refreshAccountData();
+      } catch (error) {
+        const detail = error?.response?.data?.detail;
+        toast.error(typeof detail === 'string' ? detail : 'Cambio piano non disponibile.');
+      } finally {
+        setSubscriptionActionLoading('');
+      }
     }
   };
 
@@ -535,7 +685,7 @@ const Billing = () => {
         <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-6 mb-8">
           <div className="flex items-center justify-between">
             <div>
-              <p className="text-sm text-zinc-500 mb-1">Piano attuale</p>
+              <p className="text-sm text-zinc-500 mb-1">Piano attivo</p>
               <div className="flex items-center gap-3">
                 <h2 className="text-2xl font-serif font-bold text-zinc-100 capitalize">
                   {currentPlanDetails?.name_it || accountState.planLabel}
@@ -554,26 +704,84 @@ const Billing = () => {
             }`} />
           </div>
 
-          <div className="mt-6 grid grid-cols-1 md:grid-cols-3 gap-4">
+          <div className="mt-6 grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4">
             <div className="p-4 bg-zinc-950 rounded-lg">
-              <p className="text-xs text-zinc-500 mb-1">Crediti disponibili</p>
+              <p className="text-xs text-zinc-500 mb-1">Crediti mensili</p>
+              <p className="text-2xl font-mono font-bold text-zinc-100">
+                {monthlyCredits}
+              </p>
+            </div>
+            <div className="p-4 bg-zinc-950 rounded-lg">
+              <p className="text-xs text-zinc-500 mb-1">Crediti extra</p>
+              <p className="text-2xl font-mono font-bold text-zinc-100">
+                {extraCredits}
+              </p>
+            </div>
+            <div className="p-4 bg-zinc-950 rounded-lg">
+              <p className="text-xs text-zinc-500 mb-1">Totale crediti disponibili</p>
               <p className="text-2xl font-mono font-bold text-gold">
                 {totalAvailableCredits}
               </p>
             </div>
             <div className="p-4 bg-zinc-950 rounded-lg">
-              <p className="text-xs text-zinc-500 mb-1">Tipo piano</p>
+              <p className="text-xs text-zinc-500 mb-1">Prossimo rinnovo</p>
               <p className="text-sm font-semibold text-zinc-200">
-                {currentPlanDetails?.plan_type_label_it || 'Non disponibile'}
-              </p>
-            </div>
-            <div className="p-4 bg-zinc-950 rounded-lg">
-              <p className="text-xs text-zinc-500 mb-1">Supporto</p>
-              <p className="text-sm font-semibold text-zinc-200">
-                {currentPlanDetails?.support_level_it || 'Supporto base'}
+                {renewalDateLabel || 'Non disponibile'}
               </p>
             </div>
           </div>
+          <div className="mt-4 flex flex-wrap gap-3">
+            <div className="rounded-full border border-zinc-800 bg-zinc-950 px-4 py-2 text-sm text-zinc-300">
+              {hasManagedSubscription ? 'Abbonamento ricorrente attivo' : 'Nessun abbonamento ricorrente attivo'}
+            </div>
+            {subscriptionState.pendingChange && pendingPlanLabel && (
+              <div className="rounded-full border border-indigo-500/30 bg-indigo-500/10 px-4 py-2 text-sm text-indigo-100">
+                Cambio piano programmato: {pendingPlanLabel}{pendingEffectiveLabel ? ` dal ${pendingEffectiveLabel}` : ''}
+              </div>
+            )}
+            {subscriptionState.cancelAtPeriodEnd && renewalDateLabel && (
+              <div className="rounded-full border border-amber-500/30 bg-amber-500/10 px-4 py-2 text-sm text-amber-100">
+                Cancellazione a fine periodo: {renewalDateLabel}
+              </div>
+            )}
+          </div>
+          <div className="mt-4 rounded-xl border border-zinc-800 bg-zinc-950/70 p-4 text-sm text-zinc-300 space-y-2">
+            <p>I crediti mensili si rinnovano a ogni ciclo del piano attivo.</p>
+            <p>I crediti extra restano separati, sono acquistabili in qualsiasi momento e si usano solo dopo i crediti mensili.</p>
+          </div>
+          {hasManagedSubscription && (
+            <div className="mt-4 flex flex-wrap gap-3">
+              {!subscriptionState.cancelAtPeriodEnd ? (
+                <Button
+                  onClick={() => handleSubscriptionAction('/api/billing/subscription/cancel', 'Cancellazione a fine periodo attivata.')}
+                  disabled={Boolean(subscriptionActionLoading)}
+                  variant="outline"
+                  className="border-zinc-700 bg-transparent text-zinc-100 hover:bg-zinc-800"
+                >
+                  {subscriptionActionLoading === '/api/billing/subscription/cancel' ? 'Invio...' : 'Cancella a fine periodo'}
+                </Button>
+              ) : (
+                <Button
+                  onClick={() => handleSubscriptionAction('/api/billing/subscription/resume', 'Cancellazione rimossa.')}
+                  disabled={Boolean(subscriptionActionLoading)}
+                  variant="outline"
+                  className="border-zinc-700 bg-transparent text-zinc-100 hover:bg-zinc-800"
+                >
+                  {subscriptionActionLoading === '/api/billing/subscription/resume' ? 'Invio...' : 'Mantieni attivo il rinnovo'}
+                </Button>
+              )}
+              {subscriptionState.pendingChange && (
+                <Button
+                  onClick={() => handleSubscriptionAction('/api/billing/subscription/clear-pending-change', 'Cambio piano pendente annullato.')}
+                  disabled={Boolean(subscriptionActionLoading)}
+                  variant="outline"
+                  className="border-zinc-700 bg-transparent text-zinc-100 hover:bg-zinc-800"
+                >
+                  {subscriptionActionLoading === '/api/billing/subscription/clear-pending-change' ? 'Invio...' : 'Annulla cambio piano'}
+                </Button>
+              )}
+            </div>
+          )}
           <div className="mt-6 flex justify-start">
             <Button asChild className="bg-gold text-zinc-950 hover:bg-gold-dim">
               <Link to="#billing-plans">Ricarica crediti</Link>
@@ -614,7 +822,7 @@ const Billing = () => {
                 </h3>
 
                 <p className="text-xs font-mono uppercase tracking-wider text-zinc-500 mb-4">
-                  {plan.plan_type_label_it}
+                  {localizePlanType(plan)}
                 </p>
 
                 <div className="flex items-baseline gap-1 mb-6">
@@ -626,17 +834,17 @@ const Billing = () => {
                     </span>
                   )}
                   {plan.plan_id !== 'studio' && plan.price_suffix_it && (
-                    <span className="text-zinc-500">{plan.price_suffix_it}</span>
+                    <span className="text-zinc-500">{plan.plan_id === 'starter' ? 'una tantum' : '/mese'}</span>
                   )}
                 </div>
 
                 <div className="space-y-2 mb-6 text-sm">
-                  <p className="text-zinc-200 font-medium">{plan.credits_label_it}</p>
-                  {plan.validity_label_it && (
-                    <p className="text-zinc-500">{plan.validity_label_it}</p>
+                  <p className="text-zinc-200 font-medium">{localizeCreditsLabel(plan)}</p>
+                  {localizeValidity(plan) && (
+                    <p className="text-zinc-500">{localizeValidity(plan)}</p>
                   )}
-                  {plan.support_level_it && (
-                    <p className="text-zinc-500">{plan.support_level_it}</p>
+                  {localizeSupport(plan) && (
+                    <p className="text-zinc-500">{localizeSupport(plan)}</p>
                   )}
                 </div>
 
@@ -651,35 +859,37 @@ const Billing = () => {
 
                 {plan.plan_id === accountState.planId ? (
                   <Button disabled className="w-full bg-zinc-800 text-zinc-500 cursor-not-allowed">
-                    Piano Attuale
-                  </Button>
-                ) : plan.plan_id === 'free' ? (
-                  <Button disabled className="w-full bg-zinc-800 text-zinc-500 cursor-not-allowed">
-                    {plan.cta_label_it}
+                    Piano attivo
                   </Button>
                 ) : (
-                  <Button
-                    onClick={() => handlePlanAction(plan)}
-                    data-testid={`subscribe-${plan.plan_id}-btn`}
-                    disabled={Boolean(checkoutLoadingPlanId)}
-                    className={`w-full ${
-                      plan.plan_id === 'solo'
-                        ? 'bg-indigo-600 hover:bg-indigo-700 text-white'
-                        : 'bg-gold text-zinc-950 hover:bg-gold-dim'
-                    }`}
-                  >
-                    {checkoutLoadingPlanId === plan.plan_id ? (
-                      <>
-                        <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                        Reindirizzamento...
-                      </>
-                    ) : (
-                      <>
-                        <CreditCard className="w-4 h-4 mr-2" />
-                        {plan.plan_id === 'studio' ? "Richiedi un'offerta" : plan.cta_label_it}
-                      </>
-                    )}
-                  </Button>
+                  (() => {
+                    const cta = getPlanCta(plan);
+                    const isBusy = checkoutLoadingPlanId === plan.plan_id || subscriptionActionLoading === `change:${plan.plan_id}`;
+                    return (
+                      <Button
+                        onClick={() => triggerPlanAction(plan, cta)}
+                        data-testid={`subscribe-${plan.plan_id}-btn`}
+                        disabled={Boolean(checkoutLoadingPlanId) || Boolean(subscriptionActionLoading) || cta.disabled}
+                        className={`w-full ${
+                          plan.plan_id === 'solo'
+                            ? 'bg-indigo-600 hover:bg-indigo-700 text-white'
+                            : 'bg-gold text-zinc-950 hover:bg-gold-dim'
+                        } ${cta.disabled ? 'bg-zinc-800 text-zinc-500 cursor-not-allowed hover:bg-zinc-800' : ''}`}
+                      >
+                        {isBusy ? (
+                          <>
+                            <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                            Invio...
+                          </>
+                        ) : (
+                          <>
+                            <CreditCard className="w-4 h-4 mr-2" />
+                            {cta.label}
+                          </>
+                        )}
+                      </Button>
+                    );
+                  })()
                 )}
               </div>
             ))
@@ -695,7 +905,7 @@ const Billing = () => {
               </div>
             ))}
           </div>
-          <p className="text-xs text-zinc-600 mt-4">Crediti extra disponibili.</p>
+          <p className="text-xs text-zinc-600 mt-4">Prima si consumano i crediti mensili, poi i crediti extra.</p>
         </div>
 
         <section className="mt-8 rounded-2xl border border-zinc-800 bg-zinc-900/60 p-6">
