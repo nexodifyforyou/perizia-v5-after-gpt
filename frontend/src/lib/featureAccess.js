@@ -6,7 +6,7 @@ const DEFAULT_QUOTA = {
 
 const PLAN_LABELS = {
   free: 'Accesso iniziale',
-  starter: 'Pacchetto crediti 8',
+  starter: 'Pacchetto 8 crediti',
   solo: 'Solo',
   pro: 'Pro',
   studio: 'Studio',

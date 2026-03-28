@@ -597,7 +597,7 @@ const Billing = () => {
       return { disabled: true, label: 'Piano attuale' };
     }
     if (plan.plan_id === 'starter') {
-      return { kind: 'checkout', label: 'Acquista Pacchetto crediti 8' };
+      return { kind: 'checkout', label: 'Acquista pacchetto 8 crediti' };
     }
     if (plan.plan_id === 'studio') {
       return { disabled: true, label: "Gestione manuale" };
