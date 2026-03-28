@@ -96,6 +96,7 @@ const FALLBACK_CREDITS_LABELS = {
   pro: '84 crediti mensili',
   studio: 'Gestione su richiesta',
 };
+const TERMINAL_SUBSCRIPTION_STATUSES = ['canceled', 'cancelled', 'ended', 'incomplete_expired', 'unpaid'];
 
 const localizePlanType = (plan) => (
   FALLBACK_PLAN_TYPE_LABELS[plan?.plan_id] ||
@@ -516,7 +517,13 @@ const Billing = () => {
   const currentRecurringPlanId = subscriptionState.currentPlanId || accountState.planId;
   const monthlyCredits = accountState?.periziaCredits?.monthlyRemaining ?? 0;
   const extraCredits = accountState?.periziaCredits?.extraRemaining ?? 0;
-  const hasManagedSubscription = Boolean(subscriptionState.stripeSubscriptionId && currentRecurringPlanId && ['solo', 'pro'].includes(currentRecurringPlanId));
+  const normalizedSubscriptionStatus = String(subscriptionState.status || '').trim().toLowerCase();
+  const hasRecurringSubscription = Boolean(
+    currentRecurringPlanId &&
+    ['solo', 'pro'].includes(currentRecurringPlanId) &&
+    !TERMINAL_SUBSCRIPTION_STATUSES.includes(normalizedSubscriptionStatus)
+  );
+  const hasManagedSubscription = Boolean(hasRecurringSubscription && subscriptionState.stripeSubscriptionId);
   const renewalDateLabel = subscriptionState.currentPeriodEnd ? formatBillingDate(subscriptionState.currentPeriodEnd) : null;
   const pendingPlanLabel = subscriptionState.pendingPlanId ? subscriptionState.pendingPlanId.toUpperCase() : null;
   const pendingEffectiveLabel = subscriptionState.pendingEffectiveAt
@@ -595,7 +602,7 @@ const Billing = () => {
     if (plan.plan_id === 'studio') {
       return { disabled: true, label: "Gestione manuale" };
     }
-    if (!hasManagedSubscription) {
+    if (!hasRecurringSubscription) {
       return { kind: 'checkout', label: plan.plan_id === 'starter' ? 'Acquista ora' : 'Attiva piano' };
     }
     if (subscriptionState.pendingChange) {
@@ -732,7 +739,7 @@ const Billing = () => {
           </div>
           <div className="mt-4 flex flex-wrap gap-3">
             <div className="rounded-full border border-zinc-800 bg-zinc-950 px-4 py-2 text-sm text-zinc-300">
-              {hasManagedSubscription ? 'Abbonamento ricorrente attivo' : 'Nessun abbonamento ricorrente attivo'}
+              {hasRecurringSubscription ? 'Abbonamento ricorrente attivo' : 'Nessun abbonamento ricorrente attivo'}
             </div>
             {subscriptionState.pendingChange && pendingPlanLabel && (
               <div className="rounded-full border border-indigo-500/30 bg-indigo-500/10 px-4 py-2 text-sm text-indigo-100">

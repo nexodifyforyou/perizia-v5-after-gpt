@@ -1328,6 +1328,89 @@ async def test_checkout_session_completed_for_subscription_does_not_grant_or_mut
 
 
 @pytest.mark.anyio
+async def test_auth_me_recovers_missing_subscription_state_from_local_records(fake_db, monkeypatch):
+    class FakeSubscriptionApi:
+        @staticmethod
+        def retrieve(subscription_id):
+            assert subscription_id == "sub_local_recovery"
+            return {
+                "id": "sub_local_recovery",
+                "customer": "cus_local_recovery",
+                "status": "active",
+                "cancel_at_period_end": False,
+                "current_period_end": 1775000000,
+                "metadata": {"app_user_id": "user_checkout", "plan_code": "solo"},
+                "items": {"data": [{"id": "si_local_recovery", "price": {"id": "price_solo_env"}}]},
+            }
+
+    class FakeStripeModule:
+        api_key = None
+        Subscription = FakeSubscriptionApi
+
+    monkeypatch.setitem(sys.modules, "stripe", FakeStripeModule)
+
+    token = _seed_default_checkout_user(fake_db, plan="solo", credits=32)
+    _user_doc(fake_db)["perizia_credits"] = {
+        "version": 1,
+        "monthly_remaining": 28,
+        "extra_remaining": 4,
+        "total_available": 32,
+        "monthly_plan_id": "solo",
+        "monthly_refreshed_at": "2026-03-25T00:03:26.848917+00:00",
+        "pack_expiry_enforced": False,
+        "pack_validity_days": 365,
+        "pack_grants": [
+            {
+                "grant_id": "pack_existing",
+                "source": "legacy_migration",
+                "plan_code": "starter",
+                "reference_id": "user_checkout",
+                "amount_granted": 4,
+                "amount_remaining": 4,
+                "granted_at": "2026-03-25T00:00:59.259999+00:00",
+                "expires_at": None,
+            }
+        ],
+        "processed_invoice_ids": ["in_local_recovery_1"],
+    }
+    _user_doc(fake_db)["subscription_state"] = {}
+    _seed_pending_checkout(
+        fake_db,
+        user_id="user_checkout",
+        plan_id="solo",
+        session_id="cs_local_recovery",
+        transaction_id="txn_local_recovery",
+        billing_record_id="bill_local_recovery",
+    )
+    fake_db.payment_transactions.items[-1]["status"] = "complete"
+    fake_db.payment_transactions.items[-1]["payment_status"] = "paid"
+    fake_db.payment_transactions.items[-1]["stripe_customer_id"] = "cus_local_recovery"
+    fake_db.payment_transactions.items[-1]["stripe_subscription_id"] = "sub_local_recovery"
+    fake_db.billing_records.items[-1]["status"] = "paid"
+    fake_db.billing_records.items[-1]["invoice_status"] = "ready"
+    fake_db.billing_records.items[-1]["metadata"].update({
+        "stripe_customer_id": "cus_local_recovery",
+        "stripe_subscription_id": "sub_local_recovery",
+        "entitlement_granted": True,
+    })
+
+    transport = httpx.ASGITransport(app=server.app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        me = await client.get("/api/auth/me", headers={"Authorization": f"Bearer {token}"})
+
+    assert me.status_code == 200
+    payload = me.json()
+    state = payload["account"]["subscription"]
+    assert state["current_plan_id"] == "solo"
+    assert state["stripe_customer_id"] == "cus_local_recovery"
+    assert state["stripe_subscription_id"] == "sub_local_recovery"
+    assert state["status"] == "active"
+    assert state["current_period_end"] is not None
+    assert _subscription_state(fake_db)["stripe_subscription_id"] == "sub_local_recovery"
+    assert _subscription_state(fake_db)["current_period_end"] is not None
+
+
+@pytest.mark.anyio
 async def test_invoice_payment_failed_marks_billing_failed_without_grant_or_wallet_mutation(fake_db, monkeypatch):
     next_event = {}
 

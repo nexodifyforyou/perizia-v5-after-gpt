@@ -948,6 +948,7 @@ async def get_current_user(request: Request) -> Optional[User]:
     user_doc = await db.users.find_one({"user_id": session_doc["user_id"]}, {"_id": 0})
     if not user_doc:
         return None
+    user_doc = await _recover_subscription_state_from_local_records(user_doc)
 
     normalized_user_doc = await _apply_normalized_account_state(user_doc, persist=True)
     await _ensure_opening_balance_baseline_for_user_doc(normalized_user_doc)
@@ -6951,6 +6952,33 @@ async def _payment_transaction_by_session(session_id: str, user_id: Optional[str
         query["user_id"] = user_id
     return await db.payment_transactions.find_one(query, {"_id": 0})
 
+
+async def _latest_subscription_transaction_for_user(user_id: str, plan_id: Optional[str] = None) -> Optional[Dict[str, Any]]:
+    query: Dict[str, Any] = {"user_id": user_id, "plan_id": {"$in": sorted(SELF_SERVE_RECURRING_PLAN_IDS)}}
+    normalized_plan_id = str(plan_id or "").strip().lower()
+    if normalized_plan_id in SELF_SERVE_RECURRING_PLAN_IDS:
+        query["plan_id"] = normalized_plan_id
+    return await db.payment_transactions.find_one(query, {"_id": 0}, sort=[("created_at", -1)])
+
+
+async def _latest_subscription_billing_record_for_user(user_id: str, plan_id: Optional[str] = None) -> Optional[Dict[str, Any]]:
+    query: Dict[str, Any] = {
+        "user_id": user_id,
+        "purchase_type": "subscription",
+        "plan_id": {"$in": sorted(SELF_SERVE_RECURRING_PLAN_IDS)},
+    }
+    normalized_plan_id = str(plan_id or "").strip().lower()
+    if normalized_plan_id in SELF_SERVE_RECURRING_PLAN_IDS:
+        query["plan_id"] = normalized_plan_id
+    return await db.billing_records.find_one(query, {"_id": 0}, sort=[("created_at", -1)])
+
+
+def _resolved_checkout_user_id(*candidate_values: Optional[str]) -> Optional[str]:
+    distinct_values = {str(value or "").strip() for value in candidate_values if str(value or "").strip()}
+    if len(distinct_values) != 1:
+        return None
+    return next(iter(distinct_values))
+
 async def _set_payment_transaction_state(
     session_id: str,
     *,
@@ -7028,6 +7056,81 @@ async def _persist_subscription_state(
     await db.users.update_one({"user_id": user_doc["user_id"]}, {"$set": update_fields})
     user_doc["subscription_state"] = normalized_state
     return normalized_state
+
+
+async def _recover_subscription_state_from_local_records(user_doc: Dict[str, Any]) -> Dict[str, Any]:
+    normalized_plan_id = str(user_doc.get("plan") or "").strip().lower()
+    current_state = _normalize_subscription_state(user_doc)
+    current_plan_id = str(current_state.get("current_plan_id") or normalized_plan_id or "").strip().lower()
+    if current_plan_id not in SELF_SERVE_RECURRING_PLAN_IDS:
+        return user_doc
+    if (
+        current_state.get("stripe_subscription_id")
+        and current_state.get("stripe_customer_id")
+        and current_state.get("current_period_end")
+    ):
+        return user_doc
+
+    billing_record = await _latest_subscription_billing_record_for_user(user_doc["user_id"], current_plan_id)
+    payment_transaction = await _latest_subscription_transaction_for_user(user_doc["user_id"], current_plan_id)
+    billing_metadata = dict((billing_record or {}).get("metadata") or {})
+    recovered_customer_id = (
+        billing_metadata.get("stripe_customer_id")
+        or (payment_transaction or {}).get("stripe_customer_id")
+        or current_state.get("stripe_customer_id")
+    )
+    recovered_subscription_id = (
+        billing_metadata.get("stripe_subscription_id")
+        or (payment_transaction or {}).get("stripe_subscription_id")
+        or current_state.get("stripe_subscription_id")
+    )
+    recovered_plan_id = str(
+        current_state.get("current_plan_id")
+        or (billing_record or {}).get("plan_id")
+        or (payment_transaction or {}).get("plan_id")
+        or normalized_plan_id
+        or ""
+    ).strip().lower()
+    if recovered_plan_id not in SELF_SERVE_RECURRING_PLAN_IDS:
+        return user_doc
+
+    if recovered_subscription_id and STRIPE_SECRET_KEY:
+        try:
+            import stripe
+            stripe.api_key = STRIPE_SECRET_KEY
+            subscription = stripe.Subscription.retrieve(recovered_subscription_id)
+            recovered_state = await _sync_subscription_state_from_stripe(
+                user_doc=user_doc,
+                subscription=subscription,
+                current_plan_hint=recovered_plan_id,
+            )
+            user_doc["subscription_state"] = recovered_state
+            return user_doc
+        except Exception as exc:
+            logger.warning(
+                "Subscription state recovery from Stripe failed: user_id=%s subscription_id=%s error=%s",
+                user_doc.get("user_id"),
+                recovered_subscription_id,
+                exc,
+            )
+
+    if not recovered_customer_id and not recovered_subscription_id:
+        return user_doc
+
+    recovered_state = await _persist_subscription_state(
+        user_doc=user_doc,
+        subscription_state={
+            **current_state,
+            "stripe_customer_id": recovered_customer_id,
+            "stripe_subscription_id": recovered_subscription_id,
+            "status": current_state.get("status") or "active",
+            "current_plan_id": current_state.get("current_plan_id") or recovered_plan_id,
+            "stripe_plan_id": current_state.get("stripe_plan_id") or recovered_plan_id,
+        },
+        plan_override=current_plan_id,
+    )
+    user_doc["subscription_state"] = recovered_state
+    return user_doc
 
 
 def _stripe_subscription_item_id(subscription: Any) -> Optional[str]:
@@ -8656,8 +8759,14 @@ async def stripe_webhook(request: Request):
                         metadata_updates=metadata_updates,
                         paid=starter_paid and bool(resolved_user_id),
                     )
-            if plan_id in SELF_SERVE_RECURRING_PLAN_IDS and metadata_user_id and stripe_subscription_id:
-                user_doc = await _get_user_doc_by_id(metadata_user_id)
+            recurring_checkout_user_id = _resolved_checkout_user_id(
+                metadata_user_id,
+                client_reference_id,
+                (payment_transaction or {}).get("user_id"),
+                (billing_record or {}).get("user_id"),
+            )
+            if plan_id in SELF_SERVE_RECURRING_PLAN_IDS and recurring_checkout_user_id and stripe_subscription_id:
+                user_doc = await _get_user_doc_by_id(recurring_checkout_user_id)
                 if user_doc:
                     await _persist_subscription_state(
                         user_doc=user_doc,
@@ -8706,7 +8815,7 @@ async def stripe_webhook(request: Request):
                     stripe_customer_id=str(invoice.get("customer") or "").strip() or None,
                     stripe_subscription_id=stripe_subscription_id,
                 )
-                if granted and stripe_subscription_id:
+                if stripe_subscription_id:
                     try:
                         subscription = stripe.Subscription.retrieve(stripe_subscription_id)
                         user_doc = await _get_user_doc_by_id(user_id)
