@@ -778,6 +778,48 @@ def _append_pack_grant(wallet: Dict[str, Any], *, amount: int, reference_id: str
     return updated_wallet
 
 
+def _admin_override_perizia_credit_wallet(
+    user_doc: Dict[str, Any],
+    *,
+    total_available: int,
+    plan_override: Optional[str] = None,
+) -> Dict[str, Any]:
+    plan_id = str(plan_override or user_doc.get("plan") or "").strip().lower()
+    is_master_admin = _is_master_admin_email(user_doc.get("email"))
+    current_wallet = _normalize_perizia_credit_wallet(user_doc, plan_id=plan_id, is_master_admin=is_master_admin)
+    if is_master_admin:
+        return current_wallet
+
+    target_total = max(0, int(total_available or 0))
+    monthly_remaining = 0
+    if plan_id in PAID_RECURRING_PLAN_IDS:
+        monthly_remaining = min(target_total, _monthly_perizia_quota_for_plan(plan_id))
+    extra_remaining = max(0, target_total - monthly_remaining)
+    pack_grants: List[Dict[str, Any]] = []
+    if extra_remaining > 0:
+        pack_grants.append(
+            _make_pack_grant(
+                amount=extra_remaining,
+                amount_remaining=extra_remaining,
+                source="admin_adjustment",
+                plan_code="starter",
+                reference_id=str(user_doc.get("user_id") or "").strip() or None,
+            )
+        )
+
+    return _finalize_perizia_credit_wallet(
+        {
+            "monthly_remaining": monthly_remaining,
+            "extra_remaining": extra_remaining,
+            "monthly_refreshed_at": current_wallet.get("monthly_refreshed_at"),
+            "pack_grants": pack_grants,
+            "processed_invoice_ids": current_wallet.get("processed_invoice_ids") or [],
+        },
+        plan_id=plan_id,
+        is_master_admin=is_master_admin,
+    )
+
+
 def _consume_extra_pack_grants(pack_grants: List[Dict[str, Any]], amount: int) -> List[Dict[str, Any]]:
     remaining_to_consume = max(0, int(amount or 0))
     ordered = sorted(
@@ -7135,8 +7177,9 @@ async def _recover_subscription_state_from_local_records(user_doc: Dict[str, Any
 
 def _stripe_subscription_item_id(subscription: Any) -> Optional[str]:
     items = _stripe_object_get(subscription, "items") or {}
-    for item in (items.get("data") or []):
-        item_id = str((item or {}).get("id") or "").strip()
+    item_list = _stripe_object_get(items, "data") or []
+    for item in item_list:
+        item_id = str(_stripe_object_get(item, "id") or "").strip()
         if item_id:
             return item_id
     return None
@@ -7144,8 +7187,10 @@ def _stripe_subscription_item_id(subscription: Any) -> Optional[str]:
 
 def _stripe_subscription_plan_id(subscription: Any) -> Optional[str]:
     items = _stripe_object_get(subscription, "items") or {}
-    for item in (items.get("data") or []):
-        price_id = str((((item or {}).get("price") or {}).get("id")) or "").strip()
+    item_list = _stripe_object_get(items, "data") or []
+    for item in item_list:
+        price = _stripe_object_get(item, "price") or {}
+        price_id = str(_stripe_object_get(price, "id") or "").strip()
         plan_id = _plan_id_for_stripe_price_id(price_id)
         if plan_id in SELF_SERVE_RECURRING_PLAN_IDS:
             return plan_id
@@ -7163,7 +7208,8 @@ def _stripe_subscription_period_end_iso(subscription: Any) -> Optional[str]:
         return normalized_period_end
 
     items = _stripe_object_get(subscription, "items") or {}
-    for item in (items.get("data") or []):
+    item_list = _stripe_object_get(items, "data") or []
+    for item in item_list:
         item_period_end = _stripe_object_get(item, "current_period_end")
         if isinstance(item_period_end, (int, float)) and item_period_end > 0:
             return datetime.fromtimestamp(item_period_end, tz=timezone.utc).isoformat()
@@ -7175,12 +7221,12 @@ def _stripe_subscription_period_end_iso(subscription: Any) -> Optional[str]:
 
 async def _resolve_subscription_owner_context(
     *,
-    subscription: Dict[str, Any],
+    subscription: Any,
     allow_customer_fallback: bool = True,
 ) -> Tuple[Optional[Dict[str, Any]], Optional[str]]:
     metadata = _stripe_object_metadata(subscription)
-    subscription_id = str(subscription.get("id") or "").strip() or None
-    customer_id = str(subscription.get("customer") or "").strip() or None
+    subscription_id = str(_stripe_object_get(subscription, "id") or "").strip() or None
+    customer_id = str(_stripe_object_get(subscription, "customer") or "").strip() or None
     user_candidates: Dict[str, Optional[str]] = {
         "subscription_metadata_user_id": str(metadata.get("app_user_id") or "").strip() or None,
     }
@@ -7236,7 +7282,7 @@ async def _resolve_subscription_owner_context(
 async def _sync_subscription_state_from_stripe(
     *,
     user_doc: Dict[str, Any],
-    subscription: Dict[str, Any],
+    subscription: Any,
     current_plan_hint: Optional[str] = None,
 ) -> Dict[str, Any]:
     current_state = _normalize_subscription_state(user_doc)
@@ -7246,12 +7292,12 @@ async def _sync_subscription_state_from_stripe(
         current_plan_id = current_plan_hint
     next_state = {
         **current_state,
-        "stripe_customer_id": str(subscription.get("customer") or "").strip() or current_state.get("stripe_customer_id"),
-        "stripe_subscription_id": str(subscription.get("id") or "").strip() or current_state.get("stripe_subscription_id"),
-        "status": str(subscription.get("status") or current_state.get("status") or "").strip().lower() or None,
+        "stripe_customer_id": str(_stripe_object_get(subscription, "customer") or "").strip() or current_state.get("stripe_customer_id"),
+        "stripe_subscription_id": str(_stripe_object_get(subscription, "id") or "").strip() or current_state.get("stripe_subscription_id"),
+        "status": str(_stripe_object_get(subscription, "status") or current_state.get("status") or "").strip().lower() or None,
         "stripe_plan_id": stripe_plan_id or current_state.get("stripe_plan_id"),
         "current_period_end": _stripe_subscription_period_end_iso(subscription) or current_state.get("current_period_end"),
-        "cancel_at_period_end": bool(subscription.get("cancel_at_period_end")),
+        "cancel_at_period_end": bool(_stripe_object_get(subscription, "cancel_at_period_end")),
         "current_plan_id": current_plan_id,
     }
     if next_state.get("pending_plan_id") == next_state.get("current_plan_id"):
@@ -8827,7 +8873,7 @@ async def stripe_webhook(request: Request):
                     stripe_customer_id=str(invoice.get("customer") or "").strip() or None,
                     stripe_subscription_id=stripe_subscription_id,
                 )
-                if stripe_subscription_id:
+                if granted and stripe_subscription_id:
                     try:
                         subscription = stripe.Subscription.retrieve(stripe_subscription_id)
                         user_doc = await _get_user_doc_by_id(user_id)
@@ -8904,9 +8950,9 @@ async def stripe_webhook(request: Request):
                     await _update_billing_record(
                         pending_record["billing_record_id"],
                         metadata_updates={
-                            "stripe_customer_id": str(subscription.get("customer") or "").strip() or None,
-                            "stripe_subscription_id": str(subscription.get("id") or "").strip() or None,
-                            "stripe_subscription_status": subscription.get("status"),
+                            "stripe_customer_id": str(_stripe_object_get(subscription, "customer") or "").strip() or None,
+                            "stripe_subscription_id": str(_stripe_object_get(subscription, "id") or "").strip() or None,
+                            "stripe_subscription_status": _stripe_object_get(subscription, "status"),
                             "plan_code": plan_for_record,
                             "billing_reason": "subscription_state_sync",
                         },
@@ -13391,6 +13437,12 @@ async def admin_overview(request: Request):
 
     top_users = sorted(top_users, key=lambda x: (x.get("perizie", 0) + x.get("images", 0) + x.get("assistant_qas", 0)), reverse=True)[:10]
 
+    latest_credit_movements = [
+        _serialize_admin_ledger_entry(entry)
+        for entry in ledger_30d_entries
+        if entry.get("entry_type") != "opening_balance"
+    ][:5]
+
     await _write_admin_audit(admin_user, "ADMIN_API_VIEW", meta={"endpoint": "overview"})
 
     return {
@@ -13407,10 +13459,7 @@ async def admin_overview(request: Request):
         "billing_records_30d": {
             "status_counts": billing_status_counts,
         },
-        "latest_credit_movements": [
-            _serialize_admin_ledger_entry(entry)
-            for entry in ledger_30d_entries[:5]
-        ],
+        "latest_credit_movements": latest_credit_movements,
         "latest_billing_activity": [
             _serialize_admin_billing_record(record)
             for record in billing_30d_records[:5]
@@ -13447,7 +13496,7 @@ async def admin_users(
 
     total = await db.users.count_documents(query)
 
-    requires_full_scan = sort in ["last_active_at", "usage_30d.perizie"]
+    requires_full_scan = sort in ["created_at", "last_active_at", "usage_30d.perizie"]
     users_list: List[Dict[str, Any]]
 
     if requires_full_scan:
@@ -13516,6 +13565,11 @@ async def admin_users(
         })
 
     if requires_full_scan:
+        if sort == "created_at":
+            enriched_users.sort(
+                key=lambda x: _parse_dt(x.get("created_at")) or datetime.min.replace(tzinfo=timezone.utc),
+                reverse=sort_dir == -1,
+            )
         if sort == "last_active_at":
             enriched_users.sort(key=lambda x: _parse_dt(x.get("last_active_at")) or datetime.min.replace(tzinfo=timezone.utc), reverse=sort_dir == -1)
         elif sort == "usage_30d.perizie":
@@ -13802,6 +13856,14 @@ async def admin_user_update(user_id: str, request: Request):
         new_quota = before_quota.copy()
         new_quota.update(quota_updates)
         update_data["quota"] = new_quota
+        if "perizia_scans_remaining" in quota_updates:
+            effective_plan = str(plan or before_plan or target_user.get("plan") or "").strip().lower()
+            update_data["perizia_credits"] = _admin_override_perizia_credit_wallet(
+                {**target_user, "plan": effective_plan},
+                total_available=new_quota["perizia_scans_remaining"],
+                plan_override=effective_plan,
+            )
+            update_data["quota"]["perizia_scans_remaining"] = update_data["perizia_credits"]["total_available"]
 
     if update_data:
         await db.users.update_one({"user_id": user_id}, {"$set": update_data})
