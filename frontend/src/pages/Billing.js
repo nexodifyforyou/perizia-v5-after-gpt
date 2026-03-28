@@ -17,7 +17,7 @@ const API_URL = process.env.REACT_APP_BACKEND_URL;
 const LEDGER_PAGE_SIZE = 10;
 const ACTIVE_CHECKOUT_STORAGE_KEY = 'periziascan.active_checkout_session';
 const INTERNAL_PLAN_DETAILS = {
-  name_it: 'Enterprise',
+  name_it: 'Interno',
   plan_type_label_it: 'Interno',
   support_level_it: 'Supporto dedicato',
 };
@@ -39,7 +39,7 @@ const REFERENCE_TYPE_LABELS = {
   analysis: 'Analisi',
   forensics: 'Analisi immagini',
   assistant_qa: 'Sessione assistente',
-  checkout_session: 'Checkout',
+  checkout_session: 'Pagamento',
   admin_user_update: 'Aggiornamento admin',
   system: 'Sistema',
   legacy_helper: 'Sistema',
@@ -335,7 +335,7 @@ const Billing = () => {
       }
       const feedback = {
         type: 'info',
-        title: 'Checkout annullato',
+        title: 'Pagamento annullato',
         body: 'Questo tentativo e stato annullato. Nessun addebito effettuato e nessun credito aggiunto.',
       };
       setCheckoutFeedback(feedback);
@@ -480,7 +480,7 @@ const Billing = () => {
       if (attempts >= maxAttempts) {
         const feedback = {
           type: 'info',
-          title: 'Checkout ancora in elaborazione',
+          title: 'Pagamento ancora in elaborazione',
           body: 'Questa sessione e ancora in sincronizzazione. Se il saldo non si aggiorna a breve, ricarica la pagina.',
         };
         setCheckoutFeedback(feedback);
@@ -500,7 +500,7 @@ const Billing = () => {
 
       const feedback = {
         type: 'info',
-        title: 'Stato checkout in sincronizzazione',
+        title: 'Stato pagamento in sincronizzazione',
         body: 'Questa sessione non puo essere verificata adesso. Se il saldo non si aggiorna a breve, ricarica la pagina una volta.',
       };
       setCheckoutFeedback(feedback);
@@ -597,7 +597,7 @@ const Billing = () => {
       return { disabled: true, label: 'Piano attuale' };
     }
     if (plan.plan_id === 'starter') {
-      return { kind: 'checkout', label: 'Acquista Credit Pack 8' };
+      return { kind: 'checkout', label: 'Acquista Pacchetto crediti 8' };
     }
     if (plan.plan_id === 'studio') {
       return { disabled: true, label: "Gestione manuale" };
@@ -698,8 +698,8 @@ const Billing = () => {
                   {currentPlanDetails?.name_it || accountState.planLabel}
                 </h2>
                 {accountState.isMasterAdmin && (
-                  <span className="px-2 py-1 bg-gold/20 text-gold text-xs font-mono rounded">
-                    MASTER ADMIN
+                    <span className="px-2 py-1 bg-gold/20 text-gold text-xs font-mono rounded">
+                    ADMIN PRINCIPALE
                   </span>
                 )}
               </div>
@@ -993,7 +993,7 @@ const Billing = () => {
           <AlertCircle className="w-5 h-5 text-zinc-500 flex-shrink-0 mt-0.5" />
           <div className="text-sm text-zinc-500">
             <p>Questa schermata mostra il modello commerciale attuale del prodotto.</p>
-            <p className="mt-1">Assistente e Image Forensics non sono inclusi nei pacchetti attivi.</p>
+            <p className="mt-1">Assistente e analisi immagini non sono inclusi nei pacchetti attivi.</p>
           </div>
         </div>
       </main>

@@ -7158,7 +7158,19 @@ def _stripe_subscription_period_end_iso(subscription: Any) -> Optional[str]:
     period_end = _stripe_object_get(subscription, "current_period_end")
     if isinstance(period_end, (int, float)) and period_end > 0:
         return datetime.fromtimestamp(period_end, tz=timezone.utc).isoformat()
-    return _to_iso(period_end)
+    normalized_period_end = _to_iso(period_end)
+    if normalized_period_end:
+        return normalized_period_end
+
+    items = _stripe_object_get(subscription, "items") or {}
+    for item in (items.get("data") or []):
+        item_period_end = _stripe_object_get(item, "current_period_end")
+        if isinstance(item_period_end, (int, float)) and item_period_end > 0:
+            return datetime.fromtimestamp(item_period_end, tz=timezone.utc).isoformat()
+        normalized_item_period_end = _to_iso(item_period_end)
+        if normalized_item_period_end:
+            return normalized_item_period_end
+    return None
 
 
 async def _resolve_subscription_owner_context(

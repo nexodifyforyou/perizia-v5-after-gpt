@@ -926,6 +926,59 @@ async def test_invoice_paid_uses_transaction_fallback_when_invoice_context_metad
 
 
 @pytest.mark.anyio
+async def test_auth_me_uses_subscription_item_period_end_when_top_level_period_end_is_missing(fake_db, monkeypatch):
+    class FakeSubscriptionApi:
+        @staticmethod
+        def retrieve(subscription_id):
+            assert subscription_id == "sub_item_period_end"
+            return {
+                "id": "sub_item_period_end",
+                "customer": "cus_item_period_end",
+                "status": "active",
+                "cancel_at_period_end": False,
+                "current_period_end": None,
+                "metadata": {"app_user_id": "user_checkout", "plan_code": "solo"},
+                "items": {
+                    "data": [{
+                        "id": "si_item_period_end",
+                        "price": {"id": "price_solo_env"},
+                        "current_period_end": 1777075401,
+                    }]
+                },
+            }
+
+    class FakeStripeModule:
+        api_key = None
+        Subscription = FakeSubscriptionApi
+
+    monkeypatch.setitem(sys.modules, "stripe", FakeStripeModule)
+
+    token = _seed_default_checkout_user(fake_db, plan="solo", credits=32)
+    _user_doc(fake_db)["subscription_state"] = {
+        "stripe_customer_id": "cus_item_period_end",
+        "stripe_subscription_id": "sub_item_period_end",
+        "status": "active",
+        "current_plan_id": "solo",
+        "stripe_plan_id": "solo",
+        "current_period_end": None,
+        "cancel_at_period_end": False,
+        "pending_change": False,
+        "pending_plan_id": None,
+        "pending_effective_at": None,
+    }
+
+    transport = httpx.ASGITransport(app=server.app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        me = await client.get("/api/auth/me", headers={"Authorization": f"Bearer {token}"})
+
+    assert me.status_code == 200
+    state = me.json()["account"]["subscription"]
+    assert state["current_period_end"] is not None
+    assert state["stripe_subscription_id"] == "sub_item_period_end"
+    assert _subscription_state(fake_db)["current_period_end"] is not None
+
+
+@pytest.mark.anyio
 async def test_subscription_refresh_preserves_extra_packs_and_prevents_99_becomes_28_regression(fake_db, monkeypatch):
     next_event = {}
 
