@@ -2300,11 +2300,50 @@ def _extract_address_state(pages: List[Dict[str, Any]], lots: List[Dict[str, Any
     }
 
 def _extract_prezzo_base_asta_state(pages: List[Dict[str, Any]]) -> Dict[str, Any]:
-    keywords = ["prezzo base", "prezzo base d'asta", "prezzo base d’asta", "prezzo base asta", "euro", "€"]
-    patterns = [
-        re.compile(r"(Prezzo\s+base(?:\s+d['’]asta)?[^\n]{0,60}?)(?:€|\bEuro\b)?\s*([0-9]{1,3}(?:[.\s][0-9]{3})*(?:,[0-9]{2})?)", re.I),
-        re.compile(r"(Prezzo\s+base[^\n]{0,60}?)(?:€|\bEuro\b)\s*([0-9]{1,3}(?:[.\s][0-9]{3})*(?:,[0-9]{2})?)", re.I),
+    keywords = [
+        "prezzo base",
+        "prezzo base d'asta",
+        "prezzo base d’asta",
+        "prezzo base asta",
+        "base d'asta",
+        "base d’asta",
+        "prezzo a base d'asta",
+        "prezzo a base d’asta",
+        "prezzo base del lotto",
+        "valore posto a base d'asta",
+        "valore posto a base d’asta",
+        "prezzo di partenza",
+        "€",
     ]
+    candidate_patterns = [
+        re.compile(r"(?P<label>prezzo\s+base(?:\s+del\s+lotto)?(?:\s+d['’]asta|\s+asta)?)[^\n]{0,40}?(?:€|\bEuro\b)?\s*(?P<value>[0-9]{1,3}(?:[.\s][0-9]{3})*(?:,[0-9]{2})?)", re.I),
+        re.compile(r"(?P<label>base\s+d['’]asta|prezzo\s+a\s+base\s+d['’]asta|valore\s+posto\s+a\s+base\s+d['’]asta)[^\n]{0,40}?(?:€|\bEuro\b)?\s*(?P<value>[0-9]{1,3}(?:[.\s][0-9]{3})*(?:,[0-9]{2})?)", re.I),
+        re.compile(r"(?P<label>prezzo\s+di\s+partenza)[^\n]{0,40}?(?:€|\bEuro\b)?\s*(?P<value>[0-9]{1,3}(?:[.\s][0-9]{3})*(?:,[0-9]{2})?)", re.I),
+        re.compile(r"(?:€|\bEuro\b)\s*(?P<value>[0-9]{1,3}(?:[.\s][0-9]{3})*(?:,[0-9]{2})?)[^\n]{0,60}?(?P<label>prezzo\s+base(?:\s+del\s+lotto)?(?:\s+d['’]asta|\s+asta)?|base\s+d['’]asta|prezzo\s+a\s+base\s+d['’]asta|valore\s+posto\s+a\s+base\s+d['’]asta)", re.I),
+    ]
+    negative_context = re.compile(r"(valore\s+di\s+stima|valore\s+finale|valore\s+di\s+mercato|offerta\s+minima|rilancio\s+minimo|canone|spese|deprezzament|oneri\s+di\s+regolarizzazione|sanatoria|morosit[aà]|condominial)", re.I)
+    competing_auction_price_context = re.compile(r"(offerta\s+minima|rilancio\s+minimo)", re.I)
+    strong_auction_context = re.compile(r"(asta|vendita\s+senza\s+incanto|vendita\s+giudiziaria|esperimento\s+di\s+vendita|lotto|procedura)", re.I)
+    candidates: List[Tuple[float, int, Dict[str, Any]]] = []
+
+    def _candidate_score(label_text: str, line_text: str, page_num: int) -> int:
+        score = 0
+        normalized_label = _normalize_headline_text(label_text).lower()
+        normalized_line = _normalize_headline_text(line_text).lower()
+        if "prezzo base" in normalized_label:
+            score += 8
+        if any(token in normalized_label for token in ("base d'asta", "base d asta", "prezzo a base d'asta", "valore posto a base d'asta")):
+            score += 7
+        if "prezzo di partenza" in normalized_label and strong_auction_context.search(normalized_line):
+            score += 5
+        if strong_auction_context.search(normalized_line):
+            score += 3
+        if "schema riassuntivo" in normalized_line:
+            score += 2
+        if _is_cost_table_context(line_text):
+            score -= 3
+        return score
+
     schema_pages = []
     for p in pages:
         text_upper = str(p.get("text", "") or "").upper()
@@ -2314,33 +2353,47 @@ def _extract_prezzo_base_asta_state(pages: List[Dict[str, Any]]) -> Dict[str, An
     for group in page_groups:
         for p in group:
             text = str(p.get("text", "") or "")
-            for pat in patterns:
-                m = pat.search(text)
-                if not m:
-                    continue
-                value_raw = m.group(2)
-                value = _parse_euro_number(value_raw)
-                if value is None:
-                    continue
-                start = m.start(1)
-                end = m.end(2)
-                ls, le = _line_bounds(text, start, end)
-                ev = _build_evidence(
-                    text,
-                    int(p.get("page_number", 0) or 0),
-                    ls,
-                    le,
-                    field_key="prezzo_base_asta",
-                    anchor_hint=m.group(0),
-                )
-                line_text = text[ls:le]
-                if _is_toc_like_line(line_text) or _is_toc_like_quote(str(ev.get("quote") or "")):
-                    continue
-                if not str(ev.get("quote") or "").strip():
-                    continue
-                evidence = [ev]
-                searched_in = _make_searched_in(pages, keywords, "FOUND", field_key="prezzo_base_asta")
-                return _build_field_state(value=value, status="FOUND", evidence=evidence, searched_in=searched_in)
+            for pat in candidate_patterns:
+                for m in pat.finditer(text):
+                    label_text = str(m.group("label") or "")
+                    value_raw = str(m.group("value") or "")
+                    value = _parse_euro_number(value_raw)
+                    if value is None:
+                        continue
+                    start = min(m.start("label"), m.start("value"))
+                    end = max(m.end("label"), m.end("value"))
+                    ls, le = _line_bounds(text, start, end)
+                    line_text = text[ls:le]
+                    if _is_toc_like_line(line_text):
+                        continue
+                    normalized_label = _normalize_headline_text(label_text).lower()
+                    if competing_auction_price_context.search(line_text) and "prezzo base" not in normalized_label and "base d" not in normalized_label and "valore posto a base" not in normalized_label:
+                        continue
+                    if negative_context.search(line_text) and "prezzo base" not in normalized_label and "base d" not in normalized_label:
+                        continue
+                    if "prezzo di partenza" in normalized_label and not strong_auction_context.search(line_text):
+                        continue
+                    ev = _build_evidence(
+                        text,
+                        int(p.get("page_number", 0) or 0),
+                        ls,
+                        le,
+                        field_key="prezzo_base_asta",
+                        anchor_hint=m.group(0),
+                    )
+                    if _is_toc_like_quote(str(ev.get("quote") or "")):
+                        continue
+                    if not str(ev.get("quote") or "").strip():
+                        continue
+                    score = _candidate_score(label_text, line_text, int(p.get("page_number", 0) or 0))
+                    candidates.append((float(value), score, ev))
+        if candidates:
+            break
+    if candidates:
+        best_value, _, best_ev = sorted(candidates, key=lambda item: (-item[1], item[2].get("page", 0), item[0]))[0]
+        evidence = [best_ev]
+        searched_in = _make_searched_in(pages, keywords, "FOUND", field_key="prezzo_base_asta")
+        return _build_field_state(value=best_value, status="FOUND", evidence=evidence, searched_in=searched_in)
     searched_in = _make_searched_in(pages, keywords, "NOT_FOUND", field_key="prezzo_base_asta")
     return _build_field_state(value=None, status="NOT_FOUND", evidence=[], searched_in=searched_in)
 
@@ -4433,7 +4486,11 @@ def _is_buyer_burden_quote(text: str) -> bool:
     if re.search(r"(deprezzament|rischio\s+assunto\s+per\s+mancata\s+garanzia)", normalized, re.I):
         return False
     return bool(
-        re.search(r"(regolarizzazione\s+urbanistica|sanatoria|spese\s+condominiali|liberazione|completamento|bonifica|messa\s+in\s+sicurezza|ripristin|allineamento\s+catastal|pratiche\s+tecniche)", normalized, re.I)
+        re.search(
+            r"(regolarizzazione\s+urbanistica|oneri\s+di\s+regolarizzazione|spesa\s+per\s+regolarizzazione|costo\s+regolarizzazione\s+urbanistica|sanatoria|condono|definizione\s+in\s+sanatoria|pratica\s+edilizia\s+da\s+regolarizzare|abuso\s+da\s+sanare|oneri\s+tecnici\s+per\s+sanatoria|spese\s+tecniche\s+per\s+regolarizzazione|costi\s+per\s+adeguamento\s+urbanistico|spese\s+condominiali|oneri\s+condominiali|morosit[aà]\s+condominiale|debito\s+condominiale|insoluti\s+condominiali|quote\s+condominiali\s+non\s+pagate|arretrati\s+verso\s+il\s+condominio|rate\s+scadute\s+condominiali|liberazione|rilascio|sgombero|costi\s+di\s+liberazione|spese\s+per\s+liberazione|oneri\s+per\s+rilascio|costi\s+connessi\s+alla\s+liberazione|allineamento\s+catastal|aggiornamento\s+catastal|variazione\s+catastal|regolarizzazione\s+catastal|spese\s+tecniche\s+catastali|cancellazione\s+formalita|spese\s+di\s+cancellazione|oneri\s+di\s+cancellazione|formalita\s+pregiudizievoli\s+da\s+cancellare)",
+            normalized,
+            re.I,
+        )
     )
 
 
@@ -4441,25 +4498,222 @@ def _translated_cost_burden_label(text: str) -> Optional[str]:
     normalized = _normalize_signal_text(text)
     if not normalized:
         return None
-    if any(token in normalized for token in ("immobile non regolare ediliziamente", "immobile non regolare", "difformit", "non conformita", "non conformità", "regolarizzazione urbanistica", "accertamento di conformita", "accertamento di conformità")):
+    if any(token in normalized for token in ("spese tecniche per regolarizzazione", "oneri tecnici per sanatoria", "oneri tecnici", "spese tecniche", "istruttoria pratica")):
+        return "Oneri tecnici / istruttoria da verificare"
+    if any(token in normalized for token in ("immobile non regolare ediliziamente", "immobile non regolare", "difformit", "non conformita", "non conformità", "regolarizzazione urbanistica", "oneri di regolarizzazione", "spesa per regolarizzazione", "costo regolarizzazione urbanistica", "accertamento di conformita", "accertamento di conformità", "abuso da sanare", "adeguamento urbanistico")):
         return "Regolarizzazione edilizia / urbanistica da verificare"
     if any(token in normalized for token in ("sanatoria / condono non perfezionati", "sanatoria", "condono")):
         return "Completamento o perfezionamento sanatoria / condono da verificare"
+    if any(token in normalized for token in ("spese condominiali arretrate", "oneri condominiali arretrati", "morosita condominiale", "morosità condominiale", "debito condominiale", "insoluti condominiali", "quote condominiali non pagate", "arretrati verso il condominio", "spese condominiali pregresse", "rate scadute condominiali")):
+        return "Spese condominiali arretrate da verificare"
     if any(token in normalized for token in ("uso residenziale non legittimato", "destinazione d'uso")):
         return "Verifica conseguenze della destinazione d'uso non legittimata"
-    if any(token in normalized for token in ("occupato da terzi senza titolo", "occupato", "occupazione", "liberazione")):
+    if any(token in normalized for token in ("occupato da terzi senza titolo", "occupato", "occupazione", "liberazione", "rilascio", "sgombero")):
         return "Eventuali costi connessi alla liberazione dell'immobile"
     if any(token in normalized for token in ("in costruzione", "lavori sospesi", "completamento", "messa in sicurezza", "abitabilit", "agibilit")):
         return "Completamento lavori / messa in sicurezza e pratiche tecniche da verificare"
     if any(token in normalized for token in ("ripristin", "conservativ", "infiltrazioni", "umidit", "degrado", "fibro-cemento", "amianto", "bonifica")):
         return "Eventuali ripristini / problemi conservativi segnalati in perizia"
-    if any(token in normalized for token in ("allineamento catastal", "catastal")):
+    if any(token in normalized for token in ("allineamento catastal", "aggiornamento catastal", "variazione catastal", "regolarizzazione catastal", "spese tecniche catastali", "catastal")):
         return "Allineamento catastale da verificare"
-    if "spese condominiali" in normalized or "condominial" in normalized:
-        return "Eventuali arretrati condominiali da verificare"
-    if "formalita da cancellare" in normalized or "cancellazione formalita" in normalized:
+    if any(token in normalized for token in ("formalita da cancellare", "cancellazione formalita", "cancellazione ipoteca", "spese di cancellazione", "oneri di cancellazione", "formalita pregiudizievoli da cancellare")):
         return "Costi di formalita da verificare in sede di trasferimento"
     return None
+
+
+def _money_box_code_for_text(text: str) -> Optional[str]:
+    normalized = _normalize_signal_text(text)
+    if not normalized:
+        return None
+    if any(token in normalized for token in ("formalita da cancellare", "cancellazione formalita", "cancellazione ipoteca", "spese di cancellazione", "oneri di cancellazione", "formalita pregiudizievoli da cancellare")):
+        return "G"
+    if any(token in normalized for token in ("spese condominiali arretrate", "oneri condominiali arretrati", "morosita condominiale", "morosità condominiale", "debito condominiale", "insoluti condominiali", "quote condominiali non pagate", "arretrati verso il condominio", "spese condominiali pregresse", "rate scadute condominiali")):
+        return "E"
+    if any(token in normalized for token in ("liberazione immobile", "rilascio immobile", "costi di liberazione", "spese per liberazione", "oneri per rilascio", "costi connessi alla liberazione", "spese per sgombero", "sgombero")):
+        return "H"
+    if any(token in normalized for token in ("allineamento catastal", "aggiornamento catastal", "variazione catastal", "regolarizzazione catastal", "spese tecniche catastali")):
+        return "D"
+    if any(token in normalized for token in ("spese tecniche per regolarizzazione", "oneri tecnici per sanatoria", "oneri tecnici", "spese tecniche", "istruttoria pratica")):
+        return "B"
+    if any(token in normalized for token in ("ripristin", "messa in sicurezza", "bonifica", "adeguamento")):
+        return "C"
+    if any(token in normalized for token in ("regolarizzazione urbanistica", "oneri di regolarizzazione", "spesa per regolarizzazione", "costo regolarizzazione urbanistica", "sanatoria", "condono", "definizione in sanatoria", "pratica edilizia da regolarizzare", "abuso da sanare", "costi per adeguamento urbanistico")):
+        return "A"
+    return None
+
+
+def _extract_euro_amounts_from_text(text: str) -> List[float]:
+    amounts: List[float] = []
+    seen: set = set()
+    patterns = (
+        r"€\s*([0-9][0-9\.\,\s]{0,18})",
+        r"([0-9][0-9\.\,\s]{0,18})\s*€",
+    )
+    for pattern in patterns:
+        for match in re.finditer(pattern, text):
+            parsed = _parse_euro_number(match.group(1))
+            if not isinstance(parsed, (int, float)) or parsed <= 0:
+                continue
+            key = round(float(parsed), 2)
+            if key in seen:
+                continue
+            seen.add(key)
+            amounts.append(float(parsed))
+    return amounts
+
+
+def _money_box_amount_is_defensible(text: str, code: str) -> bool:
+    normalized = _normalize_signal_text(text)
+    if not normalized:
+        return False
+    if _is_toc_like_quote(text):
+        return False
+    explicit_cost_context = False
+    if code == "A":
+        explicit_cost_context = bool(re.search(r"(oneri|spese|costo|costi)[^\n]{0,40}(regolarizzazione|sanatoria|condono|abuso\s+da\s+sanare|pratica\s+edilizia)", normalized, re.I))
+    elif code == "B":
+        explicit_cost_context = bool(re.search(r"(oneri|spese|costo|costi)[^\n]{0,40}(tecnic|istruttoria)", normalized, re.I))
+    elif code == "D":
+        explicit_cost_context = bool(re.search(r"(oneri|spese|costo|costi)[^\n]{0,40}(catastal|allineamento|aggiornamento|variazione)", normalized, re.I))
+    elif code == "E":
+        explicit_cost_context = bool(re.search(r"(spese|oneri|morosit|debito|insoluti|arretrat|quote)[^\n]{0,40}condominial", normalized, re.I))
+    elif code == "H":
+        explicit_cost_context = bool(re.search(r"(costi|spese|oneri)[^\n]{0,40}(liberazione|rilascio|sgombero)", normalized, re.I))
+    if _is_cost_table_context(text) and not explicit_cost_context:
+        return False
+    if len(_extract_euro_amounts_from_text(text)) != 1:
+        return False
+    if code == "A":
+        return bool(re.search(r"(sanatoria|condono|regolarizzazione|abuso\s+da\s+sanare|pratica\s+edilizia)", normalized, re.I))
+    if code == "B":
+        return bool(re.search(r"(oneri\s+tecnici|spese\s+tecniche|istruttoria)", normalized, re.I))
+    if code == "D":
+        return bool(re.search(r"(allineamento|aggiornamento|variazione|regolarizzazione)\s+catastal", normalized, re.I))
+    if code == "E":
+        return bool(re.search(r"(spese|oneri|morosit|debito|insoluti|arretrat|quote)[^\n]{0,40}condominial", normalized, re.I))
+    if code == "H":
+        return bool(re.search(r"(costi|spese|oneri)[^\n]{0,40}(liberazione|rilascio|sgombero)", normalized, re.I))
+    return False
+
+
+def _extract_money_box_supported_amount(item: Dict[str, Any], code: str, evidence: List[Dict[str, Any]]) -> Optional[float]:
+    if code == "G":
+        return None
+    existing_value = _as_float_or_none(item.get("stima_euro"))
+    candidates: List[float] = []
+    quote_sources = [str(ev.get("quote") or "") for ev in evidence if isinstance(ev, dict)]
+    quote_sources.append(str(item.get("stima_nota") or ""))
+    for quote in quote_sources:
+        if not quote or not _money_box_amount_is_defensible(quote, code):
+            continue
+        candidates.extend(_extract_euro_amounts_from_text(quote))
+        if candidates:
+            break
+    unique_candidates = sorted({round(candidate, 2) for candidate in candidates})
+    if len(unique_candidates) != 1:
+        return None
+    amount = float(unique_candidates[0])
+    if existing_value is not None and abs(existing_value - amount) > 1.0:
+        return None
+    return amount
+
+
+def _apply_money_box_canonical_supplements(result: Dict[str, Any], items: List[Dict[str, Any]]) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
+    canonical_items = [copy.deepcopy(item) for item in items if isinstance(item, dict) and len(str(item.get("code") or item.get("voce") or "").strip().upper()) == 1]
+    item_map: Dict[str, Dict[str, Any]] = {
+        str(item.get("code") or item.get("voce") or "").strip().upper(): item
+        for item in canonical_items
+        if isinstance(item, dict)
+    }
+
+    supplement_candidates: List[Dict[str, Any]] = []
+
+    def _push_candidate(code: Optional[str], note: str, evidence: List[Dict[str, Any]], source: str, amount: Optional[float] = None) -> None:
+        if not code or code not in item_map:
+            return
+        if not evidence:
+            return
+        supplement_candidates.append(
+            {
+                "code": code,
+                "note": note.strip(),
+                "evidence": copy.deepcopy(evidence[:2]),
+                "source": source,
+                "amount": amount,
+            }
+        )
+
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        code = str(item.get("code") or item.get("voce") or "").strip().upper()
+        if len(code) == 1:
+            continue
+        fonte = item.get("fonte_perizia", {}) if isinstance(item.get("fonte_perizia"), dict) else {}
+        evidence = _normalize_contract_evidence_list(fonte.get("evidence", []), max_items=2)
+        if not evidence:
+            evidence = _normalize_contract_evidence_list(item.get("evidence", []), max_items=2)
+        text_blob = " ".join(
+            [
+                str(item.get("label_it") or ""),
+                str(item.get("label_en") or ""),
+                str(item.get("stima_nota") or ""),
+            ] + [str(ev.get("quote") or "") for ev in evidence]
+        )
+        mapped_code = _money_box_code_for_text(text_blob)
+        if not mapped_code or not _is_buyer_burden_quote(text_blob):
+            continue
+        amount = _extract_money_box_supported_amount(item, mapped_code, evidence)
+        _push_candidate(mapped_code, str(item.get("stima_nota") or item.get("label_it") or ""), evidence, "SECONDARY_PATH", amount=amount)
+
+    for burden in _build_conservative_cost_burdens(result, items):
+        if not isinstance(burden, dict):
+            continue
+        evidence = _normalize_contract_evidence_list(burden.get("evidence", []), max_items=2)
+        label = str(burden.get("label_it") or "")
+        mapped_code = _money_box_code_for_text(label)
+        _push_candidate(mapped_code, label, evidence, str(burden.get("source") or "PERIZIA_QUALITATIVE"))
+
+    qualitative_burdens: List[Dict[str, Any]] = []
+    qualitative_seen: set = set()
+
+    for candidate in supplement_candidates:
+        target = item_map.get(candidate["code"])
+        if not isinstance(target, dict):
+            continue
+        target_fonte = target.get("fonte_perizia") if isinstance(target.get("fonte_perizia"), dict) else {}
+        target_evidence = _normalize_contract_evidence_list(target_fonte.get("evidence", []), max_items=2)
+        if not target_evidence and candidate["evidence"]:
+            target["fonte_perizia"] = {"value": candidate["source"], "evidence": copy.deepcopy(candidate["evidence"])}
+        if candidate["amount"] is not None and candidate["code"] != "G":
+            if _as_float_or_none(target.get("stima_euro")) is None:
+                target["stima_euro"] = int(round(candidate["amount"]))
+                target["type"] = "ESTIMATE"
+                target["stima_nota"] = candidate["note"] or target.get("stima_nota") or "Da perizia"
+        else:
+            if _as_float_or_none(target.get("stima_euro")) is None:
+                if str(target.get("type") or "").upper() not in {"INFO_ONLY"}:
+                    target["type"] = "QUALITATIVE"
+                if not target_evidence:
+                    target["stima_nota"] = candidate["note"] or target.get("stima_nota") or "Da verificare in perizia"
+        if candidate["code"] != "G":
+            signature = (candidate["code"], candidate["note"])
+            if signature not in qualitative_seen:
+                qualitative_seen.add(signature)
+                qualitative_burdens.append(
+                    {
+                        "code": f"QB_{len(qualitative_burdens) + 1}",
+                        "label_it": target.get("label_it") or candidate["note"],
+                        "label_en": target.get("label_en") or target.get("label_it") or candidate["note"],
+                        "type": "QUALITATIVE" if candidate["amount"] is None else "ESTIMATE",
+                        "stima_euro": int(round(candidate["amount"])) if candidate["amount"] is not None else "NON_QUANTIFICATO",
+                        "stima_nota": candidate["note"] or "Onere buyer-side rilevato in perizia",
+                        "source": candidate["source"],
+                        "evidence": copy.deepcopy(candidate["evidence"]),
+                    }
+                )
+
+    return canonical_items, qualitative_burdens
 
 
 def _build_conservative_cost_burdens(result: Dict[str, Any], items: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
@@ -4524,18 +4778,15 @@ def _sanitize_money_box_for_customer(result: Dict[str, Any]) -> None:
     if not isinstance(items, list):
         return
 
-    cleaned_items: List[Dict[str, Any]] = []
+    cleaned_items, supplement_burdens = _apply_money_box_canonical_supplements(result, items)
     supported_numeric_total = 0.0
     has_document_backed_buyer_burden = False
     is_multi_lot = bool(result.get("is_multi_lot")) or len(result.get("lots", []) if isinstance(result.get("lots"), list) else []) > 1
 
-    for item in items:
+    for item in cleaned_items:
         if not isinstance(item, dict):
             continue
         code = str(item.get("code") or item.get("voce") or "").strip().upper()
-        if code.startswith("S3C"):
-            continue
-
         fonte = item.get("fonte_perizia", {}) if isinstance(item.get("fonte_perizia"), dict) else {}
         evidence = _normalize_contract_evidence_list(fonte.get("evidence", []), max_items=2)
         if not evidence:
@@ -4550,23 +4801,30 @@ def _sanitize_money_box_for_customer(result: Dict[str, Any]) -> None:
 
         if evidence and not _is_buyer_burden_quote(quote_blob):
             if code not in {"G"}:
-                continue
+                if _as_float_or_none(item.get("stima_euro")) is not None:
+                    item["stima_euro"] = "TBD"
+                if str(item.get("type") or "").upper() not in {"INFO_ONLY"}:
+                    item["type"] = "QUALITATIVE" if evidence else item.get("type", "TBD")
 
         if evidence and _is_buyer_burden_quote(quote_blob):
             has_document_backed_buyer_burden = True
-            stima_val = _as_float_or_none(item.get("stima_euro"))
-            if isinstance(stima_val, float) and stima_val > 0:
-                supported_numeric_total += stima_val
-
-        cleaned_items.append(item)
+            supported_amount = _extract_money_box_supported_amount(item, code, evidence)
+            if isinstance(supported_amount, float) and supported_amount > 0:
+                item["stima_euro"] = int(round(supported_amount))
+                supported_numeric_total += supported_amount
+            elif _as_float_or_none(item.get("stima_euro")) is not None:
+                item["stima_euro"] = "TBD"
+                if str(item.get("type") or "").upper() not in {"INFO_ONLY"}:
+                    item["type"] = "QUALITATIVE"
 
     money_box["items"] = cleaned_items
+    if supplement_burdens:
+        money_box["qualitative_burdens"] = copy.deepcopy(supplement_burdens)
 
-    if not is_multi_lot and not has_document_backed_buyer_burden:
-        qualitative_burdens = _build_conservative_cost_burdens(result, cleaned_items)
+    if not is_multi_lot and supported_numeric_total <= 0:
+        qualitative_burdens = supplement_burdens or _build_conservative_cost_burdens(result, cleaned_items)
         money_box["policy"] = "CONSERVATIVE"
         money_box.pop("total_extra_costs_range", None)
-        money_box["items"] = qualitative_burdens
         money_box["qualitative_burdens"] = copy.deepcopy(qualitative_burdens)
         money_box["total_extra_costs"] = {
             "min": "NON_QUANTIFICATO_IN_PERIZIA",
@@ -4575,7 +4833,7 @@ def _sanitize_money_box_for_customer(result: Dict[str, Any]) -> None:
             "note": "Buyer-side extra cost burdens are grounded, but the perizia does not support a defensible numeric total",
         }
         if isinstance(result.get("section_3_money_box"), dict):
-            result["section_3_money_box"]["items"] = copy.deepcopy(qualitative_burdens)
+            result["section_3_money_box"]["items"] = copy.deepcopy(cleaned_items)
             result["section_3_money_box"]["qualitative_burdens"] = copy.deepcopy(qualitative_burdens)
             result["section_3_money_box"].pop("total_extra_costs_range", None)
             result["section_3_money_box"]["totale_extra_budget"] = {
@@ -4584,18 +4842,27 @@ def _sanitize_money_box_for_customer(result: Dict[str, Any]) -> None:
                 "nota": "Costi extra non quantificati in perizia; mantenuti solo oneri qualitativi grounded",
             }
     elif supported_numeric_total > 0:
+        note = "Document-backed buyer burdens only"
+        if supplement_burdens:
+            note = "Document-backed quantified buyer burdens only; qualitative burdens remain excluded from the numeric total"
         money_box["total_extra_costs"] = {
             "range": {"min": int(round(supported_numeric_total)), "max": int(round(supported_numeric_total))},
             "max_is_open": False,
-            "note": "Document-backed buyer burdens only",
+            "note": note,
         }
         if isinstance(result.get("section_3_money_box"), dict):
             result["section_3_money_box"]["items"] = copy.deepcopy(cleaned_items)
+            if supplement_burdens:
+                result["section_3_money_box"]["qualitative_burdens"] = copy.deepcopy(supplement_burdens)
             result["section_3_money_box"]["totale_extra_budget"] = {
                 "min": int(round(supported_numeric_total)),
                 "max": int(round(supported_numeric_total)),
-                "nota": "EUR document-backed buyer burdens only",
+                "nota": note,
             }
+    elif isinstance(result.get("section_3_money_box"), dict):
+        result["section_3_money_box"]["items"] = copy.deepcopy(cleaned_items)
+        if supplement_burdens:
+            result["section_3_money_box"]["qualitative_burdens"] = copy.deepcopy(supplement_burdens)
 
     result["money_box"] = money_box
 

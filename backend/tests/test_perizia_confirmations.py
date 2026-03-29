@@ -2,6 +2,7 @@ import io
 import os
 import sys
 import zipfile
+import copy
 from datetime import datetime, timezone
 
 import httpx
@@ -70,6 +71,19 @@ def _build_result_with_legal_items(pages, items):
     return result
 
 
+def _build_result_with_money_box_items(pages, mutate_items):
+    result = server.create_fallback_analysis("perizia.pdf", "case_1", "run_1", pages, server._build_full_text_from_pages(pages))
+    items = copy.deepcopy(result["money_box"]["items"])
+    mutate_items(items)
+    result["money_box"]["items"] = copy.deepcopy(items)
+    result["section_3_money_box"] = copy.deepcopy(result["money_box"])
+    server._apply_headline_field_states(result, pages)
+    server._apply_decision_field_states(result, pages)
+    server._normalize_legal_killers(result, pages)
+    server._apply_market_ranges_to_money_box(result)
+    return result
+
+
 def test_occupazione_uncertain_case_produces_confirmation_metadata():
     pages = [
         {"page_number": 4, "text": "STATO OCCUPATIVO\nL'immobile risulta libero e nella disponibilità della procedura.\n"},
@@ -124,6 +138,51 @@ def test_noisy_table_like_mention_is_downweighted_against_narrative():
     state = server._extract_stato_occupativo_state(pages)
     assert state["value"] == "LIBERO"
     assert state["chosen_candidate"]["is_table_like"] is False
+
+
+def test_explicit_prezzo_base_extraction_from_strong_clause():
+    pages = [
+        {"page_number": 2, "text": "Il prezzo base d'asta del lotto è pari a € 85.000,00.\n"},
+    ]
+    state = server._extract_prezzo_base_asta_state(pages)
+    assert state["status"] == "FOUND"
+    assert state["value"] == 85000.0
+
+
+def test_prezzo_base_not_confused_with_valore_di_stima():
+    pages = [
+        {"page_number": 2, "text": "Valore di stima € 120.000,00.\nPrezzo base d'asta € 85.000,00.\n"},
+    ]
+    state = server._extract_prezzo_base_asta_state(pages)
+    assert state["status"] == "FOUND"
+    assert state["value"] == 85000.0
+
+
+def test_prezzo_base_not_confused_with_offerta_minima():
+    pages = [
+        {"page_number": 3, "text": "Offerta minima € 63.750,00.\nPrezzo base asta € 85.000,00.\n"},
+    ]
+    state = server._extract_prezzo_base_asta_state(pages)
+    assert state["status"] == "FOUND"
+    assert state["value"] == 85000.0
+
+
+def test_prezzo_base_not_confused_with_rilancio_minimo():
+    pages = [
+        {"page_number": 3, "text": "Rilancio minimo € 2.000,00.\nPrezzo base asta € 85.000,00.\n"},
+    ]
+    state = server._extract_prezzo_base_asta_state(pages)
+    assert state["status"] == "FOUND"
+    assert state["value"] == 85000.0
+
+
+def test_prezzo_base_not_confused_with_nearby_cost_numbers():
+    pages = [
+        {"page_number": 4, "text": "Prezzo base del lotto € 85.000,00. Oneri di regolarizzazione urbanistica € 12.000,00.\n"},
+    ]
+    state = server._extract_prezzo_base_asta_state(pages)
+    assert state["status"] == "FOUND"
+    assert state["value"] == 85000.0
 
 
 def test_later_authoritative_urbanistica_compliant_beats_earlier_weak_negative():
@@ -494,6 +553,187 @@ def test_semaforo_top_items_respect_theme_level_normalization():
     blocker_labels = [b["label_it"] for b in result["semaforo_generale"]["top_blockers"]]
     assert "Occupato da terzi senza titolo" in blocker_labels
     assert "Abuso edilizio" not in blocker_labels
+
+
+def test_vetted_quantified_burden_survives_to_final_money_box_output():
+    pages = [
+        {"page_number": 3, "text": "Oneri di regolarizzazione urbanistica € 12.000.\n"},
+    ]
+    result = _build_result_with_money_box_items(
+        pages,
+        lambda items: items.__setitem__(
+            0,
+            {
+                **items[0],
+                "stima_euro": 12000,
+                "type": "ESTIMATE",
+                "stima_nota": "Oneri di regolarizzazione urbanistica € 12.000.",
+                "fonte_perizia": {"value": "Perizia", "evidence": [{"page": 3, "quote": "Oneri di regolarizzazione urbanistica € 12.000.", "search_hint": "regolarizzazione urbanistica"}]},
+            },
+        ),
+    )
+    item_a = next(item for item in result["money_box"]["items"] if item["code"] == "A")
+    assert item_a["stima_euro"] == 12000
+    assert result["money_box"]["total_extra_costs"]["range"]["min"] == 12000
+    assert result["money_box"]["total_extra_costs"]["range"]["max"] == 12000
+
+
+def test_secondary_internal_burden_is_mapped_into_canonical_money_box_slot():
+    pages = [
+        {"page_number": 4, "text": "Spese tecniche per regolarizzazione urbanistica da quantificare.\n"},
+    ]
+    def mutate(items):
+        items.append(
+            {
+                "code": "S3C_URB_1",
+                "label_it": "Spese tecniche per regolarizzazione urbanistica",
+                "label_en": "Technical fees for urban regularization",
+                "type": "QUALITATIVE",
+                "stima_euro": "TBD",
+                "stima_nota": "Spese tecniche per regolarizzazione urbanistica da quantificare",
+                "fonte_perizia": {"value": "Perizia", "evidence": [{"page": 4, "quote": "Spese tecniche per regolarizzazione urbanistica da quantificare.", "search_hint": "spese tecniche"}]},
+            }
+        )
+    result = _build_result_with_money_box_items(pages, mutate)
+    item_b = next(item for item in result["money_box"]["items"] if item["code"] == "B")
+    assert item_b["type"] == "QUALITATIVE"
+    assert "Spese tecniche per regolarizzazione urbanistica" in item_b["stima_nota"]
+    assert item_b["fonte_perizia"]["evidence"]
+
+
+def test_qualitative_only_burden_remains_qualitative_when_amount_is_unsupported():
+    pages = [
+        {"page_number": 2, "text": "Morosità condominiale da verificare presso l'amministratore.\n"},
+    ]
+    def mutate(items):
+        items.append(
+            {
+                "code": "S3C_CONDO_1",
+                "label_it": "Morosità condominiale",
+                "label_en": "Condo arrears",
+                "type": "QUALITATIVE",
+                "stima_euro": "TBD",
+                "stima_nota": "Morosità condominiale da verificare presso l'amministratore",
+                "fonte_perizia": {"value": "Perizia", "evidence": [{"page": 2, "quote": "Morosità condominiale da verificare presso l'amministratore.", "search_hint": "morosita condominiale"}]},
+            }
+        )
+    result = _build_result_with_money_box_items(pages, mutate)
+    item_e = next(item for item in result["money_box"]["items"] if item["code"] == "E")
+    assert item_e["type"] == "QUALITATIVE"
+    assert item_e["stima_euro"] == "TBD"
+    assert result["money_box"]["total_extra_costs"]["min"] == "NON_QUANTIFICATO_IN_PERIZIA"
+
+
+def test_weak_evidence_does_not_generate_fake_numeric_total():
+    pages = [
+        {"page_number": 1, "text": "Tabella costi | sanatoria | € 5.000 | valore finale € 120.000\n"},
+    ]
+    result = _build_result_with_money_box_items(
+        pages,
+        lambda items: items.__setitem__(
+            0,
+            {
+                **items[0],
+                "stima_euro": 5000,
+                "type": "ESTIMATE",
+                "stima_nota": "Tabella costi | sanatoria | € 5.000 | valore finale € 120.000",
+                "fonte_perizia": {"value": "Perizia", "evidence": [{"page": 1, "quote": "Tabella costi | sanatoria | € 5.000 | valore finale € 120.000", "search_hint": "sanatoria"}]},
+            },
+        ),
+    )
+    item_a = next(item for item in result["money_box"]["items"] if item["code"] == "A")
+    assert item_a["stima_euro"] == "TBD"
+    assert result["money_box"]["total_extra_costs"]["min"] == "NON_QUANTIFICATO_IN_PERIZIA"
+
+
+def test_irrelevant_or_seller_side_amount_does_not_mix_into_buyer_money_box():
+    pages = [
+        {"page_number": 6, "text": "Valore finale di stima € 120.000.\n"},
+    ]
+    result = _build_result_with_money_box_items(
+        pages,
+        lambda items: items.__setitem__(
+            0,
+            {
+                **items[0],
+                "stima_euro": 120000,
+                "type": "ESTIMATE",
+                "stima_nota": "Valore finale di stima € 120.000.",
+                "fonte_perizia": {"value": "Perizia", "evidence": [{"page": 6, "quote": "Valore finale di stima € 120.000.", "search_hint": "valore finale"}]},
+            },
+        ),
+    )
+    item_a = next(item for item in result["money_box"]["items"] if item["code"] == "A")
+    assert item_a["stima_euro"] == "TBD"
+    assert result["money_box"]["total_extra_costs"]["min"] == "NON_QUANTIFICATO_IN_PERIZIA"
+
+
+def test_broad_wording_variants_are_recognized_when_linkage_is_strong():
+    pages = [
+        {"page_number": 5, "text": "Morosità condominiale pari a € 3.200 a carico dell'acquirente.\n"},
+    ]
+    def mutate(items):
+        items.append(
+            {
+                "code": "S3C_CONDO_2",
+                "label_it": "Morosità condominiale",
+                "label_en": "Condo arrears",
+                "type": "ESTIMATE",
+                "stima_euro": 3200,
+                "stima_nota": "Morosità condominiale pari a € 3.200",
+                "fonte_perizia": {"value": "Perizia", "evidence": [{"page": 5, "quote": "Morosità condominiale pari a € 3.200 a carico dell'acquirente.", "search_hint": "morosita condominiale"}]},
+            }
+        )
+    result = _build_result_with_money_box_items(pages, mutate)
+    item_e = next(item for item in result["money_box"]["items"] if item["code"] == "E")
+    assert item_e["stima_euro"] == 3200
+    assert result["money_box"]["total_extra_costs"]["range"]["min"] == 3200
+
+
+def test_broad_wording_variants_do_not_create_false_numeric_mapping_when_linkage_is_weak():
+    pages = [
+        {"page_number": 2, "text": "Riepilogo | morosità condominiale | € 3.200 | valore lotto € 98.000\n"},
+    ]
+    def mutate(items):
+        items.append(
+            {
+                "code": "S3C_CONDO_3",
+                "label_it": "Morosità condominiale",
+                "label_en": "Condo arrears",
+                "type": "ESTIMATE",
+                "stima_euro": 3200,
+                "stima_nota": "Riepilogo morosità condominiale",
+                "fonte_perizia": {"value": "Perizia", "evidence": [{"page": 2, "quote": "Riepilogo | morosità condominiale | € 3.200 | valore lotto € 98.000", "search_hint": "morosita condominiale"}]},
+            }
+        )
+    result = _build_result_with_money_box_items(pages, mutate)
+    item_e = next(item for item in result["money_box"]["items"] if item["code"] == "E")
+    assert item_e["stima_euro"] == "TBD"
+    assert result["money_box"]["total_extra_costs"]["min"] == "NON_QUANTIFICATO_IN_PERIZIA"
+
+
+def test_customer_facing_money_box_structure_remains_usable():
+    pages = [
+        {"page_number": 3, "text": "Spese tecniche per regolarizzazione urbanistica da quantificare.\n"},
+    ]
+    def mutate(items):
+        items.append(
+            {
+                "code": "S3C_URB_2",
+                "label_it": "Spese tecniche per regolarizzazione urbanistica",
+                "label_en": "Technical fees for urban regularization",
+                "type": "QUALITATIVE",
+                "stima_euro": "TBD",
+                "stima_nota": "Spese tecniche per regolarizzazione urbanistica da quantificare",
+                "fonte_perizia": {"value": "Perizia", "evidence": [{"page": 3, "quote": "Spese tecniche per regolarizzazione urbanistica da quantificare.", "search_hint": "spese tecniche"}]},
+            }
+        )
+    result = _build_result_with_money_box_items(pages, mutate)
+    codes = [item["code"] for item in result["money_box"]["items"] if isinstance(item, dict) and item.get("code")]
+    assert {"A", "B", "C", "D", "E", "F", "G", "H"}.issubset(set(codes))
+    assert isinstance(result["money_box"]["qualitative_burdens"], list)
+    assert isinstance(result["section_3_money_box"]["items"], list)
+    assert isinstance(result["section_3_money_box"]["totale_extra_budget"], dict)
 
 
 @pytest.mark.anyio
