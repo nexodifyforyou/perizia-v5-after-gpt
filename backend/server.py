@@ -24,7 +24,9 @@ from PyPDF2 import PdfReader, PdfWriter
 import pdfplumber
 import io
 import hashlib
+import zipfile
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
+from xml.sax.saxutils import escape
 from openai import AsyncOpenAI
 from candidate_miner import run_candidate_miner_for_analysis
 from section_builder import build_estratto_quality
@@ -72,6 +74,41 @@ OFFLINE_QA_ENV = os.environ.get('OFFLINE_QA', '0').lower() in {"1", "true", "yes
 ALLOW_OFFLINE_QA_ENV = os.environ.get("ALLOW_OFFLINE_QA", "0").strip() == "1"
 OFFLINE_QA_TOKEN = os.environ.get("OFFLINE_QA_TOKEN", "").strip()
 EVIDENCE_OFFSET_MODE = "PAGE_LOCAL"
+CONFIRMATION_EXPORT_COLUMNS = [
+    "confirmation_id",
+    "run_id",
+    "user_email",
+    "check_type",
+    "field_key",
+    "document_name",
+    "created_at",
+    "confirmed_at",
+    "system_original_value",
+    "system_original_status",
+    "system_original_confidence",
+    "user_confirmed_value",
+    "final_applied_value",
+    "confirmation_source",
+    "resolver_conflict_flag",
+    "resolver_confidence",
+    "needs_user_confirmation",
+    "candidate_1_value",
+    "candidate_1_score",
+    "candidate_1_page",
+    "candidate_1_quote",
+    "candidate_2_value",
+    "candidate_2_score",
+    "candidate_2_page",
+    "candidate_2_quote",
+    "candidate_1_window_word_count",
+    "candidate_2_window_word_count",
+    "candidate_1_section_hint",
+    "candidate_2_section_hint",
+    "chosen_candidate_value",
+    "chosen_candidate_score",
+    "system_decision_vs_user_decision_changed",
+    "notes",
+]
 
 OFFLINE_QA_FIXTURE_PATH = os.environ.get(
     "OFFLINE_QA_FIXTURE_PATH",
@@ -267,6 +304,7 @@ class HeadlineOverrideRequest(BaseModel):
     procedura: Optional[str] = None
     lotto: Optional[str] = None
     address: Optional[str] = None
+    confirmation_notes: Optional[str] = None
 
 class FieldOverrideRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
@@ -283,6 +321,13 @@ class FieldOverrideRequest(BaseModel):
     conformita_catastale: Optional[Any] = None
     spese_condominiali_arretrate: Optional[Any] = None
     formalita_pregiudizievoli: Optional[Any] = None
+    confirmation_notes: Optional[str] = None
+
+class ConfirmationLogRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    check_type: str
+    value: Any
+    notes: Optional[str] = None
 
 # Subscription Plans
 SUBSCRIPTION_PLANS = {
@@ -1056,6 +1101,119 @@ def _require_feature_access(user: User, feature_label_it: str, access_flag: str)
 def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
+
+def _safe_user_email(user: Optional[User]) -> str:
+    if isinstance(user, User):
+        return str(user.email or "").strip()
+    if isinstance(user, dict):
+        return str(user.get("email") or "").strip()
+    return ""
+
+
+def _word_count(text: Any) -> int:
+    return len(re.findall(r"\b\w+\b", str(text or ""), flags=re.UNICODE))
+
+
+def _json_cell(value: Any) -> str:
+    if value in (None, "", [], {}):
+        return ""
+    if isinstance(value, (dict, list)):
+        return json.dumps(value, ensure_ascii=False, sort_keys=True)
+    return str(value)
+
+
+def _escape_xlsx(value: Any) -> str:
+    text = _json_cell(value)
+    if not text:
+        return ""
+    return escape(text)
+
+
+def _xlsx_column_name(index: int) -> str:
+    name = ""
+    value = index
+    while value > 0:
+        value, rem = divmod(value - 1, 26)
+        name = chr(65 + rem) + name
+    return name or "A"
+
+
+def _build_simple_xlsx_bytes(sheet_name: str, headers: List[str], rows: List[Dict[str, Any]]) -> bytes:
+    sheet_rows: List[List[str]] = [headers]
+    for row in rows:
+        sheet_rows.append([_json_cell(row.get(header)) for header in headers])
+
+    xml_rows: List[str] = []
+    for row_idx, values in enumerate(sheet_rows, start=1):
+        cells: List[str] = []
+        for col_idx, value in enumerate(values, start=1):
+            ref = f"{_xlsx_column_name(col_idx)}{row_idx}"
+            cells.append(f'<c r="{ref}" t="inlineStr"><is><t xml:space="preserve">{_escape_xlsx(value)}</t></is></c>')
+        xml_rows.append(f'<row r="{row_idx}">{"".join(cells)}</row>')
+
+    worksheet_xml = (
+        '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+        '<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">'
+        f'<sheetData>{"".join(xml_rows)}</sheetData>'
+        "</worksheet>"
+    )
+    workbook_xml = (
+        '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+        '<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" '
+        'xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">'
+        f'<sheets><sheet name="{_escape_xlsx(sheet_name)}" sheetId="1" r:id="rId1"/></sheets>'
+        "</workbook>"
+    )
+    workbook_rels_xml = (
+        '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+        '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
+        '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" '
+        'Target="worksheets/sheet1.xml"/>'
+        '<Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" '
+        'Target="styles.xml"/>'
+        "</Relationships>"
+    )
+    root_rels_xml = (
+        '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+        '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
+        '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" '
+        'Target="xl/workbook.xml"/>'
+        "</Relationships>"
+    )
+    styles_xml = (
+        '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+        '<styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">'
+        '<fonts count="1"><font><sz val="11"/><name val="Calibri"/></font></fonts>'
+        '<fills count="1"><fill><patternFill patternType="none"/></fill></fills>'
+        '<borders count="1"><border/></borders>'
+        '<cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs>'
+        '<cellXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/></cellXfs>'
+        "</styleSheet>"
+    )
+    content_types_xml = (
+        '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+        '<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">'
+        '<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>'
+        '<Default Extension="xml" ContentType="application/xml"/>'
+        '<Override PartName="/xl/workbook.xml" '
+        'ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>'
+        '<Override PartName="/xl/worksheets/sheet1.xml" '
+        'ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>'
+        '<Override PartName="/xl/styles.xml" '
+        'ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/>'
+        "</Types>"
+    )
+
+    out = io.BytesIO()
+    with zipfile.ZipFile(out, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+        zf.writestr("[Content_Types].xml", content_types_xml)
+        zf.writestr("_rels/.rels", root_rels_xml)
+        zf.writestr("xl/workbook.xml", workbook_xml)
+        zf.writestr("xl/_rels/workbook.xml.rels", workbook_rels_xml)
+        zf.writestr("xl/worksheets/sheet1.xml", worksheet_xml)
+        zf.writestr("xl/styles.xml", styles_xml)
+    return out.getvalue()
+
 def _truncate(value: Optional[str], limit: int = 50) -> Optional[str]:
     if value is None:
         return None
@@ -1464,7 +1622,7 @@ def _normalize_field_state_contract(field_key: str, state: Any, pages: List[Dict
     else:
         searched_in = []
 
-    return {
+    normalized = {
         "value": value,
         "status": status,
         "confidence": _extract_confidence(value, status),
@@ -1472,6 +1630,10 @@ def _normalize_field_state_contract(field_key: str, state: Any, pages: List[Dict
         "searched_in": searched_in,
         "user_prompt_it": prompt,
     }
+    for extra_key in ("review_required", "needs_user_confirmation", "resolver_meta", "conflicts", "all_candidates", "chosen_candidate", "top_candidates"):
+        if extra_key in st:
+            normalized[extra_key] = copy.deepcopy(st.get(extra_key))
+    return normalized
 
 
 def _enforce_field_states_contract(result: Dict[str, Any], pages: List[Dict[str, Any]]) -> None:
@@ -2252,6 +2414,119 @@ def _extract_diritto_reale_state(pages: List[Dict[str, Any]]) -> Dict[str, Any]:
     searched_in = _make_searched_in(pages, keywords, "NOT_FOUND", field_key="stato_occupativo")
     return _build_field_state(value=None, status="NOT_FOUND", evidence=[], searched_in=searched_in)
 
+
+def _extract_context_window(text: str, start: int, end: int, radius: int = 220) -> Tuple[str, str, str, str]:
+    safe_text = str(text or "")
+    if not safe_text:
+        return "", "", "", ""
+    win_start = max(0, start - radius)
+    win_end = min(len(safe_text), end + radius)
+    window = safe_text[win_start:win_end].strip()
+    norm = re.sub(r"\s+", " ", window).strip()
+    sentences = [s.strip() for s in re.split(r"(?<=[\.;:!?])\s+", norm) if s.strip()]
+    sentence = ""
+    prev_sentence = ""
+    next_sentence = ""
+    anchor = re.sub(r"\s+", " ", safe_text[start:end]).strip().lower()
+    for idx, cand in enumerate(sentences):
+        low = cand.lower()
+        if anchor and anchor[:40] and anchor[:40] in low:
+            sentence = cand
+            prev_sentence = sentences[idx - 1] if idx > 0 else ""
+            next_sentence = sentences[idx + 1] if idx + 1 < len(sentences) else ""
+            break
+    if not sentence and sentences:
+        sentence = sentences[0]
+        next_sentence = sentences[1] if len(sentences) > 1 else ""
+    return sentence, prev_sentence, next_sentence, norm
+
+
+def _occupancy_section_hint(text: str, start: int, end: int) -> str:
+    line_spans: List[Tuple[int, int]] = []
+    cursor = 0
+    for line in str(text or "").splitlines(keepends=True):
+        line_spans.append((cursor, cursor + len(line)))
+        cursor += len(line)
+    if not line_spans:
+        line_spans = [(0, len(str(text or "")))]
+    idx = 0
+    probe_offset = (start + end) // 2
+    for line_idx, (span_start, span_end) in enumerate(line_spans):
+        if span_start <= probe_offset <= span_end:
+            idx = line_idx
+            break
+    for probe in range(max(0, idx - 4), idx + 1):
+        s, e = line_spans[probe]
+        line = _normalize_headline_text(text[s:e])
+        if not line:
+            continue
+        low = line.lower()
+        if any(token in low for token in ("stato occupativo", "occupazione", "detenzione", "liberazione", "titolo opponibile", "locazione opponibile", "disponibilità")):
+            return line
+        if len(line) <= 80 and re.fullmatch(r"[A-ZÀ-Ù0-9 '\-]+", line):
+            return line
+    return ""
+
+
+def _is_table_like_text(text: str) -> bool:
+    compact = str(text or "")
+    if not compact:
+        return False
+    if "|" in compact or "\t" in compact:
+        return True
+    if compact.count(":") >= 2:
+        return True
+    if re.search(r"(?:€|eur|euro|\bmq\b|\bm2\b)", compact, re.I):
+        return True
+    return False
+
+
+def _is_heading_like_text(text: str) -> bool:
+    compact = _normalize_headline_text(str(text or ""))
+    if not compact:
+        return False
+    return len(compact) <= 80 and bool(re.fullmatch(r"[A-ZÀ-Ù0-9 '\-]+", compact))
+
+
+def _occupancy_authority_score(
+    *,
+    label: str,
+    page_num: int,
+    sentence_text: str,
+    context_window_text: str,
+    section_hint: str,
+    is_table_like: bool,
+    is_heading_like: bool,
+    speculative: bool,
+) -> float:
+    score = 0.0
+    normalized_sentence = str(sentence_text or "").lower()
+    normalized_window = str(context_window_text or "").lower()
+    normalized_hint = str(section_hint or "").lower()
+    if label == "OCCUPATO DA TERZI SENZA TITOLO":
+        score += 6.0
+    elif label == "OCCUPATO DAL DEBITORE":
+        score += 5.0
+    elif label == "LIBERO":
+        score += 4.2
+    else:
+        score += 3.6
+    if any(token in normalized_hint for token in ("stato occupativo", "occupazione", "detenzione", "liberazione", "titolo opponibile", "locazione opponibile")):
+        score += 3.5
+    if any(token in normalized_sentence for token in ("risulta", "è", "e'", "si presenta", "risulta essere")):
+        score += 1.0
+    if any(token in normalized_window for token in ("conclus", "pertanto", "si ritiene", "alla data del sopralluogo")):
+        score += 0.8
+    if is_table_like:
+        score -= 2.5
+    if is_heading_like:
+        score -= 1.5
+    if speculative:
+        score -= 3.0
+    score += min(3.0, max(0.0, float(page_num)) * 0.12)
+    return round(score, 3)
+
+
 def _extract_stato_occupativo_state(pages: List[Dict[str, Any]]) -> Dict[str, Any]:
     keywords = ["occupato", "libero", "detenuto", "contratto di locazione", "rilascio"]
     ambiguous_markers = ["si presume", "non è noto", "non e' noto", "non risulta", "da verificare", "da accertare", "presumibilmente", "non è dato sapere", "non e' dato sapere"]
@@ -2261,44 +2536,131 @@ def _extract_stato_occupativo_state(pages: List[Dict[str, Any]]) -> Dict[str, An
         (re.compile(r"\b(non\s+occupato|libero|libera\s+disponibilit[aà])\b", re.I), "LIBERO"),
         (re.compile(r"\b(occupato|detenuto|locato|locazione|contratto\s+di\s+locazione|inquilino)\b", re.I), "OCCUPATO"),
     ]
-    candidates: List[Tuple[int, int, str, str, Dict[str, Any]]] = []
-    # priority: OCCUPATO DA TERZI SENZA TITOLO > OCCUPATO DAL DEBITORE > OCCUPATO > LIBERO
+    candidates: List[Dict[str, Any]] = []
     pri = {"OCCUPATO DA TERZI SENZA TITOLO": 4, "OCCUPATO DAL DEBITORE": 3, "OCCUPATO": 2, "LIBERO": 1}
     for p in pages:
         text = str(p.get("text", "") or "")
         for pat, label in patterns:
-            m = pat.search(text)
-            if not m:
-                continue
-            start, end = m.start(), m.end()
-            line_start, line_end = _line_bounds(text, start, end)
-            line_text = text[line_start:line_end].lower()
-            evidence = [
-                _build_evidence(
-                    text,
-                    int(p.get("page_number", 0) or 0),
-                    line_start,
-                    line_end,
-                    field_key="stato_occupativo",
-                    anchor_hint=m.group(0),
+            for m in pat.finditer(text):
+                start, end = m.start(), m.end()
+                line_start, line_end = _line_bounds(text, start, end)
+                line_text = text[line_start:line_end]
+                sentence_text, prev_sentence, next_sentence, context_window_text = _extract_context_window(text, line_start, line_end)
+                section_hint = _occupancy_section_hint(text, line_start, line_end)
+                is_table_like = _is_table_like_text(line_text)
+                is_heading_like = _is_heading_like_text(line_text)
+                speculative = any(marker in context_window_text.lower() for marker in ambiguous_markers)
+                evidence = [
+                    _build_evidence(
+                        text,
+                        int(p.get("page_number", 0) or 0),
+                        line_start,
+                        line_end,
+                        field_key="stato_occupativo",
+                        anchor_hint=m.group(0),
+                    )
+                ]
+                authority_score = _occupancy_authority_score(
+                    label=label,
+                    page_num=int(p.get("page_number", 0) or 0),
+                    sentence_text=sentence_text or line_text,
+                    context_window_text=context_window_text,
+                    section_hint=section_hint,
+                    is_table_like=is_table_like,
+                    is_heading_like=is_heading_like,
+                    speculative=speculative,
                 )
-            ]
-            status = "LOW_CONFIDENCE" if any(marker in line_text for marker in ambiguous_markers) else "FOUND"
-            candidates.append((pri.get(label, 0), int(p.get("page_number", 0) or 0), label, status, evidence[0]))
+                candidates.append(
+                    {
+                        "value": label,
+                        "status": "LOW_CONFIDENCE" if speculative else "FOUND",
+                        "priority": pri.get(label, 0),
+                        "score": authority_score,
+                        "page": int(p.get("page_number", 0) or 0),
+                        "match_text": _normalize_headline_text(m.group(0)),
+                        "sentence_text": sentence_text or _normalize_headline_text(line_text),
+                        "prev_sentence": prev_sentence,
+                        "next_sentence": next_sentence,
+                        "context_window_text": context_window_text,
+                        "window_word_count": _word_count(context_window_text),
+                        "section_hint": section_hint,
+                        "is_table_like": is_table_like,
+                        "is_heading_like": is_heading_like,
+                        "authority_score": authority_score,
+                        "contradiction_group": "FREE" if label == "LIBERO" else "OCCUPIED",
+                        "ocr_noise_hint": None,
+                        "speculative": speculative,
+                        "evidence": evidence,
+                    }
+                )
 
     if candidates:
-        candidates.sort(key=lambda x: (-x[0], x[1]))
+        deduped: List[Dict[str, Any]] = []
+        seen_candidate_keys: set = set()
+        for cand in sorted(candidates, key=lambda item: (-float(item.get("score", 0.0)), -int(item.get("page", 0) or 0), -int(item.get("priority", 0) or 0))):
+            evidence = cand.get("evidence", []) if isinstance(cand.get("evidence"), list) else []
+            first_ev = evidence[0] if evidence and isinstance(evidence[0], dict) else {}
+            key = (cand.get("value"), first_ev.get("page"), str(first_ev.get("quote") or ""))
+            if key in seen_candidate_keys:
+                continue
+            seen_candidate_keys.add(key)
+            deduped.append(cand)
+        candidates = deduped
+        candidates.sort(key=lambda item: (-float(item.get("score", 0.0)), -int(item.get("page", 0) or 0), -int(item.get("priority", 0) or 0)))
         top = candidates[0]
-        chosen_label = top[2]
-        chosen_status = top[3]
-        chosen_evidence = [top[4]]
-        searched_in = _make_searched_in(pages, keywords, chosen_status, field_key="ape")
-        return _build_field_state(value=chosen_label, status=chosen_status, evidence=chosen_evidence, searched_in=searched_in)
+        best_by_group: Dict[str, Dict[str, Any]] = {}
+        for cand in candidates:
+            group = str(cand.get("contradiction_group") or "")
+            if group and group not in best_by_group:
+                best_by_group[group] = cand
+        top_candidates_src: List[Dict[str, Any]] = [top]
+        opposite_group = "FREE" if str(top.get("contradiction_group")) == "OCCUPIED" else "OCCUPIED"
+        opposite = best_by_group.get(opposite_group)
+        if opposite:
+            top_candidates_src.append(opposite)
+        else:
+            for cand in candidates[1:]:
+                if str(cand.get("value") or "") != str(top.get("value") or ""):
+                    top_candidates_src.append(cand)
+                    break
+        top_candidates = copy.deepcopy(top_candidates_src[:2])
+        conflicts: List[Dict[str, Any]] = []
+        runner_up = top_candidates_src[1] if len(top_candidates_src) > 1 else None
+        if isinstance(runner_up, dict):
+            score_gap = float(top.get("score", 0.0)) - float(runner_up.get("score", 0.0))
+            if top.get("contradiction_group") != runner_up.get("contradiction_group") and score_gap <= 2.0:
+                conflicts.append(
+                    {
+                        "type": "CONTRADICTORY_OCCUPANCY",
+                        "top_value": top.get("value"),
+                        "runner_up_value": runner_up.get("value"),
+                        "score_gap": round(score_gap, 3),
+                        "pages": [top.get("page"), runner_up.get("page")],
+                    }
+                )
+        review_required = bool(conflicts) or bool(top.get("speculative")) or float(top.get("score", 0.0)) < 3.5
+        chosen_value = "DA VERIFICARE" if review_required else top.get("value")
+        chosen_status = "LOW_CONFIDENCE" if review_required else str(top.get("status") or "FOUND")
+        chosen_evidence = top.get("evidence", []) if isinstance(top.get("evidence"), list) else []
+        searched_in = _make_searched_in(pages, keywords, chosen_status, field_key="stato_occupativo")
+        state = _build_field_state(value=chosen_value, status=chosen_status, evidence=chosen_evidence, searched_in=searched_in)
+        state["review_required"] = review_required
+        state["needs_user_confirmation"] = review_required
+        state["resolver_meta"] = {
+            "resolver_version": "occupancy_v1",
+            "resolver_confidence": round(max(0.0, min(1.0, float(top.get("score", 0.0)) / 10.0)), 3),
+            "conflict_flag": bool(conflicts),
+            "candidate_count": len(candidates),
+        }
+        state["conflicts"] = conflicts
+        state["all_candidates"] = copy.deepcopy(candidates)
+        state["top_candidates"] = top_candidates
+        state["chosen_candidate"] = copy.deepcopy(top)
+        if review_required:
+            state["user_prompt_it"] = "Lo stato occupativo richiede conferma manuale. Verifica le due evidenze principali e conferma il valore corretto."
+        return state
 
-    if len(set([c[2] for c in candidates])) > 1:
-        searched_in = _make_searched_in(pages, keywords, "LOW_CONFIDENCE", field_key="ape")
-        return _build_field_state(value="DA VERIFICARE", status="LOW_CONFIDENCE", evidence=[], searched_in=searched_in)
-    searched_in = _make_searched_in(pages, keywords, "NOT_FOUND", field_key="ape")
+    searched_in = _make_searched_in(pages, keywords, "NOT_FOUND", field_key="stato_occupativo")
     return _build_field_state(value=None, status="NOT_FOUND", evidence=[], searched_in=searched_in)
 
 def _extract_ape_state(pages: List[Dict[str, Any]]) -> Dict[str, Any]:
@@ -12288,9 +12650,26 @@ async def update_perizia_headline(analysis_id: str, payload: HeadlineOverrideReq
     """Update headline fields (tribunale/procedura/lotto/address) with user-provided overrides."""
     user = await require_auth(request)
     analysis, storage_mode, storage_path = await _get_perizia_analysis_for_user_with_storage(analysis_id, user)
+    pre_refresh_states = {}
+    existing_result = analysis.get("result")
+    if isinstance(existing_result, dict) and isinstance(existing_result.get("field_states"), dict):
+        pre_refresh_states = copy.deepcopy(existing_result.get("field_states") or {})
+    result = analysis.get("result")
+    if isinstance(result, dict):
+        pages_hint = int(analysis.get("pages_count", 0) or 0)
+        pages_for_proof = _load_pages_for_analysis(analysis_id, pages_hint)
+        _refresh_customer_facing_result_on_read(
+            result,
+            pages_for_proof,
+            analysis_id=analysis_id,
+            headline_overrides=analysis.get("headline_overrides") or {},
+            field_overrides=analysis.get("field_overrides") or {},
+        )
+        analysis["result"] = result
 
     overrides = analysis.get("headline_overrides", {}) or {}
     updated = False
+    confirmation_record: Optional[Dict[str, Any]] = None
     for field in ("tribunale", "procedura", "lotto", "address"):
         value = getattr(payload, field)
         if value is None:
@@ -12311,17 +12690,51 @@ async def update_perizia_headline(analysis_id: str, payload: HeadlineOverrideReq
             storage_mode=storage_mode,
             storage_path=storage_path
         )
+        if payload.address is not None and str(overrides.get("address") or "").strip():
+            confirmation_record = await _log_confirmation_for_analysis(
+                analysis=analysis,
+                user=user,
+                storage_mode=storage_mode,
+                storage_path=storage_path,
+                check_type="address",
+                field_key="field_states.address",
+                user_confirmed_value=overrides.get("address"),
+                final_applied_value=overrides.get("address"),
+                confirmation_source="headline_override",
+                notes=payload.confirmation_notes,
+                system_state=pre_refresh_states.get("address"),
+            )
 
-    return {"analysis_id": analysis_id, "headline_overrides": overrides}
+    response_payload: Dict[str, Any] = {"analysis_id": analysis_id, "headline_overrides": overrides}
+    if confirmation_record:
+        response_payload["confirmation"] = confirmation_record
+    return response_payload
 
 @api_router.patch("/analysis/perizia/{analysis_id}/overrides")
 async def update_perizia_overrides(analysis_id: str, payload: FieldOverrideRequest, request: Request):
     """Update field overrides (headline + decision fields) with user-provided values."""
     user = await require_auth(request)
     analysis, storage_mode, storage_path = await _get_perizia_analysis_for_user_with_storage(analysis_id, user)
+    pre_refresh_states = {}
+    existing_result = analysis.get("result")
+    if isinstance(existing_result, dict) and isinstance(existing_result.get("field_states"), dict):
+        pre_refresh_states = copy.deepcopy(existing_result.get("field_states") or {})
+    result = analysis.get("result")
+    if isinstance(result, dict):
+        pages_hint = int(analysis.get("pages_count", 0) or 0)
+        pages_for_proof = _load_pages_for_analysis(analysis_id, pages_hint)
+        _refresh_customer_facing_result_on_read(
+            result,
+            pages_for_proof,
+            analysis_id=analysis_id,
+            headline_overrides=analysis.get("headline_overrides") or {},
+            field_overrides=analysis.get("field_overrides") or {},
+        )
+        analysis["result"] = result
 
     overrides = analysis.get("field_overrides", {}) or {}
     updated = False
+    confirmation_record: Optional[Dict[str, Any]] = None
     fields = [
         "tribunale",
         "procedura",
@@ -12353,6 +12766,11 @@ async def update_perizia_overrides(analysis_id: str, payload: FieldOverrideReque
         else:
             overrides[target_field] = value
         updated = True
+        if target_field == "stato_occupativo" and value not in (None, ""):
+            confirmation_record = {
+                "value": cleaned if isinstance(value, str) else value,
+                "notes": getattr(payload, "confirmation_notes", None),
+            }
 
     analysis["field_overrides"] = overrides
 
@@ -12364,8 +12782,46 @@ async def update_perizia_overrides(analysis_id: str, payload: FieldOverrideReque
             storage_mode=storage_mode,
             storage_path=storage_path
         )
+        if isinstance(confirmation_record, dict):
+            confirmation_record = await _log_confirmation_for_analysis(
+                analysis=analysis,
+                user=user,
+                storage_mode=storage_mode,
+                storage_path=storage_path,
+                check_type="stato_occupativo",
+                field_key="field_states.stato_occupativo",
+                user_confirmed_value=confirmation_record.get("value"),
+                final_applied_value=confirmation_record.get("value"),
+                confirmation_source="field_override",
+                notes=confirmation_record.get("notes"),
+                system_state=pre_refresh_states.get("stato_occupativo"),
+            )
 
-    return {"analysis_id": analysis_id, "field_overrides": overrides}
+    response_payload: Dict[str, Any] = {"analysis_id": analysis_id, "field_overrides": overrides}
+    if isinstance(confirmation_record, dict) and confirmation_record.get("confirmation_id"):
+        response_payload["confirmation"] = confirmation_record
+    return response_payload
+
+
+@api_router.post("/analysis/perizia/{analysis_id}/confirmations")
+async def confirm_perizia_field(analysis_id: str, payload: ConfirmationLogRequest, request: Request):
+    user = await require_auth(request)
+    check_type = str(payload.check_type or "").strip().lower()
+    if check_type not in {"stato_occupativo", "address"}:
+        raise HTTPException(status_code=400, detail="Unsupported confirmation type")
+    if payload.value in (None, ""):
+        raise HTTPException(status_code=400, detail="Confirmation value is required")
+    if check_type == "address":
+        return await update_perizia_headline(
+            analysis_id,
+            HeadlineOverrideRequest(address=str(payload.value).strip(), confirmation_notes=payload.notes),
+            request,
+        )
+    return await update_perizia_overrides(
+        analysis_id,
+        FieldOverrideRequest(stato_occupativo=payload.value, confirmation_notes=payload.notes),
+        request,
+    )
 def generate_report_html(analysis: Dict, result: Dict) -> str:
     """Generate HTML report from analysis - supports ROMA STANDARD format with multi-lot"""
     
@@ -13499,6 +13955,23 @@ async def admin_overview(request: Request):
         "top_users_30d": top_users
     }
 
+
+@api_router.get("/admin/perizia-confirmations/export.xlsx")
+async def admin_export_perizia_confirmations(request: Request):
+    admin_user = await require_master_admin(request)
+    rows = await _collect_admin_confirmation_rows()
+    normalized_rows = [{column: row.get(column) for column in CONFIRMATION_EXPORT_COLUMNS} for row in rows if isinstance(row, dict)]
+    await _write_admin_audit(admin_user, "ADMIN_API_EXPORT", meta={"endpoint": "perizia_confirmations_export", "rows": len(normalized_rows)})
+    content = _build_simple_xlsx_bytes("Confirmations", CONFIRMATION_EXPORT_COLUMNS, normalized_rows)
+    return Response(
+        content=content,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={
+            "Content-Disposition": 'attachment; filename="periziascan_confirmations.xlsx"',
+            "Cache-Control": "no-store",
+        },
+    )
+
 @api_router.get("/admin/users")
 async def admin_users(
     request: Request,
@@ -14282,6 +14755,266 @@ def _persist_offline_analysis(path: Path, analysis: Dict[str, Any]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     with open(path, "w", encoding="utf-8") as f:
         json.dump(analysis, f, ensure_ascii=False, indent=2)
+
+
+def _normalize_confirmation_candidates(state: Dict[str, Any]) -> List[Dict[str, Any]]:
+    if not isinstance(state, dict):
+        return []
+    candidates = state.get("top_candidates")
+    if not isinstance(candidates, list):
+        resolver_meta = state.get("resolver_meta") if isinstance(state.get("resolver_meta"), dict) else {}
+        candidates = resolver_meta.get("candidates")
+    if not isinstance(candidates, list):
+        return []
+    out: List[Dict[str, Any]] = []
+    for idx, cand in enumerate(candidates[:2], start=1):
+        if not isinstance(cand, dict):
+            continue
+        evidence = cand.get("evidence", []) if isinstance(cand.get("evidence"), list) else []
+        first_ev = evidence[0] if evidence and isinstance(evidence[0], dict) else {}
+        out.append(
+            {
+                "rank": idx,
+                "value": cand.get("value"),
+                "score": cand.get("score"),
+                "page": first_ev.get("page"),
+                "quote": first_ev.get("quote"),
+                "window_word_count": cand.get("window_word_count"),
+                "section_hint": cand.get("section_hint"),
+                "context_window_text": cand.get("context_window_text"),
+                "evidence": evidence,
+            }
+        )
+    return out
+
+
+def _build_confirmation_record(
+    *,
+    analysis: Dict[str, Any],
+    user: User,
+    check_type: str,
+    field_key: str,
+    user_confirmed_value: Any,
+    final_applied_value: Any,
+    confirmation_source: str,
+    notes: Optional[str] = None,
+    system_state: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    system_state = system_state if isinstance(system_state, dict) else {}
+    candidates = _normalize_confirmation_candidates(system_state)
+    chosen_candidate = system_state.get("chosen_candidate") if isinstance(system_state.get("chosen_candidate"), dict) else {}
+    resolver_meta = system_state.get("resolver_meta") if isinstance(system_state.get("resolver_meta"), dict) else {}
+    now_iso = _now_iso()
+    analysis_created_at = analysis.get("created_at")
+    if isinstance(analysis_created_at, datetime):
+        analysis_created_at = analysis_created_at.isoformat()
+    if not isinstance(analysis_created_at, str) or not analysis_created_at.strip():
+        analysis_created_at = now_iso
+    c1 = candidates[0] if len(candidates) > 0 else {}
+    c2 = candidates[1] if len(candidates) > 1 else {}
+    original_value = system_state.get("value")
+    if isinstance(original_value, dict):
+        original_value = original_value.get("value", original_value)
+    conflict_flag = bool(
+        system_state.get("review_required")
+        or system_state.get("needs_user_confirmation")
+        or (resolver_meta.get("conflict_flag") if isinstance(resolver_meta, dict) else False)
+        or (isinstance(system_state.get("conflicts"), list) and len(system_state.get("conflicts")) > 0)
+    )
+    return {
+        "confirmation_id": f"conf_{uuid.uuid4().hex[:12]}",
+        "analysis_id": analysis.get("analysis_id"),
+        "run_id": analysis.get("run_id"),
+        "user_id": user.user_id,
+        "user_email": _safe_user_email(user),
+        "check_type": check_type,
+        "field_key": field_key,
+        "document_name": analysis.get("file_name") or analysis.get("case_title"),
+        "created_at": analysis_created_at,
+        "confirmed_at": now_iso,
+        "system_original_value": original_value,
+        "system_original_status": system_state.get("status"),
+        "system_original_confidence": system_state.get("confidence"),
+        "resolver_conflict_flag": conflict_flag,
+        "resolver_confidence": resolver_meta.get("resolver_confidence", system_state.get("confidence")),
+        "needs_user_confirmation": bool(system_state.get("needs_user_confirmation")),
+        "candidate_1_value": c1.get("value"),
+        "candidate_1_score": c1.get("score"),
+        "candidate_1_page": c1.get("page"),
+        "candidate_1_quote": c1.get("quote"),
+        "candidate_2_value": c2.get("value"),
+        "candidate_2_score": c2.get("score"),
+        "candidate_2_page": c2.get("page"),
+        "candidate_2_quote": c2.get("quote"),
+        "candidate_1_window_word_count": c1.get("window_word_count"),
+        "candidate_2_window_word_count": c2.get("window_word_count"),
+        "candidate_1_section_hint": c1.get("section_hint"),
+        "candidate_2_section_hint": c2.get("section_hint"),
+        "user_confirmed_value": user_confirmed_value,
+        "final_applied_value": final_applied_value,
+        "confirmation_source": confirmation_source,
+        "notes": str(notes or "").strip() or None,
+        "chosen_candidate_value": chosen_candidate.get("value"),
+        "chosen_candidate_score": chosen_candidate.get("score"),
+        "system_decision_vs_user_decision_changed": str(original_value or "") != str(final_applied_value or ""),
+        "candidate_details": candidates,
+        "resolver_meta": resolver_meta,
+        "conflicts": system_state.get("conflicts", []),
+        "all_candidates": system_state.get("all_candidates", []),
+        "chosen_candidate": chosen_candidate,
+        "top_candidates": system_state.get("top_candidates", []),
+        "system_state_snapshot": copy.deepcopy(system_state),
+    }
+
+
+async def _store_confirmation_record(
+    *,
+    analysis: Dict[str, Any],
+    user: User,
+    storage_mode: str,
+    storage_path: Optional[Path],
+    record: Dict[str, Any],
+) -> None:
+    if storage_mode == "mongo":
+        await db.perizia_confirmations.insert_one(copy.deepcopy(record))
+        return
+    if storage_mode == "offline_file":
+        if storage_path is None:
+            raise HTTPException(status_code=500, detail="Offline analysis path not available")
+        existing = _load_offline_persisted_analysis(storage_path)
+        if not existing or existing.get("analysis_id") != analysis.get("analysis_id"):
+            raise HTTPException(status_code=404, detail="Analysis not found")
+        existing_owner = str(existing.get("user_id", "") or "").strip()
+        if existing_owner and existing_owner != user.user_id:
+            raise HTTPException(status_code=404, detail="Analysis not found")
+        confirmations = existing.get("confirmation_log")
+        if not isinstance(confirmations, list):
+            confirmations = []
+        confirmations.append(copy.deepcopy(record))
+        existing["confirmation_log"] = confirmations
+        _persist_offline_analysis(storage_path, existing)
+        analysis["confirmation_log"] = confirmations
+        return
+    raise HTTPException(status_code=500, detail="Unsupported analysis storage mode")
+
+
+async def _log_confirmation_for_analysis(
+    *,
+    analysis: Dict[str, Any],
+    user: User,
+    storage_mode: str,
+    storage_path: Optional[Path],
+    check_type: str,
+    field_key: str,
+    user_confirmed_value: Any,
+    final_applied_value: Any,
+    confirmation_source: str,
+    notes: Optional[str] = None,
+    system_state: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    if not isinstance(system_state, dict):
+        result = analysis.get("result") if isinstance(analysis.get("result"), dict) else {}
+        states = result.get("field_states") if isinstance(result.get("field_states"), dict) else {}
+        state_leaf = str(field_key).split(".")[-1]
+        system_state = states.get(state_leaf) if isinstance(states.get(state_leaf), dict) else {}
+    record = _build_confirmation_record(
+        analysis=analysis,
+        user=user,
+        check_type=check_type,
+        field_key=field_key,
+        user_confirmed_value=user_confirmed_value,
+        final_applied_value=final_applied_value,
+        confirmation_source=confirmation_source,
+        notes=notes,
+        system_state=system_state,
+    )
+    await _store_confirmation_record(
+        analysis=analysis,
+        user=user,
+        storage_mode=storage_mode,
+        storage_path=storage_path,
+        record=record,
+    )
+    return record
+
+
+async def _list_confirmation_records() -> List[Dict[str, Any]]:
+    if hasattr(db, "perizia_confirmations"):
+        rows = await db.perizia_confirmations.find({}, {"_id": 0}).to_list(None)
+        if isinstance(rows, list):
+            return [row for row in rows if isinstance(row, dict)]
+    return []
+
+
+async def _collect_admin_confirmation_rows() -> List[Dict[str, Any]]:
+    rows = await _list_confirmation_records()
+    seen_pairs = {
+        (str(row.get("analysis_id") or ""), str(row.get("check_type") or ""), str(row.get("field_key") or ""), str(row.get("user_confirmed_value") or ""))
+        for row in rows
+        if isinstance(row, dict)
+    }
+    analyses = await db.perizia_analyses.find({}, {"_id": 0}).to_list(None)
+    for analysis in analyses:
+        if not isinstance(analysis, dict):
+            continue
+        user_email = ""
+        user_id = str(analysis.get("user_id") or "").strip()
+        if user_id:
+            user_doc = await db.users.find_one({"user_id": user_id}, {"_id": 0, "email": 1})
+            if isinstance(user_doc, dict):
+                user_email = str(user_doc.get("email") or "").strip()
+        legacy_rows = []
+        headline_overrides = analysis.get("headline_overrides") if isinstance(analysis.get("headline_overrides"), dict) else {}
+        if str(headline_overrides.get("address") or "").strip():
+            legacy_rows.append(
+                {
+                    "analysis_id": analysis.get("analysis_id"),
+                    "run_id": analysis.get("run_id"),
+                    "user_id": user_id,
+                    "user_email": user_email,
+                    "check_type": "address",
+                    "field_key": "field_states.address",
+                    "document_name": analysis.get("file_name") or analysis.get("case_title"),
+                    "created_at": analysis.get("created_at"),
+                    "confirmed_at": analysis.get("updated_at") or analysis.get("created_at"),
+                    "user_confirmed_value": headline_overrides.get("address"),
+                    "final_applied_value": headline_overrides.get("address"),
+                    "confirmation_source": "headline_override_legacy",
+                    "notes": "Normalized from existing headline_overrides.address",
+                }
+            )
+        field_overrides = analysis.get("field_overrides") if isinstance(analysis.get("field_overrides"), dict) else {}
+        if field_overrides.get("stato_occupativo") not in (None, ""):
+            legacy_rows.append(
+                {
+                    "analysis_id": analysis.get("analysis_id"),
+                    "run_id": analysis.get("run_id"),
+                    "user_id": user_id,
+                    "user_email": user_email,
+                    "check_type": "stato_occupativo",
+                    "field_key": "field_states.stato_occupativo",
+                    "document_name": analysis.get("file_name") or analysis.get("case_title"),
+                    "created_at": analysis.get("created_at"),
+                    "confirmed_at": analysis.get("updated_at") or analysis.get("created_at"),
+                    "user_confirmed_value": field_overrides.get("stato_occupativo"),
+                    "final_applied_value": field_overrides.get("stato_occupativo"),
+                    "confirmation_source": "field_override_legacy",
+                    "notes": "Normalized from existing field_overrides.stato_occupativo",
+                }
+            )
+        for row in legacy_rows:
+            key = (
+                str(row.get("analysis_id") or ""),
+                str(row.get("check_type") or ""),
+                str(row.get("field_key") or ""),
+                str(row.get("user_confirmed_value") or ""),
+            )
+            if key in seen_pairs:
+                continue
+            seen_pairs.add(key)
+            rows.append(row)
+    rows.sort(key=lambda row: str(row.get("confirmed_at") or row.get("created_at") or ""), reverse=True)
+    return rows
 
 async def _save_headline_overrides_for_analysis(
     *,

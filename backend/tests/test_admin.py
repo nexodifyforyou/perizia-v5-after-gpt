@@ -223,6 +223,7 @@ class FakeDB:
         self.billing_records = FakeCollection("billing_records")
         self.admin_audit_log = FakeCollection("admin_audit_log")
         self.admin_user_notes = FakeCollection("admin_user_notes")
+        self.perizia_confirmations = FakeCollection("perizia_confirmations")
 
 
 @pytest.fixture()
