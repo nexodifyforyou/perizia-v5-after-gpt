@@ -235,6 +235,65 @@ def test_weak_ape_mention_is_downweighted_against_stronger_class_evidence():
     assert state["chosen_candidate"]["page"] == 7
 
 
+def test_explicit_dichiarazione_present_is_captured_for_elettrico():
+    pages = [
+        {"page_number": 4, "text": "E' presente la dichiarazione di conformità dell'impianto elettrico.\n"},
+    ]
+    state = server._extract_dichiarazione_impianto_elettrico_state(pages)
+    assert state["status"] == "FOUND"
+    assert state["value"] == "DICHIARAZIONE PRESENTE"
+
+
+def test_explicit_non_conforme_is_captured_for_impianto_gas():
+    pages = [
+        {"page_number": 5, "text": "L'impianto gas risulta non conforme e da adeguare.\n"},
+    ]
+    state = server._extract_dichiarazione_impianto_gas_state(pages)
+    assert state["status"] == "FOUND"
+    assert state["value"] == "NON CONFORME / DA ADEGUARE"
+
+
+def test_explicit_dichiarazione_absent_is_captured_for_impianto_idrico():
+    pages = [
+        {"page_number": 6, "text": "L'impianto idrico e' privo di dichiarazione di conformita'.\n"},
+    ]
+    state = server._extract_dichiarazione_impianto_idrico_state(pages)
+    assert state["status"] == "FOUND"
+    assert state["value"] == "DICHIARAZIONE ASSENTE"
+
+
+def test_generic_impianto_mention_is_not_overpromoted():
+    pages = [
+        {"page_number": 3, "text": "L'impianto elettrico è sottotraccia.\n"},
+    ]
+    state = server._extract_dichiarazione_impianto_elettrico_state(pages)
+    assert state["status"] == "LOW_CONFIDENCE"
+    assert state["value"] == "MENZIONE GENERICA SENZA DICHIARAZIONE"
+    assert state["evidence"][0]["page"] == 3
+    assert "impianto elettrico" in state["evidence"][0]["quote"].lower()
+
+
+def test_true_not_found_has_no_false_impianto_evidence():
+    pages = [
+        {"page_number": 2, "text": "L'immobile è composto da soggiorno e cucina.\n"},
+    ]
+    state = server._extract_dichiarazione_impianto_idrico_state(pages)
+    assert state["status"] == "NOT_FOUND"
+    assert state["evidence"] == []
+
+
+def test_impianto_certificate_conflict_yields_review_required_output():
+    pages = [
+        {"page_number": 4, "text": "E' presente la dichiarazione di conformità dell'impianto elettrico.\n"},
+        {"page_number": 5, "text": "L'impianto elettrico è privo di dichiarazione di conformità.\n"},
+    ]
+    state = server._extract_dichiarazione_impianto_elettrico_state(pages)
+    assert state["status"] == "LOW_CONFIDENCE"
+    assert state["value"] == "DA VERIFICARE"
+    assert state["review_required"] is True
+    assert len(state["top_candidates"]) == 2
+
+
 def test_later_authoritative_urbanistica_compliant_beats_earlier_weak_negative():
     pages = [
         {"page_number": 1, "text": "Tabella costi | oneri di regolarizzazione urbanistica | sanatoria € 5.000 | valore finale € 120.000\n"},
@@ -1189,6 +1248,41 @@ def test_ape_resolver_backed_field_does_not_leak_human_phrase_into_status():
     assert ape_state["value"] == "CLASSE ENERGETICA F"
     assert legacy_ape["status"] == "PRESENTE"
     assert legacy_ape["detail_it"] == "CLASSE ENERGETICA F"
+
+
+def test_impianti_resolver_backed_fields_do_not_leak_human_phrase_into_status():
+    pages = [
+        {"page_number": 4, "text": "E' presente la dichiarazione di conformità dell'impianto elettrico.\n"},
+        {"page_number": 5, "text": "L'impianto gas risulta non conforme e da adeguare.\n"},
+    ]
+    result = _build_result_for_pages(pages)
+    elettrico_state = result["field_states"]["dichiarazione_impianto_elettrico"]
+    gas_state = result["field_states"]["dichiarazione_impianto_gas"]
+    legacy_impianti = result["abusi_edilizi_conformita"]["impianti"]
+    assert elettrico_state["status"] == "FOUND"
+    assert elettrico_state["value"] == "DICHIARAZIONE PRESENTE"
+    assert gas_state["status"] == "FOUND"
+    assert gas_state["value"] == "NON CONFORME / DA ADEGUARE"
+    assert legacy_impianti["elettrico"]["status"] == "PRESENTE"
+    assert legacy_impianti["elettrico"]["detail_it"] == "DICHIARAZIONE PRESENTE"
+    assert legacy_impianti["gas"]["status"] == "NON_CONFORME"
+    assert legacy_impianti["gas"]["detail_it"] == "NON CONFORME / DA ADEGUARE"
+
+
+def test_impianti_legacy_mapping_preserves_evidence_for_generic_mentions():
+    pages = [
+        {"page_number": 3, "text": "L'impianto elettrico è sottotraccia.\n"},
+    ]
+    result = _build_result_for_pages(pages)
+    elettrico_state = result["field_states"]["dichiarazione_impianto_elettrico"]
+    legacy_impianti = result["abusi_edilizi_conformita"]["impianti"]
+    assert elettrico_state["status"] == "LOW_CONFIDENCE"
+    assert elettrico_state["value"] == "MENZIONE GENERICA SENZA DICHIARAZIONE"
+    assert elettrico_state["evidence"][0]["page"] == 3
+    assert legacy_impianti["elettrico"]["status"] == "UNKNOWN"
+    assert legacy_impianti["elettrico"]["detail_it"] == "MENZIONE GENERICA SENZA DICHIARAZIONE"
+    assert legacy_impianti["elettrico"]["evidence"][0]["page"] == 3
+    assert "impianto elettrico" in legacy_impianti["elettrico"]["evidence"][0]["quote"].lower()
 
 
 @pytest.mark.anyio

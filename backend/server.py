@@ -1823,6 +1823,20 @@ def _legacy_ape_status_from_state(state: Dict[str, Any]) -> str:
         return normalized
     return "UNKNOWN"
 
+
+def _legacy_impianto_cert_status_from_state(state: Dict[str, Any]) -> str:
+    display = _field_state_display_value(state, fallback="DA VERIFICARE")
+    normalized = _normalize_headline_text(str(display or "")).upper()
+    if normalized in {"", "NON SPECIFICATO IN PERIZIA", "DA VERIFICARE"}:
+        return "UNKNOWN"
+    if any(token in normalized for token in ("NON CONFORME", "NON A NORMA", "DA ADEGUARE")):
+        return "NON_CONFORME"
+    if any(token in normalized for token in ("DICHIARAZIONE PRESENTE", "CERTIFICAZIONE PRESENTE", "CONFORME")):
+        return "PRESENTE"
+    if any(token in normalized for token in ("DICHIARAZIONE ASSENTE", "PRIVO DI DICHIARAZIONE", "DOCUMENTAZIONE NON REPERITA")):
+        return "ASSENTE"
+    return "UNKNOWN"
+
 def _build_field_state(
     *,
     value: Any,
@@ -3314,6 +3328,269 @@ def _extract_ape_state(pages: List[Dict[str, Any]]) -> Dict[str, Any]:
     return _build_field_state(value=None, status="NOT_FOUND", evidence=[], searched_in=searched_in)
 
 
+def _impianto_section_hint(text: str, start: int, end: int) -> str:
+    line_start, line_end = _line_bounds(text, start, end)
+    current_line = _normalize_headline_text(text[line_start:line_end])
+    lines = text.splitlines()
+    current_index = 0
+    running = 0
+    for idx, line in enumerate(lines):
+        next_running = running + len(line) + 1
+        if running <= start < next_running:
+            current_index = idx
+            break
+        running = next_running
+    window = lines[max(0, current_index - 1):min(len(lines), current_index + 2)]
+    for candidate in window:
+        low = _normalize_signal_text(candidate)
+        if any(token in low for token in ("impianto", "dichiarazione di conformita", "certificato di conformita", "certificazione impianto", "conforme", "non conforme", "non a norma", "da adeguare")):
+            return _normalize_headline_text(candidate)
+    return current_line
+
+
+def _impianto_authority_score(value: str, line_text: str, section_hint: str) -> float:
+    score = 1.0
+    normalized_line = _normalize_signal_text(line_text)
+    normalized_hint = _normalize_signal_text(section_hint)
+    normalized_value = _normalize_signal_text(value)
+    if any(token in normalized_hint for token in ("dichiarazione di conformita", "certificato di conformita", "certificazione impianto", "impianto")):
+        score += 2.0
+    if any(token in normalized_line for token in ("dichiarazione di conformita", "certificato di conformita", "certificazione impianto")):
+        score += 2.0
+    if any(token in normalized_value for token in ("non conforme", "non a norma", "da adeguare")):
+        score += 2.0
+    if any(token in normalized_value for token in ("dichiarazione presente", "dichiarazione assente", "documentazione non reperita")):
+        score += 1.5
+    if any(token in normalized_line for token in ("da verificare", "documentazione non reperita", "non leggibile")):
+        score -= 0.75
+    if _is_cost_table_context(line_text):
+        score -= 1.0
+    return score
+
+
+def _extract_impianto_certificate_state(
+    pages: List[Dict[str, Any]],
+    *,
+    field_key: str,
+    domain_tokens: Tuple[str, ...],
+) -> Dict[str, Any]:
+    keywords = list(domain_tokens) + ["dichiarazione di conformità", "certificato di conformità", "certificazione impianto", "non conforme", "non a norma", "da adeguare"]
+    domain_union = "|".join(domain_tokens)
+    mention_pattern = re.compile(rf"({domain_union})", re.I)
+    candidate_patterns = [
+        (
+            re.compile(rf"(((?:e['’]?\s+|[èe]\s+)?presente|esiste|risulta\s+presente|allegat\w*|acquisit\w*|depositat\w*)[^\n]{{0,40}}?(?:la\s+)?(?:dichiarazione\s+di\s+conformit[aà]|dichiarazione\s+conformit[aà]|certificat\w*\s+di\s+conformit[aà]|certificazion\w+\s+(?:dell['’]?\s*)?impianto)[^\n]{{0,80}}?(?:{domain_union}))", re.I),
+            lambda _m: "DICHIARAZIONE PRESENTE",
+            "presence",
+        ),
+        (
+            re.compile(rf"((?:{domain_union})[^\n]{{0,80}}?(?:dichiarazione\s+di\s+conformit[aà]|dichiarazione\s+conformit[aà]|certificat\w*\s+di\s+conformit[aà]|certificazion\w+\s+(?:dell['’]?\s*)?impianto)[^\n]{{0,60}}?(?:presente|esiste|risulta\s+presente|allegat\w*|acquisit\w*|depositat\w*|conforme))", re.I),
+            lambda _m: "DICHIARAZIONE PRESENTE",
+            "presence",
+        ),
+        (
+            re.compile(rf"((?:non\s+esiste|assente|non\s+presente|privo\s+di\s+dichiarazione|assenza\s+della?\s+dichiarazione|documentazione\s+non\s+reperita)[^\n]{{0,120}}?(?:{domain_union})[^\n]{{0,80}}?(?:dichiarazione\s+di\s+conformit[aà]|certificat\w*\s+di\s+conformit[aà]|certificazion\w+))", re.I),
+            lambda _m: "DICHIARAZIONE ASSENTE",
+            "absence",
+        ),
+        (
+            re.compile(rf"((?:{domain_union})[^\n]{{0,120}}?(?:privo\s+di\s+dichiarazione|assenza\s+della?\s+dichiarazione|documentazione\s+non\s+reperita|non\s+esiste|assente|non\s+presente))", re.I),
+            lambda _m: "DICHIARAZIONE ASSENTE",
+            "absence",
+        ),
+        (
+            re.compile(rf"((?:{domain_union})[^\n]{{0,120}}?(?:non\s+conforme|non\s+a\s+norma|da\s+adeguare|da\s+mettere\s+a\s+norma))", re.I),
+            lambda _m: "NON CONFORME / DA ADEGUARE",
+            "non_conforme",
+        ),
+    ]
+    candidates: List[Dict[str, Any]] = []
+    mention_candidates: List[Dict[str, Any]] = []
+    for p in pages:
+        text = str(p.get("text", "") or "")
+        page_num = int(p.get("page_number", 0) or 0)
+        if not text:
+            continue
+        for pattern, value_builder, contradiction_group in candidate_patterns:
+            for m in pattern.finditer(text):
+                start, end = m.start(1), m.end(1)
+                line_start, line_end = _line_bounds(text, start, end)
+                line_text = text[line_start:line_end]
+                if _is_toc_like_line(line_text) or _is_toc_like_quote(line_text):
+                    continue
+                if not re.search(r"(dichiarazione|certificat|certificazion|conforme|non\s+conforme|non\s+a\s+norma|da\s+adeguare)", line_text, re.I):
+                    continue
+                evidence = [
+                    _build_evidence(
+                        text,
+                        page_num,
+                        line_start,
+                        line_end,
+                        field_key=field_key,
+                        anchor_hint=m.group(1),
+                    )
+                ]
+                if not evidence or not str(evidence[0].get("quote") or "").strip():
+                    continue
+                prev_line_start = text.rfind("\n", 0, line_start - 1)
+                prev_line_start = 0 if prev_line_start < 0 else prev_line_start + 1
+                prev_line_end = line_start - 1 if line_start > 0 else 0
+                prev_line = _normalize_headline_text(text[prev_line_start:prev_line_end]) if prev_line_end > prev_line_start else ""
+                next_line_start = line_end + 1 if line_end < len(text) else len(text)
+                next_line_stop = text.find("\n", next_line_start)
+                next_line_stop = len(text) if next_line_stop < 0 else next_line_stop
+                next_line = _normalize_headline_text(text[next_line_start:next_line_stop]) if next_line_stop > next_line_start else ""
+                section_hint = _impianto_section_hint(text, line_start, line_end)
+                value = value_builder(m)
+                context_window_text = _normalize_headline_text(text[max(0, line_start - 120):min(len(text), line_end + 120)])
+                score = _impianto_authority_score(value, line_text, section_hint)
+                candidates.append(
+                    {
+                        "value": value,
+                        "page": page_num,
+                        "score": score,
+                        "status": "FOUND",
+                        "speculative": bool(re.search(r"(da\s+verificare|documentazione\s+non\s+reperita)", line_text, re.I)),
+                        "match_text": _normalize_headline_text(m.group(1)),
+                        "sentence_text": _normalize_headline_text(line_text),
+                        "prev_sentence": prev_line,
+                        "next_sentence": next_line,
+                        "context_window_text": context_window_text,
+                        "window_word_count": len(context_window_text.split()),
+                        "quote": str(evidence[0].get("quote") or ""),
+                        "evidence": evidence[0],
+                        "section_hint": section_hint,
+                        "is_table_like": bool(_is_cost_table_context(line_text)),
+                        "is_heading_like": bool(re.match(r"^\s*(impianto|dichiarazione|certificat)", _normalize_signal_text(line_text), re.I)),
+                        "authority_score": score,
+                        "contradiction_group": contradiction_group,
+                        "ocr_noise_hint": bool(re.search(r"\b[a-z]\s+[a-z]\s+[a-z]\b", line_text, re.I)),
+                    }
+                )
+        for m in mention_pattern.finditer(text):
+            start, end = m.start(1), m.end(1)
+            line_start, line_end = _line_bounds(text, start, end)
+            line_text = text[line_start:line_end]
+            if _is_toc_like_line(line_text) or _is_toc_like_quote(line_text):
+                continue
+            if re.search(r"(dichiarazione|certificat|certificazion|conforme|non\s+conforme|non\s+a\s+norma|da\s+adeguare|privo\s+di\s+dichiarazione|assenza\s+della?\s+dichiarazione|documentazione\s+non\s+reperita)", line_text, re.I):
+                continue
+            evidence = [
+                _build_evidence(
+                    text,
+                    page_num,
+                    line_start,
+                    line_end,
+                    field_key=field_key,
+                    anchor_hint=m.group(1),
+                )
+            ]
+            if not evidence or not str(evidence[0].get("quote") or "").strip():
+                continue
+            prev_line_start = text.rfind("\n", 0, line_start - 1)
+            prev_line_start = 0 if prev_line_start < 0 else prev_line_start + 1
+            prev_line_end = line_start - 1 if line_start > 0 else 0
+            prev_line = _normalize_headline_text(text[prev_line_start:prev_line_end]) if prev_line_end > prev_line_start else ""
+            next_line_start = line_end + 1 if line_end < len(text) else len(text)
+            next_line_stop = text.find("\n", next_line_start)
+            next_line_stop = len(text) if next_line_stop < 0 else next_line_stop
+            next_line = _normalize_headline_text(text[next_line_start:next_line_stop]) if next_line_stop > next_line_start else ""
+            section_hint = _impianto_section_hint(text, line_start, line_end)
+            context_window_text = _normalize_headline_text(text[max(0, line_start - 120):min(len(text), line_end + 120)])
+            mention_candidates.append(
+                {
+                    "value": "MENZIONE GENERICA SENZA DICHIARAZIONE",
+                    "page": page_num,
+                    "score": 1.2 + min(float(page_num) * 0.05, 0.4),
+                    "status": "LOW_CONFIDENCE",
+                    "speculative": True,
+                    "match_text": _normalize_headline_text(m.group(1)),
+                    "sentence_text": _normalize_headline_text(line_text),
+                    "prev_sentence": prev_line,
+                    "next_sentence": next_line,
+                    "context_window_text": context_window_text,
+                    "window_word_count": len(context_window_text.split()),
+                    "quote": str(evidence[0].get("quote") or ""),
+                    "evidence": evidence[0],
+                    "section_hint": section_hint,
+                    "is_table_like": bool(_is_cost_table_context(line_text)),
+                    "is_heading_like": bool(re.match(r"^\s*(impianto|dichiarazione|certificat)", _normalize_signal_text(line_text), re.I)),
+                    "authority_score": 1.2,
+                    "contradiction_group": "generic_mention",
+                    "ocr_noise_hint": bool(re.search(r"\b[a-z]\s+[a-z]\s+[a-z]\b", line_text, re.I)),
+                }
+            )
+    if candidates:
+        candidates.sort(key=lambda cand: (-float(cand.get("score", 0.0)), -int(cand.get("page", 0) or 0), str(cand.get("value") or "")))
+        top = candidates[0]
+        conflicts: List[Dict[str, Any]] = []
+        for cand in candidates[1:]:
+            if str(cand.get("value") or "") == str(top.get("value") or ""):
+                continue
+            if float(cand.get("score", 0.0)) >= float(top.get("score", 0.0)) - 0.75:
+                conflicts.append({"value": cand.get("value"), "page": cand.get("page"), "score": cand.get("score"), "quote": cand.get("quote")})
+        top_candidates = copy.deepcopy(candidates[:2])
+        review_required = bool(conflicts) or bool(top.get("speculative"))
+        chosen_value = "DA VERIFICARE" if review_required else top.get("value")
+        chosen_status = "LOW_CONFIDENCE" if review_required else str(top.get("status") or "FOUND")
+        searched_in = _make_searched_in(pages, keywords, chosen_status, field_key=field_key)
+        state = _build_field_state(value=chosen_value, status=chosen_status, evidence=[copy.deepcopy(top.get("evidence"))], searched_in=searched_in)
+        state["review_required"] = review_required
+        state["needs_user_confirmation"] = review_required
+        state["resolver_meta"] = {"resolver_version": "impianti_cert_v1", "candidates_found": len(candidates)}
+        state["conflicts"] = conflicts
+        state["all_candidates"] = copy.deepcopy(candidates[:6])
+        state["chosen_candidate"] = copy.deepcopy(top)
+        state["top_candidates"] = top_candidates
+        if review_required:
+            state["user_prompt_it"] = "La documentazione impiantistica richiede verifica manuale. Controlla la dichiarazione o l'eventuale non conformità nella perizia."
+        return state
+    if mention_candidates:
+        mention_candidates.sort(key=lambda cand: (-float(cand.get("score", 0.0)), -int(cand.get("page", 0) or 0), str(cand.get("quote") or "")))
+        top = mention_candidates[0]
+        searched_in = _make_searched_in(pages, keywords, "LOW_CONFIDENCE", field_key=field_key)
+        state = _build_field_state(
+            value="MENZIONE GENERICA SENZA DICHIARAZIONE",
+            status="LOW_CONFIDENCE",
+            evidence=[copy.deepcopy(top.get("evidence"))],
+            searched_in=searched_in,
+        )
+        state["review_required"] = False
+        state["needs_user_confirmation"] = False
+        state["resolver_meta"] = {"resolver_version": "impianti_cert_v1", "candidates_found": 0, "generic_mentions_found": len(mention_candidates)}
+        state["conflicts"] = []
+        state["all_candidates"] = copy.deepcopy(mention_candidates[:4])
+        state["chosen_candidate"] = copy.deepcopy(top)
+        state["top_candidates"] = copy.deepcopy(mention_candidates[:1])
+        return state
+    searched_in = _make_searched_in(pages, keywords, "NOT_FOUND", field_key=field_key)
+    return _build_field_state(value=None, status="NOT_FOUND", evidence=[], searched_in=searched_in)
+
+
+def _extract_dichiarazione_impianto_elettrico_state(pages: List[Dict[str, Any]]) -> Dict[str, Any]:
+    return _extract_impianto_certificate_state(
+        pages,
+        field_key="dichiarazione_impianto_elettrico",
+        domain_tokens=("impianto\\s+elettric\\w*", "elettric\\w*"),
+    )
+
+
+def _extract_dichiarazione_impianto_idrico_state(pages: List[Dict[str, Any]]) -> Dict[str, Any]:
+    return _extract_impianto_certificate_state(
+        pages,
+        field_key="dichiarazione_impianto_idrico",
+        domain_tokens=("impianto\\s+idrico", "idrico", "acqua"),
+    )
+
+
+def _extract_dichiarazione_impianto_gas_state(pages: List[Dict[str, Any]]) -> Dict[str, Any]:
+    return _extract_impianto_certificate_state(
+        pages,
+        field_key="dichiarazione_impianto_gas",
+        domain_tokens=("impianto\\s+gas", "gas"),
+    )
+
+
 def _extract_agibilita_state(pages: List[Dict[str, Any]]) -> Dict[str, Any]:
     keywords = ["agibilità", "agibilita", "abitabilità", "abitabilita", "agibile"]
     absent_patterns = [
@@ -4123,6 +4400,26 @@ def _apply_decision_states_to_result(result: Dict[str, Any], states: Dict[str, A
         "detail_it": _field_state_display_value(ape_state),
         "evidence": ape_state.get("evidence", []),
     }
+    impianti = abusi.get("impianti", {}) if isinstance(abusi.get("impianti"), dict) else {}
+    for legacy_key, field_key in (
+        ("elettrico", "dichiarazione_impianto_elettrico"),
+        ("idrico", "dichiarazione_impianto_idrico"),
+        ("gas", "dichiarazione_impianto_gas"),
+    ):
+        imp_state = states.get(field_key) or {}
+        legacy_status = _legacy_impianto_cert_status_from_state(imp_state)
+        legacy_detail = (
+            str(imp_state.get("value")).strip()
+            if imp_state.get("value") is not None and str(imp_state.get("value")).strip() != ""
+            else _field_state_display_value(imp_state)
+        )
+        impianti[legacy_key] = {
+            "status": legacy_status,
+            "conformita": "SI" if legacy_status == "PRESENTE" else ("NO" if legacy_status in {"ASSENTE", "NON_CONFORME"} else "NON_RISULTA"),
+            "detail_it": legacy_detail,
+            "evidence": imp_state.get("evidence", []),
+        }
+    abusi["impianti"] = impianti
     agibilita_state = states.get("agibilita") or {}
     abusi["agibilita"] = {
         "status": _field_state_display_value(agibilita_state),
@@ -5151,6 +5448,9 @@ def _apply_decision_field_states(result: Dict[str, Any], pages: List[Dict[str, A
             "conformita_catastale": _extract_conformita_catastale_state(pages),
             "spese_condominiali_arretrate": _extract_spese_condominiali_state(pages),
             "ape": _extract_ape_state(pages),
+            "dichiarazione_impianto_elettrico": _extract_dichiarazione_impianto_elettrico_state(pages),
+            "dichiarazione_impianto_idrico": _extract_dichiarazione_impianto_idrico_state(pages),
+            "dichiarazione_impianto_gas": _extract_dichiarazione_impianto_gas_state(pages),
             "agibilita": _extract_agibilita_state(pages),
             "dati_asta": _extract_dati_asta_state(pages),
             "formalita_pregiudizievoli": _extract_formalita_pregiudizievoli_state(pages),
@@ -5218,6 +5518,24 @@ def _apply_decision_field_states(result: Dict[str, Any], pages: List[Dict[str, A
                 evidence=abusi.get("ape", {}).get("evidence", []) if isinstance(abusi.get("ape"), dict) else [],
                 pages=pages,
                 keywords=["ape", "certificato energetico", "attestato di prestazione energetica"],
+            ),
+            "dichiarazione_impianto_elettrico": _build_state_from_existing_value(
+                value_obj=((abusi.get("impianti", {}) or {}).get("elettrico", {}) or {}).get("detail_it") or ((abusi.get("impianti", {}) or {}).get("elettrico", {}) or {}).get("status"),
+                evidence=((abusi.get("impianti", {}) or {}).get("elettrico", {}) or {}).get("evidence", []),
+                pages=pages,
+                keywords=["impianto elettrico", "dichiarazione di conformità", "certificato di conformità"],
+            ),
+            "dichiarazione_impianto_idrico": _build_state_from_existing_value(
+                value_obj=((abusi.get("impianti", {}) or {}).get("idrico", {}) or {}).get("detail_it") or ((abusi.get("impianti", {}) or {}).get("idrico", {}) or {}).get("status"),
+                evidence=((abusi.get("impianti", {}) or {}).get("idrico", {}) or {}).get("evidence", []),
+                pages=pages,
+                keywords=["impianto idrico", "acqua", "dichiarazione di conformità", "certificato di conformità"],
+            ),
+            "dichiarazione_impianto_gas": _build_state_from_existing_value(
+                value_obj=((abusi.get("impianti", {}) or {}).get("gas", {}) or {}).get("detail_it") or ((abusi.get("impianti", {}) or {}).get("gas", {}) or {}).get("status"),
+                evidence=((abusi.get("impianti", {}) or {}).get("gas", {}) or {}).get("evidence", []),
+                pages=pages,
+                keywords=["impianto gas", "gas", "dichiarazione di conformità", "certificato di conformità"],
             ),
             "agibilita": _build_state_from_existing_value(
                 value_obj=abusi.get("agibilita", {}).get("status") if isinstance(abusi.get("agibilita"), dict) else None,
