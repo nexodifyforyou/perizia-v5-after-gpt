@@ -1809,6 +1809,20 @@ def _legacy_catastale_status_from_state(state: Dict[str, Any]) -> str:
         return "DIFFORME"
     return "UNKNOWN"
 
+
+def _legacy_ape_status_from_state(state: Dict[str, Any]) -> str:
+    display = _field_state_display_value(state, fallback="DA VERIFICARE")
+    normalized = _normalize_headline_text(str(display or "")).upper()
+    if normalized in {"", "NON SPECIFICATO IN PERIZIA", "DA VERIFICARE"}:
+        return "UNKNOWN"
+    if any(token in normalized for token in ("CLASSE ENERGETICA", "APE PRESENTE", "ATTESTATO DI PRESTAZIONE ENERGETICA PRESENTE")):
+        return "PRESENTE"
+    if any(token in normalized for token in ("ASSENTE", "NON PRESENTE", "NON RINVENUTO", "ESENTE", "NON DOVUTO")):
+        return "ASSENTE"
+    if normalized in {"PRESENTE", "ASSENTE", "UNKNOWN"}:
+        return normalized
+    return "UNKNOWN"
+
 def _build_field_state(
     *,
     value: Any,
@@ -3131,34 +3145,172 @@ def _extract_delivery_timeline_state(pages: List[Dict[str, Any]]) -> Dict[str, A
     searched_in = _make_searched_in(pages, keywords, "NOT_FOUND", field_key="delivery_timeline")
     return _build_field_state(value=None, status="NOT_FOUND", evidence=[], searched_in=searched_in)
 
+def _ape_section_hint(text: str, start: int, end: int) -> str:
+    line_start, line_end = _line_bounds(text, start, end)
+    lines = text.splitlines()
+    current_line = text[line_start:line_end]
+    current_index = 0
+    running = 0
+    for idx, line in enumerate(lines):
+        next_running = running + len(line) + 1
+        if running <= start < next_running:
+            current_index = idx
+            break
+        running = next_running
+    window = lines[max(0, current_index - 1):min(len(lines), current_index + 2)]
+    for candidate in window:
+        low = _normalize_signal_text(candidate)
+        if any(token in low for token in ("ape", "attestato di prestazione energetica", "attestazione di prestazione energetica", "classe energetica", "prestazione energetica", "certificazione energetica")):
+            return _normalize_headline_text(candidate)
+    return _normalize_headline_text(current_line)
+
+
+def _ape_authority_score(value: str, line_text: str, section_hint: str) -> float:
+    score = 1.0
+    normalized_line = _normalize_signal_text(line_text)
+    normalized_hint = _normalize_signal_text(section_hint)
+    normalized_value = _normalize_signal_text(value)
+    if any(token in normalized_hint for token in ("ape", "attestato di prestazione energetica", "attestazione di prestazione energetica", "classe energetica", "prestazione energetica", "certificazione energetica")):
+        score += 2.5
+    if "classe energetica" in normalized_line:
+        score += 3.0
+    if any(token in normalized_line for token in ("attestato di prestazione energetica", "attestazione di prestazione energetica", "certificazione energetica")):
+        score += 2.0
+    if "classe energetica" in normalized_value:
+        score += 2.5
+    if any(token in normalized_value for token in ("assente", "non rinvenuto", "esente", "non dovuto")):
+        score += 2.0
+    if any(token in normalized_line for token in ("da verificare", "non leggibile", "non desumibile", "non indicata")):
+        score -= 0.75
+    if _is_cost_table_context(line_text):
+        score -= 1.25
+    return score
+
+
 def _extract_ape_state(pages: List[Dict[str, Any]]) -> Dict[str, Any]:
-    keywords = ["ape", "attestato di prestazione energetica", "certificato energetico"]
-    patterns = [
-        (re.compile(r"(non\s+presente|assente|non\s+esiste)[\s\S]{0,120}(ape|certificato\s+energetico)", re.I), "ASSENTE"),
-        (re.compile(r"(ape|certificato\s+energetico)[\s\S]{0,120}(non\s+presente|assente|non\s+esiste)", re.I), "ASSENTE"),
-        (re.compile(r"(ape|attestato\s+di\s+prestazione\s+energetica)[\s\S]{0,120}(presente)", re.I), "PRESENTE"),
+    keywords = ["ape", "attestato di prestazione energetica", "attestazione di prestazione energetica", "classe energetica", "prestazione energetica", "certificazione energetica"]
+    candidate_patterns = [
+        (
+            re.compile(r"((?:ape|attestato\s+di\s+prestazione\s+energetica|attestazione\s+di\s+prestazione\s+energetica|prestazione\s+energetica|classe\s+energetica)[^\n]{0,90}?classe\s+(?:energetica\s+)?(?P<class>A4|A3|A2|A1|A|B|C|D|E|F|G)\b)", re.I),
+            lambda m: f"CLASSE ENERGETICA {str(m.group('class') or '').upper()}",
+            "class",
+        ),
+        (
+            re.compile(r"((?:classe\s+energetica)\s+(?P<class>A4|A3|A2|A1|A|B|C|D|E|F|G)\b[^\n]{0,90}?(?:ape|attestato\s+di\s+prestazione\s+energetica|prestazione\s+energetica)?)", re.I),
+            lambda m: f"CLASSE ENERGETICA {str(m.group('class') or '').upper()}",
+            "class",
+        ),
+        (
+            re.compile(r"((?:ape|attestato\s+di\s+prestazione\s+energetica|attestazione\s+di\s+prestazione\s+energetica|certificato\s+energetico)[^\n]{0,120}?(?:non\s+presente|assente|non\s+esiste|non\s+rinven\w*|non\s+reperit\w*))", re.I),
+            lambda _m: "ASSENTE",
+            "absence",
+        ),
+        (
+            re.compile(r"((?:non\s+presente|assente|non\s+esiste|non\s+rinven\w*|non\s+reperit\w*)[^\n]{0,120}?(?:ape|attestato\s+di\s+prestazione\s+energetica|attestazione\s+di\s+prestazione\s+energetica|certificato\s+energetico))", re.I),
+            lambda _m: "ASSENTE",
+            "absence",
+        ),
+        (
+            re.compile(r"((?:immobile|fabbricato|unit[aà]\s+immobiliare)[^\n]{0,80}?(?:esente|esclus\w*)[^\n]{0,40}?(?:ape|attestato\s+di\s+prestazione\s+energetica|prestazione\s+energetica))", re.I),
+            lambda _m: "ESENTE / NON DOVUTO",
+            "absence",
+        ),
+        (
+            re.compile(r"((?:ape|attestato\s+di\s+prestazione\s+energetica|attestazione\s+di\s+prestazione\s+energetica|certificazione\s+energetica)[^\n]{0,120}?(?:presente|allegat\w*|acquisit\w*|depositat\w*|in\s+atti)|classe\s+energetica[^\n]{0,80}?(?:non\s+leggibile|non\s+desumibile|non\s+indicata))", re.I),
+            lambda _m: "APE PRESENTE (CLASSE NON LEGGIBILE)",
+            "presence",
+        ),
     ]
+    candidates: List[Dict[str, Any]] = []
     for p in pages:
         text = str(p.get("text", "") or "")
-        for pat, label in patterns:
-            m = pat.search(text)
-            if not m:
+        page_num = int(p.get("page_number", 0) or 0)
+        if not text:
+            continue
+        for pattern, value_builder, contradiction_group in candidate_patterns:
+            for m in pattern.finditer(text):
+                start, end = m.start(1), m.end(1)
+                line_start, line_end = _line_bounds(text, start, end)
+                line_text = text[line_start:line_end]
+                if _is_toc_like_line(line_text) or _is_toc_like_quote(line_text):
+                    continue
+                if re.search(r"(impianto\s+elettric|impianto\s+idrico|impianto\s+termico|dichiarazione\s+di\s+conformit[aà]\s+dell['’]impianto)", line_text, re.I):
+                    continue
+                evidence = [
+                    _build_evidence(
+                        text,
+                        page_num,
+                        line_start,
+                        line_end,
+                        field_key="ape",
+                        anchor_hint=m.group(1),
+                    )
+                ]
+                if not evidence or not str(evidence[0].get("quote") or "").strip():
+                    continue
+                prev_line_start = text.rfind("\n", 0, line_start - 1)
+                prev_line_start = 0 if prev_line_start < 0 else prev_line_start + 1
+                prev_line_end = line_start - 1 if line_start > 0 else 0
+                prev_line = _normalize_headline_text(text[prev_line_start:prev_line_end]) if prev_line_end > prev_line_start else ""
+                next_line_end = text.find("\n", line_end)
+                next_line_end = len(text) if next_line_end < 0 else next_line_end
+                next_line_start = line_end + 1 if line_end < len(text) else len(text)
+                next_line_stop = text.find("\n", next_line_start)
+                next_line_stop = len(text) if next_line_stop < 0 else next_line_stop
+                next_line = _normalize_headline_text(text[next_line_start:next_line_stop]) if next_line_stop > next_line_start else ""
+                section_hint = _ape_section_hint(text, line_start, line_end)
+                value = value_builder(m)
+                context_window_text = _normalize_headline_text(text[max(0, line_start - 120):min(len(text), line_end + 120)])
+                candidate = {
+                    "value": value,
+                    "page": page_num,
+                    "score": _ape_authority_score(value, line_text, section_hint),
+                    "status": "FOUND",
+                    "speculative": bool(re.search(r"(da\s+verificare|non\s+leggibile|non\s+desumibile|non\s+indicata)", line_text, re.I)),
+                    "match_text": _normalize_headline_text(m.group(1)),
+                    "sentence_text": _normalize_headline_text(line_text),
+                    "prev_sentence": prev_line,
+                    "next_sentence": next_line,
+                    "context_window_text": context_window_text,
+                    "window_word_count": len(context_window_text.split()),
+                    "quote": str(evidence[0].get("quote") or ""),
+                    "evidence": evidence[0],
+                    "section_hint": section_hint,
+                    "is_table_like": bool(_is_cost_table_context(line_text)),
+                    "is_heading_like": bool(re.match(r"^\s*(ape|attestato\s+di\s+prestazione\s+energetica|classe\s+energetica)\s*$", _normalize_signal_text(line_text), re.I)),
+                    "authority_score": _ape_authority_score(value, line_text, section_hint),
+                    "contradiction_group": contradiction_group,
+                    "ocr_noise_hint": bool(re.search(r"\b[a-z]\s+[a-z]\s+[a-z]\b", line_text, re.I)),
+                }
+                candidates.append(candidate)
+
+    if candidates:
+        candidates.sort(key=lambda cand: (-float(cand.get("score", 0.0)), -int(cand.get("page", 0) or 0), str(cand.get("value") or "")))
+        top = candidates[0]
+        conflicts: List[Dict[str, Any]] = []
+        for cand in candidates[1:]:
+            if str(cand.get("value") or "") == str(top.get("value") or ""):
                 continue
-            start, end = m.start(), m.end()
-            line_start, line_end = _line_bounds(text, start, end)
-            evidence = [
-                _build_evidence(
-                    text,
-                    int(p.get("page_number", 0) or 0),
-                    line_start,
-                    line_end,
-                    field_key="ape",
-                    anchor_hint=m.group(0),
-                )
-            ]
-            searched_in = _make_searched_in(pages, keywords, "FOUND")
-            return _build_field_state(value=label, status="FOUND", evidence=evidence, searched_in=searched_in)
-    searched_in = _make_searched_in(pages, keywords, "NOT_FOUND")
+            if float(cand.get("score", 0.0)) >= float(top.get("score", 0.0)) - 0.75:
+                conflicts.append({"value": cand.get("value"), "page": cand.get("page"), "score": cand.get("score"), "quote": cand.get("quote")})
+        top_candidates = copy.deepcopy(candidates[:2])
+        review_required = bool(conflicts) or bool(top.get("speculative"))
+        chosen_value = "DA VERIFICARE" if review_required else top.get("value")
+        chosen_status = "LOW_CONFIDENCE" if review_required else str(top.get("status") or "FOUND")
+        searched_in = _make_searched_in(pages, keywords, chosen_status, field_key="ape")
+        state = _build_field_state(value=chosen_value, status=chosen_status, evidence=[copy.deepcopy(top.get("evidence"))], searched_in=searched_in)
+        state["review_required"] = review_required
+        state["needs_user_confirmation"] = review_required
+        state["resolver_meta"] = {"resolver_version": "ape_v1", "candidates_found": len(candidates)}
+        state["conflicts"] = conflicts
+        state["all_candidates"] = copy.deepcopy(candidates[:6])
+        state["chosen_candidate"] = copy.deepcopy(top)
+        state["top_candidates"] = top_candidates
+        if review_required:
+            state["user_prompt_it"] = "L'informazione APE richiede conferma manuale. Verifica la classe energetica o l'assenza dell'APE nella perizia."
+        return state
+
+    searched_in = _make_searched_in(pages, keywords, "NOT_FOUND", field_key="ape")
     return _build_field_state(value=None, status="NOT_FOUND", evidence=[], searched_in=searched_in)
 
 
@@ -3967,7 +4119,8 @@ def _apply_decision_states_to_result(result: Dict[str, Any], states: Dict[str, A
     }
     ape_state = states.get("ape") or {}
     abusi["ape"] = {
-        "status": _field_state_display_value(ape_state),
+        "status": _legacy_ape_status_from_state(ape_state),
+        "detail_it": _field_state_display_value(ape_state),
         "evidence": ape_state.get("evidence", []),
     }
     agibilita_state = states.get("agibilita") or {}
@@ -5058,7 +5211,10 @@ def _apply_decision_field_states(result: Dict[str, Any], pages: List[Dict[str, A
                 keywords=["spese condominiali", "arretrate", "arretrati"],
             ),
             "ape": _build_state_from_existing_value(
-                value_obj=abusi.get("ape", {}).get("status") if isinstance(abusi.get("ape"), dict) else None,
+                value_obj=(
+                    abusi.get("ape", {}).get("detail_it")
+                    or abusi.get("ape", {}).get("status")
+                ) if isinstance(abusi.get("ape"), dict) else None,
                 evidence=abusi.get("ape", {}).get("evidence", []) if isinstance(abusi.get("ape"), dict) else [],
                 pages=pages,
                 keywords=["ape", "certificato energetico", "attestato di prestazione energetica"],

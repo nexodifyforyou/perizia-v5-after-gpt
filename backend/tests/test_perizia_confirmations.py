@@ -185,6 +185,56 @@ def test_prezzo_base_not_confused_with_nearby_cost_numbers():
     assert state["value"] == 85000.0
 
 
+def test_explicit_ape_class_clause_is_captured_correctly():
+    pages = [
+        {"page_number": 6, "text": "ATTESTATO DI PRESTAZIONE ENERGETICA\nClasse energetica F.\n"},
+    ]
+    state = server._extract_ape_state(pages)
+    assert state["status"] == "FOUND"
+    assert state["value"] == "CLASSE ENERGETICA F"
+
+
+def test_ape_is_not_confused_with_unrelated_certificate_language():
+    pages = [
+        {"page_number": 3, "text": "Non esiste la dichiarazione di conformità dell'impianto elettrico.\n"},
+    ]
+    state = server._extract_ape_state(pages)
+    assert state["status"] == "NOT_FOUND"
+
+
+def test_ape_present_but_unclear_class_yields_conservative_result():
+    pages = [
+        {"page_number": 5, "text": "APE presente in atti ma classe energetica non leggibile.\n"},
+    ]
+    state = server._extract_ape_state(pages)
+    assert state["status"] == "LOW_CONFIDENCE"
+    assert state["value"] == "DA VERIFICARE"
+    assert state["review_required"] is True
+
+
+def test_ape_strong_unresolved_conflict_yields_review_required_output():
+    pages = [
+        {"page_number": 4, "text": "ATTESTATO DI PRESTAZIONE ENERGETICA\nClasse energetica F.\n"},
+        {"page_number": 5, "text": "ATTESTATO DI PRESTAZIONE ENERGETICA\nClasse energetica G.\n"},
+    ]
+    state = server._extract_ape_state(pages)
+    assert state["status"] == "LOW_CONFIDENCE"
+    assert state["value"] == "DA VERIFICARE"
+    assert state["review_required"] is True
+    assert len(state["top_candidates"]) == 2
+
+
+def test_weak_ape_mention_is_downweighted_against_stronger_class_evidence():
+    pages = [
+        {"page_number": 1, "text": "Riepilogo | APE | certificazione energetica\n"},
+        {"page_number": 7, "text": "ATTESTATO DI PRESTAZIONE ENERGETICA\nClasse energetica C.\n"},
+    ]
+    state = server._extract_ape_state(pages)
+    assert state["status"] == "FOUND"
+    assert state["value"] == "CLASSE ENERGETICA C"
+    assert state["chosen_candidate"]["page"] == 7
+
+
 def test_later_authoritative_urbanistica_compliant_beats_earlier_weak_negative():
     pages = [
         {"page_number": 1, "text": "Tabella costi | oneri di regolarizzazione urbanistica | sanatoria € 5.000 | valore finale € 120.000\n"},
@@ -1126,6 +1176,19 @@ def test_opponibilita_cluster_resolver_backed_fields_do_not_leak_human_phrase_in
     assert opp_state["value"] == "TITOLO NON OPPONIBILE"
     assert delivery_state["status"] == "FOUND"
     assert "entro 120 giorni" in delivery_state["value"].lower()
+
+
+def test_ape_resolver_backed_field_does_not_leak_human_phrase_into_status():
+    pages = [
+        {"page_number": 6, "text": "ATTESTATO DI PRESTAZIONE ENERGETICA\nClasse energetica F.\n"},
+    ]
+    result = _build_result_for_pages(pages)
+    ape_state = result["field_states"]["ape"]
+    legacy_ape = result["abusi_edilizi_conformita"]["ape"]
+    assert ape_state["status"] == "FOUND"
+    assert ape_state["value"] == "CLASSE ENERGETICA F"
+    assert legacy_ape["status"] == "PRESENTE"
+    assert legacy_ape["detail_it"] == "CLASSE ENERGETICA F"
 
 
 @pytest.mark.anyio
