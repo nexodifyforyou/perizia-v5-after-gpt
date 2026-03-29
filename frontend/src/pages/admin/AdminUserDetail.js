@@ -185,7 +185,7 @@ const AdminUserDetail = () => {
         <div className="text-zinc-400 font-mono text-sm">Loading...</div>
       ) : (
         <>
-          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4 mb-8">
+          <div className="mb-8 grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
             <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-6">
               <p className="text-sm text-zinc-500 mb-1">Current account state</p>
               <p className="text-2xl font-serif font-bold text-zinc-100 capitalize">{user.plan || '-'}</p>
@@ -255,7 +255,7 @@ const AdminUserDetail = () => {
                           {entry.direction === 'credit' ? '+' : '-'}{entry.amount || 0}
                         </span>
                       </div>
-                      <div className="mt-3 grid grid-cols-2 gap-3 text-xs text-zinc-400">
+                      <div className="mt-3 grid grid-cols-1 gap-3 text-xs text-zinc-400 sm:grid-cols-2">
                         <div>{CREDIT_LABELS[entry.quota_field] || entry.quota_field || '-'}</div>
                         <div>{ENTRY_TYPE_LABELS[entry.entry_type] || entry.entry_type || '-'}</div>
                         <div>Saldo prima: {entry.balance_before || 0}</div>
@@ -314,7 +314,7 @@ const AdminUserDetail = () => {
                           {record.status || '-'}
                         </span>
                       </div>
-                      <div className="mt-3 grid grid-cols-2 gap-3 text-xs text-zinc-400">
+                      <div className="mt-3 grid grid-cols-1 gap-3 text-xs text-zinc-400 sm:grid-cols-2">
                         <div>{formatCurrency(record.amount_total, record.currency)}</div>
                         <div>{record.purchase_type || '-'}</div>
                         <div>Piano: {record.plan_id || '-'}</div>
@@ -332,13 +332,13 @@ const AdminUserDetail = () => {
           <SectionShell title="Recent Activity" subtitle="Ultime analisi e sessioni utente">
             <div className="space-y-3">
               {(data?.recent_activity || []).map((item) => (
-                <div key={`${item.type}-${item.id}`} className="flex items-center justify-between bg-zinc-950 border border-zinc-800 rounded-lg p-3">
-                  <div>
+                <div key={`${item.type}-${item.id}`} className="flex flex-col gap-3 rounded-lg border border-zinc-800 bg-zinc-950 p-3 sm:flex-row sm:items-center sm:justify-between">
+                  <div className="min-w-0">
                     <p className="text-sm text-zinc-200 uppercase font-mono">{item.type}</p>
                     <p className="text-xs text-zinc-500">Case: {item.case_id || '-'} | Run: {item.run_id || '-'}</p>
                     <p className="text-xs text-zinc-500">Created: {item.created_at ? new Date(item.created_at).toLocaleString() : '-'}</p>
                   </div>
-                  <div className="text-right text-xs text-zinc-400">
+                  <div className="text-xs text-zinc-400 sm:text-right">
                     {item.summary?.semaforo && <div>Semaforo: {item.summary.semaforo}</div>}
                     {item.summary?.image_count !== undefined && <div>Images: {item.summary.image_count}</div>}
                     {item.summary?.question_preview && <div>{item.summary.question_preview}</div>}

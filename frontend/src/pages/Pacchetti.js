@@ -36,7 +36,7 @@ const Pacchetti = () => {
         title="Come funzionano i crediti"
         description="Il consumo e legato alla fascia pagine del documento analizzato. Il piano Free include 12 crediti, cioe fino a 3 perizie standard da 1-20 pagine."
       >
-        <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-5">
           {creditBands.map((band) => (
             <div key={band} className="rounded-2xl border border-zinc-800 bg-zinc-900/70 p-5 text-zinc-200">
               {band}

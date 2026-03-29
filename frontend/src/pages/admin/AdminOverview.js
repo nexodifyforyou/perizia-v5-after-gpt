@@ -206,7 +206,7 @@ const AdminOverview = () => {
               <h3 className="text-lg font-serif font-bold text-zinc-100">Top utenti (30d)</h3>
             </div>
             <div className="overflow-x-auto">
-              <table className="w-full text-sm">
+              <table className="responsive-data-table text-sm">
                 <thead>
                   <tr className="text-left text-zinc-500 border-b border-zinc-800">
                     <th className="py-2">Email</th>

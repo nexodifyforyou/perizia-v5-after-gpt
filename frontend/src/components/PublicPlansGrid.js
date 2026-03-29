@@ -92,14 +92,14 @@ const PublicPlansGrid = ({ detailed = false }) => {
   }
 
   return (
-    <div className={`grid grid-cols-1 md:grid-cols-2 ${detailed ? 'xl:grid-cols-5' : 'xl:grid-cols-5'} gap-6`}>
+    <div className={`grid grid-cols-1 gap-6 md:grid-cols-2 xl:grid-cols-5`}>
       {plans.map((plan) => {
         const featured = plan.plan_id === 'solo';
 
         return (
           <article
             key={plan.plan_id}
-            className={`plan-surface section-fade relative rounded-3xl border p-7 transition-all duration-300 ${
+            className={`plan-surface section-fade relative flex h-full flex-col rounded-3xl border p-5 transition-all duration-300 sm:p-7 ${
               featured
                 ? 'plan-surface-hero border-gold/60 bg-gradient-to-b from-[#20190d] via-[#141414] to-zinc-950 gold-glow'
                 : 'border-zinc-800 bg-zinc-900/80 hover:-translate-y-1 hover:border-zinc-700'
@@ -112,9 +112,9 @@ const PublicPlansGrid = ({ detailed = false }) => {
             )}
 
             <div className="mb-6">
-              <p className="text-xs font-mono uppercase tracking-[0.28em] text-zinc-500 mb-3">{planEyebrow[plan.plan_id] || plan.plan_type_label_it}</p>
-              <h3 className="text-2xl font-serif font-bold text-zinc-100 mb-2">{planNameOverrides[plan.plan_id] || plan.name_it}</h3>
-              <p className="text-sm leading-relaxed text-zinc-400">{defaultSummary[plan.plan_id] || 'Pacchetto pubblico PeriziaScan.'}</p>
+              <p className="mb-3 text-xs font-mono uppercase tracking-[0.28em] text-zinc-500">{planEyebrow[plan.plan_id] || plan.plan_type_label_it}</p>
+              <h3 className="mb-2 text-2xl font-serif font-bold text-zinc-100 text-wrap-safe">{planNameOverrides[plan.plan_id] || plan.name_it}</h3>
+              <p className="text-sm leading-relaxed text-zinc-400 text-wrap-safe">{defaultSummary[plan.plan_id] || 'Pacchetto pubblico PeriziaScan.'}</p>
             </div>
 
             <div className="flex items-end gap-2 mb-5">
@@ -140,11 +140,11 @@ const PublicPlansGrid = ({ detailed = false }) => {
               {planEvidenceNotes[plan.plan_id]}
             </div>
 
-            <ul className="space-y-3 mb-7">
+            <ul className="mb-7 space-y-3">
               {((detailed ? plan.features_it : (plan.features_it || []).slice(0, 3)) || []).map((feature) => (
                 <li key={feature} className="flex items-start gap-3 text-sm text-zinc-300">
                   <CheckCircle2 className="w-5 h-5 text-emerald-400 flex-shrink-0 mt-0.5" />
-                  <span>{feature}</span>
+                  <span className="text-wrap-safe">{feature}</span>
                 </li>
               ))}
             </ul>
@@ -163,7 +163,7 @@ const PublicPlansGrid = ({ detailed = false }) => {
             ) : (
               <Button
                 asChild
-                className={`w-full ${featured ? 'bg-gold text-zinc-950 hover:bg-gold-dim' : 'bg-zinc-800 text-zinc-100 hover:bg-zinc-700'}`}
+                className={`mt-auto w-full ${featured ? 'bg-gold text-zinc-950 hover:bg-gold-dim' : 'bg-zinc-800 text-zinc-100 hover:bg-zinc-700'}`}
               >
                 <Link to="/pacchetti">Dettagli pacchetto <ArrowUpRight className="w-4 h-4 ml-2" /></Link>
               </Button>

@@ -24,7 +24,7 @@ const Profile = () => {
     <div className="min-h-screen bg-[#09090b]">
       <Sidebar user={user} logout={logout} />
       
-      <main className="ml-64 p-8">
+      <main className="px-4 pb-8 pt-24 sm:px-6 lg:ml-64 lg:px-8 lg:pt-8">
         {/* Header */}
         <div className="mb-8">
           <h1 className="text-3xl font-serif font-bold text-zinc-100 mb-2">
@@ -37,9 +37,9 @@ const Profile = () => {
 
         {/* Profile Card */}
         <div className="max-w-2xl">
-          <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-8">
+          <div className="rounded-xl border border-zinc-800 bg-zinc-900 p-5 sm:p-8">
             {/* Avatar */}
-            <div className="flex items-center gap-6 mb-8 pb-8 border-b border-zinc-800">
+            <div className="mb-8 flex flex-col gap-4 border-b border-zinc-800 pb-8 sm:flex-row sm:items-center sm:gap-6">
               {user?.picture ? (
                 <img 
                   src={user.picture} 
@@ -51,9 +51,9 @@ const Profile = () => {
                   <User className="w-12 h-12 text-gold" />
                 </div>
               )}
-              <div>
-                <h2 className="text-2xl font-serif font-bold text-zinc-100">{user?.name}</h2>
-                <p className="text-zinc-500">{user?.email}</p>
+              <div className="min-w-0">
+                <h2 className="text-2xl font-serif font-bold text-zinc-100 text-wrap-safe">{user?.name}</h2>
+                <p className="text-zinc-500 text-wrap-safe">{user?.email}</p>
                 {user?.is_master_admin && (
                   <span className="inline-flex items-center gap-1 mt-2 px-3 py-1 bg-gold/20 text-gold text-xs font-mono rounded-full">
                     <Shield className="w-3 h-3" />
@@ -118,7 +118,7 @@ const Profile = () => {
           {/* Quota Summary */}
           <div className="mt-6 bg-zinc-900 border border-zinc-800 rounded-xl p-6">
             <h3 className="text-lg font-semibold text-zinc-100 mb-4">Quota Utilizzo</h3>
-            <div className="grid grid-cols-3 gap-4">
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
               <div className="text-center p-4 bg-zinc-950 rounded-lg">
                 <p className="text-2xl font-mono font-bold text-gold">
                   {accountState.quota.perizia_scans_remaining}

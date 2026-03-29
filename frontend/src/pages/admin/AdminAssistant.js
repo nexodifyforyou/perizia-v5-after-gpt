@@ -78,7 +78,7 @@ const AdminAssistant = () => {
           <div className="text-zinc-400 font-mono text-sm">Loading...</div>
         ) : (
           <div className="overflow-x-auto">
-            <table className="w-full text-sm">
+            <table className="responsive-data-table text-sm">
               <thead>
                 <tr className="text-left text-zinc-500 border-b border-zinc-800">
                   <th className="py-2">QA ID</th>
@@ -111,7 +111,7 @@ const AdminAssistant = () => {
         )}
       </div>
 
-      <div className="flex items-center justify-between mt-4">
+      <div className="mt-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <p className="text-sm text-zinc-500">Page {page} / {totalPages} (Total {total})</p>
         <div className="flex gap-2">
           <Button variant="outline" className="border-zinc-700 text-zinc-300" disabled={page <= 1} onClick={() => setPage(page - 1)}>Prev</Button>

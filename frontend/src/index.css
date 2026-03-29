@@ -45,6 +45,7 @@
     body {
         @apply bg-[#09090b] text-zinc-100 font-sans antialiased;
         font-family: 'Manrope', sans-serif;
+        overflow-x: hidden;
     }
     
     h1, h2, h3 {
@@ -53,6 +54,17 @@
     
     .font-mono, code, .data-value {
         font-family: 'JetBrains Mono', monospace;
+    }
+}
+
+@layer utilities {
+    .text-wrap-safe {
+        overflow-wrap: anywhere;
+        word-break: break-word;
+    }
+
+    .responsive-panel {
+        @apply rounded-xl border border-zinc-800 bg-zinc-900;
     }
 }
 
@@ -205,7 +217,7 @@
 
 /* PDF upload zone */
 .upload-zone {
-    @apply border-2 border-dashed border-zinc-700 rounded-xl p-12 text-center transition-all duration-300;
+    @apply border-2 border-dashed border-zinc-700 rounded-xl p-6 text-center transition-all duration-300 sm:p-8 lg:p-12;
 }
 
 .upload-zone:hover {
@@ -219,6 +231,17 @@
 /* Premium badge */
 .premium-badge {
     @apply bg-[#D4AF37]/10 text-[#D4AF37] border border-[#D4AF37]/20 px-3 py-1 rounded-full text-xs font-semibold;
+}
+
+.responsive-data-table {
+    width: 100%;
+    min-width: 720px;
+}
+
+@media (max-width: 767px) {
+    .responsive-data-table {
+        min-width: 640px;
+    }
 }
 
 .perizia-print-html,

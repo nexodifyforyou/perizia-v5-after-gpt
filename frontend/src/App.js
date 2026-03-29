@@ -94,7 +94,7 @@ const FeatureUnavailablePage = ({ featureName }) => {
   return (
     <div className="min-h-screen bg-[#09090b]">
       <Sidebar user={user} logout={logout} />
-      <main className="ml-64 p-8">
+      <main className="px-4 pb-8 pt-24 sm:px-6 lg:ml-64 lg:px-8 lg:pt-8">
         <div className="max-w-2xl bg-zinc-900 border border-zinc-800 rounded-2xl p-8">
           <p className="text-xs font-mono uppercase tracking-wider text-zinc-500 mb-3">In arrivo</p>
           <h1 className="text-3xl font-serif font-bold text-zinc-100 mb-3">{featureName}</h1>

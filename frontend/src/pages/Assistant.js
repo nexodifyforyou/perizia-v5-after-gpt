@@ -93,9 +93,9 @@ const Assistant = () => {
     <div className="min-h-screen bg-[#09090b]">
       <Sidebar user={user} logout={logout} />
       
-      <main className="ml-64 h-screen flex flex-col">
+      <main className="flex min-h-screen flex-col pt-16 lg:ml-64 lg:h-screen lg:pt-0">
         {/* Header */}
-        <div className="p-8 pb-4 border-b border-zinc-800">
+        <div className="border-b border-zinc-800 px-4 pb-4 pt-6 sm:px-6 lg:p-8 lg:pb-4">
           <h1 className="text-3xl font-serif font-bold text-zinc-100 mb-2">
             Assistente AI
           </h1>
@@ -106,7 +106,7 @@ const Assistant = () => {
         
         {/* Chat Area */}
         <div className="flex-1 overflow-hidden flex flex-col">
-          <ScrollArea className="flex-1 p-8" ref={scrollRef}>
+          <ScrollArea className="flex-1 px-4 py-6 sm:px-6 lg:p-8" ref={scrollRef}>
             <div className="max-w-3xl mx-auto space-y-6">
               {messages.map((message, index) => (
                 <div 
@@ -125,7 +125,7 @@ const Assistant = () => {
                     </div>
                   )}
                   
-                  <div className={`max-w-[80%] ${message.role === 'user' ? 'order-first' : ''}`}>
+                  <div className={`max-w-[88%] sm:max-w-[80%] ${message.role === 'user' ? 'order-first' : ''}`}>
                     <div className={`p-4 rounded-xl ${
                       message.role === 'user' 
                         ? 'bg-gold text-zinc-950' 
@@ -185,7 +185,7 @@ const Assistant = () => {
           
           {/* Suggested Questions */}
           {messages.length <= 1 && (
-            <div className="px-8 py-4 border-t border-zinc-800">
+            <div className="border-t border-zinc-800 px-4 py-4 sm:px-6 lg:px-8">
               <p className="text-xs text-zinc-500 mb-3">Domande suggerite:</p>
               <div className="flex flex-wrap gap-2">
                 {suggestedQuestions.map((q, i) => (
@@ -202,8 +202,8 @@ const Assistant = () => {
           )}
           
           {/* Input */}
-          <div className="p-8 pt-4 border-t border-zinc-800">
-            <form onSubmit={handleSubmit} className="max-w-3xl mx-auto flex gap-4">
+          <div className="border-t border-zinc-800 px-4 pb-6 pt-4 sm:px-6 lg:px-8 lg:pb-8">
+            <form onSubmit={handleSubmit} className="mx-auto flex max-w-3xl flex-col gap-3 sm:flex-row sm:gap-4">
               <Input
                 value={input}
                 onChange={(e) => setInput(e.target.value)}
@@ -216,7 +216,7 @@ const Assistant = () => {
                 type="submit"
                 data-testid="assistant-send-btn"
                 disabled={!input.trim() || loading}
-                className="bg-gold text-zinc-950 hover:bg-gold-dim disabled:opacity-50"
+                className="bg-gold text-zinc-950 hover:bg-gold-dim disabled:opacity-50 sm:self-auto"
               >
                 <Send className="w-5 h-5" />
               </Button>

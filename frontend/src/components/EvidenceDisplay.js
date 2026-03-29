@@ -31,7 +31,7 @@ export const EvidenceDetail = ({ evidence, className = '' }) => {
   return (
     <div className={`mt-2 space-y-2 ${className}`}>
       {evidence.map((e, idx) => (
-        <div key={idx} className="flex items-start gap-2 p-2 bg-zinc-950/50 rounded border border-zinc-800/50">
+        <div key={idx} className="flex items-start gap-2 rounded border border-zinc-800/50 bg-zinc-950/50 p-2">
           <Quote className="w-4 h-4 text-gold flex-shrink-0 mt-0.5" />
           <div className="flex-1 min-w-0">
             {e.page && (
@@ -44,7 +44,7 @@ export const EvidenceDetail = ({ evidence, className = '' }) => {
               <span className="text-xs text-zinc-500">[{e.anchor}]</span>
             )}
             {e.quote && (
-              <p className="text-xs text-zinc-400 mt-1 italic">"{e.quote}"</p>
+              <p className="mt-1 text-xs italic text-zinc-400 text-wrap-safe">"{e.quote}"</p>
             )}
           </div>
         </div>
@@ -96,9 +96,9 @@ export const DataValueWithEvidence = ({ label, value, evidence, valueClassName =
           </span>
         )}
       </div>
-      <p className={`font-medium ${valueClassName}`}>{displayValue}</p>
+      <p className={`font-medium text-wrap-safe ${valueClassName}`}>{displayValue}</p>
       {hasEvidence && evidence[0]?.quote && (
-        <p className="text-xs text-zinc-500 mt-2 italic border-l-2 border-gold/30 pl-2">
+        <p className="mt-2 border-l-2 border-gold/30 pl-2 text-xs italic text-zinc-500 text-wrap-safe">
           "{evidence[0].quote.substring(0, 150)}{evidence[0].quote.length > 150 ? '...' : ''}"
         </p>
       )}

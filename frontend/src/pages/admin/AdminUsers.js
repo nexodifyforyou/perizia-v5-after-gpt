@@ -158,7 +158,7 @@ const AdminUsers = () => {
           <div className="text-zinc-400 font-mono text-sm">Loading...</div>
         ) : (
           <div className="overflow-x-auto">
-            <table className="w-full text-sm">
+            <table className="responsive-data-table text-sm">
               <thead>
                 <tr className="text-left text-zinc-500 border-b border-zinc-800">
                   <th className="py-2">Email</th>
@@ -221,7 +221,7 @@ const AdminUsers = () => {
         )}
       </div>
 
-      <div className="flex items-center justify-between mt-4">
+      <div className="mt-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <p className="text-sm text-zinc-500">Page {page} / {totalPages} (Total {total})</p>
         <div className="flex gap-2">
           <Button variant="outline" className="border-zinc-700 text-zinc-300" disabled={page <= 1} onClick={() => setPage(page - 1)}>Prev</Button>
@@ -265,7 +265,7 @@ const AdminUsers = () => {
                 placeholder="Assistant messages remaining"
               />
             </div>
-            <div className="flex justify-end gap-2 mt-6">
+            <div className="mt-6 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
               <Button variant="outline" className="border-zinc-700 text-zinc-300" onClick={() => setEditingUser(null)}>Cancel</Button>
               <Button className="bg-gold text-zinc-950 hover:bg-gold-dim" onClick={handlePlanSave}>Save</Button>
             </div>
@@ -300,7 +300,7 @@ const AdminUsers = () => {
                 placeholder="Internal note"
               />
             </div>
-            <div className="flex justify-end gap-2 mt-6">
+            <div className="mt-6 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
               <Button variant="outline" className="border-zinc-700 text-zinc-300" onClick={() => setNotesUser(null)}>Cancel</Button>
               <Button className="bg-gold text-zinc-950 hover:bg-gold-dim" onClick={handleNotesSave}>Save</Button>
             </div>

@@ -589,15 +589,15 @@ const MultiLotSelector = ({ lots, selectedLot, onSelectLot }) => {
   if (!lots || lots.length <= 1) return null;
   
   return (
-    <div className="mb-6 p-4 bg-gradient-to-r from-gold/10 to-amber-500/10 rounded-lg border border-gold/30">
+      <div className="mb-6 rounded-lg border border-gold/30 bg-gradient-to-r from-gold/10 to-amber-500/10 p-4">
       <div className="flex items-center gap-2 mb-3">
         <Home className="w-5 h-5 text-gold" />
         <h3 className="text-lg font-semibold text-zinc-100">Perizia Multi-Lotto ({lots.length} lotti)</h3>
       </div>
       
       {/* Compact Lots Table */}
-      <div className="overflow-x-auto mb-4">
-        <table className="w-full text-sm">
+      <div className="mb-4 overflow-x-auto">
+        <table className="responsive-data-table text-sm">
           <thead>
             <tr className="border-b border-zinc-700">
               <th className="text-left py-2 px-3 text-zinc-400">Lotto</th>
@@ -628,7 +628,7 @@ const MultiLotSelector = ({ lots, selectedLot, onSelectLot }) => {
       </div>
       
       {/* Lot Selector Dropdown */}
-      <div className="flex items-center gap-3">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
         <label className="text-sm text-zinc-400">Seleziona Lotto:</label>
         <select 
           value={selectedLot}
@@ -789,7 +789,7 @@ const AnalysisResult = () => {
     return (
       <div className="min-h-screen bg-[#09090b]">
         <Sidebar user={user} logout={logout} />
-        <main className="ml-64 p-8">
+        <main className="px-4 pb-8 pt-24 sm:px-6 lg:ml-64 lg:px-8 lg:pt-8">
           <div className="text-center py-16">
             <FileText className="w-16 h-16 text-zinc-700 mx-auto mb-4" />
             <h2 className="text-2xl font-serif text-zinc-100 mb-2">Analisi non trovata</h2>
@@ -2397,7 +2397,7 @@ const AnalysisResult = () => {
     <div className="min-h-screen bg-[#09090b]">
       <Sidebar user={user} logout={logout} />
       
-      <main className="ml-64 p-8">
+      <main className="px-4 pb-8 pt-24 sm:px-6 lg:ml-64 lg:px-8 lg:pt-8">
         {isDebugMode && (
           <pre className="mb-4 text-[10px] leading-4 text-zinc-400 bg-zinc-950 border border-zinc-800 rounded p-2 overflow-x-auto">
 {JSON.stringify({
@@ -2409,12 +2409,12 @@ const AnalysisResult = () => {
         )}
 
         {/* Back Button & Actions */}
-        <div className="flex items-center justify-between mb-6">
+        <div className="mb-6 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <Link to="/history" className="inline-flex items-center gap-2 text-zinc-400 hover:text-zinc-100 transition-colors">
             <ArrowLeft className="w-4 h-4" />
             Torna allo storico
           </Link>
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-3 self-start sm:self-auto">
             <Button
               onClick={() => setShowDeleteModal(true)}
               variant="outline"
@@ -2450,7 +2450,7 @@ const AnalysisResult = () => {
                 Sei sicuro di voler eliminare questa analisi? L'azione non può essere annullata.
               </p>
               
-              <div className="flex gap-3 justify-end">
+              <div className="flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
                 <Button 
                   variant="outline" 
                   onClick={() => setShowDeleteModal(false)}
@@ -2496,13 +2496,13 @@ const AnalysisResult = () => {
         )}
 
         {/* Header with Semaforo */}
-        <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-6 mb-8">
-          <div className="flex items-start justify-between gap-6">
-            <div>
-              <h1 className="text-2xl font-serif font-bold text-zinc-100 mb-2">
+        <div className="mb-8 rounded-xl border border-zinc-800 bg-zinc-900 p-5 sm:p-6">
+          <div className="flex flex-col gap-6 xl:flex-row xl:items-start xl:justify-between">
+            <div className="min-w-0">
+              <h1 className="mb-2 text-2xl font-serif font-bold text-zinc-100 text-wrap-safe">
                 {safeRender(analysis.case_title || analysis.file_name, 'Analisi Perizia')}
               </h1>
-              <div className="flex items-center gap-2 mb-3">
+              <div className="mb-3 flex flex-wrap items-center gap-2">
                 <span className="text-[10px] px-2 py-1 rounded border border-zinc-700 text-zinc-300 uppercase tracking-wide">
                   {semaforoLabels.it}
                 </span>
@@ -2513,7 +2513,7 @@ const AnalysisResult = () => {
                   </span>
                 )}
               </div>
-              <div className="flex items-center gap-4 text-sm text-zinc-500">
+              <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-sm text-zinc-500">
                 <span className="font-mono">Case: {safeRender(analysis.case_id)}</span>
                 <span>•</span>
                 <span>{analysis.pages_count || '?'} pagine</span>
@@ -2550,8 +2550,8 @@ const AnalysisResult = () => {
                 />
               </div>
             </div>
-            <div className="text-right space-y-2">
-              <div className="flex items-center justify-end gap-2">
+            <div className="space-y-2 xl:max-w-sm xl:text-right">
+              <div className="flex flex-col gap-2 sm:flex-row xl:justify-end">
                 <Link
                   to={`/analysis/${analysisId}/print`}
                   target="_blank"
@@ -2571,13 +2571,13 @@ const AnalysisResult = () => {
                   Scarica Report
                 </Button>
               </div>
-              <div className="flex justify-end">
+              <div className="flex xl:justify-end">
                 <SemaforoBadge status={semaforoStatus} />
               </div>
-              <p className="text-xs text-zinc-400 max-w-xs ml-auto">
+              <p className="ml-auto max-w-xs text-xs text-zinc-400">
                 Sintesi operativa: priorità alle verifiche indicate.
               </p>
-              <p className="text-[11px] text-zinc-500 max-w-xs ml-auto">
+              <p className="ml-auto max-w-xs text-[11px] text-zinc-500">
                 Operational summary: prioritize the checks listed.
               </p>
             </div>
@@ -2590,7 +2590,7 @@ const AnalysisResult = () => {
               <p className="text-xs text-zinc-500 mt-1">
                 {safeRender(semaforo.reason_en || semaforo.status_en, '')}
               </p>
-              <div className="text-right">
+              <div className="xl:text-right">
                 {/* Show driver/reason for semaforo */}
                 {semaforo.driver?.value && (
                   <p className="text-xs text-amber-400 mt-1">
@@ -2599,7 +2599,7 @@ const AnalysisResult = () => {
                 )}
                 {/* Show evidence pages */}
                 {(getEvidence(semaforo.semaforo_complessivo || semaforo).length > 0) && (
-                  <p className="text-xs text-gold mt-1 flex items-center justify-end gap-1">
+                  <p className="mt-1 flex items-center gap-1 text-xs text-gold xl:justify-end">
                     <FileText className="w-3 h-3" />
                     Basato su pag. {[...new Set(getEvidence(semaforo.semaforo_complessivo || semaforo).map(e => e.page))].join(', ')}
                   </p>
@@ -2608,7 +2608,7 @@ const AnalysisResult = () => {
 
               {/* Quick Decision with Evidence */}
               <div className="mt-6 p-4 bg-zinc-950 rounded-lg border border-zinc-800">
-                <div className="flex items-center justify-between gap-3 mb-2">
+                <div className="mb-2 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
                   <p className="text-xs font-mono uppercase text-zinc-500">Decisione Rapida</p>
                   <span className="text-[10px] px-2 py-1 rounded border border-zinc-700 text-zinc-400 uppercase tracking-wide">
                     {decisionSourceLabel}
@@ -2648,7 +2648,7 @@ const AnalysisResult = () => {
                     <p className="text-xs font-mono text-red-400 uppercase">Criticità Rilevate:</p>
                     {decision.driver_rosso.map((driver, idx) => (
                       <div key={idx} className="p-2 bg-red-500/10 rounded border border-red-500/20">
-                        <div className="flex items-center gap-2">
+                        <div className="flex flex-wrap items-center gap-2">
                           <AlertTriangle className="w-4 h-4 text-red-400" />
                           <span className="text-sm text-red-400">{safeRender(driver.headline_it)}</span>
                           {getEvidence(driver).length > 0 && (
@@ -2668,7 +2668,7 @@ const AnalysisResult = () => {
         
         {/* Tabs */}
         <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
-          <TabsList className="w-full justify-start bg-zinc-900 border border-zinc-800 p-1 mb-6 overflow-x-auto">
+          <TabsList className="mb-6 h-auto w-full justify-start overflow-x-auto border border-zinc-800 bg-zinc-900 p-1">
             <TabsTrigger value="overview" data-testid="tab-overview">Panoramica</TabsTrigger>
             <TabsTrigger value="costs" data-testid="tab-costs">Costi</TabsTrigger>
             <TabsTrigger value="legal" data-testid="tab-legal">Legal Killers</TabsTrigger>
@@ -2679,9 +2679,9 @@ const AnalysisResult = () => {
           {/* Overview Tab */}
           <TabsContent value="overview" className="space-y-6">
             {/* Summary for Client - Section 12 Style */}
-            <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-6 relative">
+            <div className="relative rounded-xl border border-zinc-800 bg-zinc-900 p-5 sm:p-6">
               {/* QA Badge - Small Corner */}
-              <div className={`absolute top-4 right-4 px-2 py-1 rounded text-xs font-mono flex items-center gap-1 ${
+              <div className={`mb-4 inline-flex items-center gap-1 rounded px-2 py-1 text-xs font-mono sm:absolute sm:right-4 sm:top-4 ${
                 safeRender(qa.status) === 'PASS' ? 'bg-emerald-500/20 text-emerald-400' :
                 safeRender(qa.status) === 'FAIL' ? 'bg-red-500/20 text-red-400' :
                 'bg-amber-500/20 text-amber-400'
@@ -2702,7 +2702,7 @@ const AnalysisResult = () => {
               
               {/* Recommendation - Main message */}
               {(summary.raccomandazione || summary.summary_it) && (
-                <div className="space-y-3 mb-4">
+                <div className="mb-4 space-y-3">
                   {summary.raccomandazione && (
                     <div className="p-4 bg-amber-500/10 border-l-4 border-amber-500 rounded-r-lg">
                       <p className="text-zinc-200 font-medium">
@@ -2730,9 +2730,9 @@ const AnalysisResult = () => {
             </div>
 
             {/* Case Summary - Principal Facts */}
-            <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-6">
+            <div className="rounded-xl border border-zinc-800 bg-zinc-900 p-5 sm:p-6">
               <h2 className="text-xl font-serif font-bold text-zinc-100 mb-4">Case Summary</h2>
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+              <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
                 <PanoramicaDataValueCard
                   label="Tribunale"
                   value={overviewTribunale}
@@ -2775,7 +2775,7 @@ const AnalysisResult = () => {
 
             {/* Composizione Lotto / Lot Composition */}
             {lotCompositionItems.length > 0 && (
-              <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-6">
+              <div className="rounded-xl border border-zinc-800 bg-zinc-900 p-5 sm:p-6">
                 <h2 className="text-lg font-serif font-bold text-zinc-100 mb-3">Composizione Lotto / Lot Composition</h2>
                 <p className="text-xs text-zinc-500 mb-4">
                   {lotCompositionItems.length > 1
@@ -2828,23 +2828,23 @@ const AnalysisResult = () => {
             )}
 
             {/* Riepilogo Costi (Stima Compatta) */}
-            <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-6">
+            <div className="rounded-xl border border-zinc-800 bg-zinc-900 p-5 sm:p-6">
               <h2 className="text-lg font-serif font-bold text-zinc-100 mb-3">Sintesi costi extra (stima) / Compact extra-cost estimate</h2>
               {hasMoneyBoxTotalRange ? (
                 <div className="space-y-2">
-                  <div className="flex items-center justify-between gap-3 text-sm">
+                  <div className="flex flex-col gap-1 text-sm sm:flex-row sm:items-center sm:justify-between sm:gap-3">
                     <span className="text-zinc-400">Da perizia / Document-backed</span>
                     <span className="font-mono text-emerald-300">
                       €{documentBackedMin.toLocaleString()} - €{documentBackedMax.toLocaleString()}
                     </span>
                   </div>
-                  <div className="flex items-center justify-between gap-3 text-sm">
+                  <div className="flex flex-col gap-1 text-sm sm:flex-row sm:items-center sm:justify-between sm:gap-3">
                     <span className="text-zinc-400">Stime Nexodify / Estimated missing items</span>
                     <span className="font-mono text-gold">
                       €{estimatedMin.toLocaleString()} - €{estimatedMax.toLocaleString()}
                     </span>
                   </div>
-                  <div className="mt-3 pt-3 border-t border-zinc-800 flex items-center justify-between gap-3">
+                  <div className="mt-3 flex flex-col gap-1 border-t border-zinc-800 pt-3 sm:flex-row sm:items-center sm:justify-between sm:gap-3">
                     <span className="text-zinc-200 font-medium">Totale costi extra / Total extra costs</span>
                     <span className="font-mono font-bold text-zinc-100">
                       €{moneyBoxTotalRange.min_eur.toLocaleString()} - €{moneyBoxTotalRange.max_eur.toLocaleString()}
@@ -2869,7 +2869,7 @@ const AnalysisResult = () => {
             </div>
             
             {/* Key Data Grid with Evidence */}
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+            <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
               <PanoramicaDataValueCard
                 label="Prezzo Base" 
                 value={overviewPrezzoBaseValue}
@@ -2915,9 +2915,9 @@ const AnalysisResult = () => {
 
             {/* Waterfall Valutativo / Valuation Waterfall */}
             {canRenderValuationWaterfall && (
-              <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-6">
+              <div className="rounded-xl border border-zinc-800 bg-zinc-900 p-5 sm:p-6">
                 <h2 className="text-lg font-serif font-bold text-zinc-100 mb-3">Waterfall Valutativo / Valuation Waterfall</h2>
-                <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
                   <div className="p-3 bg-zinc-950 rounded-lg border border-zinc-800">
                     <div className="flex items-center justify-between gap-2">
                       <p className="text-xs text-zinc-500">Valore di stima</p>
@@ -2952,9 +2952,9 @@ const AnalysisResult = () => {
             
             {/* Impianti Section */}
             {abusi.impianti && (
-              <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-4">
+              <div className="rounded-xl border border-zinc-800 bg-zinc-900 p-4">
                 <h3 className="text-sm font-semibold text-zinc-100 mb-3">Conformità Impianti</h3>
-                <div className="grid grid-cols-3 gap-4">
+                <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
                   <div className={`text-center p-3 rounded-lg ${
                     abusi.impianti.elettrico?.conformita === 'SI' ? 'bg-emerald-500/10 border border-emerald-500/30' :
                     abusi.impianti.elettrico?.conformita === 'NO' ? 'bg-red-500/10 border border-red-500/30' :
@@ -2997,10 +2997,10 @@ const AnalysisResult = () => {
             
             {/* Scenario Indicativo */}
             {canRenderAllIn && (
-              <div className="bg-gold/10 border border-gold/30 rounded-xl p-6">
+              <div className="rounded-xl border border-gold/30 bg-gold/10 p-5 sm:p-6">
                 <h3 className="text-lg font-semibold text-zinc-100 mb-2">Scenario indicativo (stima)</h3>
                 <p className="text-zinc-300 mb-4 text-sm">{safeRender(indice.lettura_secca_it || indice.dry_read_it, 'Calcolo basato su prezzo base + extra budget stimato')}</p>
-                <div className="grid grid-cols-3 gap-4">
+                <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
                   <div className="text-center p-3 bg-zinc-950 rounded-lg">
                     <p className="text-xs text-zinc-500 mb-1">PREZZO BASE</p>
                     <p className="text-lg font-mono font-bold text-zinc-300">€{prezzoBaseValue.toLocaleString()}</p>

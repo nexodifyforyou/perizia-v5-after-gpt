@@ -269,7 +269,7 @@ const LedgerRow = ({ entry }) => {
           </div>
         </div>
 
-        <div className="grid grid-cols-2 gap-3 md:min-w-[320px]">
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 md:min-w-[320px]">
           <div className="rounded-xl border border-zinc-800 bg-zinc-900/60 p-3">
             <p className="text-[11px] uppercase tracking-wide text-zinc-500">Direzione</p>
             <p className={`mt-1 inline-flex items-center rounded-full border px-2.5 py-1 text-sm font-semibold ${directionClasses}`}>
@@ -809,7 +809,7 @@ const Billing = () => {
     <div className="min-h-screen bg-[#09090b]">
       <Sidebar user={user} logout={logout} />
 
-      <main className="ml-64 p-8">
+      <main className="px-4 pb-8 pt-24 sm:px-6 lg:ml-64 lg:px-8 lg:pt-8">
         <div className="mb-8">
           <h1 className="text-3xl font-serif font-bold text-zinc-100 mb-2">
             Abbonamento
@@ -839,12 +839,12 @@ const Billing = () => {
           </div>
         )}
 
-        <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-6 mb-8">
-          <div className="flex items-center justify-between">
-            <div>
+        <div className="mb-8 rounded-xl border border-zinc-800 bg-zinc-900 p-5 sm:p-6">
+          <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+            <div className="min-w-0">
               <p className="text-sm text-zinc-500 mb-1">Piano attivo</p>
-              <div className="flex items-center gap-3">
-                <h2 className="text-2xl font-serif font-bold text-zinc-100 capitalize">
+              <div className="flex flex-wrap items-center gap-3">
+                <h2 className="text-2xl font-serif font-bold text-zinc-100 capitalize text-wrap-safe">
                   {localizePlanName(currentPlanDetails) || accountState.planLabel}
                 </h2>
                 {accountState.isMasterAdmin && (
@@ -948,7 +948,7 @@ const Billing = () => {
 
         <h3 className="text-xl font-serif font-bold text-zinc-100 mb-6">Piani Disponibili</h3>
 
-        <div id="billing-plans" className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-5 gap-6">
+        <div id="billing-plans" className="grid grid-cols-1 gap-6 md:grid-cols-2 xl:grid-cols-5">
           {loading ? (
             <div className="col-span-full text-center py-12">
               <Loader2 className="w-8 h-8 text-gold animate-spin mx-auto" />
@@ -958,7 +958,7 @@ const Billing = () => {
               <div
                 key={plan.plan_id}
                 data-testid={`billing-plan-${plan.plan_id}`}
-                className={`plan-surface relative bg-zinc-900 border rounded-2xl p-6 transition-all duration-300 ${
+                className={`plan-surface relative flex h-full flex-col rounded-2xl border bg-zinc-900 p-5 transition-all duration-300 sm:p-6 ${
                   plan.plan_id === accountState.planId
                     ? 'border-gold ring-2 ring-gold/20'
                     : plan.plan_id === 'solo'
@@ -981,7 +981,7 @@ const Billing = () => {
                   </div>
                 )}
 
-                <h3 className="text-xl font-serif font-bold text-zinc-100 mb-2">
+                <h3 className="mb-2 text-xl font-serif font-bold text-zinc-100 text-wrap-safe">
                   {localizePlanName(plan)}
                 </h3>
 
@@ -1002,13 +1002,13 @@ const Billing = () => {
                   )}
                 </div>
 
-                <div className="space-y-2 mb-6 text-sm">
+                <div className="mb-6 space-y-2 text-sm">
                   <p className="text-zinc-200 font-medium">{localizeCreditsLabel(plan)}</p>
                   {localizeValidity(plan) && (
-                    <p className="text-zinc-500">{localizeValidity(plan)}</p>
+                    <p className="text-zinc-500 text-wrap-safe">{localizeValidity(plan)}</p>
                   )}
                   {localizeSupport(plan) && (
-                    <p className="text-zinc-500">{localizeSupport(plan)}</p>
+                    <p className="text-zinc-500 text-wrap-safe">{localizeSupport(plan)}</p>
                   )}
                 </div>
 
@@ -1020,17 +1020,17 @@ const Billing = () => {
                   {PLAN_POSITIONING_COPY[plan.plan_id] || 'Dettaglio piano disponibile in piattaforma.'}
                 </div>
 
-                <ul className="space-y-3 mb-6">
+                <ul className="mb-6 space-y-3">
                   {plan.features_it.map((feature, i) => (
                     <li key={i} className="flex items-start gap-3 text-sm text-zinc-300">
                       <CheckCircle2 className="w-5 h-5 text-emerald-400 flex-shrink-0 mt-0.5" />
-                      {feature}
+                      <span className="text-wrap-safe">{feature}</span>
                     </li>
                   ))}
                 </ul>
 
                 {plan.plan_id === accountState.planId ? (
-                  <Button disabled className="w-full bg-zinc-800 text-zinc-500 cursor-not-allowed">
+                  <Button disabled className="mt-auto w-full cursor-not-allowed bg-zinc-800 text-zinc-500">
                     Piano attivo
                   </Button>
                 ) : (
@@ -1042,7 +1042,7 @@ const Billing = () => {
                         onClick={() => triggerPlanAction(plan, cta)}
                         data-testid={`subscribe-${plan.plan_id}-btn`}
                         disabled={Boolean(checkoutLoadingPlanId) || Boolean(subscriptionActionLoading) || cta.disabled}
-                        className={`w-full ${
+                        className={`mt-auto w-full ${
                           plan.plan_id === 'solo'
                             ? 'bg-gold text-zinc-950 hover:bg-gold-dim'
                             : 'bg-gold text-zinc-950 hover:bg-gold-dim'

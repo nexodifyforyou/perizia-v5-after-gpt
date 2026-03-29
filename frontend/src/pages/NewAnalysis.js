@@ -264,7 +264,7 @@ const NewAnalysis = () => {
     <div className="min-h-screen bg-[#09090b]">
       <Sidebar user={user} logout={logout} />
       
-      <main className="ml-64 p-8">
+      <main className="px-4 pb-8 pt-24 sm:px-6 lg:ml-64 lg:px-8 lg:pt-8">
         {/* Header */}
         <div className="mb-8">
           <h1 className="text-3xl font-serif font-bold text-zinc-100 mb-2">
@@ -389,7 +389,7 @@ const NewAnalysis = () => {
                     </div>
                   </div>
                 ) : (
-                  <div className="flex gap-4 justify-center">
+                  <div className="flex flex-col justify-center gap-3 sm:flex-row sm:gap-4">
                     <Button
                       onClick={() => setFile(null)}
                       variant="outline"
@@ -412,7 +412,7 @@ const NewAnalysis = () => {
           
           {/* Error Display */}
           {error && (
-            <div className="mt-4 p-4 bg-red-500/10 border border-red-500/30 rounded-lg flex items-start gap-3">
+            <div className="mt-4 flex items-start gap-3 rounded-lg border border-red-500/30 bg-red-500/10 p-4">
               <AlertCircle className="w-5 h-5 text-red-400 flex-shrink-0 mt-0.5" />
               <div className="space-y-1">
                 <p className="text-red-300 text-sm font-semibold">
@@ -465,8 +465,8 @@ const NewAnalysis = () => {
           </div>
           
           {/* Quota Info */}
-          <div className="mt-6 p-4 bg-zinc-900/50 border border-zinc-800 rounded-lg">
-            <div className="flex items-center justify-between">
+          <div className="mt-6 rounded-lg border border-zinc-800 bg-zinc-900/50 p-4">
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
               <span className="text-sm text-zinc-500">Crediti disponibili</span>
               <span className="font-mono text-gold font-bold">
                 {(accountState?.periziaCredits?.totalAvailable

@@ -122,7 +122,7 @@ const ImageForensics = () => {
     <div className="min-h-screen bg-[#09090b]">
       <Sidebar user={user} logout={logout} />
       
-      <main className="ml-64 p-8">
+      <main className="px-4 pb-8 pt-24 sm:px-6 lg:ml-64 lg:px-8 lg:pt-8">
         {/* Header */}
         <div className="mb-8">
           <h1 className="text-3xl font-serif font-bold text-zinc-100 mb-2">
@@ -174,7 +174,7 @@ const ImageForensics = () => {
                 </>
               ) : (
                 <div>
-                  <div className="grid grid-cols-5 gap-2 mb-6">
+                  <div className="mb-6 grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-5">
                     {files.map((file, index) => (
                       <div key={index} className="relative group">
                         <img 
@@ -221,7 +221,7 @@ const ImageForensics = () => {
                       </div>
                     </div>
                   ) : (
-                    <div className="flex gap-4 justify-center">
+                    <div className="flex flex-col justify-center gap-3 sm:flex-row sm:gap-4">
                       <Button
                         onClick={resetForm}
                         variant="outline"
@@ -251,8 +251,8 @@ const ImageForensics = () => {
             )}
             
             {/* Quota Info */}
-            <div className="mt-6 p-4 bg-zinc-900/50 border border-zinc-800 rounded-lg">
-              <div className="flex items-center justify-between">
+            <div className="mt-6 rounded-lg border border-zinc-800 bg-zinc-900/50 p-4">
+              <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
                 <span className="text-sm text-zinc-500">Analisi immagini rimanenti</span>
                 <span className="font-mono text-indigo-400 font-bold">
                   {user?.quota?.image_scans_remaining || 0}

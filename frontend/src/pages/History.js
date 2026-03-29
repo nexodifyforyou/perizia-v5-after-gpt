@@ -231,9 +231,9 @@ const History = () => {
     <div className="min-h-screen bg-[#09090b]">
       <Sidebar user={user} logout={logout} />
       
-      <main className="ml-64 p-8">
+      <main className="px-4 pb-8 pt-24 sm:px-6 lg:ml-64 lg:px-8 lg:pt-8">
         {/* Header */}
-        <div className="flex items-start justify-between mb-8">
+        <div className="mb-8 flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
           <div>
             <h1 className="text-3xl font-serif font-bold text-zinc-100 mb-2">
               Storico Analisi
@@ -270,7 +270,7 @@ const History = () => {
         
         {/* Tabs */}
         <Tabs defaultValue="perizia" className="w-full">
-          <TabsList className="bg-zinc-900 border border-zinc-800 p-1 mb-6">
+          <TabsList className="mb-6 h-auto w-full justify-start overflow-x-auto border border-zinc-800 bg-zinc-900 p-1">
             <TabsTrigger value="perizia" data-testid="history-tab-perizia" className="flex items-center gap-2">
               <FileText className="w-4 h-4" />
               Perizie ({periziaHistory.length})
@@ -299,19 +299,19 @@ const History = () => {
                     <div
                       key={analysis.analysis_id}
                       data-testid={`history-item-${analysis.analysis_id}`}
-                      className="flex items-center justify-between p-4 hover:bg-zinc-800/50 transition-colors group"
+                      className="group flex flex-col gap-3 p-4 transition-colors hover:bg-zinc-800/50 sm:flex-row sm:items-center sm:justify-between"
                     >
                       <Link
                         to={`/analysis/${analysis.analysis_id}`}
-                        className="flex items-center gap-4 flex-1"
+                        className="flex min-w-0 flex-1 items-center gap-4"
                       >
                         <FileText className="w-5 h-5 text-gold" />
-                        <div>
+                        <div className="min-w-0">
                           <p className="text-sm font-medium text-zinc-100">
                             {analysis.case_title || analysis.file_name}
                           </p>
-                          <div className="flex items-center gap-3 mt-1">
-                            <span className="text-xs text-zinc-500 font-mono">{analysis.case_id}</span>
+                          <div className="mt-1 flex flex-wrap items-center gap-3">
+                            <span className="text-xs font-mono text-zinc-500 text-wrap-safe">{analysis.case_id}</span>
                             <span className="text-xs text-zinc-600 flex items-center gap-1">
                               <Calendar className="w-3 h-3" />
                               {new Date(analysis.created_at).toLocaleDateString('it-IT')}
@@ -319,7 +319,7 @@ const History = () => {
                           </div>
                         </div>
                       </Link>
-                      <div className="flex items-center gap-4">
+                      <div className="flex items-center gap-3 self-end sm:self-auto">
                         <SemaforoBadge status={
                           analysis.semaforo_status ||
                           analysis.result?.section_1_semaforo_generale?.status ||
@@ -369,18 +369,18 @@ const History = () => {
                   {imageHistory.map((forensics) => (
                     <div
                       key={forensics.forensics_id}
-                      className="flex items-center justify-between p-4 hover:bg-zinc-800/50 transition-colors group"
+                      className="group flex flex-col gap-3 p-4 transition-colors hover:bg-zinc-800/50 sm:flex-row sm:items-center sm:justify-between"
                     >
-                      <div className="flex items-center gap-4 flex-1">
+                      <div className="flex min-w-0 flex-1 items-center gap-4">
                         <Image className="w-5 h-5 text-indigo-400" />
-                        <div>
+                        <div className="min-w-0">
                           <p className="text-sm font-medium text-zinc-100">
                             {forensics.image_count} immagini analizzate
                           </p>
                           <span className="text-xs text-zinc-500 font-mono">{forensics.case_id}</span>
                         </div>
                       </div>
-                      <div className="flex items-center gap-4">
+                      <div className="flex items-center gap-3 self-end sm:self-auto">
                         <span className="text-xs text-zinc-600">
                           {new Date(forensics.created_at).toLocaleDateString('it-IT')}
                         </span>
@@ -420,7 +420,7 @@ const History = () => {
                       key={qa.qa_id}
                       className="p-4 hover:bg-zinc-800/50 transition-colors group"
                     >
-                      <div className="flex items-start gap-4">
+                      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:gap-4">
                         <MessageSquare className="w-5 h-5 text-emerald-400 flex-shrink-0 mt-0.5" />
                         <div className="flex-1 min-w-0">
                           <p className="text-sm font-medium text-zinc-100 truncate">
@@ -430,7 +430,7 @@ const History = () => {
                             {qa.result?.result?.answer_it}
                           </p>
                         </div>
-                        <div className="flex items-center gap-3 flex-shrink-0">
+                        <div className="flex items-center gap-3 self-end sm:self-auto">
                           <span className="text-xs text-zinc-600">
                             {new Date(qa.created_at).toLocaleDateString('it-IT')}
                           </span>

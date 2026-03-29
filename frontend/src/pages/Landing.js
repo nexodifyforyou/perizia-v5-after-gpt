@@ -75,16 +75,16 @@ const Landing = () => {
   return (
     <div className="min-h-screen bg-[#09090b]">
       {/* Header */}
-      <header className="glass fixed top-0 w-full z-50 border-b border-white/5">
-        <div className="max-w-7xl mx-auto px-6 py-4 flex items-center justify-between">
-          <div className="flex items-center gap-3">
+      <header className="glass fixed top-0 z-50 w-full border-b border-white/5">
+        <div className="mx-auto flex max-w-7xl items-center justify-between gap-3 px-4 py-4 sm:px-6">
+          <div className="flex min-w-0 items-center gap-3">
             <Scale className="w-8 h-8 text-gold" />
-            <span className="text-xl font-serif font-bold text-zinc-100">Nexodify</span>
+            <span className="truncate text-xl font-serif font-bold text-zinc-100">Nexodify</span>
           </div>
           <Button 
             onClick={openLoginNotice}
             data-testid="header-login-btn"
-            className="bg-gold text-zinc-950 hover:bg-gold-dim font-semibold px-6"
+            className="bg-gold px-4 text-sm font-semibold text-zinc-950 hover:bg-gold-dim sm:px-6 sm:text-base"
           >
             Accedi / Login
           </Button>
@@ -92,7 +92,7 @@ const Landing = () => {
       </header>
 
       {/* Hero Section */}
-      <section className="relative pt-32 pb-24 px-6 overflow-hidden">
+      <section className="relative overflow-hidden px-4 pb-20 pt-28 sm:px-6 sm:pb-24 sm:pt-32">
         <div 
           className="absolute inset-0 opacity-20"
           style={{
@@ -106,14 +106,14 @@ const Landing = () => {
         <div className="relative max-w-7xl mx-auto text-center stagger-children">
           <div className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-gold/10 border border-gold/20 mb-8">
             <Sparkles className="w-4 h-4 text-gold" />
-            <span className="text-sm font-mono text-gold">Screening premium, alert ancorati alle pagine della perizia</span>
+            <span className="text-center text-xs font-mono text-gold sm:text-sm">Screening premium, alert ancorati alle pagine della perizia</span>
           </div>
           
-          <h1 className="text-5xl md:text-7xl font-serif font-bold text-zinc-100 tracking-tight leading-none mb-6">
+          <h1 className="mb-6 text-4xl font-serif font-bold leading-none tracking-tight text-zinc-100 sm:text-5xl md:text-7xl">
             Screening della perizia, con prove di pagina.
           </h1>
           
-          <p className="text-lg md:text-xl text-zinc-400 max-w-3xl mx-auto mb-12 leading-relaxed">
+          <p className="mx-auto mb-10 max-w-3xl text-base leading-relaxed text-zinc-400 sm:text-lg md:mb-12 md:text-xl">
             PeriziaScan non e una semplice sintesi AI. Trasforma perizie lunghe e opache in uno screening piu rapido della prima revisione manuale, con alert, criticita e costi da verificare collegati direttamente alle pagine del documento.
           </p>
 
@@ -129,18 +129,18 @@ const Landing = () => {
             ))}
           </div>
           
-          <div className="flex flex-col sm:flex-row gap-4 justify-center">
+          <div className="flex flex-col justify-center gap-4 sm:flex-row">
             <Button 
               onClick={openLoginNotice}
               data-testid="hero-get-started-btn"
-              className="bg-gold text-zinc-950 hover:bg-gold-dim font-semibold px-8 py-6 text-lg gold-glow gold-glow-hover"
+              className="bg-gold px-6 py-5 text-base font-semibold text-zinc-950 gold-glow gold-glow-hover hover:bg-gold-dim sm:px-8 sm:py-6 sm:text-lg"
             >
               Inizia con 12 crediti inclusi <ArrowRight className="w-5 h-5 ml-2" />
             </Button>
             <Button 
               variant="outline"
               data-testid="hero-learn-more-btn"
-              className="border-zinc-700 text-zinc-300 hover:bg-zinc-800 px-8 py-6 text-lg"
+              className="border-zinc-700 px-6 py-5 text-base text-zinc-300 hover:bg-zinc-800 sm:px-8 sm:py-6 sm:text-lg"
               onClick={() => document.getElementById('features').scrollIntoView({ behavior: 'smooth' })}
             >
               Vedi cosa controlla
@@ -150,7 +150,7 @@ const Landing = () => {
       </section>
 
       {/* Fit Strip */}
-      <section className="py-8 px-6">
+      <section className="px-4 py-8 sm:px-6">
         <div className="max-w-7xl mx-auto">
           <div className="section-fade grid grid-cols-2 gap-3 md:grid-cols-4">
             {[
@@ -169,14 +169,14 @@ const Landing = () => {
       </section>
 
       {/* Semaforo Preview */}
-      <section className="py-16 px-6">
+      <section className="px-4 py-16 sm:px-6">
         <div className="max-w-7xl mx-auto">
           <div className="text-center mb-8">
             <p className="text-zinc-500 text-sm md:text-base">
               Una vista immediata per capire dove concentrare le verifiche iniziali.
             </p>
           </div>
-          <div className="section-fade grid grid-cols-3 gap-4 max-w-lg mx-auto">
+          <div className="section-fade mx-auto grid max-w-lg grid-cols-1 gap-4 sm:grid-cols-3">
             <div className="bg-red-500/10 border border-red-500/30 rounded-xl p-6 text-center">
               <div className="w-12 h-12 rounded-full bg-red-500 mx-auto mb-3 animate-pulse-slow" />
               <p className="text-red-400 font-mono text-sm font-bold">ALTO RISCHIO</p>
@@ -194,13 +194,13 @@ const Landing = () => {
       </section>
 
       {/* Why */}
-      <section id="features" className="py-24 px-6 bg-zinc-900/30">
+      <section id="features" className="bg-zinc-900/30 px-4 py-20 sm:px-6 md:py-24">
         <div className="max-w-7xl mx-auto">
           <div className="text-center mb-16">
             <h2 className="text-3xl md:text-5xl font-serif font-bold text-zinc-100 mb-4">
               Perche PeriziaScan
             </h2>
-            <p className="text-zinc-400 text-lg">
+            <p className="text-base text-zinc-400 sm:text-lg">
               Un posizionamento preciso: meno testo generico, piu lettura strutturata utile a una decisione reale
             </p>
           </div>
@@ -225,13 +225,13 @@ const Landing = () => {
       </section>
 
       {/* Comparison */}
-      <section className="py-24 px-6">
+      <section className="px-4 py-20 sm:px-6 md:py-24">
         <div className="max-w-7xl mx-auto">
           <div className="text-center mb-16">
             <h2 className="text-3xl md:text-5xl font-serif font-bold text-zinc-100 mb-4">
               Più utile di un riassunto generico
             </h2>
-            <p className="text-zinc-400 text-lg">
+            <p className="text-base text-zinc-400 sm:text-lg">
               La differenza non e “piu testo”. La differenza e come viene costruito il risultato.
             </p>
           </div>
@@ -261,13 +261,13 @@ const Landing = () => {
       </section>
 
       {/* Pricing */}
-      <section id="pricing" className="py-24 px-6 bg-zinc-900/30">
+      <section id="pricing" className="bg-zinc-900/30 px-4 py-20 sm:px-6 md:py-24">
         <div className="max-w-7xl mx-auto">
           <div className="text-center mb-16">
             <h2 className="text-3xl md:text-5xl font-serif font-bold text-zinc-100 mb-4">
               Accesso e Pacchetti
             </h2>
-            <p className="text-zinc-400 text-lg">
+            <p className="text-base text-zinc-400 sm:text-lg">
               I crediti restano il motore del consumo, ma il valore va letto prima nel metodo: evidenze di pagina, screening piu rapido e posizionamento chiaro per ogni piano.
             </p>
           </div>
@@ -285,19 +285,19 @@ const Landing = () => {
       </section>
 
       {/* CTA */}
-      <section className="py-24 px-6">
+      <section className="px-4 py-20 sm:px-6 md:py-24">
         <div className="max-w-4xl mx-auto text-center">
           <Building2 className="w-16 h-16 text-gold mx-auto mb-8" />
           <h2 className="text-3xl md:text-5xl font-serif font-bold text-zinc-100 mb-6">
             Inizia dalla perizia, non dal rumore
           </h2>
-          <p className="text-zinc-400 text-lg mb-8">
+          <p className="mb-8 text-base text-zinc-400 sm:text-lg">
             Carica una perizia, individua piu rapidamente le criticita principali e controlla i riferimenti direttamente nel report. Meno tempo perso nella ricerca iniziale, piu criterio nel pre-screening.
           </p>
           <Button 
             onClick={openLoginNotice}
             data-testid="cta-start-btn"
-            className="bg-gold text-zinc-950 hover:bg-gold-dim font-semibold px-12 py-6 text-lg gold-glow"
+            className="bg-gold px-8 py-5 text-base font-semibold text-zinc-950 gold-glow hover:bg-gold-dim sm:px-12 sm:py-6 sm:text-lg"
           >
             Prova Free con 12 crediti
           </Button>
@@ -305,8 +305,8 @@ const Landing = () => {
       </section>
 
       {/* Footer */}
-      <footer className="border-t border-zinc-800 py-12 px-6">
-        <div className="max-w-7xl mx-auto flex flex-col md:flex-row items-center justify-between gap-6">
+      <footer className="border-t border-zinc-800 px-4 py-12 sm:px-6">
+        <div className="mx-auto flex max-w-7xl flex-col items-center justify-between gap-6 md:flex-row">
           <div className="flex items-center gap-3">
             <Scale className="w-6 h-6 text-gold" />
             <span className="font-serif font-bold text-zinc-100">Nexodify</span>
