@@ -1285,6 +1285,198 @@ def test_impianti_legacy_mapping_preserves_evidence_for_generic_mentions():
     assert "impianto elettrico" in legacy_impianti["elettrico"]["evidence"][0]["quote"].lower()
 
 
+def test_identity_shaping_repairs_blob_address_and_short_location():
+    pages = [
+        {
+            "page_number": 3,
+            "text": (
+                "PREMESSA\n"
+                "Bene N° 1 - Fabbricato civile ubicato a Borgo Virgilio (MN) - Via Ippolito Nievo 1/3"
+                "DESCRIZIONE Si tratta di una abitazione con garage e cortile di pertinenza.\n"
+            ),
+        },
+    ]
+    result = _build_result_for_pages(pages)
+    assert result["report_header"]["address"]["value"] == "Borgo Virgilio (MN) - Via Ippolito Nievo 1/3"
+    assert result["case_header"]["address"] == "Borgo Virgilio (MN) - Via Ippolito Nievo 1/3"
+    assert result["beni"][0]["short_location"] == "Borgo Virgilio (MN) - Via Ippolito Nievo 1/3"
+
+
+def test_diritto_reale_shaping_splits_clean_quota_from_schema_blob():
+    pages = [
+        {
+            "page_number": 13,
+            "text": (
+                "SCHEMA RIASSUNTIVO\n"
+                "Diritto reale:ProprietàQuota1/1Tipologia immobile:Fabbricato civile"
+                "Identificato al catasto Fabbricati - Fg. 30, Part. 323, Sub. 1, Categoria A2\n"
+            ),
+        },
+    ]
+    result = _build_result_for_pages(pages)
+    assert result["field_states"]["diritto_reale"]["value"] == "Proprietà 1/1"
+    assert result["dati_certi_del_lotto"]["diritto_reale"]["value"] == "Proprietà"
+    assert result["dati_certi_del_lotto"]["quota"]["value"] == "1/1"
+
+
+def test_superficie_catastale_not_mislabeled_with_conventional_surface():
+    pages = [
+        {
+            "page_number": 5,
+            "text": (
+                "DATI CATASTALI\n"
+                "Catasto fabbricati (CF)\n"
+                "Sezione Foglio Part. Sub. Zona Cens. Categoria Classe Consistenza Superficie catastale Rendita Piano\n"
+                "30 323 1 A2 46 158 mq 387,34 € T-1\n"
+                "30 323 2 C6 21 22 mq 43,18 € T\n"
+                "Corrispondenza catastale Sussiste corrispondenza tra lo stato dei luoghi e la planimetria catastale.\n"
+            ),
+        },
+        {
+            "page_number": 13,
+            "text": "SCHEMA RIASSUNTIVO\nSuperficie 161,64 mq\n",
+        },
+    ]
+    result = _build_result_for_pages(pages)
+    surface_value = result["dati_certi_del_lotto"]["superficie_catastale"]["value"]
+    assert "158 mq" in surface_value
+    assert "22 mq" in surface_value
+    assert "161,64" not in surface_value
+
+
+def test_positive_urbanistica_phrases_are_captured_as_positive():
+    pages = [
+        {
+            "page_number": 9,
+            "text": (
+                "REGOLARITÀ EDILIZIA\n"
+                "L'immobile risulta regolare per la legge n° 47/1985. "
+                "L'uso attualmente residenziale è quindi compatibile con gli strumenti urbanistici in vigore. "
+                "Le unità immobiliari sono conformi a quanto depositato.\n"
+            ),
+        },
+    ]
+    state = server._extract_regolarita_urbanistica_state(pages)
+    assert state["status"] == "FOUND"
+    assert state["value"] == "NON EMERGONO ABUSI"
+
+
+def test_positive_catastale_corrispondenza_is_captured():
+    pages = [
+        {
+            "page_number": 5,
+            "text": "Corrispondenza catastale\nSussiste corrispondenza tra lo stato dei luoghi e la planimetria catastale esistente.\n",
+        },
+    ]
+    state = server._extract_conformita_catastale_state(pages)
+    assert state["status"] == "FOUND"
+    assert state["value"] == "CONFORME"
+
+
+def test_agibilita_positive_statement_stays_positive_in_legacy_mapping():
+    pages = [
+        {"page_number": 9, "text": "L'immobile risulta agibile.\n"},
+    ]
+    result = _build_result_for_pages(pages)
+    assert result["field_states"]["agibilita"]["status"] == "FOUND"
+    assert result["field_states"]["agibilita"]["value"] == "PRESENTE"
+    assert result["abusi_edilizi_conformita"]["agibilita"]["status"] == "PRESENTE"
+    assert result["abusi_edilizi_conformita"]["agibilita"]["detail_it"] == "PRESENTE"
+
+
+def test_explicit_absence_of_condominial_burdens_is_captured():
+    pages = [
+        {"page_number": 9, "text": "VINCOLI OD ONERI CONDOMINIALI\nNon sono presenti vincoli od oneri condominiali.\n"},
+    ]
+    result = _build_result_for_pages(pages)
+    state = result["field_states"]["spese_condominiali_arretrate"]
+    assert state["status"] == "FOUND"
+    assert state["value"] == "NON PRESENTI"
+
+
+def test_ape_explicit_existence_without_class_is_coherent_across_storage_layers():
+    pages = [
+        {"page_number": 3, "text": "Bene N° 1 - Fabbricato civile ubicato a Borgo Virgilio (MN) - Via Ippolito Nievo 1/3\n"},
+        {"page_number": 9, "text": "Certificazioni energetiche e dichiarazioni di conformità\nEsiste il certificato energetico dell'immobile / APE.\n"},
+    ]
+    result = _build_result_for_pages(pages)
+    assert result["field_states"]["ape"]["status"] == "FOUND"
+    assert result["field_states"]["ape"]["value"] == "APE PRESENTE (CLASSE NON LEGGIBILE)"
+    assert result["abusi_edilizi_conformita"]["ape"]["status"] == "PRESENTE"
+    assert result["abusi_edilizi_conformita"]["ape"]["detail_it"] == "APE PRESENTE (CLASSE NON LEGGIBILE)"
+    assert result["beni"][0]["ape"] == "APE PRESENTE (CLASSE NON LEGGIBILE)"
+
+
+def test_ape_explicit_existence_survives_compact_ocr_line_with_following_impianti_bullets():
+    pages = [
+        {"page_number": 3, "text": "Bene N° 1 - Fabbricato civile ubicato a Borgo Virgilio (MN) - Via Ippolito Nievo 1/3\n"},
+        {
+            "page_number": 9,
+            "text": (
+                "Certificazioni energetiche e dichiarazioni di conformità"
+                "•Esiste il certificato energetico dell'immobile / APE."
+                "•Esiste la dichiarazione di conformità dell'impianto elettrico."
+                "•Esiste la dichiarazione di conformità dell'impianto termico."
+            ),
+        },
+    ]
+    result = _build_result_for_pages(pages)
+    assert result["field_states"]["ape"]["status"] == "FOUND"
+    assert result["field_states"]["ape"]["value"] == "APE PRESENTE (CLASSE NON LEGGIBILE)"
+    assert result["abusi_edilizi_conformita"]["ape"]["detail_it"] == "APE PRESENTE (CLASSE NON LEGGIBILE)"
+    assert result["beni"][0]["ape"] == "APE PRESENTE (CLASSE NON LEGGIBILE)"
+
+
+def test_explicit_impianti_declarations_populate_normalized_field_states_and_aliases():
+    pages = [
+        {"page_number": 3, "text": "Bene N° 1 - Fabbricato civile ubicato a Borgo Virgilio (MN) - Via Ippolito Nievo 1/3\n"},
+        {
+            "page_number": 9,
+            "text": (
+                "Esiste la dichiarazione di conformità dell'impianto elettrico.\n"
+                "Esiste la dichiarazione di conformità dell'impianto termico.\n"
+                "Esiste la dichiarazione di conformità dell'impianto idrico.\n"
+            ),
+        },
+    ]
+    result = _build_result_for_pages(pages)
+    assert result["field_states"]["dichiarazione_impianto_elettrico"]["value"] == "DICHIARAZIONE PRESENTE"
+    assert result["field_states"]["dichiarazione_impianto_termico"]["value"] == "DICHIARAZIONE PRESENTE"
+    assert result["field_states"]["dichiarazione_impianto_idrico"]["value"] == "DICHIARAZIONE PRESENTE"
+    bene = result["beni"][0]
+    assert bene["dichiarazioni"]["dichiarazione_impianto_elettrico"] == "DICHIARAZIONE PRESENTE"
+    assert bene["dichiarazioni"]["dichiarazione_impianto_termico"] == "DICHIARAZIONE PRESENTE"
+    assert bene["dichiarazioni"]["dichiarazione_impianto_idrico"] == "DICHIARAZIONE PRESENTE"
+
+
+def test_formalita_da_cancellare_survives_normalized_legal_top_items():
+    pages = [
+        {
+            "page_number": 14,
+            "text": "FORMALITÀ DA CANCELLARE CON IL DECRETO DI TRASFERIMENTO\nIpoteca volontaria derivante da mutuo fondiario.\n",
+        },
+    ]
+    result = _build_result_with_legal_items(
+        pages,
+        [
+            {
+                "killer": "Formalità da cancellare",
+                "status": "GIALLO",
+                "reason_it": "Rilevata criticita: Formalità da cancellare",
+                "evidence": [{"page": 14, "quote": "Formalità da cancellare con il decreto di trasferimento"}],
+            }
+        ],
+    )
+    killers = [item["killer"] for item in result["section_9_legal_killers"]["top_items"]]
+    assert "Formalità da cancellare" in killers
+
+
+def test_indice_prezzo_base_is_not_polluted_without_evidence():
+    result = {"indice_di_convenienza": {"prezzo_base_asta": 233105.19}}
+    cleaned = server.enforce_evidence_or_low_confidence(result)
+    assert cleaned["indice_di_convenienza"]["prezzo_base_asta"] is None
+
+
 @pytest.mark.anyio
 async def test_admin_export_generates_xlsx_with_expected_rows_and_columns(fake_db):
     pages = [{"page_number": 1, "text": "TRIBUNALE DI ROMA\nUbicazione Via Roma 10, Roma\nSTATO OCCUPATIVO\nL'immobile risulta libero.\n"}]

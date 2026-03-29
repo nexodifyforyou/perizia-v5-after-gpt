@@ -1708,6 +1708,33 @@ def _normalize_address_value(value: Optional[str]) -> Optional[str]:
     if not value:
         return value
     cleaned = _normalize_headline_text(str(value))
+    m = re.search(
+        r"([A-ZÀ-ÿ][A-Za-zÀ-ÿ' ]+\([A-Z]{2}\)\s*-\s*(?:Via|Viale|Piazza|Corso|Strada|Vicolo|Largo|Localit[aà])\s+[^\n,;:.]{1,80}?\d+(?:/\d+)?)",
+        cleaned,
+        re.I,
+    )
+    if not m:
+        m = re.search(
+            r"((?:Via|Viale|Piazza|Corso|Strada|Vicolo|Largo|Localit[aà])\s+[^\n,;:.]{1,80}?\d+(?:/\d+)?)",
+            cleaned,
+            re.I,
+        )
+    if m:
+        cleaned = m.group(1)
+    for marker in (
+        "DESCRIZIONE",
+        "COMPLETEZZA DOCUMENTAZIONE",
+        "LOTTO UNICO",
+        "PREMESSA",
+        "CONFINI",
+        "SCHEMA RIASSUNTIVO",
+        "RIEPILOGO",
+        "DATI CATASTALI",
+    ):
+        idx = cleaned.upper().find(marker)
+        if idx > 0:
+            cleaned = cleaned[:idx].strip(" ,;-")
+            break
     cleaned = re.sub(r"^Ubicazione[:\s]*", "", cleaned, flags=re.I).strip()
     cleaned = re.sub(r"\b(Via|Viale|Piazza|Corso|Largo|Vicolo)([A-ZÀ-Ù])", r"\1 \2", cleaned)
     cleaned = re.sub(r"\b([A-ZÀ-Ù])\s+([a-zà-ù]{2,})\b", r"\1\2", cleaned)
@@ -1717,7 +1744,41 @@ def _normalize_address_value(value: Optional[str]) -> Optional[str]:
         cleaned,
     )
     cleaned = re.sub(r"\s*-\s*([a-zà-ù])", r"-\1", cleaned)
-    return cleaned
+    return cleaned.strip(" ,;-") or None
+
+
+def _normalize_quota_value(value: Optional[str]) -> Optional[str]:
+    if not value:
+        return None
+    normalized = _normalize_headline_text(str(value))
+    match = re.search(r"quota\s*(\d+\s*/\s*\d+)", normalized, re.I)
+    if not match:
+        match = re.search(r"\b(\d+\s*/\s*\d+)\b", normalized)
+    if not match:
+        return None
+    return match.group(1).replace(" ", "")
+
+
+def _extract_right_and_quota(raw_value: Optional[str], text: str = "", start: int = 0, end: int = 0) -> Tuple[Optional[str], Optional[str]]:
+    raw = _normalize_headline_text(str(raw_value or ""))
+    if not raw:
+        return None, None
+    context_window = _normalize_headline_text(text[max(0, start - 120):min(len(text), end + 160)]) if text else raw
+    quota = _normalize_quota_value(raw) or _normalize_quota_value(context_window)
+    for marker in ("Quota", "Tipologia", "Identificato", "Superficie", "Ubicazione", "Catasto", "CONFINI"):
+        idx = raw.lower().find(marker.lower())
+        if idx > 0:
+            raw = raw[:idx].strip(" ,;-:")
+            break
+    right_match = re.search(r"\b(Piena\s+propriet[àa]|Nuda\s+propriet[àa]|Propriet[àa]|Usufrutto|Diritto\s+di\s+[A-Za-zÀ-ÿ'\s]+)\b", raw, re.I)
+    if not right_match and context_window:
+        right_match = re.search(r"\b(Piena\s+propriet[àa]|Nuda\s+propriet[àa]|Propriet[àa]|Usufrutto|Diritto\s+di\s+[A-Za-zÀ-ÿ'\s]+)\b", context_window, re.I)
+    right = _normalize_headline_text(right_match.group(1)) if right_match else raw
+    if right:
+        right = re.sub(r"\s{2,}", " ", right).strip(" ,;-:")
+    if right and right.lower().startswith("diritto di"):
+        right = _normalize_headline_text(right)
+    return right or None, quota
 
 def _headline_display_value(state: Dict[str, Any]) -> str:
     status = state.get("status")
@@ -2513,12 +2574,10 @@ def _extract_diritto_reale_state(pages: List[Dict[str, Any]]) -> Dict[str, Any]:
     pattern = re.compile(r"\b(Nuda\s+proprietà|Piena\s+proprietà|Proprietà|Usufrutto|Diritto\s+di\s+[^\n]{0,40})\b", re.I)
     schema_pattern = re.compile(r"Diritto\s+reale[:\s]*([^\n]{3,60})", re.I)
     def _normalize_right_value(raw_value: str, text: str, start: int, end: int) -> str:
-        value = _normalize_headline_text(raw_value)
-        window = text[max(0, start - 120):min(len(text), end + 120)]
-        if re.search(r"\b(propriet[àa]|piena\s+propriet[àa])\b", value, re.I):
-            if re.search(r"\b(?:quota\s+)?1\s*/\s*1\b|\bper\s+1\s*/\s*1\b|\(propriet[àa]\s+1\s*/\s*1\)", window, re.I):
-                return "Proprietà 1/1"
-        return value
+        right, quota = _extract_right_and_quota(raw_value, text, start, end)
+        if right and quota and re.search(r"\b(propriet[àa]|piena\s+propriet[àa])\b", right, re.I):
+            return f"{right} {quota}"
+        return right or _normalize_headline_text(raw_value)
 
     schema_pages = []
     for p in pages:
@@ -2541,7 +2600,7 @@ def _extract_diritto_reale_state(pages: List[Dict[str, Any]]) -> Dict[str, Any]:
                 )
             ]
             value = _normalize_right_value(m.group(1), text, start, end)
-            searched_in = _make_searched_in(pages, keywords, "FOUND", field_key="stato_occupativo")
+            searched_in = _make_searched_in(pages, keywords, "FOUND", field_key="diritto_reale")
             return _build_field_state(value=value, status="FOUND", evidence=evidence, searched_in=searched_in)
     for p in pages:
         text = str(p.get("text", "") or "")
@@ -2560,9 +2619,9 @@ def _extract_diritto_reale_state(pages: List[Dict[str, Any]]) -> Dict[str, Any]:
             )
         ]
         value = _normalize_right_value(m.group(0), text, start, end)
-        searched_in = _make_searched_in(pages, keywords, "FOUND", field_key="stato_occupativo")
+        searched_in = _make_searched_in(pages, keywords, "FOUND", field_key="diritto_reale")
         return _build_field_state(value=value, status="FOUND", evidence=evidence, searched_in=searched_in)
-    searched_in = _make_searched_in(pages, keywords, "NOT_FOUND", field_key="stato_occupativo")
+    searched_in = _make_searched_in(pages, keywords, "NOT_FOUND", field_key="diritto_reale")
     return _build_field_state(value=None, status="NOT_FOUND", evidence=[], searched_in=searched_in)
 
 
@@ -3234,6 +3293,16 @@ def _extract_ape_state(pages: List[Dict[str, Any]]) -> Dict[str, Any]:
             lambda _m: "APE PRESENTE (CLASSE NON LEGGIBILE)",
             "presence",
         ),
+        (
+            re.compile(r"((?:esiste|e['’]?\s+presente|presente|risulta\s+presente)[^\n]{0,60}?(?:il\s+)?(?:certificato\s+energetico|ape|attestato\s+di\s+prestazione\s+energetica))", re.I),
+            lambda _m: "APE PRESENTE (CLASSE NON LEGGIBILE)",
+            "presence",
+        ),
+        (
+            re.compile(r"((?:certificato\s+energetico|ape|attestato\s+di\s+prestazione\s+energetica)[^\n]{0,80}?(?:esiste|e['’]?\s+presente|presente|risulta\s+presente))", re.I),
+            lambda _m: "APE PRESENTE (CLASSE NON LEGGIBILE)",
+            "presence",
+        ),
     ]
     candidates: List[Dict[str, Any]] = []
     for p in pages:
@@ -3248,7 +3317,11 @@ def _extract_ape_state(pages: List[Dict[str, Any]]) -> Dict[str, Any]:
                 line_text = text[line_start:line_end]
                 if _is_toc_like_line(line_text) or _is_toc_like_quote(line_text):
                     continue
-                if re.search(r"(impianto\s+elettric|impianto\s+idrico|impianto\s+termico|dichiarazione\s+di\s+conformit[aà]\s+dell['’]impianto)", line_text, re.I):
+                normalized_match_text = _normalize_signal_text(m.group(1))
+                if (
+                    re.search(r"(impianto\s+elettric|impianto\s+idrico|impianto\s+termico|dichiarazione\s+di\s+conformit[aà]\s+dell['’]impianto)", line_text, re.I)
+                    and not any(token in normalized_match_text for token in ("certificato energetico", "ape", "attestato di prestazione energetica"))
+                ):
                     continue
                 evidence = [
                     _build_evidence(
@@ -3591,6 +3664,14 @@ def _extract_dichiarazione_impianto_gas_state(pages: List[Dict[str, Any]]) -> Di
     )
 
 
+def _extract_dichiarazione_impianto_termico_state(pages: List[Dict[str, Any]]) -> Dict[str, Any]:
+    return _extract_impianto_certificate_state(
+        pages,
+        field_key="dichiarazione_impianto_termico",
+        domain_tokens=("impianto\\s+termic\\w*", "termic\\w*", "riscaldament\\w*"),
+    )
+
+
 def _extract_agibilita_state(pages: List[Dict[str, Any]]) -> Dict[str, Any]:
     keywords = ["agibilità", "agibilita", "abitabilità", "abitabilita", "agibile"]
     absent_patterns = [
@@ -3644,8 +3725,8 @@ def _extract_agibilita_state(pages: List[Dict[str, Any]]) -> Dict[str, Any]:
                     anchor_hint=m.group(0),
                 )
             ]
-            searched_in = _make_searched_in(pages, keywords, "LOW_CONFIDENCE")
-            return _build_field_state(value="PRESENTE", status="LOW_CONFIDENCE", evidence=evidence, searched_in=searched_in)
+            searched_in = _make_searched_in(pages, keywords, "FOUND", field_key="agibilita")
+            return _build_field_state(value="PRESENTE", status="FOUND", evidence=evidence, searched_in=searched_in)
 
     searched_in = _make_searched_in(pages, keywords, "NOT_FOUND")
     return _build_field_state(value=None, status="NOT_FOUND", evidence=[], searched_in=searched_in)
@@ -3768,7 +3849,7 @@ def _extract_regolarita_urbanistica_state(pages: List[Dict[str, Any]]) -> Dict[s
     patterns = [
         (
             re.compile(
-                r"\b(non\s+(?:risultano|emergono|sono\s+stati\s+rilevati)\s+(?:abusi|difformit\w+|irregolarit\w+)|assenza\s+di\s+(?:abusi|difformit\w+|irregolarit\w+)|conform(?:e|ità)\s+urbanistic\w*|regolar\w+\s+(?:sotto\s+il\s+profilo\s+urbanistic\w*|urbanistic\w*))\b",
+                r"\b(non\s+(?:risultano|emergono|sono\s+stati\s+rilevati)\s+(?:abusi|difformit\w+|irregolarit\w+)|assenza\s+di\s+(?:abusi|difformit\w+|irregolarit\w+)|conform(?:e|ità)\s+urbanistic\w*|regolar\w+\s+(?:sotto\s+il\s+profilo\s+urbanistic\w*|urbanistic\w*)|compatibil\w+[^\n]{0,80}strumenti\s+urbanistic\w*|immobile\s+risulta\s+regolare|unit[aà]\s+immobiliar\w+\s+sono\s+conformi\s+a\s+quanto\s+depositato)\b",
                 re.I,
             ),
             "NON EMERGONO ABUSI",
@@ -4007,10 +4088,42 @@ def _catastale_authority_score(
 def _extract_conformita_catastale_state(pages: List[Dict[str, Any]]) -> Dict[str, Any]:
     keywords = ["conformità catastale", "difformità", "planimetria", "catasto"]
     ambiguous = re.compile(r"(da\s+verificare|non\s+è\s+noto|non\s+e'\s+noto|da\s+accertare|si\s+presume|presumibilmente|potrebbe|sarebbe)", re.I)
+    explicit_positive = re.compile(
+        r"(corrispondenza\s+catastal\w*[\s\S]{0,80}?sussiste\s+corrispondenza|sussiste\s+corrispondenza[\s\S]{0,120}?planimetri\w+\s+catastal\w*|planimetri\w+\s+catastal\w*[\s\S]{0,80}?conforme)",
+        re.I,
+    )
+    explicit_negative = re.compile(r"(difformit[aà]\s+catastal\w*|mancata\s+corrispondenza|planimetri\w+\s+non\s+conforme|non\s+conform[ei][^\n]{0,40}catast)", re.I)
+    negative_present = any(explicit_negative.search(str(p.get("text", "") or "")) for p in pages)
+    for p in pages:
+        text = str(p.get("text", "") or "")
+        m = explicit_positive.search(text)
+        if not m or negative_present:
+            continue
+        line_start, line_end = _line_bounds(text, m.start(), m.end())
+        ev = _build_evidence(
+            text,
+            int(p.get("page_number", 0) or 0),
+            line_start,
+            line_end,
+            field_key="conformita_catastale",
+            anchor_hint=m.group(0),
+        )
+        if not str(ev.get("quote") or "").strip():
+            continue
+        searched_in = _make_searched_in(pages, keywords, "FOUND", field_key="conformita_catastale")
+        state = _build_field_state(value="CONFORME", status="FOUND", evidence=[ev], searched_in=searched_in)
+        state["review_required"] = False
+        state["needs_user_confirmation"] = False
+        state["resolver_meta"] = {"resolver_version": "catastale_v1", "resolver_confidence": 0.86, "conflict_flag": False, "candidate_count": 1}
+        state["conflicts"] = []
+        state["all_candidates"] = []
+        state["top_candidates"] = []
+        state["chosen_candidate"] = {"value": "CONFORME", "page": int(p.get("page_number", 0) or 0), "quote": ev.get("quote")}
+        return state
     patterns = [
         (
             re.compile(
-                r"\b(conformit[aà]\s+catastal\w*|planimetri\w+\s+conforme|conforme\s+al\s+catasto|corrispondenza\s+catastal\w*|catastalmente\s+conforme|non\s+(?:risultano|emergono)\s+difformit\w+\s+catastal\w*|assenza\s+di\s+difformit\w+\s+catastal\w*)\b",
+                r"\b(conformit[aà]\s+catastal\w*|planimetri\w+\s+conforme|conforme\s+al\s+catasto|corrispondenza\s+catastal\w*|sussiste\s+corrispondenza|catastalmente\s+conforme|non\s+(?:risultano|emergono)\s+difformit\w+\s+catastal\w*|assenza\s+di\s+difformit\w+\s+catastal\w*)\b",
                 re.I,
             ),
             "CONFORME",
@@ -4164,7 +4277,7 @@ def _extract_spese_condominiali_state(pages: List[Dict[str, Any]]) -> Dict[str, 
     keywords = ["spese condominiali", "arretrate", "arretrati", "oneri condominiali", "morosità"]
     # Positive is accepted only when explicitly tied to arrears/morosita context.
     positive = re.compile(
-        r"((?:spese\s+condominiali\s+arretrat\w*|arretrat\w+\s+condominial\w*|morosit[aà])[\s\S]{0,70}?(?:non\s+presenti|non\s+risultan\w*|nessun\w*))",
+        r"((?:spese\s+condominiali\s+arretrat\w*|arretrat\w+\s+condominial\w*|morosit[aà]|vincoli\s+od\s+oneri\s+condominiali|oneri\s+condominiali)[\s\S]{0,90}?(?:non\s+presenti|non\s+risultan\w*|nessun\w*)|(?:non\s+sono\s+presenti|non\s+risultan\w*|nessun\w*)[\s\S]{0,90}?(?:vincoli\s+od\s+oneri\s+condominiali|oneri\s+condominiali|spese\s+condominiali\s+arretrat\w*|arretrat\w+\s+condominial\w*|morosit[aà]))",
         re.I,
     )
     negative = re.compile(r"(spese\s+condominiali\s+arretrate|arretrati\s+condominiali|morosit[aà]|oneri\s+condominiali\s+insoluti)", re.I)
@@ -4180,6 +4293,21 @@ def _extract_spese_condominiali_state(pages: List[Dict[str, Any]]) -> Dict[str, 
     )
     for p in pages:
         text = str(p.get("text", "") or "")
+        explicit_none = re.search(r"(non\s+sono\s+presenti[^\n]{0,80}(vincoli\s+od\s+oneri\s+condominiali|oneri\s+condominiali))", text, re.I)
+        if explicit_none:
+            line_start, line_end = _line_bounds(text, explicit_none.start(), explicit_none.end())
+            evidence = [
+                _build_evidence(
+                    text,
+                    int(p.get("page_number", 0) or 0),
+                    line_start,
+                    line_end,
+                    field_key="spese_condominiali_arretrate",
+                    anchor_hint=explicit_none.group(0),
+                )
+            ]
+            searched_in = _make_searched_in(pages, keywords, "FOUND", field_key="spese_condominiali_arretrate")
+            return _build_field_state(value="NON PRESENTI", status="FOUND", evidence=evidence, searched_in=searched_in)
         # Section-aware parsing: heading may be on one line and value on next lines
         sec = re.search(r"spese\s+condominiali", text, re.I) or spese_section_ocr.search(text)
         if sec:
@@ -4189,7 +4317,7 @@ def _extract_spese_condominiali_state(pages: List[Dict[str, Any]]) -> Dict[str, 
                 # Guardrail: only accept "non presenti/non risultano" when the snippet
                 # explicitly refers to arrears (not generic condo incidence/fees).
                 sec_window = text[sec.start():min(len(text), sec.end() + len(after))]
-                if not re.search(r"(arretrat|morosit[aà])", sec_window, re.I):
+                if not re.search(r"(arretrat|morosit[aà]|oneri\s+condominiali|vincoli\s+od\s+oneri\s+condominiali)", sec_window, re.I):
                     continue
                 match_start = sec.end() + absence.start()
                 match_end = sec.end() + absence.end()
@@ -4342,16 +4470,16 @@ def _apply_decision_states_to_result(result: Dict[str, Any], states: Dict[str, A
     superficie_display = _field_state_display_value(superficie_state)
     if isinstance(superficie_value, dict) and superficie_value.get("value") is not None:
         superficie_display = _format_mq_value(superficie_value.get("value"))
-    dati["superficie_catastale"] = {
-        "value": superficie_display,
-        "evidence": superficie_state.get("evidence", []),
-    }
 
     diritto_display = _field_state_display_value(diritto_state)
+    diritto_clean, quota_clean = _extract_right_and_quota(diritto_display)
+    diritto_evidence = diritto_state.get("evidence", [])
     dati["diritto_reale"] = {
-        "value": diritto_display,
-        "evidence": diritto_state.get("evidence", []),
+        "value": diritto_clean or diritto_display,
+        "evidence": diritto_evidence,
     }
+    if quota_clean:
+        dati["quota"] = {"value": quota_clean, "evidence": diritto_evidence}
     result["dati_certi_del_lotto"] = dati
 
     occ = result.get("stato_occupativo", {}) if isinstance(result.get("stato_occupativo"), dict) else {}
@@ -4404,6 +4532,7 @@ def _apply_decision_states_to_result(result: Dict[str, Any], states: Dict[str, A
     for legacy_key, field_key in (
         ("elettrico", "dichiarazione_impianto_elettrico"),
         ("idrico", "dichiarazione_impianto_idrico"),
+        ("termico", "dichiarazione_impianto_termico"),
         ("gas", "dichiarazione_impianto_gas"),
     ):
         imp_state = states.get(field_key) or {}
@@ -4423,6 +4552,7 @@ def _apply_decision_states_to_result(result: Dict[str, Any], states: Dict[str, A
     agibilita_state = states.get("agibilita") or {}
     abusi["agibilita"] = {
         "status": _field_state_display_value(agibilita_state),
+        "detail_it": _field_state_display_value(agibilita_state),
         "evidence": agibilita_state.get("evidence", []),
     }
     result["abusi_edilizi_conformita"] = abusi
@@ -4898,6 +5028,14 @@ def _build_state_driven_legal_killers(result: Dict[str, Any], pages: List[Dict[s
             88,
             [r"accertamento\s+di\s+conformit"],
             "Accertamento di conformità richiesto",
+        ),
+        (
+            "Formalità da cancellare",
+            "GIALLO",
+            "ATTENZIONE",
+            86,
+            [r"formalit[àa]\s+da\s+cancellare[\s\S]{0,80}?decreto\s+di\s+trasferimento"],
+            "Formalità da cancellare con il decreto di trasferimento",
         ),
     ]
     out: List[Dict[str, Any]] = []
@@ -5450,6 +5588,7 @@ def _apply_decision_field_states(result: Dict[str, Any], pages: List[Dict[str, A
             "ape": _extract_ape_state(pages),
             "dichiarazione_impianto_elettrico": _extract_dichiarazione_impianto_elettrico_state(pages),
             "dichiarazione_impianto_idrico": _extract_dichiarazione_impianto_idrico_state(pages),
+            "dichiarazione_impianto_termico": _extract_dichiarazione_impianto_termico_state(pages),
             "dichiarazione_impianto_gas": _extract_dichiarazione_impianto_gas_state(pages),
             "agibilita": _extract_agibilita_state(pages),
             "dati_asta": _extract_dati_asta_state(pages),
@@ -5530,6 +5669,12 @@ def _apply_decision_field_states(result: Dict[str, Any], pages: List[Dict[str, A
                 evidence=((abusi.get("impianti", {}) or {}).get("idrico", {}) or {}).get("evidence", []),
                 pages=pages,
                 keywords=["impianto idrico", "acqua", "dichiarazione di conformità", "certificato di conformità"],
+            ),
+            "dichiarazione_impianto_termico": _build_state_from_existing_value(
+                value_obj=((abusi.get("impianti", {}) or {}).get("termico", {}) or {}).get("detail_it") or ((abusi.get("impianti", {}) or {}).get("termico", {}) or {}).get("status"),
+                evidence=((abusi.get("impianti", {}) or {}).get("termico", {}) or {}).get("evidence", []),
+                pages=pages,
+                keywords=["impianto termico", "riscaldamento", "dichiarazione di conformità", "certificato di conformità"],
             ),
             "dichiarazione_impianto_gas": _build_state_from_existing_value(
                 value_obj=((abusi.get("impianti", {}) or {}).get("gas", {}) or {}).get("detail_it") or ((abusi.get("impianti", {}) or {}).get("gas", {}) or {}).get("status"),
@@ -5669,6 +5814,7 @@ def _apply_decision_field_states(result: Dict[str, Any], pages: List[Dict[str, A
     result["field_states"] = states
     _enforce_field_states_contract(result, pages)
     _apply_decision_states_to_result(result, result.get("field_states", states))
+    _repair_identity_and_cadastral_storage(result, pages)
     _ensure_semaforo_top_blockers(result, result.get("field_states", states), pages)
     _synthesize_decisione_rapida(result, result.get("field_states", states))
 
@@ -5814,11 +5960,13 @@ def _ensure_lot_contract(lot: Dict[str, Any], lot_number: int) -> Dict[str, Any]
     lot_obj.setdefault("prezzo_base_value", None)
     lot_obj.setdefault("ubicazione", "TBD")
     lot_obj.setdefault("superficie_mq", "TBD")
+    lot_obj.setdefault("superficie_catastale", None)
     lot_obj.setdefault("diritto_reale", "TBD")
+    lot_obj.setdefault("quota", None)
     lot_obj.setdefault("shared_rights_note", None)
     lot_obj.setdefault("detail_scope", "LOT")
     evidence = lot_obj.get("evidence") if isinstance(lot_obj.get("evidence"), dict) else {}
-    for key in ("lotto", "prezzo_base", "ubicazione", "superficie", "diritto_reale", "shared_rights_note", "tipologia", "valore_stima", "deprezzamento"):
+    for key in ("lotto", "prezzo_base", "ubicazione", "superficie", "superficie_catastale", "diritto_reale", "quota", "shared_rights_note", "tipologia", "valore_stima", "deprezzamento"):
         if not isinstance(evidence.get(key), list):
             evidence[key] = []
     lot_obj["evidence"] = evidence
@@ -6438,7 +6586,7 @@ def _legal_relevance_profile(killer: str) -> Tuple[str, int]:
     if any(token in low for token in ("servitù rilevata", "accertamento di conformità", "condizioni conservative", "sicurezza")):
         return "RELEVANT_SECONDARY", 70
     if any(token in low for token in ("oneri di cancellazione", "formalità da cancellare", "salva casa")):
-        return "BACKGROUND_NOTE", 20
+        return "RELEVANT_SECONDARY", 72
     return "RELEVANT_SECONDARY", 50
 
 
@@ -7034,7 +7182,7 @@ def _extract_beni_from_pages(pages_in: List[Dict[str, Any]]) -> List[Dict[str, A
     def _clean_location_text(raw: Optional[str]) -> Optional[str]:
         if not raw:
             return None
-        text = _normalize_headline_text(str(raw))
+        text = _normalize_address_value(str(raw)) or _normalize_headline_text(str(raw))
         text = re.sub(r"\.{2,}\s*\d+\s*$", "", text).strip()
         text = re.sub(r"\s{2,}", " ", text).strip(" ,;-")
         text = re.sub(r",\s*piano\s+[A-Za-zÀ-ÿ].*$", "", text, flags=re.I).strip(" ,;-")
@@ -7395,6 +7543,7 @@ def _extract_beni_from_pages(pages_in: List[Dict[str, Any]]) -> List[Dict[str, A
             line_start, line_end = _line_bounds(text, m.start(), m.end())
             line = text[line_start:line_end]
             catasto = bene.get("catasto", {})
+            subalterni = catasto.get("subalterni", []) if isinstance(catasto.get("subalterni"), list) else []
 
             def _set_if(key: str, val: Optional[str]) -> None:
                 if val and not catasto.get(key):
@@ -7409,6 +7558,17 @@ def _extract_beni_from_pages(pages_in: List[Dict[str, Any]]) -> List[Dict[str, A
             _set_if("sub", sub.group(1) if sub else None)
             if categoria:
                 _set_if("categoria", _normalize_headline_text(categoria.group(1)))
+            for entry in re.finditer(r"(?:Fg\.?|Foglio)\s*(\d+)\s*,?\s*(?:Part\.?|Particella)\s*(\d+)\s*,?\s*(?:Sub\.?|Subalterno)\s*(\d+)\s*,?\s*Categoria\s*([A-Z]\s*/?\s*\d+)", line, re.I):
+                subalterno = {
+                    "foglio": entry.group(1),
+                    "particella": entry.group(2),
+                    "sub": entry.group(3),
+                    "categoria": _normalize_headline_text(entry.group(4)),
+                }
+                if subalterno not in subalterni:
+                    subalterni.append(subalterno)
+            if subalterni:
+                catasto["subalterni"] = subalterni
 
             bene["catasto"] = catasto
             bene["evidence"]["catasto"] = [_build_evidence(text, page_num, line_start, line_end)]
@@ -8555,6 +8715,9 @@ def enforce_evidence_or_low_confidence(result: Dict[str, Any]) -> Dict[str, Any]
     # Remove numeric estimates from indice_di_convenienza unless explicitly evidenced
     indice = result.get("indice_di_convenienza", {})
     if isinstance(indice, dict) and not _has_evidence(indice.get("evidence", [])):
+        for key in ("prezzo_base_asta", "prezzo_base"):
+            if key in indice:
+                indice[key] = None
         for key in ("extra_costs_min", "extra_costs_max", "all_in_light_min", "all_in_light_max"):
             if key in indice:
                 indice[key] = "TBD"
@@ -8918,6 +9081,111 @@ def _normalize_legal_killers(result: Dict[str, Any], pages: List[Dict[str, Any]]
             and len(item.get("evidence")) > 0
         )
     ][:10]
+
+
+def _extract_cadastral_surface_summary(pages: List[Dict[str, Any]]) -> Tuple[Optional[str], List[Dict[str, Any]]]:
+    entries: List[Tuple[str, Dict[str, Any]]] = []
+    for p in pages:
+        text = str(p.get("text", "") or "")
+        if "superficiecatastale" not in _normalize_signal_text(text) and "superficie catastale" not in _normalize_signal_text(text):
+            continue
+        row_pattern = re.compile(r"^\s*\d+\s+\d+\s+(?P<sub>\d+)\s+[A-Z]\d+\s+\d+\s+(?P<sup>\d{1,4})\s*mq\b.*$", re.I | re.M)
+        for m in row_pattern.finditer(text):
+            line_start, line_end = _line_bounds(text, m.start(), m.end())
+            if line_end <= line_start:
+                continue
+            ev = _build_evidence(
+                text,
+                int(p.get("page_number", 0) or 0),
+                line_start,
+                line_end,
+                field_key="superficie_catastale",
+                anchor_hint=m.group(0),
+            )
+            label = f"{m.group('sup')} mq (sub {m.group('sub')})"
+            entries.append((label, ev))
+    deduped: List[Tuple[str, Dict[str, Any]]] = []
+    seen = set()
+    for label, ev in entries:
+        if label in seen:
+            continue
+        seen.add(label)
+        deduped.append((label, ev))
+    if not deduped:
+        return None, []
+    return " + ".join(label for label, _ in deduped[:3]), [ev for _, ev in deduped[:3]]
+
+
+def _repair_identity_and_cadastral_storage(result: Dict[str, Any], pages: List[Dict[str, Any]]) -> None:
+    report_header = result.get("report_header", {}) if isinstance(result.get("report_header"), dict) else {}
+    case_header = result.get("case_header", {}) if isinstance(result.get("case_header"), dict) else {}
+    for container, key in ((report_header, "address"),):
+        if isinstance(container.get(key), dict):
+            current = container[key].get("value")
+            normalized = _normalize_address_value(current)
+            if normalized:
+                container[key]["value"] = normalized
+    if case_header.get("address"):
+        normalized = _normalize_address_value(case_header.get("address"))
+        if normalized:
+            case_header["address"] = normalized
+    result["report_header"] = report_header
+    result["case_header"] = case_header
+
+    dati = result.get("dati_certi_del_lotto", {}) if isinstance(result.get("dati_certi_del_lotto"), dict) else {}
+    diritto_obj = dati.get("diritto_reale") if isinstance(dati.get("diritto_reale"), dict) else {}
+    right_value, quota_value = _extract_right_and_quota((diritto_obj or {}).get("value"))
+    if right_value and isinstance(diritto_obj, dict):
+        diritto_obj["value"] = right_value
+        dati["diritto_reale"] = diritto_obj
+    if quota_value:
+        dati["quota"] = {"value": quota_value, "evidence": copy.deepcopy((diritto_obj or {}).get("evidence", []))}
+
+    superficie_catastale_value, superficie_catastale_evidence = _extract_cadastral_surface_summary(pages)
+    if superficie_catastale_value:
+        dati["superficie_catastale"] = {
+            "value": superficie_catastale_value,
+            "evidence": superficie_catastale_evidence,
+        }
+    elif "superficie_catastale" not in dati:
+        dati["superficie_catastale"] = {"value": "NON SPECIFICATO IN PERIZIA", "evidence": []}
+    elif isinstance(dati.get("superficie_catastale"), dict):
+        current_value = str(dati["superficie_catastale"].get("value") or "")
+        current_evidence = dati["superficie_catastale"].get("evidence", [])
+        evidence_text = " ".join(str(ev.get("quote") or "") for ev in current_evidence if isinstance(ev, dict)).lower()
+        if "superficie catastale" not in current_value.lower() and "superficiecatastale" not in evidence_text and "superficie catastale" not in evidence_text:
+            dati["superficie_catastale"] = {"value": "NON SPECIFICATO IN PERIZIA", "evidence": []}
+    result["dati_certi_del_lotto"] = dati
+
+    states = result.get("field_states", {}) if isinstance(result.get("field_states"), dict) else {}
+    for bene in result.get("beni", []) if isinstance(result.get("beni"), list) else []:
+        if not isinstance(bene, dict):
+            continue
+        short_location = _normalize_address_value(bene.get("short_location")) or bene.get("short_location")
+        if short_location:
+            bene["short_location"] = short_location
+        ape_state = states.get("ape") if isinstance(states.get("ape"), dict) else {}
+        ape_display = _field_state_display_value(ape_state)
+        if ape_display not in {"NON SPECIFICATO IN PERIZIA", "DA VERIFICARE"}:
+            bene["ape"] = ape_display
+        dichiarazioni = bene.get("dichiarazioni") if isinstance(bene.get("dichiarazioni"), dict) else {}
+        dichiarazioni_impianti = bene.get("dichiarazioni_impianti") if isinstance(bene.get("dichiarazioni_impianti"), dict) else {}
+        state_map = {
+            "dichiarazione_impianto_elettrico": "elettrico",
+            "dichiarazione_impianto_termico": "termico",
+            "dichiarazione_impianto_idrico": "idrico",
+        }
+        for field_key, alias_key in state_map.items():
+            state = states.get(field_key) if isinstance(states.get(field_key), dict) else {}
+            if str(state.get("status") or "").upper() not in {"FOUND", "LOW_CONFIDENCE"}:
+                continue
+            display = _field_state_display_value(state)
+            if display in {"NON SPECIFICATO IN PERIZIA", "DA VERIFICARE"}:
+                continue
+            dichiarazioni[field_key] = display
+            dichiarazioni_impianti[alias_key] = display
+        bene["dichiarazioni"] = dichiarazioni
+        bene["dichiarazioni_impianti"] = dichiarazioni_impianti
 
 def _to_iso(value: Any) -> Optional[str]:
     dt = _parse_dt(value)
