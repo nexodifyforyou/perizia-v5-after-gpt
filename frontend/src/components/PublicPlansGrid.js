@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import axios from 'axios';
-import { CheckCircle2 } from 'lucide-react';
+import { ArrowUpRight, CheckCircle2 } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { Button } from './ui/button';
 
@@ -41,23 +41,39 @@ export const usePublicPlans = () => {
 };
 
 const defaultSummary = {
-  free: 'Accesso introduttivo per valutare il flusso documentale.',
-  starter: 'Taglio operativo leggero per volumi contenuti.',
-  solo: 'Il pacchetto centrale oggi piu coerente con il prodotto attuale.',
-  pro: 'Maggiore continuita per professionisti con frequenza piu alta.',
-  studio: 'Offerta dedicata con attivazione assistita per studi e team.'
+  free: 'Ingresso senza attrito per provare il metodo su perizie standard.',
+  starter: 'Top-up occasionale per aggiungere capacita senza cambiare piano.',
+  solo: 'Il piano centrale per chi fa screening serio e ricorrente.',
+  pro: 'Per uso professionale ad alta frequenza e maggior continuita operativa.',
+  studio: 'Percorso dedicato con attivazione manuale per studi e team.'
 };
 
 const ctaByPlan = {
-  free: 'Accesso disponibile in piattaforma',
-  starter: 'Disponibilita commerciale in aggiornamento',
-  solo: 'Disponibilita commerciale in aggiornamento',
-  pro: 'Disponibilita commerciale in aggiornamento',
-  studio: 'Disponibilita commerciale in aggiornamento'
+  free: 'Fino a 3 perizie standard da 1-20 pagine',
+  starter: 'Top-up una tantum per uso occasionale',
+  solo: 'Consigliato per investitori che analizzano con continuita',
+  pro: 'Pensato per chi lavora su volumi piu alti',
+  studio: 'Offerta manuale per esigenze dedicate'
 };
 
 const planNameOverrides = {
   starter: 'Pacchetto 8 crediti',
+};
+
+const planEyebrow = {
+  free: 'Ingresso',
+  starter: 'Extra',
+  solo: 'Hero plan',
+  pro: 'Professionale',
+  studio: 'Su richiesta',
+};
+
+const planEvidenceNotes = {
+  free: 'Provi il flusso con alert collegati alle pagine e lettura documentale verificabile.',
+  starter: 'Aggiunge 8 crediti extra mantenendo invariata la logica di consumo per fascia pagine.',
+  solo: 'Pensato per chi vuole uno strumento piu rapido della revisione manuale iniziale e piu difendibile di un riassunto generico.',
+  pro: 'Per screening ricorrente, operativo e professionale su piu pratiche.',
+  studio: 'Da configurare manualmente quando servono volumi o esigenze organizzative dedicate.',
 };
 
 const supportOverrides = {
@@ -83,20 +99,20 @@ const PublicPlansGrid = ({ detailed = false }) => {
         return (
           <article
             key={plan.plan_id}
-            className={`relative rounded-3xl border p-7 transition-colors ${
+            className={`plan-surface section-fade relative rounded-3xl border p-7 transition-all duration-300 ${
               featured
-                ? 'border-gold/60 bg-gradient-to-b from-[#1d1910] to-zinc-900 gold-glow'
-                : 'border-zinc-800 bg-zinc-900/80 hover:border-zinc-700'
+                ? 'plan-surface-hero border-gold/60 bg-gradient-to-b from-[#20190d] via-[#141414] to-zinc-950 gold-glow'
+                : 'border-zinc-800 bg-zinc-900/80 hover:-translate-y-1 hover:border-zinc-700'
             }`}
           >
             {featured && (
               <div className="absolute -top-4 left-6">
-                <span className="premium-badge">Core attuale</span>
+                <span className="premium-badge">Piano consigliato</span>
               </div>
             )}
 
             <div className="mb-6">
-              <p className="text-xs font-mono uppercase tracking-[0.28em] text-zinc-500 mb-3">{plan.plan_type_label_it}</p>
+              <p className="text-xs font-mono uppercase tracking-[0.28em] text-zinc-500 mb-3">{planEyebrow[plan.plan_id] || plan.plan_type_label_it}</p>
               <h3 className="text-2xl font-serif font-bold text-zinc-100 mb-2">{planNameOverrides[plan.plan_id] || plan.name_it}</h3>
               <p className="text-sm leading-relaxed text-zinc-400">{defaultSummary[plan.plan_id] || 'Pacchetto pubblico PeriziaScan.'}</p>
             </div>
@@ -114,6 +130,14 @@ const PublicPlansGrid = ({ detailed = false }) => {
               <p className="text-zinc-100 font-medium">{plan.credits_label_it}</p>
               {plan.validity_label_it && <p className="text-zinc-500">{plan.validity_label_it}</p>}
               {(supportOverrides[plan.plan_id] || plan.support_level_it) && <p className="text-zinc-500">{supportOverrides[plan.plan_id] || plan.support_level_it}</p>}
+            </div>
+
+            <div className={`mb-6 rounded-2xl border p-4 text-sm leading-relaxed ${
+              featured
+                ? 'border-gold/20 bg-gold/10 text-zinc-200'
+                : 'border-zinc-800 bg-black/20 text-zinc-300'
+            }`}>
+              {planEvidenceNotes[plan.plan_id]}
             </div>
 
             <ul className="space-y-3 mb-7">
@@ -141,7 +165,7 @@ const PublicPlansGrid = ({ detailed = false }) => {
                 asChild
                 className={`w-full ${featured ? 'bg-gold text-zinc-950 hover:bg-gold-dim' : 'bg-zinc-800 text-zinc-100 hover:bg-zinc-700'}`}
               >
-                <Link to="/pacchetti">Dettagli pacchetto</Link>
+                <Link to="/pacchetti">Dettagli pacchetto <ArrowUpRight className="w-4 h-4 ml-2" /></Link>
               </Button>
             )}
           </article>

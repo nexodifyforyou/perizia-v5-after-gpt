@@ -579,7 +579,7 @@ async def test_admin_patch_user_quota_writes_ledger_entries(fake_db):
         "name": "Target",
         "plan": "free",
         "quota": {
-            "perizia_scans_remaining": 4,
+            "perizia_scans_remaining": 12,
             "image_scans_remaining": 0,
             "assistant_messages_remaining": 0,
         },
@@ -602,7 +602,9 @@ async def test_admin_patch_user_quota_writes_ledger_entries(fake_db):
     admin_entries = [item for item in fake_db.credit_ledger.items if item["entry_type"] == "admin_adjustment"]
     assert len(admin_entries) == 2
     assert {item["quota_field"] for item in admin_entries} == {"perizia_scans_remaining", "image_scans_remaining"}
-    assert all(item["direction"] == "credit" for item in admin_entries)
+    directions = {item["quota_field"]: item["direction"] for item in admin_entries}
+    assert directions["perizia_scans_remaining"] == "debit"
+    assert directions["image_scans_remaining"] == "credit"
 
 
 @pytest.mark.anyio
@@ -817,4 +819,3 @@ def test_perizia_upload_consumes_exact_band_credits_on_success(fake_db):
         assert ledger_entries[0]["balance_after"] == 7
 
     asyncio.run(_run())
-

@@ -19,8 +19,8 @@ export const includedToday = [
   'Semaforo rischio',
   'Criticita legali',
   'Costi e oneri da verificare',
-  'Riferimenti di pagina ed evidence anchors',
-  'Report strutturato'
+  'Ogni segnalazione importante e collegata alle pagine della perizia',
+  'Report strutturato per uno screening piu difendibile'
 ];
 
 export const excludedToday = [
@@ -34,6 +34,11 @@ export const packageFaq = [
     question: 'Quando vengono scalati i crediti?',
     answer:
       'Il consumo avviene quando viene avviata una nuova elaborazione su un file caricato o su una nuova versione del documento.'
+  },
+  {
+    question: 'Cosa include oggi il piano Free?',
+    answer:
+      'Include 12 crediti, cioe fino a 3 perizie standard da 1-20 pagine. Le fasce pagina piu alte consumano piu crediti secondo la tabella pubblica.'
   },
   {
     question: 'Cosa succede se l’analisi fallisce?',

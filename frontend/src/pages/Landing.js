@@ -6,14 +6,16 @@ import PreLoginNoticeDialog from '../components/PreLoginNoticeDialog';
 import { 
   FileText, 
   Shield, 
-  Eye, 
-  MessageSquare, 
   ArrowRight,
   Scale,
   Building2,
   Calculator,
   AlertTriangle,
-  Sparkles
+  Sparkles,
+  ScanSearch,
+  BadgeCheck,
+  BriefcaseBusiness,
+  Landmark
 } from 'lucide-react';
 import PublicPlansGrid from '../components/PublicPlansGrid';
 
@@ -40,44 +42,32 @@ const Landing = () => {
   const features = [
     {
       icon: <FileText className="w-6 h-6" />,
-      title: "Perizia Analysis",
-      title_it: "Analisi della Perizia",
-      description: "Structured appraisal analysis with traceable references",
-      description_it: "Lettura strutturata della perizia con conclusioni ancorate al documento e riferimenti verificabili"
+      title_it: "Alert con riferimenti di pagina",
+      description_it: "Ogni segnalazione importante e collegata alle pagine della perizia, cosi il controllo resta ancorato al documento"
     },
     {
       icon: <Shield className="w-6 h-6" />,
-      title: "Legal Killers Check",
-      title_it: "Criticità Legali",
-      description: "Detection of legal blockers tied to the source document",
-      description_it: "Individuazione delle criticità legali da verificare, con indicazioni collegate alla perizia"
+      title_it: "Non una semplice sintesi AI",
+      description_it: "Il report non si limita a riassumere: mette in evidenza criticita, costi da verificare e punti che contano per decidere"
     },
     {
       icon: <Calculator className="w-6 h-6" />,
-      title: "Money Box Calculator",
-      title_it: "Costi e Oneri",
-      description: "Transparent cost breakdown where the document supports it",
-      description_it: "Quadro dei costi e degli oneri da verificare, con calcoli trasparenti dove la perizia lo consente"
-    },
-    {
-      icon: <Eye className="w-6 h-6" />,
-      title: "Image Forensics",
-      title_it: "Image Forensics",
-      description: "Image review capabilities currently evolving",
-      description_it: "Funzionalita in evoluzione per l'analisi delle immagini dell'immobile"
-    },
-    {
-      icon: <MessageSquare className="w-6 h-6" />,
-      title: "AI Assistant",
-      title_it: "Assistente sulla Perizia",
-      description: "Guided Q&A capabilities currently evolving",
-      description_it: "Funzionalita in evoluzione per domande guidate sulla perizia e sui punti da approfondire"
+      title_it: "Più rapido del primo screening manuale",
+      description_it: "Riduce il tempo speso a cercare passaggi chiave, senza trasformare la verifica in una black box opaca"
     },
     {
       icon: <AlertTriangle className="w-6 h-6" />,
-      title: "Semaforo Risk System",
+      title_it: "Criticita legali da verificare",
+      description_it: "Blocchi, oneri e punti sensibili emergono in una vista iniziale orientata alla decisione"
+    },
+    {
+      icon: <ScanSearch className="w-6 h-6" />,
+      title_it: "Pensato per decisioni d’asta serie",
+      description_it: "Nasce per chi deve selezionare opportunita e scartare dossier deboli prima di investire tempo professionale"
+    },
+    {
+      icon: <AlertTriangle className="w-6 h-6" />,
       title_it: "Semaforo di Rischio",
-      description: "A fast risk-oriented view for initial screening",
       description_it: "Vista sintetica del livello di rischio per orientare piu rapidamente il pre-screening"
     }
   ];
@@ -116,16 +106,28 @@ const Landing = () => {
         <div className="relative max-w-7xl mx-auto text-center stagger-children">
           <div className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-gold/10 border border-gold/20 mb-8">
             <Sparkles className="w-4 h-4 text-gold" />
-            <span className="text-sm font-mono text-gold">Logica proprietaria, verifiche ancorate alla perizia</span>
+            <span className="text-sm font-mono text-gold">Screening premium, alert ancorati alle pagine della perizia</span>
           </div>
           
           <h1 className="text-5xl md:text-7xl font-serif font-bold text-zinc-100 tracking-tight leading-none mb-6">
-            Analisi strutturata della perizia.
+            Screening della perizia, con prove di pagina.
           </h1>
           
           <p className="text-lg md:text-xl text-zinc-400 max-w-3xl mx-auto mb-12 leading-relaxed">
-            Con focus iniziale sulle perizie d’asta, PeriziaScan trasforma documenti lunghi e opachi in una lettura chiara e tracciabile: semaforo rischio, criticità legali, costi/oneri da verificare e riferimenti puntuali alle pagine.
+            PeriziaScan non e una semplice sintesi AI. Trasforma perizie lunghe e opache in uno screening piu rapido della prima revisione manuale, con alert, criticita e costi da verificare collegati direttamente alle pagine del documento.
           </p>
+
+          <div className="mx-auto mb-12 grid max-w-5xl grid-cols-1 gap-4 md:grid-cols-3">
+            {[
+              'Ogni alert importante e collegato alle pagine della perizia',
+              'Piu difendibile di un riassunto generico',
+              'Pensato per decidere in fretta su aste serie'
+            ].map((item) => (
+              <div key={item} className="section-fade rounded-2xl border border-white/10 bg-black/25 px-5 py-4 text-sm text-zinc-200 backdrop-blur-sm">
+                {item}
+              </div>
+            ))}
+          </div>
           
           <div className="flex flex-col sm:flex-row gap-4 justify-center">
             <Button 
@@ -133,7 +135,7 @@ const Landing = () => {
               data-testid="hero-get-started-btn"
               className="bg-gold text-zinc-950 hover:bg-gold-dim font-semibold px-8 py-6 text-lg gold-glow gold-glow-hover"
             >
-              Carica la tua prima perizia <ArrowRight className="w-5 h-5 ml-2" />
+              Inizia con 12 crediti inclusi <ArrowRight className="w-5 h-5 ml-2" />
             </Button>
             <Button 
               variant="outline"
@@ -147,6 +149,25 @@ const Landing = () => {
         </div>
       </section>
 
+      {/* Fit Strip */}
+      <section className="py-8 px-6">
+        <div className="max-w-7xl mx-auto">
+          <div className="section-fade grid grid-cols-2 gap-3 md:grid-cols-4">
+            {[
+              { icon: <BriefcaseBusiness className="w-4 h-4" />, label: 'Per investitori' },
+              { icon: <BadgeCheck className="w-4 h-4" />, label: 'Per consulenti' },
+              { icon: <Landmark className="w-4 h-4" />, label: 'Per studi legali' },
+              { icon: <ScanSearch className="w-4 h-4" />, label: 'Per screening rapido delle aste' },
+            ].map((item) => (
+              <div key={item.label} className="rounded-2xl border border-zinc-800 bg-zinc-900/70 px-4 py-3 text-sm text-zinc-300 flex items-center justify-center gap-2">
+                <span className="text-gold">{item.icon}</span>
+                <span>{item.label}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      </section>
+
       {/* Semaforo Preview */}
       <section className="py-16 px-6">
         <div className="max-w-7xl mx-auto">
@@ -155,7 +176,7 @@ const Landing = () => {
               Una vista immediata per capire dove concentrare le verifiche iniziali.
             </p>
           </div>
-          <div className="grid grid-cols-3 gap-4 max-w-lg mx-auto">
+          <div className="section-fade grid grid-cols-3 gap-4 max-w-lg mx-auto">
             <div className="bg-red-500/10 border border-red-500/30 rounded-xl p-6 text-center">
               <div className="w-12 h-12 rounded-full bg-red-500 mx-auto mb-3 animate-pulse-slow" />
               <p className="text-red-400 font-mono text-sm font-bold">ALTO RISCHIO</p>
@@ -172,15 +193,15 @@ const Landing = () => {
         </div>
       </section>
 
-      {/* Features */}
+      {/* Why */}
       <section id="features" className="py-24 px-6 bg-zinc-900/30">
         <div className="max-w-7xl mx-auto">
           <div className="text-center mb-16">
             <h2 className="text-3xl md:text-5xl font-serif font-bold text-zinc-100 mb-4">
-              Cosa trovi nel report
+              Perche PeriziaScan
             </h2>
             <p className="text-zinc-400 text-lg">
-              Un'analisi iniziale piu controllabile, costruita per evidenziare i punti da verificare nella perizia
+              Un posizionamento preciso: meno testo generico, piu lettura strutturata utile a una decisione reale
             </p>
           </div>
           
@@ -195,9 +216,6 @@ const Landing = () => {
                 </div>
                 <h3 className="text-xl font-semibold text-zinc-100 mb-2">
                   {feature.title_it}
-                  {(feature.title_it === 'Image Forensics' || feature.title_it === 'Assistente sulla Perizia') && (
-                    <span className="block text-xs font-mono text-zinc-500 mt-2 uppercase tracking-wider">In arrivo</span>
-                  )}
                 </h3>
                 <p className="text-zinc-400 text-sm leading-relaxed">{feature.description_it}</p>
               </div>
@@ -206,29 +224,36 @@ const Landing = () => {
         </div>
       </section>
 
-      {/* How It Works */}
+      {/* Comparison */}
       <section className="py-24 px-6">
         <div className="max-w-7xl mx-auto">
           <div className="text-center mb-16">
             <h2 className="text-3xl md:text-5xl font-serif font-bold text-zinc-100 mb-4">
-              Come Funziona
+              Più utile di un riassunto generico
             </h2>
             <p className="text-zinc-400 text-lg">
-              Un flusso pensato per ridurre il lavoro manuale di lettura e ricerca, senza trasformare la verifica in una black box
+              La differenza non e “piu testo”. La differenza e come viene costruito il risultato.
             </p>
           </div>
           
-          <div className="grid grid-cols-1 md:grid-cols-4 gap-8">
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
             {[
-              { step: "01", title: "Carica la Perizia", desc: "Importa il PDF della perizia per avviare il pre-screening documentale" },
-              { step: "02", title: "Strutturazione dei Dati", desc: "Il sistema organizza le informazioni rilevanti e i punti da controllare" },
-              { step: "03", title: "Rischi, Criticita e Costi", desc: "Ricevi una sintesi strutturata con semaforo, criticita legali e oneri da verificare" },
-              { step: "04", title: "Controllo del Report", desc: "Verifica riferimenti di pagina e conclusioni supportate, dove applicabile, da calcoli trasparenti" }
+              {
+                title: "Riassunto generico",
+                desc: "Può sembrare veloce, ma spesso non ti aiuta a difendere il perche di un alert o a ritrovare il passaggio utile.",
+              },
+              {
+                title: "Revisione manuale iniziale",
+                desc: "Resta indispensabile nei casi complessi, ma richiede piu tempo gia nella fase di primo filtraggio.",
+              },
+              {
+                title: "PeriziaScan",
+                desc: "Piu rapido della prima lettura manuale e piu difendibile di una sintesi generica, perche ogni punto importante resta agganciato al documento.",
+              }
             ].map((item, index) => (
-              <div key={index} className="text-center">
-                <div className="text-6xl font-serif font-bold text-gold/20 mb-4">{item.step}</div>
-                <h3 className="text-xl font-semibold text-zinc-100 mb-2">{item.title}</h3>
-                <p className="text-zinc-400 text-sm">{item.desc}</p>
+              <div key={index} className="section-fade rounded-3xl border border-zinc-800 bg-zinc-900/70 p-8">
+                <h3 className="text-2xl font-serif font-bold text-zinc-100 mb-4">{item.title}</h3>
+                <p className="text-zinc-400 leading-relaxed">{item.desc}</p>
               </div>
             ))}
           </div>
@@ -243,58 +268,18 @@ const Landing = () => {
               Accesso e Pacchetti
             </h2>
             <p className="text-zinc-400 text-lg">
-              Una sintesi commerciale pulita dei pacchetti pubblici. Il dettaglio completo di crediti, validita e perimetro del prodotto attuale e disponibile nella pagina Pacchetti.
+              I crediti restano il motore del consumo, ma il valore va letto prima nel metodo: evidenze di pagina, screening piu rapido e posizionamento chiaro per ogni piano.
             </p>
           </div>
           <PublicPlansGrid />
 
           <div className="mt-10 flex flex-col items-center gap-4 text-center">
             <p className="max-w-3xl text-sm text-zinc-500">
-              Il valore attuale dei pacchetti riguarda il core product documentale. Assistente sulla Perizia e Image Forensics non sono inclusi oggi nel valore attivo dei pacchetti.
+              Free serve a entrare senza attrito. Starter e un top-up occasionale. Solo e il piano centrale per chi analizza sul serio. Pro e pensato per uso frequente. Studio resta su offerta manuale.
             </p>
             <Button asChild variant="outline" className="border-gold/30 text-gold hover:bg-gold/10 px-6">
               <Link to="/pacchetti">Vedi dettagli pacchetti e crediti</Link>
             </Button>
-          </div>
-        </div>
-      </section>
-
-      {/* In Arrivo */}
-      <section className="py-24 px-6">
-        <div className="max-w-5xl mx-auto">
-          <div className="text-center mb-12">
-            <h2 className="text-3xl md:text-5xl font-serif font-bold text-zinc-100 mb-4">
-              In Arrivo
-            </h2>
-            <p className="text-zinc-400 text-lg max-w-3xl mx-auto">
-              Alcune funzionalita sono gia presenti in forma iniziale, ma non rappresentano oggi il nucleo principale della proposta PeriziaScan.
-            </p>
-          </div>
-
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            <div className="bg-zinc-900/60 border border-zinc-800 rounded-2xl p-8">
-              <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-zinc-800 text-zinc-400 text-xs font-mono uppercase tracking-wider mb-4">
-                Prossimamente
-              </div>
-              <h3 className="text-2xl font-serif font-bold text-zinc-100 mb-3">
-                Assistente sulla Perizia
-              </h3>
-              <p className="text-zinc-400 leading-relaxed">
-                Supporto conversazionale per interrogare il contenuto della perizia e approfondire i punti che richiedono controllo professionale.
-              </p>
-            </div>
-
-            <div className="bg-zinc-900/60 border border-zinc-800 rounded-2xl p-8">
-              <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-zinc-800 text-zinc-400 text-xs font-mono uppercase tracking-wider mb-4">
-                Prossimamente
-              </div>
-              <h3 className="text-2xl font-serif font-bold text-zinc-100 mb-3">
-                Image Forensics sulle Immagini Immobile
-              </h3>
-              <p className="text-zinc-400 leading-relaxed">
-                Funzionalita dedicate alla lettura delle immagini dell'immobile per affiancare l'analisi documentale, senza sostituire il sopralluogo o la verifica tecnica.
-              </p>
-            </div>
           </div>
         </div>
       </section>
@@ -304,17 +289,17 @@ const Landing = () => {
         <div className="max-w-4xl mx-auto text-center">
           <Building2 className="w-16 h-16 text-gold mx-auto mb-8" />
           <h2 className="text-3xl md:text-5xl font-serif font-bold text-zinc-100 mb-6">
-            Inizia dalla perizia, non dalle ipotesi
+            Inizia dalla perizia, non dal rumore
           </h2>
           <p className="text-zinc-400 text-lg mb-8">
-            Carica una perizia, individua piu rapidamente le criticita principali e controlla i riferimenti direttamente nel report. Meno tempo perso nella ricerca iniziale, piu efficienza nel pre-screening.
+            Carica una perizia, individua piu rapidamente le criticita principali e controlla i riferimenti direttamente nel report. Meno tempo perso nella ricerca iniziale, piu criterio nel pre-screening.
           </p>
           <Button 
             onClick={openLoginNotice}
             data-testid="cta-start-btn"
             className="bg-gold text-zinc-950 hover:bg-gold-dim font-semibold px-12 py-6 text-lg gold-glow"
           >
-            Avvia l'analisi della perizia
+            Prova Free con 12 crediti
           </Button>
         </div>
       </section>

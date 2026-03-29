@@ -127,7 +127,7 @@ class User(BaseModel):
     plan: str = "free"
     is_master_admin: bool = False
     quota: Dict[str, int] = Field(default_factory=lambda: {
-        "perizia_scans_remaining": 4,
+        "perizia_scans_remaining": 12,
         "image_scans_remaining": 0,
         "assistant_messages_remaining": 0
     })
@@ -292,14 +292,14 @@ SUBSCRIPTION_PLANS = {
         name_it="Free",
         price=0.0,
         plan_type="free",
-        plan_type_label_it="Free",
+        plan_type_label_it="Ingresso",
         price_suffix_it="",
-        credits=4,
-        credits_label_it="4 trial credits",
-        validity_label_it="For one short perizia up to 20 pages",
-        support_level_it="Basic support",
-        usage_hint_it="Try the product on a short document",
-        cta_label_it="Start free",
+        credits=12,
+        credits_label_it="12 crediti inclusi",
+        validity_label_it="Fino a 3 perizie standard da 1-20 pagine",
+        support_level_it="Accesso iniziale in piattaforma",
+        usage_hint_it="Prova il metodo su perizie standard",
+        cta_label_it="Inizia gratis",
         features=[
             "Perizia analysis up to 20 pages",
             "Risk traffic light",
@@ -309,14 +309,14 @@ SUBSCRIPTION_PLANS = {
             "Basic export",
         ],
         features_it=[
-            "Analisi perizia fino a 20 pagine",
+            "Fino a 3 perizie standard da 1-20 pagine",
             "Semaforo rischio",
             "Criticita legali da verificare",
             "Costi e oneri da verificare",
             "Riferimenti di pagina e report strutturato",
             "Export base",
         ],
-        quota={"perizia_scans_remaining": 4, "image_scans_remaining": 0, "assistant_messages_remaining": 0},
+        quota={"perizia_scans_remaining": 12, "image_scans_remaining": 0, "assistant_messages_remaining": 0},
     ),
     "starter": SubscriptionPlan(
         plan_id="starter",

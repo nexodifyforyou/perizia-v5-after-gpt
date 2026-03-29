@@ -11,7 +11,7 @@ const Pacchetti = () => {
     <PublicSiteChrome
       eyebrow="Pacchetti"
       title="Accesso, crediti e perimetro commerciale del prodotto attuale"
-      description="La pagina Pacchetti e il riferimento pubblico per capire come viene misurato l’utilizzo di PeriziaScan, quali risultati sono inclusi oggi nel valore del prodotto e quali funzioni restano fuori dal perimetro commerciale attuale."
+      description="La pagina Pacchetti spiega come viene misurato l’utilizzo di PeriziaScan e quali risultati rendono il prodotto piu utile di una semplice sintesi AI: alert collegati alle pagine, screening strutturato e valore documentale piu difendibile."
       actions={
         <div className="flex flex-col sm:flex-row gap-4">
           <Button asChild className="bg-gold text-zinc-950 hover:bg-gold-dim font-semibold px-6">
@@ -26,7 +26,7 @@ const Pacchetti = () => {
       <PublicSection
         eyebrow="Panoramica"
         title="Panoramica dei piani pubblici"
-        description="I pacchetti definiscono crediti, validita e livello di utilizzo previsto. I dati esposti qui sono allineati al catalogo pubblico servito oggi dalla piattaforma."
+        description="I pacchetti definiscono crediti, validita e livello di utilizzo previsto. Free rimuove l’attrito iniziale, Starter serve come top-up, Solo e il piano centrale, Pro copre uso frequente e Studio resta su offerta manuale."
       >
         <PublicPlansGrid detailed />
       </PublicSection>
@@ -34,7 +34,7 @@ const Pacchetti = () => {
       <PublicSection
         eyebrow="Crediti"
         title="Come funzionano i crediti"
-        description="Il consumo e legato alla fascia pagine del documento analizzato. La logica e commerciale e dichiarata in modo esplicito."
+        description="Il consumo e legato alla fascia pagine del documento analizzato. Il piano Free include 12 crediti, cioe fino a 3 perizie standard da 1-20 pagine."
       >
         <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
           {creditBands.map((band) => (

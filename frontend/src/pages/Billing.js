@@ -68,7 +68,7 @@ const formatQuotaLabel = (field) => QUOTA_LABELS[field] || 'Credito';
 const formatEntryTypeLabel = (type) => ENTRY_TYPE_LABELS[type] || 'Movimento';
 const formatReferenceLabel = (type) => REFERENCE_TYPE_LABELS[type] || null;
 const FALLBACK_PLAN_TYPE_LABELS = {
-  free: 'Accesso iniziale',
+  free: 'Ingresso',
   starter: 'Pacchetto extra',
   solo: 'Abbonamento mensile',
   pro: 'Abbonamento mensile',
@@ -76,7 +76,7 @@ const FALLBACK_PLAN_TYPE_LABELS = {
   enterprise: 'Interno',
 };
 const FALLBACK_SUPPORT_LABELS = {
-  free: 'Supporto base',
+  free: 'Accesso iniziale in piattaforma',
   starter: 'Supporto via email',
   solo: 'Supporto standard',
   pro: 'Supporto prioritario',
@@ -84,13 +84,13 @@ const FALLBACK_SUPPORT_LABELS = {
   enterprise: 'Supporto dedicato',
 };
 const FALLBACK_VALIDITY_LABELS = {
-  free: 'Accesso iniziale non ricorrente',
+  free: 'Fino a 3 perizie standard da 1-20 pagine',
   starter: 'Crediti extra separati dal piano mensile',
   solo: 'I crediti mensili si rinnovano a ogni ciclo',
   pro: 'I crediti mensili si rinnovano a ogni ciclo',
 };
 const FALLBACK_CREDITS_LABELS = {
-  free: '4 crediti iniziali',
+  free: '12 crediti inclusi',
   starter: '8 crediti extra',
   solo: '28 crediti mensili',
   pro: '84 crediti mensili',
@@ -101,6 +101,13 @@ const PLAN_NAME_OVERRIDES = {
 };
 const PLAN_SUPPORT_OVERRIDES = {
   studio: 'Offerta dedicata con attivazione assistita',
+};
+const PLAN_POSITIONING_COPY = {
+  free: 'Ingresso rapido per provare il metodo su documenti standard.',
+  starter: 'Top-up per uso occasionale senza cambiare il piano corrente.',
+  solo: 'Piano consigliato per investitori seri e screening ricorrente.',
+  pro: 'Per utilizzo professionale ad alta frequenza.',
+  studio: 'Percorso manuale per esigenze dedicate.',
 };
 const TERMINAL_SUBSCRIPTION_STATUSES = ['canceled', 'cancelled', 'ended', 'incomplete_expired', 'unpaid'];
 
@@ -951,11 +958,11 @@ const Billing = () => {
               <div
                 key={plan.plan_id}
                 data-testid={`billing-plan-${plan.plan_id}`}
-                className={`relative bg-zinc-900 border rounded-2xl p-6 transition-all duration-300 ${
+                className={`plan-surface relative bg-zinc-900 border rounded-2xl p-6 transition-all duration-300 ${
                   plan.plan_id === accountState.planId
                     ? 'border-gold ring-2 ring-gold/20'
                     : plan.plan_id === 'solo'
-                      ? 'border-indigo-500/50'
+                      ? 'plan-surface-hero border-gold/50 shadow-[0_18px_60px_-32px_rgba(212,175,55,0.45)]'
                       : 'border-zinc-800 hover:border-zinc-600'
                 }`}
               >
@@ -963,6 +970,13 @@ const Billing = () => {
                   <div className="absolute -top-3 left-1/2 -translate-x-1/2">
                     <span className="px-3 py-1 bg-gold text-zinc-950 text-xs font-bold rounded-full">
                       ATTIVO
+                    </span>
+                  </div>
+                )}
+                {plan.plan_id === 'solo' && plan.plan_id !== accountState.planId && (
+                  <div className="absolute -top-3 left-1/2 -translate-x-1/2">
+                    <span className="px-3 py-1 bg-gold/15 border border-gold/30 text-gold text-xs font-bold rounded-full">
+                      CONSIGLIATO
                     </span>
                   </div>
                 )}
@@ -998,6 +1012,14 @@ const Billing = () => {
                   )}
                 </div>
 
+                <div className={`mb-6 rounded-2xl border p-4 text-sm leading-relaxed ${
+                  plan.plan_id === 'solo'
+                    ? 'border-gold/20 bg-gold/10 text-zinc-200'
+                    : 'border-zinc-800 bg-zinc-950/70 text-zinc-300'
+                }`}>
+                  {PLAN_POSITIONING_COPY[plan.plan_id] || 'Dettaglio piano disponibile in piattaforma.'}
+                </div>
+
                 <ul className="space-y-3 mb-6">
                   {plan.features_it.map((feature, i) => (
                     <li key={i} className="flex items-start gap-3 text-sm text-zinc-300">
@@ -1022,7 +1044,7 @@ const Billing = () => {
                         disabled={Boolean(checkoutLoadingPlanId) || Boolean(subscriptionActionLoading) || cta.disabled}
                         className={`w-full ${
                           plan.plan_id === 'solo'
-                            ? 'bg-indigo-600 hover:bg-indigo-700 text-white'
+                            ? 'bg-gold text-zinc-950 hover:bg-gold-dim'
                             : 'bg-gold text-zinc-950 hover:bg-gold-dim'
                         } ${cta.disabled ? 'bg-zinc-800 text-zinc-500 cursor-not-allowed hover:bg-zinc-800' : ''}`}
                       >

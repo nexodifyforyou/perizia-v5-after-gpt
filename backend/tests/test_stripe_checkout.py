@@ -85,7 +85,7 @@ def _subscription_state(fake_db, user_id="user_checkout"):
     return _user_doc(fake_db, user_id).get("subscription_state") or {}
 
 
-def _seed_default_checkout_user(fake_db, *, plan="free", credits=4):
+def _seed_default_checkout_user(fake_db, *, plan="free", credits=12):
     return _seed_session(fake_db, {
         "user_id": "user_checkout",
         "email": "checkout@example.com",
@@ -343,7 +343,7 @@ async def test_checkout_status_is_read_only_and_session_specific(fake_db, monkey
     assert failed_response.status_code == 200
     assert success_response.json()["session_result"] == "success"
     assert failed_response.json()["session_result"] == "failed"
-    assert _user_doc(fake_db)["quota"]["perizia_scans_remaining"] == 4
+    assert _user_doc(fake_db)["quota"]["perizia_scans_remaining"] == 12
     non_baseline_entries = [item for item in fake_db.credit_ledger.items if item["entry_type"] != "opening_balance"]
     assert non_baseline_entries == []
 
@@ -429,7 +429,7 @@ async def test_starter_webhook_does_not_grant_when_payment_intent_not_succeeded(
         response = await client.post("/api/webhook/stripe", content=b"{}", headers={"Stripe-Signature": "sig_test"})
 
     assert response.status_code == 200
-    assert _user_doc(fake_db)["quota"]["perizia_scans_remaining"] == 4
+    assert _user_doc(fake_db)["quota"]["perizia_scans_remaining"] == 12
     assert [item for item in fake_db.credit_ledger.items if item["entry_type"] == "plan_purchase"] == []
     assert fake_db.billing_records.items[0]["status"] == "failed"
     assert fake_db.billing_records.items[0]["invoice_status"] == "failed"
@@ -495,13 +495,13 @@ async def test_pack_purchase_increases_extra_bucket_and_is_idempotent(fake_db, m
     wallet = _perizia_wallet(fake_db)
     assert first.status_code == 200
     assert second.status_code == 200
-    assert _user_doc(fake_db)["quota"]["perizia_scans_remaining"] == 12
+    assert _user_doc(fake_db)["quota"]["perizia_scans_remaining"] == 20
     assert wallet["monthly_remaining"] == 0
-    assert wallet["extra_remaining"] == 12
-    assert wallet["total_available"] == 12
+    assert wallet["extra_remaining"] == 20
+    assert wallet["total_available"] == 20
     assert len(wallet["pack_grants"]) == 2
     assert wallet["pack_grants"][0]["source"] == "legacy_migration"
-    assert wallet["pack_grants"][0]["amount_remaining"] == 4
+    assert wallet["pack_grants"][0]["amount_remaining"] == 12
     assert wallet["pack_grants"][1]["reference_id"] == "cs_test_starter"
     assert wallet["pack_grants"][1]["amount_remaining"] == 8
     assert wallet["pack_grants"][1]["expires_at"] is not None
@@ -545,7 +545,7 @@ async def test_starter_webhook_skips_when_user_resolution_conflicts(fake_db, mon
         "plan": "free",
         "is_master_admin": False,
         "quota": {
-            "perizia_scans_remaining": 4,
+            "perizia_scans_remaining": 12,
             "image_scans_remaining": 0,
             "assistant_messages_remaining": 0,
         },
@@ -583,8 +583,8 @@ async def test_starter_webhook_skips_when_user_resolution_conflicts(fake_db, mon
 
     assert response.status_code == 200
     users = {item["user_id"]: item for item in fake_db.users.items}
-    assert users["user_checkout"]["quota"]["perizia_scans_remaining"] == 4
-    assert users["user_other"]["quota"]["perizia_scans_remaining"] == 4
+    assert users["user_checkout"]["quota"]["perizia_scans_remaining"] == 12
+    assert users["user_other"]["quota"]["perizia_scans_remaining"] == 12
     assert [item for item in fake_db.credit_ledger.items if item["entry_type"] == "plan_purchase"] == []
     assert fake_db.billing_records.items[0]["status"] == "pending"
     assert fake_db.billing_records.items[0]["metadata"]["manual_review_required"] is True
@@ -652,7 +652,7 @@ async def test_old_successful_pack_session_is_not_confused_with_new_failed_sessi
 
     assert first.status_code == 200
     assert second.status_code == 200
-    assert _user_doc(fake_db)["quota"]["perizia_scans_remaining"] == 12
+    assert _user_doc(fake_db)["quota"]["perizia_scans_remaining"] == 20
     ledger_entries = [item for item in fake_db.credit_ledger.items if item["entry_type"] == "plan_purchase"]
     assert len(ledger_entries) == 1
     assert ledger_entries[0]["reference_id"] == "cs_test_starter_old_success"
@@ -768,7 +768,7 @@ async def test_free_user_pack_then_solo_activation_preserves_extra_and_is_idempo
 
     monkeypatch.setitem(sys.modules, "stripe", FakeStripeModule)
 
-    _seed_default_checkout_user(fake_db, plan="free", credits=4)
+    _seed_default_checkout_user(fake_db, plan="free", credits=12)
     initial_user = _user_doc(fake_db)
     initial_normalized = await server._apply_normalized_account_state(initial_user, persist=True)
     initial_wallet = initial_normalized["perizia_credits"]
@@ -861,19 +861,19 @@ async def test_free_user_pack_then_solo_activation_preserves_extra_and_is_idempo
     assert second_invoice.status_code == 200
 
     assert initial_wallet["monthly_remaining"] == 0
-    assert initial_wallet["extra_remaining"] == 4
-    assert initial_wallet["total_available"] == 4
+    assert initial_wallet["extra_remaining"] == 12
+    assert initial_wallet["total_available"] == 12
 
     assert pack_wallet["monthly_remaining"] == 0
-    assert pack_wallet["extra_remaining"] == 12
-    assert pack_wallet["total_available"] == 12
+    assert pack_wallet["extra_remaining"] == 20
+    assert pack_wallet["total_available"] == 20
     assert len([item for item in fake_db.credit_ledger.items if item["entry_type"] == "plan_purchase"]) == 1
 
     assert _user_doc(fake_db)["plan"] == "solo"
-    assert _user_doc(fake_db)["quota"]["perizia_scans_remaining"] == 40
+    assert _user_doc(fake_db)["quota"]["perizia_scans_remaining"] == 48
     assert solo_wallet["monthly_remaining"] == 28
-    assert solo_wallet["extra_remaining"] == 12
-    assert solo_wallet["total_available"] == 40
+    assert solo_wallet["extra_remaining"] == 20
+    assert solo_wallet["total_available"] == 48
     assert solo_wallet["processed_invoice_ids"] == ["in_pack_then_solo_1"]
     assert len([item for item in fake_db.credit_ledger.items if item["entry_type"] == "subscription_reset"]) == 1
 
@@ -1153,8 +1153,8 @@ async def test_replayed_invoice_paid_does_not_create_duplicate_paid_billing_reco
     assert second_invoice.status_code == 200
     assert _user_doc(fake_db)["plan"] == "pro"
     assert wallet["monthly_remaining"] == 84
-    assert wallet["extra_remaining"] == 4
-    assert wallet["total_available"] == 88
+    assert wallet["extra_remaining"] == 12
+    assert wallet["total_available"] == 96
     subscription_entries = [item for item in fake_db.credit_ledger.items if item["entry_type"] == "subscription_reset"]
     assert len(subscription_entries) == 1
     assert subscription_entries[0]["reference_id"] == "in_test_pro_renewal_1"
@@ -1371,7 +1371,7 @@ async def test_checkout_session_completed_for_subscription_does_not_grant_or_mut
 
     monkeypatch.setitem(sys.modules, "stripe", FakeStripeModule)
 
-    _seed_default_checkout_user(fake_db, plan="free", credits=4)
+    _seed_default_checkout_user(fake_db, plan="free", credits=12)
     initial_user = _user_doc(fake_db)
     initial_normalized = await server._apply_normalized_account_state(initial_user, persist=True)
     initial_wallet = dict(initial_normalized["perizia_credits"])
@@ -1607,14 +1607,14 @@ async def test_invoice_paid_conflicting_metadata_and_transaction_context_fails_c
 
     monkeypatch.setitem(sys.modules, "stripe", FakeStripeModule)
 
-    _seed_default_checkout_user(fake_db, plan="free", credits=4)
+    _seed_default_checkout_user(fake_db, plan="free", credits=12)
     _seed_session(fake_db, {
         "user_id": "user_other",
         "email": "other@example.com",
         "name": "Other User",
         "plan": "free",
         "is_master_admin": False,
-        "quota": {"perizia_scans_remaining": 4, "image_scans_remaining": 0, "assistant_messages_remaining": 0},
+        "quota": {"perizia_scans_remaining": 12, "image_scans_remaining": 0, "assistant_messages_remaining": 0},
     }, session_token="sess_other")
     _seed_pending_checkout(fake_db, user_id="user_checkout", plan_id="solo", session_id="cs_conflict_invoice", transaction_id="txn_conflict_invoice", billing_record_id="bill_conflict_invoice")
     fake_db.payment_transactions.items[0]["stripe_subscription_id"] = "sub_conflict_invoice"
@@ -1642,8 +1642,8 @@ async def test_invoice_paid_conflicting_metadata_and_transaction_context_fails_c
     assert response.status_code == 200
     assert checkout_user["plan"] == "free"
     assert other_user["plan"] == "free"
-    assert checkout_user["quota"]["perizia_scans_remaining"] == 4
-    assert other_user["quota"]["perizia_scans_remaining"] == 4
+    assert checkout_user["quota"]["perizia_scans_remaining"] == 12
+    assert other_user["quota"]["perizia_scans_remaining"] == 12
     assert _ledger_entries(fake_db, entry_type="subscription_reset") == []
 
 
@@ -1727,7 +1727,7 @@ async def test_pro_user_cannot_buy_solo_but_can_still_buy_pack_and_free_user_can
         "name": "Free Two",
         "plan": "free",
         "is_master_admin": False,
-        "quota": {"perizia_scans_remaining": 4, "image_scans_remaining": 0, "assistant_messages_remaining": 0},
+        "quota": {"perizia_scans_remaining": 12, "image_scans_remaining": 0, "assistant_messages_remaining": 0},
     }, session_token="sess_free_two")
 
     transport = httpx.ASGITransport(app=server.app)
@@ -1949,7 +1949,7 @@ async def test_pack_replay_ten_times_cannot_mint_credits_twice(fake_db, monkeypa
 
     monkeypatch.setitem(sys.modules, "stripe", FakeStripeModule)
 
-    _seed_default_checkout_user(fake_db, plan="free", credits=4)
+    _seed_default_checkout_user(fake_db, plan="free", credits=12)
     _seed_pending_checkout(fake_db, user_id="user_checkout", plan_id="starter", session_id="cs_pack_replay_10", transaction_id="txn_pack_replay_10", billing_record_id="bill_pack_replay_10")
     next_event = _stripe_event("checkout.session.completed", {
         "id": "cs_pack_replay_10",
@@ -1968,12 +1968,12 @@ async def test_pack_replay_ten_times_cannot_mint_credits_twice(fake_db, monkeypa
     wallet = _assert_wallet_exact(
         fake_db,
         monthly_remaining=0,
-        extra_remaining=12,
-        total_available=12,
+        extra_remaining=20,
+        total_available=20,
         monthly_plan_id=None,
         processed_invoice_ids=[],
         pack_grants=[
-            {"source": "legacy_migration", "reference_id": "user_checkout", "amount_remaining": 4},
+            {"source": "legacy_migration", "reference_id": "user_checkout", "amount_remaining": 12},
             {"reference_id": "cs_pack_replay_10", "amount_granted": 8, "amount_remaining": 8, "source": "stripe_checkout", "plan_code": "starter"},
         ],
     )
@@ -2054,7 +2054,7 @@ async def test_pack_failure_paths_do_not_grant_paid_state_or_credits(fake_db, mo
 
     assert response.status_code == 200
     wallet = _perizia_wallet(fake_db)
-    assert wallet["total_available"] == 4
+    assert wallet["total_available"] == 12
     assert _ledger_entries(fake_db, entry_type="plan_purchase") == []
     billing = _billing_records(fake_db, checkout_reference=session_object["id"])[0]
     txn = next(item for item in fake_db.payment_transactions.items if item["session_id"] == session_object["id"])
@@ -2173,14 +2173,14 @@ async def test_invoice_paid_conflict_between_metadata_and_transaction_user_fails
 
     monkeypatch.setitem(sys.modules, "stripe", FakeStripeModule)
 
-    _seed_default_checkout_user(fake_db, plan="free", credits=4)
+    _seed_default_checkout_user(fake_db, plan="free", credits=12)
     _seed_session(fake_db, {
         "user_id": "user_other",
         "email": "other@example.com",
         "name": "Other User",
         "plan": "free",
         "is_master_admin": False,
-        "quota": {"perizia_scans_remaining": 4, "image_scans_remaining": 0, "assistant_messages_remaining": 0},
+        "quota": {"perizia_scans_remaining": 12, "image_scans_remaining": 0, "assistant_messages_remaining": 0},
     }, session_token="sess_other")
     _seed_pending_checkout(fake_db, user_id="user_checkout", plan_id="solo", session_id="cs_conflict_txn_user", transaction_id="txn_conflict_txn_user", billing_record_id="bill_conflict_txn_user")
     fake_db.payment_transactions.items[0]["stripe_subscription_id"] = "sub_conflict_txn_user"
@@ -2203,8 +2203,8 @@ async def test_invoice_paid_conflict_between_metadata_and_transaction_user_fails
     assert response.status_code == 200
     assert _user_doc(fake_db, "user_checkout")["plan"] == "free"
     assert _user_doc(fake_db, "user_other")["plan"] == "free"
-    assert _user_doc(fake_db, "user_checkout")["quota"]["perizia_scans_remaining"] == 4
-    assert _user_doc(fake_db, "user_other")["quota"]["perizia_scans_remaining"] == 4
+    assert _user_doc(fake_db, "user_checkout")["quota"]["perizia_scans_remaining"] == 12
+    assert _user_doc(fake_db, "user_other")["quota"]["perizia_scans_remaining"] == 12
     assert _ledger_entries(fake_db, entry_type="subscription_reset") == []
     paid_bills = [item for item in fake_db.billing_records.items if item["status"] == "paid"]
     assert paid_bills == []
@@ -2231,14 +2231,14 @@ async def test_invoice_paid_conflict_between_metadata_and_customer_mapping_fails
 
     monkeypatch.setitem(sys.modules, "stripe", FakeStripeModule)
 
-    _seed_default_checkout_user(fake_db, plan="free", credits=4)
+    _seed_default_checkout_user(fake_db, plan="free", credits=12)
     _seed_session(fake_db, {
         "user_id": "user_other",
         "email": "other@example.com",
         "name": "Other User",
         "plan": "free",
         "is_master_admin": False,
-        "quota": {"perizia_scans_remaining": 4, "image_scans_remaining": 0, "assistant_messages_remaining": 0},
+        "quota": {"perizia_scans_remaining": 12, "image_scans_remaining": 0, "assistant_messages_remaining": 0},
     }, session_token="sess_other")
     _seed_pending_checkout(fake_db, user_id="user_checkout", plan_id="solo", session_id="cs_conflict_customer_map", transaction_id="txn_conflict_customer_map", billing_record_id="bill_conflict_customer_map")
     fake_db.payment_transactions.items[0]["stripe_customer_id"] = "cus_conflict_customer_map"
@@ -2374,7 +2374,7 @@ async def test_hostile_sequence_pack_refresh_replays_failures_reads_and_debits(f
 
     monkeypatch.setitem(sys.modules, "stripe", FakeStripeModule)
 
-    token = _seed_default_checkout_user(fake_db, plan="free", credits=4)
+    token = _seed_default_checkout_user(fake_db, plan="free", credits=12)
     _seed_pending_checkout(fake_db, user_id="user_checkout", plan_id="starter", session_id="cs_seq_pack_ok", transaction_id="txn_seq_pack_ok", billing_record_id="bill_seq_pack_ok")
     _seed_pending_checkout(fake_db, user_id="user_checkout", plan_id="starter", session_id="cs_seq_pack_fail", transaction_id="txn_seq_pack_fail", billing_record_id="bill_seq_pack_fail")
     _seed_pending_checkout(fake_db, user_id="user_checkout", plan_id="solo", session_id="cs_seq_solo", transaction_id="txn_seq_solo", billing_record_id="bill_seq_solo")
@@ -2392,12 +2392,12 @@ async def test_hostile_sequence_pack_refresh_replays_failures_reads_and_debits(f
         _assert_wallet_exact(
             fake_db,
             monthly_remaining=0,
-            extra_remaining=12,
-            total_available=12,
+            extra_remaining=20,
+            total_available=20,
             monthly_plan_id=None,
             processed_invoice_ids=[],
             pack_grants=[
-                {"source": "legacy_migration", "reference_id": "user_checkout", "amount_remaining": 4},
+                {"source": "legacy_migration", "reference_id": "user_checkout", "amount_remaining": 12},
                 {"reference_id": "cs_seq_pack_ok", "amount_remaining": 8},
             ],
         )
@@ -2413,12 +2413,12 @@ async def test_hostile_sequence_pack_refresh_replays_failures_reads_and_debits(f
         _assert_wallet_exact(
             fake_db,
             monthly_remaining=0,
-            extra_remaining=12,
-            total_available=12,
+            extra_remaining=20,
+            total_available=20,
             monthly_plan_id=None,
             processed_invoice_ids=[],
             pack_grants=[
-                {"source": "legacy_migration", "reference_id": "user_checkout", "amount_remaining": 4},
+                {"source": "legacy_migration", "reference_id": "user_checkout", "amount_remaining": 12},
                 {"reference_id": "cs_seq_pack_ok", "amount_remaining": 8},
             ],
         )
@@ -2452,22 +2452,22 @@ async def test_hostile_sequence_pack_refresh_replays_failures_reads_and_debits(f
         _assert_wallet_exact(
             fake_db,
             monthly_remaining=28,
-            extra_remaining=12,
-            total_available=40,
+            extra_remaining=20,
+            total_available=48,
             monthly_plan_id="solo",
             processed_invoice_ids=["in_seq_solo_1"],
-            pack_grants=[{"reference_id": "user_checkout", "amount_remaining": 4}, {"reference_id": "cs_seq_pack_ok", "amount_remaining": 8}],
+            pack_grants=[{"reference_id": "user_checkout", "amount_remaining": 12}, {"reference_id": "cs_seq_pack_ok", "amount_remaining": 8}],
         )
 
         assert (await client.post("/api/webhook/stripe", content=b"{}", headers={"Stripe-Signature": "sig_test"})).status_code == 200
         _assert_wallet_exact(
             fake_db,
             monthly_remaining=28,
-            extra_remaining=12,
-            total_available=40,
+            extra_remaining=20,
+            total_available=48,
             monthly_plan_id="solo",
             processed_invoice_ids=["in_seq_solo_1"],
-            pack_grants=[{"reference_id": "user_checkout", "amount_remaining": 4}, {"reference_id": "cs_seq_pack_ok", "amount_remaining": 8}],
+            pack_grants=[{"reference_id": "user_checkout", "amount_remaining": 12}, {"reference_id": "cs_seq_pack_ok", "amount_remaining": 8}],
         )
 
         user = server.User(**await server._apply_normalized_account_state(_user_doc(fake_db), persist=True))
@@ -2482,11 +2482,11 @@ async def test_hostile_sequence_pack_refresh_replays_failures_reads_and_debits(f
         _assert_wallet_exact(
             fake_db,
             monthly_remaining=0,
-            extra_remaining=9,
-            total_available=9,
+            extra_remaining=17,
+            total_available=17,
             monthly_plan_id="solo",
             processed_invoice_ids=["in_seq_solo_1"],
-            pack_grants=[{"reference_id": "cs_seq_pack_ok", "amount_remaining": 5}, {"reference_id": "user_checkout", "amount_remaining": 4}],
+            pack_grants=[{"reference_id": "cs_seq_pack_ok", "amount_remaining": 5}, {"reference_id": "user_checkout", "amount_remaining": 12}],
         )
 
         next_event = _stripe_event("invoice.payment_failed", {
@@ -2500,11 +2500,11 @@ async def test_hostile_sequence_pack_refresh_replays_failures_reads_and_debits(f
         _assert_wallet_exact(
             fake_db,
             monthly_remaining=0,
-            extra_remaining=9,
-            total_available=9,
+            extra_remaining=17,
+            total_available=17,
             monthly_plan_id="solo",
             processed_invoice_ids=["in_seq_solo_1"],
-            pack_grants=[{"reference_id": "cs_seq_pack_ok", "amount_remaining": 5}, {"reference_id": "user_checkout", "amount_remaining": 4}],
+            pack_grants=[{"reference_id": "cs_seq_pack_ok", "amount_remaining": 5}, {"reference_id": "user_checkout", "amount_remaining": 12}],
         )
 
     assert len(_ledger_entries(fake_db, entry_type="plan_purchase", user_id="user_checkout")) == 1
@@ -2544,7 +2544,7 @@ async def test_subscription_lifecycle_state_is_exposed_and_synced(fake_db, monke
         Subscription = FakeSubscriptionApi
 
     monkeypatch.setitem(sys.modules, "stripe", FakeStripeModule)
-    token = _seed_default_checkout_user(fake_db, plan="free", credits=4)
+    token = _seed_default_checkout_user(fake_db, plan="free", credits=12)
     _seed_pending_checkout(fake_db, user_id="user_checkout", plan_id="solo", session_id="cs_state_solo", transaction_id="txn_state_solo", billing_record_id="bill_state_solo")
 
     transport = httpx.ASGITransport(app=server.app)
@@ -2883,7 +2883,7 @@ async def test_subscription_update_conflict_fails_closed_and_does_not_mutate_wro
         "name": "Other",
         "plan": "free",
         "is_master_admin": False,
-        "quota": {"perizia_scans_remaining": 4, "image_scans_remaining": 0, "assistant_messages_remaining": 0},
+        "quota": {"perizia_scans_remaining": 12, "image_scans_remaining": 0, "assistant_messages_remaining": 0},
     }, session_token="sess_other")
     _user_doc(fake_db)["subscription_state"] = {
         "stripe_customer_id": "cus_conflict",

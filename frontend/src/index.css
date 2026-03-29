@@ -114,6 +114,19 @@
     @apply border-zinc-600 transform -translate-y-1;
 }
 
+.section-fade {
+    animation: slide-up 0.7s ease-out both;
+}
+
+.plan-surface {
+    box-shadow: 0 18px 48px -40px rgba(0, 0, 0, 0.9);
+}
+
+.plan-surface-hero {
+    transform: translateY(-2px);
+    box-shadow: 0 22px 70px -36px rgba(212, 175, 55, 0.35);
+}
+
 /* Scrollbar styling */
 ::-webkit-scrollbar {
     width: 8px;
