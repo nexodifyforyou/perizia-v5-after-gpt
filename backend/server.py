@@ -1774,6 +1774,40 @@ def _legacy_urbanistica_status_from_state(state: Dict[str, Any]) -> str:
         return "DIFFORME"
     return "UNKNOWN"
 
+
+def _legacy_catastale_status_from_state(state: Dict[str, Any]) -> str:
+    display = _field_state_display_value(state, fallback="DA VERIFICARE")
+    normalized = _normalize_headline_text(str(display or "")).upper()
+    if normalized in {"", "NON SPECIFICATO IN PERIZIA", "DA VERIFICARE"}:
+        return "UNKNOWN"
+
+    positive_tokens = (
+        "CONFORME",
+        "CONFORME AL CATASTO",
+        "PLANIMETRIA CONFORME",
+        "CATASTALMENTE CONFORME",
+        "CATASTO CONFORME",
+    )
+    negative_tokens = (
+        "PRESENTI DIFFORMITA",
+        "PRESENTI DIFFORMITÀ",
+        "DIFFORMITA PRESENTI",
+        "DIFFORMITÀ PRESENTI",
+        "NON CONFORME",
+        "PLANIMETRIA NON CONFORME",
+        "MANCATA CORRISPONDENZA",
+        "AGGIORNAMENTO CATASTALE NECESSARIO",
+        "VARIAZIONE CATASTALE NECESSARIA",
+    )
+
+    if normalized in {"CONFORME", "DIFFORME", "UNKNOWN"}:
+        return normalized
+    if any(token in normalized for token in positive_tokens):
+        return "CONFORME"
+    if any(token in normalized for token in negative_tokens):
+        return "DIFFORME"
+    return "UNKNOWN"
+
 def _build_field_state(
     *,
     value: Any,
@@ -3059,50 +3093,243 @@ def _extract_regolarita_urbanistica_state(pages: List[Dict[str, Any]]) -> Dict[s
     searched_in = _make_searched_in(pages, keywords, "NOT_FOUND", field_key="conformita_urbanistica")
     return _build_field_state(value=None, status="NOT_FOUND", evidence=[], searched_in=searched_in)
 
+def _catastale_section_hint(text: str, start: int, end: int) -> str:
+    line_spans: List[Tuple[int, int]] = []
+    cursor = 0
+    for line in str(text or "").splitlines(keepends=True):
+        line_spans.append((cursor, cursor + len(line)))
+        cursor += len(line)
+    if not line_spans:
+        line_spans = [(0, len(str(text or "")))]
+    idx = 0
+    probe_offset = (start + end) // 2
+    for line_idx, (span_start, span_end) in enumerate(line_spans):
+        if span_start <= probe_offset <= span_end:
+            idx = line_idx
+            break
+    for probe in range(max(0, idx - 5), idx + 1):
+        s, e = line_spans[probe]
+        line = _normalize_headline_text(text[s:e])
+        if not line:
+            continue
+        low = line.lower()
+        if any(token in low for token in ("conformità catastale", "conformita catastale", "planimetria catastale", "catasto", "stato di fatto", "aggiornamento catastale")):
+            return line
+        if len(line) <= 100 and re.fullmatch(r"[A-ZÀ-Ù0-9 '\-]+", line):
+            return line
+    return ""
+
+
+def _catastale_authority_score(
+    *,
+    label: str,
+    page_num: int,
+    match_text: str,
+    sentence_text: str,
+    context_window_text: str,
+    section_hint: str,
+    is_table_like: bool,
+    is_heading_like: bool,
+    speculative: bool,
+) -> float:
+    score = 0.0
+    normalized_match = str(match_text or "").lower()
+    normalized_sentence = str(sentence_text or "").lower()
+    normalized_window = str(context_window_text or "").lower()
+    normalized_hint = str(section_hint or "").lower()
+
+    if label == "PRESENTI DIFFORMITÀ":
+        score += 4.8
+    else:
+        score += 4.2
+
+    if any(token in normalized_hint for token in ("conformità catastale", "conformita catastale", "planimetria catastale", "catasto", "stato di fatto", "aggiornamento catastale")):
+        score += 3.0
+    if any(token in normalized_window for token in ("conclus", "si ritiene", "si rileva", "in definitiva", "pertanto", "accertato", "verificato")):
+        score += 1.2
+    if any(token in normalized_sentence for token in ("risulta", "risultano", "è", "e'", "si rileva", "si segnala")):
+        score += 0.8
+
+    if label == "CONFORME":
+        if any(token in normalized_window for token in ("conformità catastale", "planimetria conforme", "conforme al catasto", "corrispondenza catastale", "catastalmente conforme")):
+            score += 2.4
+        if "non conforme" in normalized_window or "difform" in normalized_window:
+            score -= 1.4
+    else:
+        if any(token in normalized_window for token in ("difform", "non conforme", "mancata corrispondenza", "incongruenz", "planimetria non conforme")):
+            score += 2.4
+        if any(token in normalized_window for token in ("aggiornamento catastale", "variazione catastale")):
+            score += 1.2
+
+    if any(token in normalized_window for token in ("storic", "pregress", "precedent", "in passato")):
+        score -= 1.2
+    if any(token in normalized_window for token in ("eventual", "ipot", "potrebbe", "sarebbe", "da verificare", "da accertare")):
+        score -= 1.5
+    if speculative:
+        score -= 1.2
+    if is_table_like:
+        score -= 3.2
+    if is_heading_like:
+        score -= 1.0
+
+    score += min(float(page_num) * 0.12, 1.4)
+    return round(score, 3)
+
+
 def _extract_conformita_catastale_state(pages: List[Dict[str, Any]]) -> Dict[str, Any]:
     keywords = ["conformità catastale", "difformità", "planimetria", "catasto"]
-    positive = re.compile(r"(conformit[aà]\s+catastale|planimetria\s+conforme|conforme\s+al\s+catasto)", re.I)
-    negative = re.compile(
-        r"(difformit[aà]\s+catastal[ei]|non\s+conforme|mancata\s+corrispondenza|planimetria\s+non\s+conforme|incongruenz\w+[\s\S]{0,220}?planimetri\w+\s+catastal\w*)",
-        re.I,
-    )
-    ambiguous = re.compile(r"(da\s+verificare|non\s+è\s+noto|non\s+e'\s+noto|da\s+accertare|si\s+presume|presumibilmente)", re.I)
-    candidates: List[Tuple[int, int, str, str, Dict[str, Any]]] = []
+    ambiguous = re.compile(r"(da\s+verificare|non\s+è\s+noto|non\s+e'\s+noto|da\s+accertare|si\s+presume|presumibilmente|potrebbe|sarebbe)", re.I)
+    patterns = [
+        (
+            re.compile(
+                r"\b(conformit[aà]\s+catastal\w*|planimetri\w+\s+conforme|conforme\s+al\s+catasto|corrispondenza\s+catastal\w*|catastalmente\s+conforme|non\s+(?:risultano|emergono)\s+difformit\w+\s+catastal\w*|assenza\s+di\s+difformit\w+\s+catastal\w*)\b",
+                re.I,
+            ),
+            "CONFORME",
+            "REGULAR",
+        ),
+        (
+            re.compile(
+                r"\b(difformit[aà]\s+catastal\w*|non\s+conform[ei](?:\s+al\s+catasto|\s+catastal\w*)?|mancata\s+corrispondenza|planimetri\w+\s+non\s+conforme|incongruenz\w+[\s\S]{0,220}?planimetri\w+\s+catastal\w*|aggiornamento\s+catastal\w*|variazion\w+\s+catastal\w*)\b",
+                re.I,
+            ),
+            "PRESENTI DIFFORMITÀ",
+            "IRREGULAR",
+        ),
+    ]
+    candidates: List[Dict[str, Any]] = []
     for p in pages:
         text = str(p.get("text", "") or "")
-        for pat, label in ((positive, "CONFORME"), (negative, "PRESENTI DIFFORMITÀ")):
-            m = pat.search(text)
-            if not m:
-                continue
-            start, end = m.start(), m.end()
-            line_start, line_end = _line_bounds(text, start, end)
-            line_text = text[line_start:line_end]
-            snippet = text[max(0, start - 40):min(len(text), end + 120)]
-            if _is_toc_like_line(line_text) or _is_toc_like_line(snippet):
-                continue
-            evidence_obj = _build_evidence(
-                text,
-                int(p.get("page_number", 0) or 0),
-                start,
-                end,
-                field_key="conformita_catastale",
-                anchor_hint=m.group(0),
-            )
-            status = "LOW_CONFIDENCE" if ambiguous.search(line_text) else "FOUND"
-            value = "DA VERIFICARE" if status == "LOW_CONFIDENCE" else label
-            score = 0
-            low_line = line_text.lower()
-            if label == "PRESENTI DIFFORMITÀ":
-                score += 5
-            if any(tok in low_line for tok in ("planimetria catastale", "incongruenz", "difform", "non conforme", "catast")):
-                score += 4
-            candidates.append((score, int(p.get("page_number", 0) or 0), value, status, evidence_obj))
+        for pat, label, contradiction_group in patterns:
+            for m in pat.finditer(text):
+                start, end = m.start(), m.end()
+                line_start, line_end = _line_bounds(text, start, end)
+                line_text = text[line_start:line_end]
+                sentence_text, prev_sentence, next_sentence, context_window_text = _extract_context_window(text, line_start, line_end)
+                section_hint = _catastale_section_hint(text, line_start, line_end)
+                is_table_like = _is_table_like_text(line_text)
+                is_heading_like = _is_heading_like_text(line_text)
+                low_window = context_window_text.lower()
+                low_match = str(m.group(0) or "").lower()
+                if _is_toc_like_line(line_text) or _is_toc_like_line(context_window_text):
+                    continue
+                if contradiction_group == "IRREGULAR" and any(
+                    token in low_window
+                    for token in (
+                        "non risultano difform",
+                        "non emergono difform",
+                        "assenza di difform",
+                        "non risultano incongruenz",
+                        "assenza di incongruenz",
+                    )
+                ) and "aggiornamento catastale" not in low_match:
+                    continue
+                speculative = bool(ambiguous.search(context_window_text))
+                evidence = [
+                    _build_evidence(
+                        text,
+                        int(p.get("page_number", 0) or 0),
+                        line_start,
+                        line_end,
+                        field_key="conformita_catastale",
+                        anchor_hint=m.group(0),
+                    )
+                ]
+                authority_score = _catastale_authority_score(
+                    label=label,
+                    page_num=int(p.get("page_number", 0) or 0),
+                    match_text=m.group(0),
+                    sentence_text=sentence_text or line_text,
+                    context_window_text=context_window_text,
+                    section_hint=section_hint,
+                    is_table_like=is_table_like,
+                    is_heading_like=is_heading_like,
+                    speculative=speculative,
+                )
+                candidates.append(
+                    {
+                        "value": label,
+                        "status": "LOW_CONFIDENCE" if speculative else "FOUND",
+                        "score": authority_score,
+                        "page": int(p.get("page_number", 0) or 0),
+                        "match_text": _normalize_headline_text(m.group(0)),
+                        "sentence_text": sentence_text or _normalize_headline_text(line_text),
+                        "prev_sentence": prev_sentence,
+                        "next_sentence": next_sentence,
+                        "context_window_text": context_window_text,
+                        "window_word_count": _word_count(context_window_text),
+                        "section_hint": section_hint,
+                        "is_table_like": is_table_like,
+                        "is_heading_like": is_heading_like,
+                        "authority_score": authority_score,
+                        "contradiction_group": contradiction_group,
+                        "ocr_noise_hint": "table_like" if is_table_like else None,
+                        "speculative": speculative,
+                        "quote": evidence[0].get("quote"),
+                        "evidence": evidence,
+                    }
+                )
     if candidates:
-        candidates.sort(key=lambda x: (-x[0], x[1]))
+        deduped: List[Dict[str, Any]] = []
+        seen_candidate_keys: set = set()
+        for cand in sorted(candidates, key=lambda item: (-float(item.get("score", 0.0)), -int(item.get("page", 0) or 0), str(item.get("value") or ""))):
+            evidence = cand.get("evidence", []) if isinstance(cand.get("evidence"), list) else []
+            first_ev = evidence[0] if evidence and isinstance(evidence[0], dict) else {}
+            key = (cand.get("value"), first_ev.get("page"), str(first_ev.get("quote") or ""))
+            if key in seen_candidate_keys:
+                continue
+            seen_candidate_keys.add(key)
+            deduped.append(cand)
+        candidates = deduped
+        candidates.sort(key=lambda item: (-float(item.get("score", 0.0)), -int(item.get("page", 0) or 0), str(item.get("value") or "")))
         top = candidates[0]
-        searched_in = _make_searched_in(pages, keywords, top[3])
-        return _build_field_state(value=top[2], status=top[3], evidence=[top[4]], searched_in=searched_in)
-    searched_in = _make_searched_in(pages, keywords, "NOT_FOUND")
+        best_by_group: Dict[str, Dict[str, Any]] = {}
+        for cand in candidates:
+            group = str(cand.get("contradiction_group") or "")
+            if group and group not in best_by_group:
+                best_by_group[group] = cand
+        top_candidates_src: List[Dict[str, Any]] = [top]
+        opposite_group = "REGULAR" if str(top.get("contradiction_group")) == "IRREGULAR" else "IRREGULAR"
+        opposite = best_by_group.get(opposite_group)
+        if opposite:
+            top_candidates_src.append(opposite)
+        top_candidates = copy.deepcopy(top_candidates_src[:2])
+        conflicts: List[Dict[str, Any]] = []
+        runner_up = top_candidates_src[1] if len(top_candidates_src) > 1 else None
+        if isinstance(runner_up, dict):
+            score_gap = float(top.get("score", 0.0)) - float(runner_up.get("score", 0.0))
+            if top.get("contradiction_group") != runner_up.get("contradiction_group") and float(top.get("score", 0.0)) >= 5.0 and float(runner_up.get("score", 0.0)) >= 5.0 and score_gap <= 2.25:
+                conflicts.append(
+                    {
+                        "type": "CONTRADICTORY_CATASTALE",
+                        "top_value": top.get("value"),
+                        "runner_up_value": runner_up.get("value"),
+                        "score_gap": round(score_gap, 3),
+                        "pages": [top.get("page"), runner_up.get("page")],
+                    }
+                )
+        review_required = bool(conflicts) or bool(top.get("speculative")) or float(top.get("score", 0.0)) < 4.4
+        chosen_value = "DA VERIFICARE" if review_required else top.get("value")
+        chosen_status = "LOW_CONFIDENCE" if review_required else str(top.get("status") or "FOUND")
+        chosen_evidence = top.get("evidence", []) if isinstance(top.get("evidence"), list) else []
+        searched_in = _make_searched_in(pages, keywords, chosen_status, field_key="conformita_catastale")
+        state = _build_field_state(value=chosen_value, status=chosen_status, evidence=chosen_evidence, searched_in=searched_in)
+        state["review_required"] = review_required
+        state["needs_user_confirmation"] = review_required
+        state["resolver_meta"] = {
+            "resolver_version": "catastale_v1",
+            "resolver_confidence": round(max(0.0, min(1.0, float(top.get("score", 0.0)) / 10.0)), 3),
+            "conflict_flag": bool(conflicts),
+            "candidate_count": len(candidates),
+        }
+        state["conflicts"] = conflicts
+        state["all_candidates"] = copy.deepcopy(candidates)
+        state["top_candidates"] = top_candidates
+        state["chosen_candidate"] = copy.deepcopy(top)
+        if review_required:
+            state["user_prompt_it"] = "La conformità catastale richiede conferma manuale. Verifica le due evidenze principali e conferma il valore corretto."
+        return state
+    searched_in = _make_searched_in(pages, keywords, "NOT_FOUND", field_key="conformita_catastale")
     return _build_field_state(value=None, status="NOT_FOUND", evidence=[], searched_in=searched_in)
 
 def _extract_spese_condominiali_state(pages: List[Dict[str, Any]]) -> Dict[str, Any]:
@@ -3335,7 +3562,7 @@ def _apply_decision_states_to_result(result: Dict[str, Any], states: Dict[str, A
         "evidence": reg_state.get("evidence", []),
     }
     abusi["conformita_catastale"] = {
-        "status": _field_state_display_value(cat_state),
+        "status": _legacy_catastale_status_from_state(cat_state),
         "detail_it": _field_state_display_value(cat_state),
         "evidence": cat_state.get("evidence", []),
     }
@@ -4199,7 +4426,10 @@ def _apply_decision_field_states(result: Dict[str, Any], pages: List[Dict[str, A
                 keywords=["conformità urbanistica", "abusi edilizi", "sanatoria", "condono"],
             ),
             "conformita_catastale": _build_state_from_existing_value(
-                value_obj=abusi.get("conformita_catastale", {}).get("status") if isinstance(abusi.get("conformita_catastale"), dict) else None,
+                value_obj=(
+                    abusi.get("conformita_catastale", {}).get("detail_it")
+                    or abusi.get("conformita_catastale", {}).get("status")
+                ) if isinstance(abusi.get("conformita_catastale"), dict) else None,
                 evidence=abusi.get("conformita_catastale", {}).get("evidence", []) if isinstance(abusi.get("conformita_catastale"), dict) else [],
                 pages=pages,
                 keywords=["conformità catastale", "difformità", "planimetria"],
@@ -10737,7 +10967,7 @@ def apply_deterministic_fixes(result: Dict, pdf_text: str, pages: List[Dict], de
         cat_obj = abusi.get("conformita_catastale") if isinstance(abusi.get("conformita_catastale"), dict) else {}
         current_status = str(cat_obj.get("status") or "").upper()
         if current_status in {"", "UNKNOWN", "NON SPECIFICATO IN PERIZIA", "NOT_FOUND"}:
-            cat_obj["status"] = "PRESENTI DIFFORMITÀ"
+            cat_obj["status"] = "DIFFORME"
             cat_obj["detail_it"] = "PRESENTI DIFFORMITÀ"
             cat_obj["evidence"] = [catasto_ev]
             abusi["conformita_catastale"] = cat_obj
@@ -13001,7 +13231,7 @@ async def update_perizia_overrides(analysis_id: str, payload: FieldOverrideReque
         else:
             overrides[target_field] = value
         updated = True
-        if target_field in {"stato_occupativo", "regolarita_urbanistica"} and value not in (None, ""):
+        if target_field in {"stato_occupativo", "regolarita_urbanistica", "conformita_catastale"} and value not in (None, ""):
             confirmation_record = {
                 "check_type": target_field,
                 "field_key": f"field_states.{target_field}",
@@ -13045,7 +13275,7 @@ async def update_perizia_overrides(analysis_id: str, payload: FieldOverrideReque
 async def confirm_perizia_field(analysis_id: str, payload: ConfirmationLogRequest, request: Request):
     user = await require_auth(request)
     check_type = str(payload.check_type or "").strip().lower()
-    if check_type not in {"stato_occupativo", "address", "regolarita_urbanistica"}:
+    if check_type not in {"stato_occupativo", "address", "regolarita_urbanistica", "conformita_catastale"}:
         raise HTTPException(status_code=400, detail="Unsupported confirmation type")
     if payload.value in (None, ""):
         raise HTTPException(status_code=400, detail="Confirmation value is required")
@@ -13059,6 +13289,12 @@ async def confirm_perizia_field(analysis_id: str, payload: ConfirmationLogReques
         return await update_perizia_overrides(
             analysis_id,
             FieldOverrideRequest(regolarita_urbanistica=payload.value, confirmation_notes=payload.notes),
+            request,
+        )
+    if check_type == "conformita_catastale":
+        return await update_perizia_overrides(
+            analysis_id,
+            FieldOverrideRequest(conformita_catastale=payload.value, confirmation_notes=payload.notes),
             request,
         )
     return await update_perizia_overrides(
@@ -15262,6 +15498,24 @@ async def _collect_admin_confirmation_rows() -> List[Dict[str, Any]]:
                     "final_applied_value": field_overrides.get("regolarita_urbanistica"),
                     "confirmation_source": "field_override_legacy",
                     "notes": "Normalized from existing field_overrides.regolarita_urbanistica",
+                }
+            )
+        if field_overrides.get("conformita_catastale") not in (None, ""):
+            legacy_rows.append(
+                {
+                    "analysis_id": analysis.get("analysis_id"),
+                    "run_id": analysis.get("run_id"),
+                    "user_id": user_id,
+                    "user_email": user_email,
+                    "check_type": "conformita_catastale",
+                    "field_key": "field_states.conformita_catastale",
+                    "document_name": analysis.get("file_name") or analysis.get("case_title"),
+                    "created_at": analysis.get("created_at"),
+                    "confirmed_at": analysis.get("updated_at") or analysis.get("created_at"),
+                    "user_confirmed_value": field_overrides.get("conformita_catastale"),
+                    "final_applied_value": field_overrides.get("conformita_catastale"),
+                    "confirmation_source": "field_override_legacy",
+                    "notes": "Normalized from existing field_overrides.conformita_catastale",
                 }
             )
         for row in legacy_rows:

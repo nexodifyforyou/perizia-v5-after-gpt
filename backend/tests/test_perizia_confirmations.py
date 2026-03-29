@@ -172,6 +172,62 @@ def test_urbanistica_uncertain_case_exposes_top_two_candidates():
     assert {state["top_candidates"][0]["value"], state["top_candidates"][1]["value"]} == {"NON EMERGONO ABUSI", "PRESENTI DIFFORMITÀ"}
 
 
+def test_later_authoritative_catastale_compliant_beats_earlier_weak_negative():
+    pages = [
+        {"page_number": 1, "text": "Tabella riepilogo | aggiornamento catastale | planimetria | note da verificare\n"},
+        {"page_number": 7, "text": "CONFORMITA CATASTALE\nLa planimetria risulta conforme e vi e corrispondenza catastale con lo stato di fatto.\n"},
+    ]
+    state = server._extract_conformita_catastale_state(pages)
+    assert state["status"] == "FOUND"
+    assert state["value"] == "CONFORME"
+    assert state["chosen_candidate"]["page"] == 7
+
+
+def test_later_authoritative_catastale_non_compliant_beats_earlier_weak_positive():
+    pages = [
+        {"page_number": 1, "text": "Nota storica: la planimetria risultava conforme al catasto al precedente accesso.\n"},
+        {"page_number": 8, "text": "CONFORMITA CATASTALE\nSi rilevano difformita catastali e planimetria non conforme allo stato di fatto.\n"},
+    ]
+    state = server._extract_conformita_catastale_state(pages)
+    assert state["status"] == "FOUND"
+    assert state["value"] == "PRESENTI DIFFORMITÀ"
+    assert state["chosen_candidate"]["page"] == 8
+
+
+def test_catastale_strong_unresolved_conflict_yields_review_required_output():
+    pages = [
+        {"page_number": 4, "text": "CONFORMITA CATASTALE\nLa planimetria risulta conforme e vi e piena corrispondenza catastale con lo stato di fatto.\n"},
+        {"page_number": 5, "text": "PLANIMETRIA CATASTALE\nSi rilevano difformita catastali e mancata corrispondenza con lo stato di fatto.\n"},
+    ]
+    state = server._extract_conformita_catastale_state(pages)
+    assert state["value"] == "DA VERIFICARE"
+    assert state["status"] == "LOW_CONFIDENCE"
+    assert state["review_required"] is True
+    assert state["needs_user_confirmation"] is True
+    assert state["conflicts"]
+
+
+def test_catastale_table_like_mentions_are_downweighted_against_narrative():
+    pages = [
+        {"page_number": 1, "text": "Riepilogo | aggiornamento catastale | planimetria | catasto | note\n"},
+        {"page_number": 3, "text": "CONFORMITA CATASTALE\nLa planimetria risulta conforme al catasto e coerente con lo stato di fatto.\n"},
+    ]
+    state = server._extract_conformita_catastale_state(pages)
+    assert state["value"] == "CONFORME"
+    assert state["chosen_candidate"]["is_table_like"] is False
+
+
+def test_catastale_uncertain_case_exposes_top_two_candidates():
+    pages = [
+        {"page_number": 6, "text": "CONFORMITA CATASTALE\nLa planimetria risulta conforme al catasto e coerente con lo stato di fatto.\n"},
+        {"page_number": 7, "text": "PLANIMETRIA CATASTALE\nSono presenti difformita catastali e planimetria non conforme.\n"},
+    ]
+    state = server._extract_conformita_catastale_state(pages)
+    assert state["review_required"] is True
+    assert len(state["top_candidates"]) == 2
+    assert {state["top_candidates"][0]["value"], state["top_candidates"][1]["value"]} == {"CONFORME", "PRESENTI DIFFORMITÀ"}
+
+
 @pytest.mark.anyio
 async def test_occupazione_user_confirmation_is_stored_and_applied(fake_db, monkeypatch):
     pages = [
@@ -239,6 +295,43 @@ async def test_urbanistica_user_confirmation_is_stored_and_applied_without_break
         assert field_state["value"] == "NON EMERGONO ABUSI"
         assert payload["abusi_edilizi_conformita"]["conformita_urbanistica"]["status"] == "CONFORME"
         assert payload["abusi_edilizi_conformita"]["conformita_urbanistica"]["detail_it"] == "NON EMERGONO ABUSI"
+
+
+@pytest.mark.anyio
+async def test_catastale_user_confirmation_is_stored_and_applied_without_breaking_consumers(fake_db, monkeypatch):
+    pages = [
+        {"page_number": 4, "text": "CONFORMITA CATASTALE\nLa planimetria risulta conforme e vi e piena corrispondenza catastale con lo stato di fatto.\n"},
+        {"page_number": 5, "text": "PLANIMETRIA CATASTALE\nSi rilevano difformita catastali e mancata corrispondenza con lo stato di fatto.\n"},
+    ]
+    result = _build_result_for_pages(pages)
+    _seed_analysis(fake_db, analysis_id="analysis_cat", user_id="user_1", result=result)
+
+    async def fake_require_auth(_request):
+        return _user()
+
+    monkeypatch.setattr(server, "require_auth", fake_require_auth)
+    transport = httpx.ASGITransport(app=server.app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        resp = await client.post(
+            "/api/analysis/perizia/analysis_cat/confirmations",
+            json={"check_type": "conformita_catastale", "value": "CONFORME", "notes": "Confermato da geometra"},
+        )
+        assert resp.status_code == 200
+        assert len(fake_db.perizia_confirmations.items) == 1
+        record = fake_db.perizia_confirmations.items[0]
+        assert record["check_type"] == "conformita_catastale"
+        assert record["field_key"] == "field_states.conformita_catastale"
+        assert record["user_confirmed_value"] == "CONFORME"
+        assert record["notes"] == "Confermato da geometra"
+        assert record["candidate_1_value"]
+        detail = await client.get("/api/analysis/perizia/analysis_cat")
+        assert detail.status_code == 200
+        payload = detail.json()["result"]
+        field_state = payload["field_states"]["conformita_catastale"]
+        assert field_state["status"] == "USER_PROVIDED"
+        assert field_state["value"] == "CONFORME"
+        assert payload["abusi_edilizi_conformita"]["conformita_catastale"]["status"] == "CONFORME"
+        assert payload["abusi_edilizi_conformita"]["conformita_catastale"]["detail_it"] == "CONFORME"
 
 
 @pytest.mark.anyio
@@ -367,6 +460,67 @@ async def test_admin_export_includes_urbanistica_confirmation_rows(fake_db, monk
         assert "regolarita_urbanistica" in sheet_xml
         assert "PRESENTI DIFFORMITÀ" in sheet_xml
         assert "Difformita confermate" in sheet_xml
+
+
+@pytest.mark.anyio
+async def test_admin_export_includes_catastale_confirmation_rows(fake_db, monkeypatch):
+    pages = [
+        {"page_number": 4, "text": "CONFORMITA CATASTALE\nLa planimetria risulta conforme e vi e piena corrispondenza catastale con lo stato di fatto.\n"},
+        {"page_number": 5, "text": "PLANIMETRIA CATASTALE\nSi rilevano difformita catastali e mancata corrispondenza con lo stato di fatto.\n"},
+    ]
+    result = _build_result_for_pages(pages)
+    _seed_analysis(fake_db, analysis_id="analysis_cat_export", user_id="user_1", result=result)
+    admin_session = _seed_session(
+        fake_db,
+        {
+            "user_id": "user_admin",
+            "email": "admin@example.com",
+            "name": "Admin",
+            "plan": "enterprise",
+            "is_master_admin": True,
+            "quota": {},
+        },
+        session_token="sess_admin_catastale_export",
+    )
+
+    original_require_auth = server.require_auth
+
+    async def fake_require_auth(_request):
+        return _user()
+
+    monkeypatch.setattr(server, "require_auth", fake_require_auth)
+    transport = httpx.ASGITransport(app=server.app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        confirm_resp = await client.post(
+            "/api/analysis/perizia/analysis_cat_export/confirmations",
+            json={"check_type": "conformita_catastale", "value": "PRESENTI DIFFORMITÀ", "notes": "Catastale confermato"},
+        )
+        assert confirm_resp.status_code == 200
+
+        monkeypatch.setattr(server, "require_auth", original_require_auth)
+        export_resp = await client.get(
+            "/api/admin/perizia-confirmations/export.xlsx",
+            headers={"Authorization": f"Bearer {admin_session}"},
+        )
+        assert export_resp.status_code == 200
+        zf = zipfile.ZipFile(io.BytesIO(export_resp.content))
+        sheet_xml = zf.read("xl/worksheets/sheet1.xml").decode("utf-8")
+        assert "conformita_catastale" in sheet_xml
+        assert "PRESENTI DIFFORMITÀ" in sheet_xml
+        assert "Catastale confermato" in sheet_xml
+
+
+def test_catastale_resolver_backed_field_does_not_leak_human_phrase_into_status():
+    pages = [
+        {"page_number": 4, "text": "CONFORMITA CATASTALE\nLa planimetria risulta conforme e vi e piena corrispondenza catastale con lo stato di fatto.\n"},
+    ]
+    result = _build_result_for_pages(pages)
+    field_state = result["field_states"]["conformita_catastale"]
+    legacy_cat = result["abusi_edilizi_conformita"]["conformita_catastale"]
+    assert field_state["status"] == "FOUND"
+    assert field_state["value"] == "CONFORME"
+    assert legacy_cat["status"] == "CONFORME"
+    assert legacy_cat["detail_it"] == "CONFORME"
 
 
 @pytest.mark.anyio
