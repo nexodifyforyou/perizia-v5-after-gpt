@@ -228,6 +228,75 @@ def test_catastale_uncertain_case_exposes_top_two_candidates():
     assert {state["top_candidates"][0]["value"], state["top_candidates"][1]["value"]} == {"CONFORME", "PRESENTI DIFFORMITÀ"}
 
 
+def test_explicit_non_opponibile_clause_beats_generic_occupancy_mention():
+    pages = [
+        {"page_number": 1, "text": "STATO OCCUPATIVO\nImmobile occupato da terzi conduttori.\n"},
+        {"page_number": 7, "text": "TITOLO OPPONIBILE\nIl contratto di locazione non opponibile alla procedura esecutiva.\n"},
+    ]
+    state = server._extract_opponibilita_occupazione_state(pages)
+    assert state["status"] == "FOUND"
+    assert state["value"] == "TITOLO NON OPPONIBILE"
+    assert state["chosen_candidate"]["page"] == 7
+
+
+def test_explicit_opponibile_clause_beats_weak_contrary_implication():
+    pages = [
+        {"page_number": 1, "text": "STATO OCCUPATIVO\nImmobile locato a terzi.\n"},
+        {"page_number": 8, "text": "LOCAZIONE OPPONIBILE\nContratto di locazione opponibile alla procedura esecutiva.\n"},
+    ]
+    state = server._extract_opponibilita_occupazione_state(pages)
+    assert state["status"] == "FOUND"
+    assert state["value"] == "TITOLO OPPONIBILE"
+    assert state["chosen_candidate"]["page"] == 8
+
+
+def test_occupazione_senza_titolo_is_recognized_distinctly():
+    pages = [
+        {"page_number": 4, "text": "STATO OCCUPATIVO\nL'immobile risulta occupato da terzi senza titolo opponibile.\n"},
+    ]
+    state = server._extract_opponibilita_occupazione_state(pages)
+    assert state["status"] == "FOUND"
+    assert state["value"] == "OCCUPAZIONE SENZA TITOLO"
+
+
+def test_opponibilita_strong_unresolved_conflict_yields_review_required_output():
+    pages = [
+        {"page_number": 4, "text": "TITOLO OPPONIBILE\nContratto di locazione opponibile alla procedura.\n"},
+        {"page_number": 5, "text": "TITOLO OPPONIBILE\nContratto di locazione non opponibile alla procedura.\n"},
+    ]
+    state = server._extract_opponibilita_occupazione_state(pages)
+    assert state["value"] == "DA VERIFICARE"
+    assert state["status"] == "LOW_CONFIDENCE"
+    assert state["review_required"] is True
+    assert state["needs_user_confirmation"] is True
+    assert state["conflicts"]
+
+
+def test_weak_table_like_opponibilita_mention_is_downweighted_against_narrative():
+    pages = [
+        {"page_number": 1, "text": "Riepilogo | locazione | conduttore | canone\n"},
+        {"page_number": 4, "text": "TITOLO OPPONIBILE\nIl contratto di locazione non opponibile alla procedura esecutiva.\n"},
+    ]
+    state = server._extract_opponibilita_occupazione_state(pages)
+    assert state["value"] == "TITOLO NON OPPONIBILE"
+    assert state["chosen_candidate"]["is_table_like"] is False
+
+
+def test_delivery_liberazione_timing_appears_only_when_explicitly_evidenced():
+    explicit_pages = [
+        {"page_number": 6, "text": "LIBERAZIONE\nL'immobile deve essere rilasciato entro 120 giorni dal decreto di trasferimento.\n"},
+    ]
+    explicit_state = server._extract_delivery_timeline_state(explicit_pages)
+    assert explicit_state["status"] == "FOUND"
+    assert "entro 120 giorni" in explicit_state["value"].lower()
+
+    implicit_pages = [
+        {"page_number": 2, "text": "STATO OCCUPATIVO\nImmobile occupato da terzi conduttori.\n"},
+    ]
+    implicit_state = server._extract_delivery_timeline_state(implicit_pages)
+    assert implicit_state["status"] == "NOT_FOUND"
+
+
 @pytest.mark.anyio
 async def test_occupazione_user_confirmation_is_stored_and_applied(fake_db, monkeypatch):
     pages = [
@@ -332,6 +401,41 @@ async def test_catastale_user_confirmation_is_stored_and_applied_without_breakin
         assert field_state["value"] == "CONFORME"
         assert payload["abusi_edilizi_conformita"]["conformita_catastale"]["status"] == "CONFORME"
         assert payload["abusi_edilizi_conformita"]["conformita_catastale"]["detail_it"] == "CONFORME"
+
+
+@pytest.mark.anyio
+async def test_opponibilita_user_confirmation_is_stored_and_applied_without_breaking_consumers(fake_db, monkeypatch):
+    pages = [
+        {"page_number": 1, "text": "STATO OCCUPATIVO\nImmobile occupato da terzi conduttori.\n"},
+        {"page_number": 7, "text": "TITOLO OPPONIBILE\nIl contratto di locazione non opponibile alla procedura esecutiva.\n"},
+    ]
+    result = _build_result_for_pages(pages)
+    _seed_analysis(fake_db, analysis_id="analysis_opp", user_id="user_1", result=result)
+
+    async def fake_require_auth(_request):
+        return _user()
+
+    monkeypatch.setattr(server, "require_auth", fake_require_auth)
+    transport = httpx.ASGITransport(app=server.app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        resp = await client.post(
+            "/api/analysis/perizia/analysis_opp/confirmations",
+            json={"check_type": "opponibilita_occupazione", "value": "TITOLO NON OPPONIBILE", "notes": "Confermato da legale"},
+        )
+        assert resp.status_code == 200
+        assert len(fake_db.perizia_confirmations.items) == 1
+        record = fake_db.perizia_confirmations.items[0]
+        assert record["check_type"] == "opponibilita_occupazione"
+        assert record["field_key"] == "field_states.opponibilita_occupazione"
+        assert record["user_confirmed_value"] == "TITOLO NON OPPONIBILE"
+        assert record["notes"] == "Confermato da legale"
+        detail = await client.get("/api/analysis/perizia/analysis_opp")
+        assert detail.status_code == 200
+        payload = detail.json()["result"]
+        field_state = payload["field_states"]["opponibilita_occupazione"]
+        assert field_state["status"] == "USER_PROVIDED"
+        assert field_state["value"] == "TITOLO NON OPPONIBILE"
+        assert payload["stato_occupativo"]["status"]
 
 
 @pytest.mark.anyio
@@ -510,6 +614,54 @@ async def test_admin_export_includes_catastale_confirmation_rows(fake_db, monkey
         assert "Catastale confermato" in sheet_xml
 
 
+@pytest.mark.anyio
+async def test_admin_export_includes_opponibilita_confirmation_rows(fake_db, monkeypatch):
+    pages = [
+        {"page_number": 1, "text": "STATO OCCUPATIVO\nImmobile occupato da terzi conduttori.\n"},
+        {"page_number": 7, "text": "TITOLO OPPONIBILE\nIl contratto di locazione non opponibile alla procedura esecutiva.\n"},
+    ]
+    result = _build_result_for_pages(pages)
+    _seed_analysis(fake_db, analysis_id="analysis_opp_export", user_id="user_1", result=result)
+    admin_session = _seed_session(
+        fake_db,
+        {
+            "user_id": "user_admin",
+            "email": "admin@example.com",
+            "name": "Admin",
+            "plan": "enterprise",
+            "is_master_admin": True,
+            "quota": {},
+        },
+        session_token="sess_admin_opponibilita_export",
+    )
+
+    original_require_auth = server.require_auth
+
+    async def fake_require_auth(_request):
+        return _user()
+
+    monkeypatch.setattr(server, "require_auth", fake_require_auth)
+    transport = httpx.ASGITransport(app=server.app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        confirm_resp = await client.post(
+            "/api/analysis/perizia/analysis_opp_export/confirmations",
+            json={"check_type": "opponibilita_occupazione", "value": "TITOLO NON OPPONIBILE", "notes": "Opponibilita confermata"},
+        )
+        assert confirm_resp.status_code == 200
+
+        monkeypatch.setattr(server, "require_auth", original_require_auth)
+        export_resp = await client.get(
+            "/api/admin/perizia-confirmations/export.xlsx",
+            headers={"Authorization": f"Bearer {admin_session}"},
+        )
+        assert export_resp.status_code == 200
+        zf = zipfile.ZipFile(io.BytesIO(export_resp.content))
+        sheet_xml = zf.read("xl/worksheets/sheet1.xml").decode("utf-8")
+        assert "opponibilita_occupazione" in sheet_xml
+        assert "TITOLO NON OPPONIBILE" in sheet_xml
+        assert "Opponibilita confermata" in sheet_xml
+
+
 def test_catastale_resolver_backed_field_does_not_leak_human_phrase_into_status():
     pages = [
         {"page_number": 4, "text": "CONFORMITA CATASTALE\nLa planimetria risulta conforme e vi e piena corrispondenza catastale con lo stato di fatto.\n"},
@@ -521,6 +673,20 @@ def test_catastale_resolver_backed_field_does_not_leak_human_phrase_into_status(
     assert field_state["value"] == "CONFORME"
     assert legacy_cat["status"] == "CONFORME"
     assert legacy_cat["detail_it"] == "CONFORME"
+
+
+def test_opponibilita_cluster_resolver_backed_fields_do_not_leak_human_phrase_into_status():
+    pages = [
+        {"page_number": 6, "text": "LIBERAZIONE\nL'immobile deve essere rilasciato entro 120 giorni dal decreto di trasferimento.\n"},
+        {"page_number": 7, "text": "TITOLO OPPONIBILE\nIl contratto di locazione non opponibile alla procedura esecutiva.\n"},
+    ]
+    result = _build_result_for_pages(pages)
+    opp_state = result["field_states"]["opponibilita_occupazione"]
+    delivery_state = result["field_states"]["delivery_timeline"]
+    assert opp_state["status"] == "FOUND"
+    assert opp_state["value"] == "TITOLO NON OPPONIBILE"
+    assert delivery_state["status"] == "FOUND"
+    assert "entro 120 giorni" in delivery_state["value"].lower()
 
 
 @pytest.mark.anyio

@@ -319,6 +319,7 @@ class FieldOverrideRequest(BaseModel):
     stato_occupativo: Optional[Any] = None
     regolarita_urbanistica: Optional[Any] = None
     conformita_catastale: Optional[Any] = None
+    opponibilita_occupazione: Optional[Any] = None
     spese_condominiali_arretrate: Optional[Any] = None
     formalita_pregiudizievoli: Optional[Any] = None
     confirmation_notes: Optional[str] = None
@@ -2732,6 +2733,351 @@ def _extract_stato_occupativo_state(pages: List[Dict[str, Any]]) -> Dict[str, An
     searched_in = _make_searched_in(pages, keywords, "NOT_FOUND", field_key="stato_occupativo")
     return _build_field_state(value=None, status="NOT_FOUND", evidence=[], searched_in=searched_in)
 
+def _opponibilita_section_hint(text: str, start: int, end: int) -> str:
+    line_spans: List[Tuple[int, int]] = []
+    cursor = 0
+    for line in str(text or "").splitlines(keepends=True):
+        line_spans.append((cursor, cursor + len(line)))
+        cursor += len(line)
+    if not line_spans:
+        line_spans = [(0, len(str(text or "")))]
+    idx = 0
+    probe_offset = (start + end) // 2
+    for line_idx, (span_start, span_end) in enumerate(line_spans):
+        if span_start <= probe_offset <= span_end:
+            idx = line_idx
+            break
+    for probe in range(max(0, idx - 5), idx + 1):
+        s, e = line_spans[probe]
+        line = _normalize_headline_text(text[s:e])
+        if not line:
+            continue
+        low = line.lower()
+        if any(token in low for token in ("stato occupativo", "occupazione", "detenzione", "locazione", "contratto di locazione", "titolo opponibile", "locazione opponibile", "liberazione", "rilascio")):
+            return line
+        if len(line) <= 100 and re.fullmatch(r"[A-ZÀ-Ù0-9 '\-]+", line):
+            return line
+    return ""
+
+
+def _opponibilita_authority_score(
+    *,
+    label: str,
+    page_num: int,
+    match_text: str,
+    sentence_text: str,
+    context_window_text: str,
+    section_hint: str,
+    is_table_like: bool,
+    is_heading_like: bool,
+    speculative: bool,
+) -> float:
+    score = 0.0
+    normalized_sentence = str(sentence_text or "").lower()
+    normalized_window = str(context_window_text or "").lower()
+    normalized_hint = str(section_hint or "").lower()
+
+    if label == "OCCUPAZIONE SENZA TITOLO":
+        score += 6.0
+    elif label == "TITOLO NON OPPONIBILE":
+        score += 5.2
+    elif label == "TITOLO OPPONIBILE":
+        score += 5.0
+    else:
+        score += 3.6
+
+    if any(token in normalized_hint for token in ("stato occupativo", "occupazione", "detenzione", "locazione", "contratto di locazione", "titolo opponibile", "locazione opponibile", "liberazione", "rilascio")):
+        score += 3.0
+    if any(token in normalized_window for token in ("conclus", "si ritiene", "si rileva", "in definitiva", "pertanto", "alla data del sopralluogo")):
+        score += 1.0
+    if any(token in normalized_sentence for token in ("risulta", "risultano", "e'", "è", "si rileva", "si segnala")):
+        score += 0.8
+
+    if label == "OCCUPAZIONE SENZA TITOLO":
+        if any(token in normalized_window for token in ("senza titolo", "titolo opponibile", "occupazione senza titolo")):
+            score += 2.8
+    elif label == "TITOLO NON OPPONIBILE":
+        if any(token in normalized_window for token in ("non opponibil", "non opponibile", "non opponibile alla procedura")):
+            score += 2.6
+    elif label == "TITOLO OPPONIBILE":
+        if "opponibil" in normalized_window and "non opponibil" not in normalized_window:
+            score += 2.4
+    else:
+        if any(token in normalized_window for token in ("contratto di locazione", "locazione", "locato", "inquilino", "conduttore")):
+            score += 1.0
+
+    if any(token in normalized_window for token in ("storic", "pregress", "precedent", "in passato")):
+        score -= 1.2
+    if any(token in normalized_window for token in ("eventual", "ipot", "potrebbe", "sarebbe", "da verificare", "da accertare")):
+        score -= 1.5
+    if speculative:
+        score -= 1.3
+    if is_table_like:
+        score -= 3.2
+    if is_heading_like:
+        score -= 1.0
+
+    score += min(float(page_num) * 0.12, 1.4)
+    return round(score, 3)
+
+
+def _extract_opponibilita_occupazione_state(pages: List[Dict[str, Any]]) -> Dict[str, Any]:
+    keywords = ["opponibile", "non opponibile", "senza titolo", "locazione", "contratto di locazione", "liberazione", "rilascio"]
+    ambiguous = re.compile(r"(da\s+verificare|non\s+è\s+noto|non\s+e'\s+noto|da\s+accertare|si\s+presume|presumibilmente|potrebbe|sarebbe)", re.I)
+    patterns = [
+        (
+            re.compile(r"\b(occupazion\w+\s+senza\s+titolo|senza\s+titolo(?:\s+opponibile)?|occupato\s+da\s+terzi\s+senza\s+titolo)\b", re.I),
+            "OCCUPAZIONE SENZA TITOLO",
+            "WITHOUT_TITLE",
+        ),
+        (
+            re.compile(r"\b((?:titolo|contratto|locazione)\s+non\s+opponibil\w*|non\s+opponibil\w+\s+alla\s+procedura|contratto\s+di\s+locazione[^\n]{0,80}non\s+opponibil\w*)\b", re.I),
+            "TITOLO NON OPPONIBILE",
+            "NON_OPPOSABLE",
+        ),
+        (
+            re.compile(r"\b((?:titolo|contratto|locazione)\s+opponibil\w*|opponibil\w+\s+alla\s+procedura)\b", re.I),
+            "TITOLO OPPONIBILE",
+            "OPPOSABLE",
+        ),
+        (
+            re.compile(r"\b(contratto\s+di\s+locazione|locazione|locato|inquilino|conduttore)\b", re.I),
+            "LOCAZIONE DA VERIFICARE",
+            "VERIFY",
+        ),
+    ]
+    candidates: List[Dict[str, Any]] = []
+    for p in pages:
+        text = str(p.get("text", "") or "")
+        for pat, label, contradiction_group in patterns:
+            for m in pat.finditer(text):
+                start, end = m.start(), m.end()
+                line_start, line_end = _line_bounds(text, start, end)
+                line_text = text[line_start:line_end]
+                sentence_text, prev_sentence, next_sentence, context_window_text = _extract_context_window(text, line_start, line_end)
+                section_hint = _opponibilita_section_hint(text, line_start, line_end)
+                is_table_like = _is_table_like_text(line_text)
+                is_heading_like = _is_heading_like_text(line_text)
+                low_window = context_window_text.lower()
+                if _is_toc_like_line(line_text) or _is_toc_like_line(context_window_text):
+                    continue
+                if contradiction_group == "OPPOSABLE" and ("non opponibil" in low_window or "senza titolo" in low_window):
+                    continue
+                speculative = bool(ambiguous.search(context_window_text))
+                evidence = [
+                    _build_evidence(
+                        text,
+                        int(p.get("page_number", 0) or 0),
+                        line_start,
+                        line_end,
+                        field_key="opponibilita_occupazione",
+                        anchor_hint=m.group(0),
+                    )
+                ]
+                authority_score = _opponibilita_authority_score(
+                    label=label,
+                    page_num=int(p.get("page_number", 0) or 0),
+                    match_text=m.group(0),
+                    sentence_text=sentence_text or line_text,
+                    context_window_text=context_window_text,
+                    section_hint=section_hint,
+                    is_table_like=is_table_like,
+                    is_heading_like=is_heading_like,
+                    speculative=speculative,
+                )
+                candidates.append(
+                    {
+                        "value": label,
+                        "status": "LOW_CONFIDENCE" if speculative or contradiction_group == "VERIFY" else "FOUND",
+                        "score": authority_score,
+                        "page": int(p.get("page_number", 0) or 0),
+                        "match_text": _normalize_headline_text(m.group(0)),
+                        "sentence_text": sentence_text or _normalize_headline_text(line_text),
+                        "prev_sentence": prev_sentence,
+                        "next_sentence": next_sentence,
+                        "context_window_text": context_window_text,
+                        "window_word_count": _word_count(context_window_text),
+                        "section_hint": section_hint,
+                        "is_table_like": is_table_like,
+                        "is_heading_like": is_heading_like,
+                        "authority_score": authority_score,
+                        "contradiction_group": contradiction_group,
+                        "ocr_noise_hint": "table_like" if is_table_like else None,
+                        "speculative": speculative,
+                        "quote": evidence[0].get("quote"),
+                        "evidence": evidence,
+                    }
+                )
+    if candidates:
+        deduped: List[Dict[str, Any]] = []
+        seen_candidate_keys: set = set()
+        for cand in sorted(candidates, key=lambda item: (-float(item.get("score", 0.0)), -int(item.get("page", 0) or 0), str(item.get("value") or ""))):
+            evidence = cand.get("evidence", []) if isinstance(cand.get("evidence"), list) else []
+            first_ev = evidence[0] if evidence and isinstance(evidence[0], dict) else {}
+            key = (cand.get("value"), first_ev.get("page"), str(first_ev.get("quote") or ""))
+            if key in seen_candidate_keys:
+                continue
+            seen_candidate_keys.add(key)
+            deduped.append(cand)
+        candidates = deduped
+        candidates.sort(key=lambda item: (-float(item.get("score", 0.0)), -int(item.get("page", 0) or 0), str(item.get("value") or "")))
+        top = candidates[0]
+        best_by_group: Dict[str, Dict[str, Any]] = {}
+        for cand in candidates:
+            group = str(cand.get("contradiction_group") or "")
+            if group and group not in best_by_group:
+                best_by_group[group] = cand
+        top_candidates_src: List[Dict[str, Any]] = [top]
+        for group_name in ("WITHOUT_TITLE", "NON_OPPOSABLE", "OPPOSABLE", "VERIFY"):
+            candidate = best_by_group.get(group_name)
+            if candidate and str(candidate.get("value") or "") != str(top.get("value") or ""):
+                top_candidates_src.append(candidate)
+                break
+        top_candidates = copy.deepcopy(top_candidates_src[:2])
+        conflicts: List[Dict[str, Any]] = []
+        runner_up = top_candidates_src[1] if len(top_candidates_src) > 1 else None
+        if isinstance(runner_up, dict):
+            score_gap = float(top.get("score", 0.0)) - float(runner_up.get("score", 0.0))
+            if top.get("contradiction_group") != runner_up.get("contradiction_group") and float(top.get("score", 0.0)) >= 5.0 and float(runner_up.get("score", 0.0)) >= 5.0 and score_gap <= 2.25:
+                conflicts.append(
+                    {
+                        "type": "CONTRADICTORY_OPPONIBILITA",
+                        "top_value": top.get("value"),
+                        "runner_up_value": runner_up.get("value"),
+                        "score_gap": round(score_gap, 3),
+                        "pages": [top.get("page"), runner_up.get("page")],
+                    }
+                )
+        review_required = bool(conflicts) or bool(top.get("speculative")) or str(top.get("contradiction_group") or "") == "VERIFY" or float(top.get("score", 0.0)) < 4.4
+        if str(top.get("contradiction_group") or "") == "VERIFY" and not conflicts:
+            chosen_value = top.get("value")
+        else:
+            chosen_value = "DA VERIFICARE" if review_required else top.get("value")
+        chosen_status = "LOW_CONFIDENCE" if review_required else str(top.get("status") or "FOUND")
+        chosen_evidence = top.get("evidence", []) if isinstance(top.get("evidence"), list) else []
+        searched_in = _make_searched_in(pages, keywords, chosen_status, field_key="opponibilita_occupazione")
+        state = _build_field_state(value=chosen_value, status=chosen_status, evidence=chosen_evidence, searched_in=searched_in)
+        state["review_required"] = review_required
+        state["needs_user_confirmation"] = review_required
+        state["resolver_meta"] = {
+            "resolver_version": "opponibilita_v1",
+            "resolver_confidence": round(max(0.0, min(1.0, float(top.get("score", 0.0)) / 10.0)), 3),
+            "conflict_flag": bool(conflicts),
+            "candidate_count": len(candidates),
+        }
+        state["conflicts"] = conflicts
+        state["all_candidates"] = copy.deepcopy(candidates)
+        state["top_candidates"] = top_candidates
+        state["chosen_candidate"] = copy.deepcopy(top)
+        if review_required:
+            state["user_prompt_it"] = "L'opponibilità dell'occupazione richiede conferma manuale. Verifica le evidenze principali e conferma il valore corretto."
+        return state
+    searched_in = _make_searched_in(pages, keywords, "NOT_FOUND", field_key="opponibilita_occupazione")
+    return _build_field_state(value=None, status="NOT_FOUND", evidence=[], searched_in=searched_in)
+
+
+def _extract_delivery_timeline_state(pages: List[Dict[str, Any]]) -> Dict[str, Any]:
+    keywords = ["liberazione", "rilascio", "decreto di trasferimento", "aggiudicazione", "giorni"]
+    patterns = [
+        re.compile(r"(rilasciat\w*[^\n]{0,120}entro\s+\d{1,3}\s+giorni[^\n]{0,80})", re.I),
+        re.compile(r"(liberazion\w+[^\n]{0,120}entro\s+\d{1,3}\s+giorni[^\n]{0,80})", re.I),
+        re.compile(r"(sar[aà]\s+liberat\w*[^\n]{0,120}(?:al\s+momento|alla\s+data|entro)[^\n]{0,120})", re.I),
+        re.compile(r"(deve\s+essere\s+rilasciat\w*[^\n]{0,140})", re.I),
+    ]
+    ambiguous = re.compile(r"(da\s+verificare|potrebbe|sarebbe|eventual\w+)", re.I)
+    candidates: List[Dict[str, Any]] = []
+    for p in pages:
+        text = str(p.get("text", "") or "")
+        for pat in patterns:
+            for m in pat.finditer(text):
+                start, end = m.start(), m.end()
+                line_start, line_end = _line_bounds(text, start, end)
+                line_text = text[line_start:line_end]
+                sentence_text, prev_sentence, next_sentence, context_window_text = _extract_context_window(text, line_start, line_end)
+                section_hint = _opponibilita_section_hint(text, line_start, line_end)
+                is_table_like = _is_table_like_text(line_text)
+                if _is_toc_like_line(line_text) or is_table_like:
+                    continue
+                value = _normalize_headline_text(sentence_text or m.group(0))
+                if not value:
+                    continue
+                evidence = [
+                    _build_evidence(
+                        text,
+                        int(p.get("page_number", 0) or 0),
+                        line_start,
+                        line_end,
+                        field_key="delivery_timeline",
+                        anchor_hint=m.group(0),
+                    )
+                ]
+                score = 4.6
+                if section_hint:
+                    score += 1.2
+                if any(token in value.lower() for token in ("entro", "giorni", "decreto di trasferimento", "aggiudicazione")):
+                    score += 1.2
+                score += min(float(int(p.get("page_number", 0) or 0)) * 0.1, 1.0)
+                candidates.append(
+                    {
+                        "value": value,
+                        "status": "LOW_CONFIDENCE" if ambiguous.search(context_window_text) else "FOUND",
+                        "score": round(score, 3),
+                        "page": int(p.get("page_number", 0) or 0),
+                        "match_text": _normalize_headline_text(m.group(0)),
+                        "sentence_text": sentence_text or _normalize_headline_text(line_text),
+                        "prev_sentence": prev_sentence,
+                        "next_sentence": next_sentence,
+                        "context_window_text": context_window_text,
+                        "window_word_count": _word_count(context_window_text),
+                        "section_hint": section_hint,
+                        "is_table_like": is_table_like,
+                        "is_heading_like": _is_heading_like_text(line_text),
+                        "authority_score": round(score, 3),
+                        "contradiction_group": "TIMELINE",
+                        "ocr_noise_hint": None,
+                        "speculative": bool(ambiguous.search(context_window_text)),
+                        "quote": evidence[0].get("quote"),
+                        "evidence": evidence,
+                    }
+                )
+    if candidates:
+        candidates.sort(key=lambda item: (-float(item.get("score", 0.0)), -int(item.get("page", 0) or 0), str(item.get("value") or "")))
+        top = candidates[0]
+        conflicts: List[Dict[str, Any]] = []
+        if len(candidates) > 1:
+            runner_up = candidates[1]
+            score_gap = float(top.get("score", 0.0)) - float(runner_up.get("score", 0.0))
+            if str(top.get("value") or "") != str(runner_up.get("value") or "") and float(top.get("score", 0.0)) >= 5.0 and float(runner_up.get("score", 0.0)) >= 5.0 and score_gap <= 1.5:
+                conflicts.append(
+                    {
+                        "type": "CONTRADICTORY_DELIVERY_TIMELINE",
+                        "top_value": top.get("value"),
+                        "runner_up_value": runner_up.get("value"),
+                        "score_gap": round(score_gap, 3),
+                        "pages": [top.get("page"), runner_up.get("page")],
+                    }
+                )
+        review_required = bool(conflicts) or bool(top.get("speculative"))
+        chosen_status = "LOW_CONFIDENCE" if review_required else str(top.get("status") or "FOUND")
+        chosen_value = "DA VERIFICARE" if conflicts else top.get("value")
+        searched_in = _make_searched_in(pages, keywords, chosen_status, field_key="delivery_timeline")
+        state = _build_field_state(value=chosen_value, status=chosen_status, evidence=top.get("evidence", []), searched_in=searched_in)
+        state["review_required"] = review_required
+        state["needs_user_confirmation"] = review_required
+        state["resolver_meta"] = {
+            "resolver_version": "delivery_timeline_v1",
+            "resolver_confidence": round(max(0.0, min(1.0, float(top.get("score", 0.0)) / 10.0)), 3),
+            "conflict_flag": bool(conflicts),
+            "candidate_count": len(candidates),
+        }
+        state["conflicts"] = conflicts
+        state["all_candidates"] = copy.deepcopy(candidates)
+        state["top_candidates"] = copy.deepcopy(candidates[:2])
+        state["chosen_candidate"] = copy.deepcopy(top)
+        return state
+    searched_in = _make_searched_in(pages, keywords, "NOT_FOUND", field_key="delivery_timeline")
+    return _build_field_state(value=None, status="NOT_FOUND", evidence=[], searched_in=searched_in)
+
 def _extract_ape_state(pages: List[Dict[str, Any]]) -> Dict[str, Any]:
     keywords = ["ape", "attestato di prestazione energetica", "certificato energetico"]
     patterns = [
@@ -3622,6 +3968,8 @@ def _ensure_semaforo_top_blockers(result: Dict[str, Any], states: Dict[str, Any]
 
     key_config = {
         "stato_occupativo": {"label_it": "Stato occupativo", "keywords": ["occupato", "libero", "detenuto", "locazione"]},
+        "opponibilita_occupazione": {"label_it": "Opponibilità occupazione", "keywords": ["opponibile", "non opponibile", "senza titolo", "locazione"]},
+        "delivery_timeline": {"label_it": "Tempistica liberazione", "keywords": ["liberazione", "rilascio", "aggiudicazione", "giorni"]},
         "regolarita_urbanistica": {"label_it": "Regolarità urbanistica", "keywords": ["conformità urbanistica", "abusi edilizi", "sanatoria", "condono"]},
         "conformita_catastale": {"label_it": "Conformità catastale", "keywords": ["conformità catastale", "difformità", "planimetria"]},
         "formalita_pregiudizievoli": {"label_it": "Formalità pregiudizievoli", "keywords": ["ipoteca", "pignoramento", "servitù", "vincolo"]},
@@ -4377,6 +4725,8 @@ def _apply_decision_field_states(result: Dict[str, Any], pages: List[Dict[str, A
             "superficie": _extract_superficie_state(pages, dati),
             "diritto_reale": _extract_diritto_reale_state(pages),
             "stato_occupativo": _extract_stato_occupativo_state(pages),
+            "opponibilita_occupazione": _extract_opponibilita_occupazione_state(pages),
+            "delivery_timeline": _extract_delivery_timeline_state(pages),
             "regolarita_urbanistica": _extract_regolarita_urbanistica_state(pages),
             "conformita_catastale": _extract_conformita_catastale_state(pages),
             "spese_condominiali_arretrate": _extract_spese_condominiali_state(pages),
@@ -4683,6 +5033,7 @@ def _apply_field_overrides(result: Dict[str, Any], overrides: Dict[str, Any], fi
         "superficie",
         "diritto_reale",
         "stato_occupativo",
+        "opponibilita_occupazione",
         "regolarita_urbanistica",
         "conformita_catastale",
         "spese_condominiali_arretrate",
@@ -13210,6 +13561,7 @@ async def update_perizia_overrides(analysis_id: str, payload: FieldOverrideReque
         "superficie_catastale",
         "diritto_reale",
         "stato_occupativo",
+        "opponibilita_occupazione",
         "regolarita_urbanistica",
         "conformita_catastale",
         "spese_condominiali_arretrate",
@@ -13231,7 +13583,7 @@ async def update_perizia_overrides(analysis_id: str, payload: FieldOverrideReque
         else:
             overrides[target_field] = value
         updated = True
-        if target_field in {"stato_occupativo", "regolarita_urbanistica", "conformita_catastale"} and value not in (None, ""):
+        if target_field in {"stato_occupativo", "opponibilita_occupazione", "regolarita_urbanistica", "conformita_catastale"} and value not in (None, ""):
             confirmation_record = {
                 "check_type": target_field,
                 "field_key": f"field_states.{target_field}",
@@ -13275,7 +13627,7 @@ async def update_perizia_overrides(analysis_id: str, payload: FieldOverrideReque
 async def confirm_perizia_field(analysis_id: str, payload: ConfirmationLogRequest, request: Request):
     user = await require_auth(request)
     check_type = str(payload.check_type or "").strip().lower()
-    if check_type not in {"stato_occupativo", "address", "regolarita_urbanistica", "conformita_catastale"}:
+    if check_type not in {"stato_occupativo", "address", "opponibilita_occupazione", "regolarita_urbanistica", "conformita_catastale"}:
         raise HTTPException(status_code=400, detail="Unsupported confirmation type")
     if payload.value in (None, ""):
         raise HTTPException(status_code=400, detail="Confirmation value is required")
@@ -13283,6 +13635,12 @@ async def confirm_perizia_field(analysis_id: str, payload: ConfirmationLogReques
         return await update_perizia_headline(
             analysis_id,
             HeadlineOverrideRequest(address=str(payload.value).strip(), confirmation_notes=payload.notes),
+            request,
+        )
+    if check_type == "opponibilita_occupazione":
+        return await update_perizia_overrides(
+            analysis_id,
+            FieldOverrideRequest(opponibilita_occupazione=payload.value, confirmation_notes=payload.notes),
             request,
         )
     if check_type == "regolarita_urbanistica":
@@ -15480,6 +15838,24 @@ async def _collect_admin_confirmation_rows() -> List[Dict[str, Any]]:
                     "final_applied_value": field_overrides.get("stato_occupativo"),
                     "confirmation_source": "field_override_legacy",
                     "notes": "Normalized from existing field_overrides.stato_occupativo",
+                }
+            )
+        if field_overrides.get("opponibilita_occupazione") not in (None, ""):
+            legacy_rows.append(
+                {
+                    "analysis_id": analysis.get("analysis_id"),
+                    "run_id": analysis.get("run_id"),
+                    "user_id": user_id,
+                    "user_email": user_email,
+                    "check_type": "opponibilita_occupazione",
+                    "field_key": "field_states.opponibilita_occupazione",
+                    "document_name": analysis.get("file_name") or analysis.get("case_title"),
+                    "created_at": analysis.get("created_at"),
+                    "confirmed_at": analysis.get("updated_at") or analysis.get("created_at"),
+                    "user_confirmed_value": field_overrides.get("opponibilita_occupazione"),
+                    "final_applied_value": field_overrides.get("opponibilita_occupazione"),
+                    "confirmation_source": "field_override_legacy",
+                    "notes": "Normalized from existing field_overrides.opponibilita_occupazione",
                 }
             )
         if field_overrides.get("regolarita_urbanistica") not in (None, ""):
