@@ -162,6 +162,18 @@ const clearTrackedCheckoutSession = () => {
   }
 };
 
+const getCheckoutReturnState = () => {
+  const params = new URLSearchParams(window.location.search);
+  const checkout = params.get('checkout') || '';
+  const sessionId = params.get('session_id') || '';
+  return {
+    checkout,
+    sessionId,
+    hasReturnParams: Boolean(checkout || sessionId),
+    key: `${checkout}::${sessionId}`,
+  };
+};
+
 const FEEDBACK_STYLES = {
   success: {
     wrapper: 'border-emerald-500/30 bg-emerald-500/10',
@@ -274,6 +286,8 @@ const Billing = () => {
   const pollTimeoutRef = useRef(null);
   const activeCheckoutSessionRef = useRef('');
   const checkoutRequestRef = useRef(0);
+  const checkoutReconcileInFlightRef = useRef(false);
+  const checkoutHandledKeyRef = useRef('');
   const creditBands = [
     '1-20 pagine = 4 crediti',
     '21-40 pagine = 7 crediti',
@@ -308,64 +322,6 @@ const Billing = () => {
     fetchLedger({ reset: true });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
-
-  useEffect(() => {
-    const checkoutState = searchParams.get('checkout');
-    const sessionId = searchParams.get('session_id');
-    const trackedSession = readTrackedCheckoutSession();
-    const trackedSessionId = trackedSession?.sessionId || '';
-    const hasCheckoutParams = Boolean(checkoutState || sessionId);
-
-    clearCheckoutPoll();
-    setCheckingPayment(false);
-    checkoutRequestRef.current += 1;
-    activeCheckoutSessionRef.current = '';
-
-    if (!hasCheckoutParams) {
-      return undefined;
-    }
-
-    setCheckoutFeedback(null);
-
-    if (sessionId) {
-      if (trackedSessionId && trackedSessionId !== sessionId) {
-        resetTrackedCheckoutState();
-        return undefined;
-      }
-      if (!trackedSessionId) {
-        resetTrackedCheckoutState();
-        return undefined;
-      }
-      activeCheckoutSessionRef.current = sessionId;
-      checkPaymentStatus(sessionId, 0, checkoutRequestRef.current);
-      return undefined;
-    }
-
-    if (checkoutState === 'cancel') {
-      if (!trackedSessionId) {
-        resetTrackedCheckoutState();
-        return undefined;
-      }
-      const feedback = {
-        type: 'info',
-        title: 'Pagamento annullato',
-        body: 'Questo tentativo e stato annullato. Nessun addebito effettuato e nessun credito aggiunto.',
-      };
-      setCheckoutFeedback(feedback);
-      toast.info(feedback.title);
-      resetTrackedCheckoutState();
-      return undefined;
-    }
-
-    resetTrackedCheckoutState();
-
-    return () => {
-      clearCheckoutPoll();
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [searchParams]);
-
-  useEffect(() => () => clearCheckoutPoll(), []);
 
   const fetchPlans = async () => {
     try {
@@ -547,6 +503,91 @@ const Billing = () => {
     await refreshUser();
     await fetchLedger({ reset: true });
   };
+
+  const reconcileCheckoutReturn = async () => {
+    const returnState = getCheckoutReturnState();
+
+    if (!returnState.hasReturnParams) {
+      checkoutHandledKeyRef.current = '';
+      return;
+    }
+
+    if (checkoutReconcileInFlightRef.current || checkoutHandledKeyRef.current === returnState.key) {
+      return;
+    }
+
+    checkoutReconcileInFlightRef.current = true;
+    checkoutHandledKeyRef.current = returnState.key;
+    clearCheckoutPoll();
+    checkoutRequestRef.current += 1;
+    activeCheckoutSessionRef.current = '';
+    setCheckingPayment(false);
+    setCheckoutFeedback(null);
+
+    try {
+      if (returnState.sessionId) {
+        const trackedSession = readTrackedCheckoutSession();
+        if (trackedSession?.sessionId && trackedSession.sessionId !== returnState.sessionId) {
+          clearTrackedCheckoutSession();
+        }
+        activeCheckoutSessionRef.current = returnState.sessionId;
+        await checkPaymentStatus(returnState.sessionId, 0, checkoutRequestRef.current);
+        return;
+      }
+
+      if (returnState.checkout === 'cancel') {
+        const feedback = {
+          type: 'info',
+          title: 'Pagamento annullato',
+          body: 'Questo tentativo e stato annullato. Nessun addebito effettuato e nessun credito aggiunto.',
+        };
+        setCheckoutFeedback(feedback);
+        toast.info(feedback.title);
+        await refreshAccountData();
+        resetTrackedCheckoutState();
+        return;
+      }
+
+      resetTrackedCheckoutState();
+    } finally {
+      setCheckoutLoadingPlanId('');
+      checkoutReconcileInFlightRef.current = false;
+    }
+  };
+
+  useEffect(() => {
+    reconcileCheckoutReturn();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchParams]);
+
+  useEffect(() => {
+    const handleCheckoutLifecycleEvent = () => {
+      const returnState = getCheckoutReturnState();
+      if (!returnState.hasReturnParams) {
+        return;
+      }
+      reconcileCheckoutReturn();
+    };
+
+    const handleVisibilityChange = () => {
+      if (document.visibilityState !== 'visible') {
+        return;
+      }
+      handleCheckoutLifecycleEvent();
+    };
+
+    window.addEventListener('pageshow', handleCheckoutLifecycleEvent);
+    window.addEventListener('focus', handleCheckoutLifecycleEvent);
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+
+    return () => {
+      clearCheckoutPoll();
+      window.removeEventListener('pageshow', handleCheckoutLifecycleEvent);
+      window.removeEventListener('focus', handleCheckoutLifecycleEvent);
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const handlePlanAction = async (plan) => {
     if (plan.plan_id === 'free' || plan.plan_id === accountState.planId) return;
