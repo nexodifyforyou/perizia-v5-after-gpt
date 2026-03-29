@@ -7871,6 +7871,153 @@ def _normalize_evidence_offsets(result: Dict[str, Any], pages: List[Dict[str, An
     _walk(result)
     result["offset_mode"] = EVIDENCE_OFFSET_MODE
 
+def _legal_killer_theme_for_text(*parts: Any) -> Optional[str]:
+    text = _normalize_signal_text(" ".join(str(part or "") for part in parts))
+    if not text:
+        return None
+    if any(token in text for token in ("opponibil", "senza titolo", "occupato da terzi", "locazione", "contratto")):
+        return "occupazione_titolo_opponibilita"
+    if any(token in text for token in ("urbanist", "abusi edilizi", "abuso edilizio", "sanatoria", "condono", "regolarizzazione edilizia")):
+        return "urbanistica"
+    if any(token in text for token in ("catastal", "planimetr", "allineamento catastale")):
+        return "catastale"
+    return None
+
+
+def _field_state_theme_resolution(result: Dict[str, Any]) -> Dict[str, Dict[str, Any]]:
+    states = result.get("field_states", {}) if isinstance(result.get("field_states"), dict) else {}
+
+    def _base_resolution(theme: str, driver_field: str, state: Dict[str, Any]) -> Dict[str, Any]:
+        status = str(state.get("status") or "").upper()
+        return {
+            "theme": theme,
+            "theme_resolution": "RAW_ONLY",
+            "contradiction_flag": bool(state.get("review_required") or state.get("needs_user_confirmation")),
+            "source_priority": "raw_scan",
+            "driver_field": driver_field,
+            "driver_status": status,
+            "driver_value": _field_state_display_value(state),
+        }
+
+    def _resolution_from_state(
+        theme: str,
+        driver_field: str,
+        state: Dict[str, Any],
+        *,
+        blocker_tokens: Tuple[str, ...],
+        safe_tokens: Tuple[str, ...],
+    ) -> Dict[str, Any]:
+        resolution = _base_resolution(theme, driver_field, state)
+        normalized_value = _normalize_headline_text(str(_field_state_display_value(state) or "")).upper()
+        status = resolution["driver_status"]
+        if status == "USER_PROVIDED":
+            resolution["source_priority"] = "field_state_user_provided"
+        elif status in {"FOUND", "LOW_CONFIDENCE"}:
+            resolution["source_priority"] = "field_state"
+
+        if status in {"LOW_CONFIDENCE", "REVIEW_REQUIRED"} or resolution["contradiction_flag"]:
+            resolution["theme_resolution"] = "REVIEW_REQUIRED"
+            return resolution
+        if status not in {"FOUND", "USER_PROVIDED"} or not normalized_value:
+            if status == "NOT_FOUND":
+                resolution["theme_resolution"] = "NO_SIGNAL"
+            return resolution
+        if any(token in normalized_value for token in blocker_tokens):
+            resolution["theme_resolution"] = "BLOCKER_CLEAR"
+            return resolution
+        if any(token in normalized_value for token in safe_tokens):
+            resolution["theme_resolution"] = "SAFE_CLEAR"
+            return resolution
+        return resolution
+
+    occ_state = states.get("stato_occupativo") if isinstance(states.get("stato_occupativo"), dict) else {}
+    opp_state = states.get("opponibilita_occupazione") if isinstance(states.get("opponibilita_occupazione"), dict) else {}
+    opp_resolution = _resolution_from_state(
+        "occupazione_titolo_opponibilita",
+        "opponibilita_occupazione",
+        opp_state,
+        blocker_tokens=("NON OPPONIBILE", "SENZA TITOLO"),
+        safe_tokens=("OPPONIBILE",),
+    )
+    if opp_resolution["theme_resolution"] in {"RAW_ONLY", "NO_SIGNAL"}:
+        occ_resolution = _resolution_from_state(
+            "occupazione_titolo_opponibilita",
+            "stato_occupativo",
+            occ_state,
+            blocker_tokens=("OCCUPATO DA TERZI SENZA TITOLO",),
+            safe_tokens=("LIBERO", "OCCUPATO DAL DEBITORE", "OCCUPATO"),
+        )
+        if occ_resolution["theme_resolution"] != "NO_SIGNAL":
+            opp_resolution = occ_resolution
+
+    urbanistica_state = states.get("regolarita_urbanistica") if isinstance(states.get("regolarita_urbanistica"), dict) else {}
+    urbanistica_resolution = _resolution_from_state(
+        "urbanistica",
+        "regolarita_urbanistica",
+        urbanistica_state,
+        blocker_tokens=("PRESENTI DIFFORMIT", "ABUSI EDILIZI PRESENTI", "NON CONFORME", "SANATORIA NECESSARIA"),
+        safe_tokens=("NON EMERGONO ABUSI", "NON RISULTANO ABUSI", "ASSENZA DI ABUSI", "IMMOBILE CONFORME", "CONFORME URBANISTICAMENTE", "REGOLARE URBANISTICAMENTE"),
+    )
+
+    catastale_state = states.get("conformita_catastale") if isinstance(states.get("conformita_catastale"), dict) else {}
+    catastale_resolution = _resolution_from_state(
+        "catastale",
+        "conformita_catastale",
+        catastale_state,
+        blocker_tokens=("PRESENTI DIFFORMIT", "NON CONFORME", "DIFFORMITA", "DIFFORMITÀ"),
+        safe_tokens=("CONFORME", "CATASTALMENTE CONFORME"),
+    )
+
+    return {
+        "occupazione_titolo_opponibilita": opp_resolution,
+        "urbanistica": urbanistica_resolution,
+        "catastale": catastale_resolution,
+    }
+
+
+def _apply_legal_killer_theme_resolution(items: List[Dict[str, Any]], result: Dict[str, Any]) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
+    resolutions = _field_state_theme_resolution(result)
+    theme_meta: List[Dict[str, Any]] = []
+    for resolution in resolutions.values():
+        theme_meta.append({
+            "theme": resolution.get("theme"),
+            "theme_resolution": resolution.get("theme_resolution"),
+            "contradiction_flag": bool(resolution.get("contradiction_flag")),
+            "source_priority": resolution.get("source_priority"),
+            "driver_field": resolution.get("driver_field"),
+            "driver_status": resolution.get("driver_status"),
+            "driver_value": resolution.get("driver_value"),
+        })
+
+    adjusted: List[Dict[str, Any]] = []
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        theme = _legal_killer_theme_for_text(item.get("killer"), item.get("reason_it"))
+        if not theme:
+            adjusted.append(item)
+            continue
+        resolution = resolutions.get(theme, {})
+        item["theme"] = theme
+        item["theme_resolution"] = str(resolution.get("theme_resolution") or "RAW_ONLY")
+        item["contradiction_flag"] = bool(resolution.get("contradiction_flag"))
+        item["source_priority"] = str(resolution.get("source_priority") or "raw_scan")
+        item["resolver_meta"] = {
+            "driver_field": resolution.get("driver_field"),
+            "driver_status": resolution.get("driver_status"),
+            "driver_value": resolution.get("driver_value"),
+        }
+
+        if item["theme_resolution"] in {"SAFE_CLEAR", "REVIEW_REQUIRED"}:
+            item["status"] = "VERDE" if item["theme_resolution"] == "SAFE_CLEAR" else "DA_VERIFICARE"
+            item["status_it"] = "OK" if item["theme_resolution"] == "SAFE_CLEAR" else "DA VERIFICARE"
+            item["decision_bucket"] = "BACKGROUND_NOTE"
+            item["decision_score"] = 0
+        adjusted.append(item)
+
+    return adjusted, theme_meta
+
+
 def _normalize_legal_killers(result: Dict[str, Any], pages: List[Dict[str, Any]]) -> None:
     section = result.setdefault("section_9_legal_killers", {})
     items = section.get("items", [])
@@ -8011,8 +8158,10 @@ def _normalize_legal_killers(result: Dict[str, Any], pages: List[Dict[str, Any]]
         normalized.append(item)
         existing_keys.add(killer_key)
 
+    normalized, theme_meta = _apply_legal_killer_theme_resolution(normalized, result)
     normalized.sort(key=lambda item: (-int(item.get("decision_score", 0)), str(item.get("killer", ""))))
     section["items"] = normalized
+    section["resolver_meta"] = {"themes": theme_meta}
 
     lots = result.get("lots") if isinstance(result.get("lots"), list) else []
     lot_driven_top_items = _build_multi_lot_top_legal_items(lots, pages)
@@ -13160,9 +13309,9 @@ async def analyze_perizia(request: Request, file: UploadFile = File(...)):
         )
         raise HTTPException(status_code=504, detail={"error": "PIPELINE_TIMEOUT", "message": f"Pipeline exceeded {PIPELINE_TIMEOUT_SECONDS}s", "retry": True})
 
-    _normalize_legal_killers(result, pages)
     _apply_headline_field_states(result, pages)
     _apply_decision_field_states(result, pages)
+    _normalize_legal_killers(result, pages)
     _apply_market_ranges_to_money_box(result)
     _normalize_evidence_offsets(result, pages)
     result["panoramica_contract"] = _build_panoramica_contract(result, pages)

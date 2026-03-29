@@ -51,12 +51,22 @@ def _seed_analysis(fake_db, *, analysis_id: str, user_id: str, result: dict, hea
 
 def _build_result_for_pages(pages):
     result = server.create_fallback_analysis("perizia.pdf", "case_1", "run_1", pages, server._build_full_text_from_pages(pages))
-    server._normalize_legal_killers(result, pages)
     server._apply_headline_field_states(result, pages)
     server._apply_decision_field_states(result, pages)
+    server._normalize_legal_killers(result, pages)
     server._apply_market_ranges_to_money_box(result)
     server._normalize_evidence_offsets(result, pages)
     result["panoramica_contract"] = server._build_panoramica_contract(result, pages)
+    return result
+
+
+def _build_result_with_legal_items(pages, items):
+    result = server.create_fallback_analysis("perizia.pdf", "case_1", "run_1", pages, server._build_full_text_from_pages(pages))
+    result["section_9_legal_killers"] = {"items": items}
+    server._apply_headline_field_states(result, pages)
+    server._apply_decision_field_states(result, pages)
+    server._normalize_legal_killers(result, pages)
+    server._ensure_semaforo_top_blockers(result, result.get("field_states", {}), pages)
     return result
 
 
@@ -295,6 +305,195 @@ def test_delivery_liberazione_timing_appears_only_when_explicitly_evidenced():
     ]
     implicit_state = server._extract_delivery_timeline_state(implicit_pages)
     assert implicit_state["status"] == "NOT_FOUND"
+
+
+def test_contradictory_raw_opponibilita_hits_do_not_collapse_into_false_blocker():
+    pages = [
+        {"page_number": 2, "text": "STATO OCCUPATIVO\nImmobile occupato da terzi conduttori.\n"},
+        {"page_number": 8, "text": "LOCAZIONE OPPONIBILE\nContratto di locazione opponibile alla procedura esecutiva.\n"},
+    ]
+    result = _build_result_with_legal_items(
+        pages,
+        [
+            {
+                "killer": "Occupato da terzi senza titolo",
+                "status": "ROSSO",
+                "reason_it": "Segnale grezzo da verificare",
+                "evidence": [{"page": 2, "quote": "Immobile occupato da terzi conduttori.", "search_hint": "occupato da terzi"}],
+            }
+        ],
+    )
+    item = result["section_9_legal_killers"]["items"][0]
+    assert item["theme"] == "occupazione_titolo_opponibilita"
+    assert item["theme_resolution"] == "SAFE_CLEAR"
+    assert item["decision_bucket"] == "BACKGROUND_NOTE"
+    assert result["section_9_legal_killers"]["top_items"] == []
+    assert not any(b["label_it"] == "Occupato da terzi senza titolo" for b in result["semaforo_generale"]["top_blockers"])
+
+
+def test_strong_field_backed_opponibilita_blocker_survives_normalization():
+    pages = [
+        {"page_number": 1, "text": "STATO OCCUPATIVO\nImmobile occupato da terzi conduttori.\n"},
+        {"page_number": 7, "text": "TITOLO OPPONIBILE\nIl contratto di locazione non opponibile alla procedura esecutiva.\n"},
+    ]
+    result = _build_result_with_legal_items(
+        pages,
+        [
+            {
+                "killer": "Occupato da terzi senza titolo",
+                "status": "ROSSO",
+                "reason_it": "Segnale grezzo coerente con il titolo",
+                "evidence": [{"page": 7, "quote": "Il contratto di locazione non opponibile alla procedura esecutiva.", "search_hint": "non opponibile"}],
+            }
+        ],
+    )
+    item = result["section_9_legal_killers"]["items"][0]
+    assert item["theme_resolution"] == "BLOCKER_CLEAR"
+    assert result["section_9_legal_killers"]["top_items"][0]["killer"] == "Occupato da terzi senza titolo"
+    assert any(b["label_it"] == "Occupato da terzi senza titolo" for b in result["semaforo_generale"]["top_blockers"])
+
+
+def test_contradictory_raw_urbanistica_hits_do_not_produce_fake_blocker():
+    pages = [
+        {"page_number": 4, "text": "REGOLARITA URBANISTICA\nNon risultano abusi edilizi e il bene appare conforme urbanisticamente.\n"},
+        {"page_number": 5, "text": "CONFORMITA URBANISTICA\nSi rilevano difformità urbanistiche e opere abusive da sanare.\n"},
+    ]
+    result = _build_result_with_legal_items(
+        pages,
+        [
+            {
+                "killer": "Abuso edilizio",
+                "status": "ROSSO",
+                "reason_it": "Segnale grezzo da verificare",
+                "evidence": [{"page": 5, "quote": "Si rilevano difformità urbanistiche e opere abusive da sanare.", "search_hint": "difformita urbanistiche"}],
+            }
+        ],
+    )
+    item = result["section_9_legal_killers"]["items"][0]
+    assert item["theme"] == "urbanistica"
+    assert item["theme_resolution"] == "REVIEW_REQUIRED"
+    assert item["decision_bucket"] == "BACKGROUND_NOTE"
+    assert result["section_9_legal_killers"]["top_items"] == []
+
+
+def test_strong_urbanistica_blocker_survives_when_evidence_is_clear():
+    pages = [
+        {"page_number": 8, "text": "ABUSI EDILIZI E CONFORMITA URBANISTICA\nSi rilevano difformità urbanistiche e opere abusive da sanare.\n"},
+    ]
+    result = _build_result_with_legal_items(
+        pages,
+        [
+            {
+                "killer": "Abuso edilizio",
+                "status": "ROSSO",
+                "reason_it": "Criticita urbanistica supportata",
+                "evidence": [{"page": 8, "quote": "Si rilevano difformità urbanistiche e opere abusive da sanare.", "search_hint": "abusive da sanare"}],
+            }
+        ],
+    )
+    item = result["section_9_legal_killers"]["items"][0]
+    assert item["theme_resolution"] == "BLOCKER_CLEAR"
+    assert result["section_9_legal_killers"]["top_items"][0]["killer"] == "Abuso edilizio"
+
+
+def test_contradictory_raw_catastale_hits_do_not_produce_fake_blocker():
+    pages = [
+        {"page_number": 4, "text": "CONFORMITA CATASTALE\nLa planimetria risulta conforme e vi e piena corrispondenza catastale con lo stato di fatto.\n"},
+        {"page_number": 5, "text": "PLANIMETRIA CATASTALE\nSi rilevano difformita catastali e mancata corrispondenza con lo stato di fatto.\n"},
+    ]
+    result = _build_result_with_legal_items(
+        pages,
+        [
+            {
+                "killer": "Difformità catastale rilevata",
+                "status": "ROSSO",
+                "reason_it": "Segnale grezzo catastale da verificare",
+                "evidence": [{"page": 5, "quote": "Si rilevano difformita catastali e mancata corrispondenza con lo stato di fatto.", "search_hint": "difformita catastali"}],
+            }
+        ],
+    )
+    item = result["section_9_legal_killers"]["items"][0]
+    assert item["theme"] == "catastale"
+    assert item["theme_resolution"] == "REVIEW_REQUIRED"
+    assert item["decision_bucket"] == "BACKGROUND_NOTE"
+    assert result["section_9_legal_killers"]["top_items"] == []
+
+
+def test_strong_catastale_blocker_survives_when_evidence_is_clear():
+    pages = [
+        {"page_number": 8, "text": "CONFORMITA CATASTALE\nSi rilevano difformita catastali e planimetria non conforme allo stato di fatto.\n"},
+    ]
+    result = _build_result_with_legal_items(
+        pages,
+        [
+            {
+                "killer": "Difformità catastale rilevata",
+                "status": "ROSSO",
+                "reason_it": "Criticita catastale supportata",
+                "evidence": [{"page": 8, "quote": "Si rilevano difformita catastali e planimetria non conforme allo stato di fatto.", "search_hint": "planimetria non conforme"}],
+            }
+        ],
+    )
+    item = result["section_9_legal_killers"]["items"][0]
+    assert item["theme_resolution"] == "BLOCKER_CLEAR"
+    assert result["section_9_legal_killers"]["top_items"][0]["killer"] == "Difformità catastale rilevata"
+
+
+def test_legal_killers_section_shape_remains_usable_with_theme_metadata():
+    pages = [
+        {"page_number": 8, "text": "ABUSI EDILIZI E CONFORMITA URBANISTICA\nSi rilevano difformità urbanistiche e opere abusive da sanare.\n"},
+    ]
+    result = _build_result_with_legal_items(
+        pages,
+        [
+            {
+                "killer": "Abuso edilizio",
+                "status": "ROSSO",
+                "reason_it": "Criticita urbanistica supportata",
+                "evidence": [{"page": 8, "quote": "Si rilevano difformità urbanistiche e opere abusive da sanare.", "search_hint": "abusive da sanare"}],
+            }
+        ],
+    )
+    section = result["section_9_legal_killers"]
+    assert isinstance(section["items"], list)
+    assert isinstance(section["top_items"], list)
+    assert isinstance(section["resolver_meta"], dict)
+    assert isinstance(section["resolver_meta"]["themes"], list)
+    item = section["items"][0]
+    assert item["theme"] == "urbanistica"
+    assert item["theme_resolution"] == "BLOCKER_CLEAR"
+    assert item["source_priority"] == "field_state"
+
+
+def test_semaforo_top_items_respect_theme_level_normalization():
+    pages = [
+        {"page_number": 4, "text": "REGOLARITA URBANISTICA\nNon risultano abusi edilizi e il bene appare conforme urbanisticamente.\n"},
+        {"page_number": 5, "text": "CONFORMITA URBANISTICA\nSi rilevano difformità urbanistiche e opere abusive da sanare.\n"},
+        {"page_number": 8, "text": "TITOLO OPPONIBILE\nIl contratto di locazione non opponibile alla procedura esecutiva.\n"},
+    ]
+    result = _build_result_with_legal_items(
+        pages,
+        [
+            {
+                "killer": "Abuso edilizio",
+                "status": "ROSSO",
+                "reason_it": "Segnale urbanistico contraddittorio",
+                "evidence": [{"page": 5, "quote": "Si rilevano difformità urbanistiche e opere abusive da sanare.", "search_hint": "difformita urbanistiche"}],
+            },
+            {
+                "killer": "Occupato da terzi senza titolo",
+                "status": "ROSSO",
+                "reason_it": "Titolo non opponibile supportato",
+                "evidence": [{"page": 8, "quote": "Il contratto di locazione non opponibile alla procedura esecutiva.", "search_hint": "non opponibile"}],
+            },
+        ],
+    )
+    top_items = result["section_9_legal_killers"]["top_items"]
+    assert len(top_items) == 1
+    assert top_items[0]["killer"] == "Occupato da terzi senza titolo"
+    blocker_labels = [b["label_it"] for b in result["semaforo_generale"]["top_blockers"]]
+    assert "Occupato da terzi senza titolo" in blocker_labels
+    assert "Abuso edilizio" not in blocker_labels
 
 
 @pytest.mark.anyio
