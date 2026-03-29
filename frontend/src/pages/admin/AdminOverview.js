@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react';
 import axios from 'axios';
 import { Button } from '../../components/ui/button';
 import AdminLayout from './AdminLayout';
-import { Users, FileText, Image, MessageSquare, CreditCard } from 'lucide-react';
+import { Users, FileText, Image, MessageSquare, CreditCard, Download } from 'lucide-react';
 import { toast } from 'sonner';
 import { useNavigate } from 'react-router-dom';
 
@@ -20,6 +20,12 @@ const formatCurrency = (value, currency = 'EUR') => new Intl.NumberFormat('it-IT
   currency: String(currency || 'EUR').toUpperCase(),
   minimumFractionDigits: 2,
 }).format(Number(value || 0));
+
+const getDownloadFilename = (contentDisposition) => {
+  const fallbackName = 'periziascan_confirmations.xlsx';
+  const match = String(contentDisposition || '').match(/filename="?([^"]+)"?/i);
+  return match?.[1] || fallbackName;
+};
 
 const CREDIT_LABELS = {
   perizia_scans_remaining: 'Crediti perizia',
@@ -40,6 +46,8 @@ const StatCard = ({ icon, label, value }) => (
 const AdminOverview = () => {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [exportLoading, setExportLoading] = useState(false);
+  const [exportError, setExportError] = useState('');
   const navigate = useNavigate();
 
   useEffect(() => {
@@ -61,6 +69,32 @@ const AdminOverview = () => {
   const planCounts = data?.plan_counts || {};
   const ledger30 = data?.credit_ledger_30d || {};
   const billing30 = data?.billing_records_30d?.status_counts || {};
+
+  const handleExportConfirmations = async () => {
+    setExportLoading(true);
+    setExportError('');
+    try {
+      const response = await axios.get(`${API_URL}/api/admin/perizia-confirmations/export.xlsx`, {
+        withCredentials: true,
+        responseType: 'blob',
+      });
+      const filename = getDownloadFilename(response.headers['content-disposition']);
+      const blobUrl = window.URL.createObjectURL(response.data);
+      const link = document.createElement('a');
+      link.href = blobUrl;
+      link.download = filename;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      window.URL.revokeObjectURL(blobUrl);
+    } catch (error) {
+      const message = 'Impossibile esportare le conferme perizia.';
+      setExportError(message);
+      toast.error(message);
+    } finally {
+      setExportLoading(false);
+    }
+  };
 
   return (
     <AdminLayout title="Admin Overview" subtitle="Panoramica generale (GOD mode)">
@@ -97,10 +131,24 @@ const AdminOverview = () => {
               </div>
             </div>
             <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-6">
-              <p className="text-sm text-zinc-500 mb-2">Note</p>
+              <p className="text-sm text-zinc-500 mb-2">Azioni admin</p>
               <p className="text-sm text-zinc-400">
                 Panoramica operativa per monitorare crescita, uso e attività.
               </p>
+              <div className="mt-4">
+                <Button
+                  variant="outline"
+                  className="border-zinc-700 text-zinc-200 hover:bg-zinc-800"
+                  onClick={handleExportConfirmations}
+                  disabled={exportLoading}
+                >
+                  <Download className="mr-2 h-4 w-4" />
+                  {exportLoading ? 'Esportazione in corso...' : 'Export Perizia Confirmations (.xlsx)'}
+                </Button>
+                {exportError && (
+                  <p className="mt-3 text-sm text-red-400">{exportError}</p>
+                )}
+              </div>
             </div>
           </div>
 
