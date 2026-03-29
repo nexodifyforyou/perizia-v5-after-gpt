@@ -104,6 +104,32 @@ const pickFirstNonEmpty = (...values) => {
   return null;
 };
 
+const getFieldStateValue = (state) => {
+  if (!state || typeof state !== 'object') return null;
+  if (state.value !== null && state.value !== undefined && state.value !== '') return state.value;
+  return null;
+};
+
+const getLegacyDetailValue = (value) => {
+  if (!value || typeof value !== 'object') return null;
+  return pickFirstNonEmpty(value?.detail_it, value?.status_it, value?.status, value?.formatted, value?.value);
+};
+
+const getFieldStateEvidence = (state, fallback = null) => {
+  if (state && Array.isArray(state.evidence) && state.evidence.length > 0) return state.evidence;
+  return getEvidence(fallback);
+};
+
+const formatAuctionBasePrice = (...values) => {
+  for (const value of values) {
+    const numeric = parseNumericEuro(value);
+    if (numeric !== null) return formatMoney(numeric);
+    const rendered = safeRender(value, '').trim();
+    if (rendered) return rendered;
+  }
+  return MISSING_TEXT;
+};
+
 const normalizeSeverity = (value) => {
   const upper = safeRender(value, '').toUpperCase();
   if (['CRITICAL', 'ERROR', 'RED', 'ROSSO', 'CRITICO'].includes(upper)) return 'Critico';
@@ -428,6 +454,8 @@ const buildLegalItems = (result) => {
   pushItem('catasto', 'Conformita catastale', fieldStates.conformita_catastale?.status, fieldStates.conformita_catastale?.value, fieldStates.conformita_catastale?.evidence);
   pushItem('agibilita', 'Agibilita', fieldStates.agibilita?.status, fieldStates.agibilita?.value, fieldStates.agibilita?.evidence);
   pushItem('occupazione', 'Stato occupativo', fieldStates.stato_occupativo?.status, fieldStates.stato_occupativo?.value, fieldStates.stato_occupativo?.evidence);
+  pushItem('opponibilita', 'Opponibilita occupazione', fieldStates.opponibilita_occupazione?.status, fieldStates.opponibilita_occupazione?.value, fieldStates.opponibilita_occupazione?.evidence);
+  pushItem('delivery-timeline', 'Tempistica liberazione', fieldStates.delivery_timeline?.status, fieldStates.delivery_timeline?.value, fieldStates.delivery_timeline?.evidence);
 
   section9.forEach((item, index) => {
     pushItem(
@@ -526,6 +554,46 @@ const buildDetails = (result) => {
     .sort((a, b) => (a.bene_number || 0) - (b.bene_number || 0))
     .map((bene, index) => {
       const evidenceObj = bene?.evidence && typeof bene.evidence === 'object' ? bene.evidence : {};
+      const occupazioneValue = pickFirstNonEmpty(
+        getFieldStateValue(fieldStates.stato_occupativo),
+        bene?.occupancy_status,
+        bene?.stato_occupativo,
+        bene?.occupazione_status,
+        occupativo?.status_it,
+        occupativo?.status
+      );
+      const urbanisticaValue = pickFirstNonEmpty(
+        getFieldStateValue(fieldStates.regolarita_urbanistica),
+        bene?.urbanistica,
+        bene?.regolarita_urbanistica,
+        bene?.conformita_urbanistica,
+        abusi?.conformita_urbanistica?.detail_it,
+        abusi?.conformita_urbanistica?.status
+      );
+      const apeValue = pickFirstNonEmpty(
+        getFieldStateValue(fieldStates.ape),
+        bene?.ape,
+        abusi?.ape?.detail_it,
+        abusi?.ape?.status
+      );
+      const elettricoDeclarationValue = pickFirstNonEmpty(
+        bene?.dichiarazioni?.dichiarazione_impianto_elettrico,
+        bene?.dichiarazioni_impianti?.elettrico,
+        getFieldStateValue(fieldStates.dichiarazione_impianto_elettrico),
+        getLegacyDetailValue(abusi?.impianti?.elettrico)
+      );
+      const idricoDeclarationValue = pickFirstNonEmpty(
+        bene?.dichiarazioni?.dichiarazione_impianto_idrico,
+        bene?.dichiarazioni_impianti?.idrico,
+        getFieldStateValue(fieldStates.dichiarazione_impianto_idrico),
+        getLegacyDetailValue(abusi?.impianti?.idrico)
+      );
+      const gasDeclarationValue = pickFirstNonEmpty(
+        bene?.dichiarazioni?.dichiarazione_impianto_gas,
+        bene?.dichiarazioni_impianti?.gas,
+        getFieldStateValue(fieldStates.dichiarazione_impianto_gas),
+        getLegacyDetailValue(abusi?.impianti?.gas)
+      );
       const catastoFromEvidence = parseCatastoFromEvidence(evidenceObj?.catasto);
       const catastoValue = catastoFromEvidence || formatCatastoCompact(bene?.catasto);
       const catastoEvidence = evidenceMatchesCatasto(evidenceObj?.catasto, catastoValue)
@@ -534,12 +602,12 @@ const buildDetails = (result) => {
       const agibilitaDetail = buildAgibilitaDetail(bene, abusi, fieldStates);
       const detailRows = [
         { label: 'Diritto reale', value: dirittoReale, evidence: [] },
-        { label: 'Stato occupativo', value: safeRender(pickFirstNonEmpty(bene?.stato_occupativo, occupativo?.status_it, occupativo?.status), ''), evidence: getPrimaryEvidence(evidenceObj?.occupancy_status, fieldStates.stato_occupativo) },
+        { label: 'Stato occupativo', value: safeRender(occupazioneValue, ''), evidence: getPrimaryEvidence(evidenceObj?.occupancy_status, getFieldStateEvidence(fieldStates.stato_occupativo, occupativo)) },
         { label: 'Catasto', value: catastoValue, evidence: catastoEvidence },
-        { label: 'Urbanistica', value: safeRender(pickFirstNonEmpty(bene?.urbanistica, bene?.conformita_urbanistica, abusi?.conformita_urbanistica?.status), ''), evidence: getPrimaryEvidence(evidenceObj?.urbanistica, fieldStates.regolarita_urbanistica) },
+        { label: 'Urbanistica', value: safeRender(urbanisticaValue, ''), evidence: getPrimaryEvidence(evidenceObj?.urbanistica, getFieldStateEvidence(fieldStates.regolarita_urbanistica, abusi?.conformita_urbanistica)) },
         { label: 'Agibilita / Abitabilita', value: agibilitaDetail.value, note: agibilitaDetail.note, evidence: agibilitaDetail.evidence },
         { label: 'Stato conservativo', value: safeRender(bene?.stato_conservativo?.status_it || bene?.stato_conservativo?.general_condition_it || bene?.stato_conservativo, ''), evidence: getPrimaryEvidence(bene?.stato_conservativo, evidenceObj?.stato_conservativo) },
-        { label: 'APE', value: safeRender(pickFirstNonEmpty(bene?.ape, abusi?.ape?.status, fieldStates.ape?.value), ''), evidence: getPrimaryEvidence(evidenceObj?.ape, fieldStates.ape) },
+        { label: 'APE', value: safeRender(apeValue, ''), evidence: getPrimaryEvidence(evidenceObj?.ape, getFieldStateEvidence(fieldStates.ape, abusi?.ape)) },
       ].filter((row) => row.value);
 
       const impiantiRows = ['elettrico', 'idrico', 'termico']
@@ -551,9 +619,10 @@ const buildDetails = (result) => {
         .filter((row) => row.value);
 
       const declarationRows = [
-        { label: 'Dichiarazione impianto elettrico', value: safeRender(bene?.dichiarazioni?.dichiarazione_impianto_elettrico || bene?.dichiarazioni_impianti?.elettrico, ''), evidence: getPrimaryEvidence(evidenceObj?.dichiarazioni?.dichiarazione_impianto_elettrico, evidenceObj?.dichiarazioni_impianti?.elettrico) },
+        { label: 'Dichiarazione impianto elettrico', value: safeRender(elettricoDeclarationValue, ''), evidence: getPrimaryEvidence(evidenceObj?.dichiarazioni?.dichiarazione_impianto_elettrico, evidenceObj?.dichiarazioni_impianti?.elettrico, getFieldStateEvidence(fieldStates.dichiarazione_impianto_elettrico, abusi?.impianti?.elettrico)) },
         { label: 'Dichiarazione impianto termico', value: safeRender(bene?.dichiarazioni?.dichiarazione_impianto_termico || bene?.dichiarazioni_impianti?.termico, ''), evidence: getPrimaryEvidence(evidenceObj?.dichiarazioni?.dichiarazione_impianto_termico, evidenceObj?.dichiarazioni_impianti?.termico) },
-        { label: 'Dichiarazione impianto idrico', value: safeRender(bene?.dichiarazioni?.dichiarazione_impianto_idrico || bene?.dichiarazioni_impianti?.idrico, ''), evidence: getPrimaryEvidence(evidenceObj?.dichiarazioni?.dichiarazione_impianto_idrico, evidenceObj?.dichiarazioni_impianti?.idrico) },
+        { label: 'Dichiarazione impianto idrico', value: safeRender(idricoDeclarationValue, ''), evidence: getPrimaryEvidence(evidenceObj?.dichiarazioni?.dichiarazione_impianto_idrico, evidenceObj?.dichiarazioni_impianti?.idrico, getFieldStateEvidence(fieldStates.dichiarazione_impianto_idrico, abusi?.impianti?.idrico)) },
+        { label: 'Dichiarazione impianto gas', value: safeRender(gasDeclarationValue, ''), evidence: getPrimaryEvidence(evidenceObj?.dichiarazioni?.dichiarazione_impianto_gas, evidenceObj?.dichiarazioni_impianti?.gas, getFieldStateEvidence(fieldStates.dichiarazione_impianto_gas, abusi?.impianti?.gas)) },
       ].filter((row) => row.value);
 
       return {
@@ -685,6 +754,8 @@ const buildFlags = (result) => {
 export const buildPeriziaPrintReportModel = (rawAnalysis) => {
   const analysis = normalizeAnalysisResponse(rawAnalysis) || {};
   const result = analysis.result || {};
+  const fieldStates = result.field_states || {};
+  const section4 = result.section_4_dati_certi || {};
   const reportHeader = result.report_header?.procedure ? result.report_header : (result.case_header || {});
   const semaforo = result.section_1_semaforo_generale?.status ? result.section_1_semaforo_generale : (result.semaforo_generale || {});
   const narratedDecision = result.decision_rapida_narrated && typeof result.decision_rapida_narrated === 'object'
@@ -750,7 +821,18 @@ export const buildPeriziaPrintReportModel = (rawAnalysis) => {
         { label: 'Valore di stima', value: formatMoney(valuation.valore_stima_eur) },
         { label: 'Deprezzamenti', value: formatMoney(valuation.deprezzamenti_eur) },
         { label: 'Valore finale', value: formatMoney(valuation.valore_finale_eur) },
-        { label: 'Prezzo base', value: formatMoney(valuation.prezzo_base_eur || lotSummary.prezzo_base_eur) },
+        {
+          label: 'Prezzo base',
+          value: formatAuctionBasePrice(
+            lotSummary.prezzo_base_eur,
+            valuation.prezzo_base_eur,
+            getFieldStateValue(fieldStates.prezzo_base_asta),
+            section4?.prezzo_base_asta?.formatted,
+            section4?.prezzo_base_asta?.value,
+            result.dati_certi_del_lotto?.prezzo_base_asta?.formatted,
+            result.dati_certi_del_lotto?.prezzo_base_asta?.value
+          ),
+        },
       ].filter((item) => item.value && item.value !== MISSING_TEXT),
       composition: lotComposition.map((item, index) => ({
         key: `overview-bene-${index}`,
