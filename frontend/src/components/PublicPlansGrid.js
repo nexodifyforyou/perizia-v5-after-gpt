@@ -45,7 +45,7 @@ const defaultSummary = {
   starter: 'Taglio operativo leggero per volumi contenuti.',
   solo: 'Il pacchetto centrale oggi piu coerente con il prodotto attuale.',
   pro: 'Maggiore continuita per professionisti con frequenza piu alta.',
-  studio: 'Capacita estesa per team e studi con piu pratiche.'
+  studio: 'Offerta dedicata con attivazione assistita per studi e team.'
 };
 
 const ctaByPlan = {
@@ -54,6 +54,14 @@ const ctaByPlan = {
   solo: 'Disponibilita commerciale in aggiornamento',
   pro: 'Disponibilita commerciale in aggiornamento',
   studio: 'Disponibilita commerciale in aggiornamento'
+};
+
+const planNameOverrides = {
+  starter: 'Pacchetto 8 crediti',
+};
+
+const supportOverrides = {
+  studio: 'Offerta dedicata con attivazione assistita',
 };
 
 const PublicPlansGrid = ({ detailed = false }) => {
@@ -89,7 +97,7 @@ const PublicPlansGrid = ({ detailed = false }) => {
 
             <div className="mb-6">
               <p className="text-xs font-mono uppercase tracking-[0.28em] text-zinc-500 mb-3">{plan.plan_type_label_it}</p>
-              <h3 className="text-2xl font-serif font-bold text-zinc-100 mb-2">{plan.name_it}</h3>
+              <h3 className="text-2xl font-serif font-bold text-zinc-100 mb-2">{planNameOverrides[plan.plan_id] || plan.name_it}</h3>
               <p className="text-sm leading-relaxed text-zinc-400">{defaultSummary[plan.plan_id] || 'Pacchetto pubblico PeriziaScan.'}</p>
             </div>
 
@@ -105,7 +113,7 @@ const PublicPlansGrid = ({ detailed = false }) => {
             <div className="space-y-2 text-sm mb-6">
               <p className="text-zinc-100 font-medium">{plan.credits_label_it}</p>
               {plan.validity_label_it && <p className="text-zinc-500">{plan.validity_label_it}</p>}
-              {plan.support_level_it && <p className="text-zinc-500">{plan.support_level_it}</p>}
+              {(supportOverrides[plan.plan_id] || plan.support_level_it) && <p className="text-zinc-500">{supportOverrides[plan.plan_id] || plan.support_level_it}</p>}
             </div>
 
             <ul className="space-y-3 mb-7">

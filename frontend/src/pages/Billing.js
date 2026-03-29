@@ -96,7 +96,19 @@ const FALLBACK_CREDITS_LABELS = {
   pro: '84 crediti mensili',
   studio: 'Gestione su richiesta',
 };
+const PLAN_NAME_OVERRIDES = {
+  starter: 'Pacchetto 8 crediti',
+};
+const PLAN_SUPPORT_OVERRIDES = {
+  studio: 'Offerta dedicata con attivazione assistita',
+};
 const TERMINAL_SUBSCRIPTION_STATUSES = ['canceled', 'cancelled', 'ended', 'incomplete_expired', 'unpaid'];
+
+const localizePlanName = (plan) => (
+  PLAN_NAME_OVERRIDES[plan?.plan_id] ||
+  plan?.name_it ||
+  'Piano'
+);
 
 const localizePlanType = (plan) => (
   FALLBACK_PLAN_TYPE_LABELS[plan?.plan_id] ||
@@ -105,6 +117,7 @@ const localizePlanType = (plan) => (
 );
 
 const localizeSupport = (plan) => (
+  PLAN_SUPPORT_OVERRIDES[plan?.plan_id] ||
   FALLBACK_SUPPORT_LABELS[plan?.plan_id] ||
   plan?.support_level_it ||
   'Supporto'
@@ -607,7 +620,7 @@ const Billing = () => {
     }
     if (subscriptionState.pendingChange) {
       if (plan.plan_id === subscriptionState.pendingPlanId) {
-        return { disabled: true, label: `Gia programmato: ${plan.name_it}` };
+        return { disabled: true, label: `Gia programmato: ${localizePlanName(plan)}` };
       }
       return { disabled: true, label: 'Cambio gia programmato' };
     }
@@ -695,7 +708,7 @@ const Billing = () => {
               <p className="text-sm text-zinc-500 mb-1">Piano attivo</p>
               <div className="flex items-center gap-3">
                 <h2 className="text-2xl font-serif font-bold text-zinc-100 capitalize">
-                  {currentPlanDetails?.name_it || accountState.planLabel}
+                  {localizePlanName(currentPlanDetails) || accountState.planLabel}
                 </h2>
                 {accountState.isMasterAdmin && (
                     <span className="px-2 py-1 bg-gold/20 text-gold text-xs font-mono rounded">
@@ -825,7 +838,7 @@ const Billing = () => {
                 )}
 
                 <h3 className="text-xl font-serif font-bold text-zinc-100 mb-2">
-                  {plan.name_it}
+                  {localizePlanName(plan)}
                 </h3>
 
                 <p className="text-xs font-mono uppercase tracking-wider text-zinc-500 mb-4">
