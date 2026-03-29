@@ -170,6 +170,32 @@ def _extra_grant(*, amount, grant_id, source="manual_seed", reference_id=None, e
     )
 
 
+def test_empty_wallet_dict_falls_back_to_legacy_free_quota():
+    user_doc = {
+        "user_id": "user_free_empty_wallet",
+        "email": "free@example.com",
+        "name": "Free User",
+        "plan": "free",
+        "is_master_admin": False,
+        "quota": {
+            "perizia_scans_remaining": 12,
+            "image_scans_remaining": 0,
+            "assistant_messages_remaining": 0,
+        },
+        "perizia_credits": {},
+    }
+
+    wallet = server._normalize_perizia_credit_wallet(user_doc, plan_id="free", is_master_admin=False)
+
+    assert wallet["total_available"] == 12
+    assert wallet["monthly_remaining"] == 0
+    assert wallet["extra_remaining"] == 12
+    assert wallet["monthly_plan_id"] is None
+    assert len(wallet["pack_grants"]) == 1
+    assert wallet["pack_grants"][0]["source"] == "legacy_migration"
+    assert wallet["pack_grants"][0]["amount_remaining"] == 12
+
+
 def _assert_wallet_exact(fake_db, *, user_id="user_checkout", monthly_remaining, extra_remaining, total_available, monthly_plan_id, processed_invoice_ids, pack_grants):
     user_doc = _user_doc(fake_db, user_id)
     wallet = _perizia_wallet(fake_db, user_id)
@@ -258,6 +284,77 @@ async def test_create_checkout_uses_env_price_ids_modes_and_card_only(fake_db, m
     assert captured[1]["line_items"] == [{"price": "price_solo_env", "quantity": 1}]
     assert captured[1]["payment_method_types"] == ["card"]
     assert captured[1]["subscription_data"]["metadata"]["app_user_id"] == "user_checkout"
+
+
+@pytest.mark.anyio
+async def test_create_session_initializes_free_wallet_and_auth_me_keeps_twelve(fake_db, monkeypatch):
+    original_async_client = httpx.AsyncClient
+
+    class FakeAuthResponse:
+        status_code = 200
+
+        @staticmethod
+        def json():
+            return {
+                "email": "freshfree@example.com",
+                "name": "Fresh Free",
+                "picture": "https://example.com/avatar.png",
+            }
+
+    class FakeAsyncClient:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+        async def get(self, url, headers=None):
+            assert url == "https://demobackend.emergentagent.com/auth/v1/env/oauth/session-data"
+            assert headers == {"X-Session-ID": "sess_from_auth_provider"}
+            return FakeAuthResponse()
+
+    def fake_async_client(*args, **kwargs):
+        if "transport" in kwargs:
+            return original_async_client(*args, **kwargs)
+        return FakeAsyncClient()
+
+    monkeypatch.setattr(server.httpx, "AsyncClient", fake_async_client)
+
+    transport = httpx.ASGITransport(app=server.app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        create_response = await client.post(
+            "/api/auth/session",
+            json={"session_id": "sess_from_auth_provider"},
+        )
+
+        assert create_response.status_code == 200
+        create_payload = create_response.json()
+        session_token = create_payload["session_token"]
+
+        me_response = await client.get("/api/auth/me", headers={"Authorization": f"Bearer {session_token}"})
+
+    assert me_response.status_code == 200
+    me_payload = me_response.json()
+    assert me_payload["plan"] == "free"
+    assert me_payload["quota"]["perizia_scans_remaining"] == 12
+    assert me_payload["perizia_credits"]["total_available"] == 12
+    assert me_payload["perizia_credits"]["monthly_remaining"] == 0
+    assert me_payload["perizia_credits"]["extra_remaining"] == 12
+    assert me_payload["perizia_credits"]["monthly_plan_id"] is None
+    assert len(me_payload["perizia_credits"]["pack_grants"]) == 1
+
+    stored_user = next(item for item in fake_db.users.items if item["email"] == "freshfree@example.com")
+    assert stored_user["plan"] == "free"
+    assert stored_user["quota"]["perizia_scans_remaining"] == 12
+    assert stored_user["perizia_credits"]["total_available"] == 12
+    assert stored_user["perizia_credits"]["extra_remaining"] == 12
+
+    opening_entries = [
+        item for item in fake_db.credit_ledger.items
+        if item["user_id"] == stored_user["user_id"] and item["entry_type"] == "opening_balance"
+    ]
+    assert len(opening_entries) == 1
+    assert opening_entries[0]["amount"] == 12
 
 
 @pytest.mark.anyio

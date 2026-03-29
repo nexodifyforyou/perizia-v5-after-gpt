@@ -752,9 +752,21 @@ def _build_legacy_perizia_credit_wallet(user_doc: Dict[str, Any], *, plan_id: Op
     )
 
 
+def _is_valid_perizia_credit_wallet(raw_wallet: Any) -> bool:
+    if not isinstance(raw_wallet, dict):
+        return False
+    required_fields = {
+        "monthly_remaining",
+        "extra_remaining",
+        "pack_grants",
+        "processed_invoice_ids",
+    }
+    return required_fields.issubset(raw_wallet.keys())
+
+
 def _normalize_perizia_credit_wallet(user_doc: Dict[str, Any], *, plan_id: Optional[str], is_master_admin: bool) -> Dict[str, Any]:
     raw_wallet = user_doc.get("perizia_credits")
-    if isinstance(raw_wallet, dict):
+    if _is_valid_perizia_credit_wallet(raw_wallet):
         return _finalize_perizia_credit_wallet(raw_wallet, plan_id=plan_id, is_master_admin=is_master_admin)
     return _build_legacy_perizia_credit_wallet(user_doc, plan_id=plan_id, is_master_admin=is_master_admin)
 
@@ -8351,10 +8363,16 @@ async def create_session(request: Request, response: Response):
             quota=SUBSCRIPTION_PLANS["enterprise" if is_master else "free"].quota.copy()
         )
         user_dict = new_user.model_dump()
+        user_dict["perizia_credits"] = _build_legacy_perizia_credit_wallet(
+            user_dict,
+            plan_id=user_dict.get("plan"),
+            is_master_admin=is_master,
+        )
+        user_dict["quota"]["perizia_scans_remaining"] = user_dict["perizia_credits"]["total_available"]
         user_dict["created_at"] = user_dict["created_at"].isoformat()
         await db.users.insert_one(user_dict)
         await _ensure_opening_balance_baseline_for_user_doc(user_dict)
-        user = new_user
+        user = User(**user_dict)
     
     # Create session
     session_token = f"sess_{uuid.uuid4().hex}"
