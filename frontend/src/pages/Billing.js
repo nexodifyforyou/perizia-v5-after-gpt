@@ -166,11 +166,15 @@ const getCheckoutReturnState = () => {
   const params = new URLSearchParams(window.location.search);
   const checkout = params.get('checkout') || '';
   const sessionId = params.get('session_id') || '';
+  const trackedSession = readTrackedCheckoutSession();
+  const trackedSessionId = trackedSession?.sessionId || '';
   return {
     checkout,
     sessionId,
+    trackedSessionId,
     hasReturnParams: Boolean(checkout || sessionId),
-    key: `${checkout}::${sessionId}`,
+    hasTrackedSession: Boolean(trackedSessionId),
+    key: `${checkout}::${sessionId}::${trackedSessionId}`,
   };
 };
 
@@ -288,6 +292,8 @@ const Billing = () => {
   const checkoutRequestRef = useRef(0);
   const checkoutReconcileInFlightRef = useRef(false);
   const checkoutHandledKeyRef = useRef('');
+  const checkoutLoadingPlanIdRef = useRef('');
+  const reconcileCheckoutReturnRef = useRef(null);
   const creditBands = [
     '1-20 pagine = 4 crediti',
     '21-40 pagine = 7 crediti',
@@ -310,11 +316,19 @@ const Billing = () => {
     window.history.replaceState({}, '', `${url.pathname}${url.search}${url.hash}`);
   };
 
-  const resetTrackedCheckoutState = () => {
+  const clearCheckoutProcessingState = ({ clearTrackedSession = false, clearUrlState = false } = {}) => {
     clearCheckoutPoll();
     activeCheckoutSessionRef.current = '';
-    clearTrackedCheckoutSession();
-    clearCheckoutUrlState();
+    if (clearTrackedSession) {
+      clearTrackedCheckoutSession();
+    }
+    if (clearUrlState) {
+      clearCheckoutUrlState();
+    }
+  };
+
+  const resetTrackedCheckoutState = () => {
+    clearCheckoutProcessingState({ clearTrackedSession: true, clearUrlState: true });
   };
 
   useEffect(() => {
@@ -322,6 +336,10 @@ const Billing = () => {
     fetchLedger({ reset: true });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  useEffect(() => {
+    checkoutLoadingPlanIdRef.current = checkoutLoadingPlanId;
+  }, [checkoutLoadingPlanId]);
 
   const fetchPlans = async () => {
     try {
@@ -413,12 +431,17 @@ const Billing = () => {
     }
   };
 
-  const checkPaymentStatus = async (sessionId, attempts = 0, requestId = checkoutRequestRef.current) => {
+  const checkPaymentStatus = async (
+    sessionId,
+    attempts = 0,
+    requestId = checkoutRequestRef.current,
+    { preserveTrackedSessionOnUnresolved = false, clearUrlStateOnCleanup = true } = {},
+  ) => {
     const maxAttempts = 6;
     const pollInterval = 2000;
 
     if (!sessionId || activeCheckoutSessionRef.current !== sessionId || checkoutRequestRef.current !== requestId) {
-      return;
+      return 'skipped';
     }
 
     setCheckingPayment(true);
@@ -429,7 +452,7 @@ const Billing = () => {
       });
 
       if (activeCheckoutSessionRef.current !== sessionId || checkoutRequestRef.current !== requestId) {
-        return;
+        return 'skipped';
       }
 
       const payload = response.data || {};
@@ -443,7 +466,7 @@ const Billing = () => {
         });
         setCheckingPayment(false);
         resetTrackedCheckoutState();
-        return;
+        return 'resolved';
       }
 
       if (attempts >= maxAttempts) {
@@ -455,16 +478,23 @@ const Billing = () => {
         setCheckoutFeedback(feedback);
         toast.info(feedback.title);
         setCheckingPayment(false);
-        resetTrackedCheckoutState();
-        return;
+        clearCheckoutProcessingState({
+          clearTrackedSession: !preserveTrackedSessionOnUnresolved,
+          clearUrlState: clearUrlStateOnCleanup,
+        });
+        return 'unresolved';
       }
 
       pollTimeoutRef.current = window.setTimeout(() => {
-        checkPaymentStatus(sessionId, attempts + 1, requestId);
+        checkPaymentStatus(sessionId, attempts + 1, requestId, {
+          preserveTrackedSessionOnUnresolved,
+          clearUrlStateOnCleanup,
+        });
       }, pollInterval);
+      return 'pending';
     } catch (error) {
       if (activeCheckoutSessionRef.current !== sessionId || checkoutRequestRef.current !== requestId) {
-        return;
+        return 'skipped';
       }
 
       const feedback = {
@@ -475,7 +505,11 @@ const Billing = () => {
       setCheckoutFeedback(feedback);
       toast.info(feedback.title);
       setCheckingPayment(false);
-      resetTrackedCheckoutState();
+      clearCheckoutProcessingState({
+        clearTrackedSession: !preserveTrackedSessionOnUnresolved,
+        clearUrlState: clearUrlStateOnCleanup,
+      });
+      return 'unresolved';
     }
   };
 
@@ -506,9 +540,20 @@ const Billing = () => {
 
   const reconcileCheckoutReturn = async () => {
     const returnState = getCheckoutReturnState();
+    const reconciliationSessionId = returnState.sessionId || returnState.trackedSessionId || '';
+    const hasNoParamTrackedReturn = !returnState.hasReturnParams && Boolean(returnState.trackedSessionId);
+    const hasVisibleStaleCheckoutUi = Boolean(checkoutLoadingPlanId);
 
-    if (!returnState.hasReturnParams) {
+    if (!returnState.hasReturnParams && !returnState.hasTrackedSession) {
       checkoutHandledKeyRef.current = '';
+      if (hasVisibleStaleCheckoutUi) {
+        try {
+          await refreshAccountData();
+        } finally {
+          setCheckoutLoadingPlanId('');
+          setCheckingPayment(false);
+        }
+      }
       return;
     }
 
@@ -525,13 +570,21 @@ const Billing = () => {
     setCheckoutFeedback(null);
 
     try {
-      if (returnState.sessionId) {
-        const trackedSession = readTrackedCheckoutSession();
-        if (trackedSession?.sessionId && trackedSession.sessionId !== returnState.sessionId) {
+      if (reconciliationSessionId) {
+        if (returnState.sessionId && returnState.trackedSessionId && returnState.trackedSessionId !== returnState.sessionId) {
           clearTrackedCheckoutSession();
         }
-        activeCheckoutSessionRef.current = returnState.sessionId;
-        await checkPaymentStatus(returnState.sessionId, 0, checkoutRequestRef.current);
+        activeCheckoutSessionRef.current = reconciliationSessionId;
+        const status = await checkPaymentStatus(reconciliationSessionId, 0, checkoutRequestRef.current, {
+          preserveTrackedSessionOnUnresolved: hasNoParamTrackedReturn,
+          clearUrlStateOnCleanup: returnState.hasReturnParams,
+        });
+        if (status !== 'pending') {
+          await refreshAccountData();
+        }
+        if (status === 'unresolved' && hasNoParamTrackedReturn) {
+          checkoutHandledKeyRef.current = '';
+        }
         return;
       }
 
@@ -551,9 +604,14 @@ const Billing = () => {
       resetTrackedCheckoutState();
     } finally {
       setCheckoutLoadingPlanId('');
+      if (!reconciliationSessionId || !checkoutReconcileInFlightRef.current) {
+        setCheckingPayment(false);
+      }
       checkoutReconcileInFlightRef.current = false;
     }
   };
+
+  reconcileCheckoutReturnRef.current = reconcileCheckoutReturn;
 
   useEffect(() => {
     reconcileCheckoutReturn();
@@ -563,10 +621,10 @@ const Billing = () => {
   useEffect(() => {
     const handleCheckoutLifecycleEvent = () => {
       const returnState = getCheckoutReturnState();
-      if (!returnState.hasReturnParams) {
+      if (!returnState.hasReturnParams && !returnState.hasTrackedSession && !checkoutLoadingPlanIdRef.current) {
         return;
       }
-      reconcileCheckoutReturn();
+      reconcileCheckoutReturnRef.current?.();
     };
 
     const handleVisibilityChange = () => {
