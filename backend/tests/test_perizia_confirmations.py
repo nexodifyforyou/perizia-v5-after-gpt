@@ -116,6 +116,62 @@ def test_noisy_table_like_mention_is_downweighted_against_narrative():
     assert state["chosen_candidate"]["is_table_like"] is False
 
 
+def test_later_authoritative_urbanistica_compliant_beats_earlier_weak_negative():
+    pages = [
+        {"page_number": 1, "text": "Tabella costi | oneri di regolarizzazione urbanistica | sanatoria € 5.000 | valore finale € 120.000\n"},
+        {"page_number": 7, "text": "REGOLARITA URBANISTICA\nNon risultano abusi edilizi e il bene risulta conforme urbanisticamente.\n"},
+    ]
+    state = server._extract_regolarita_urbanistica_state(pages)
+    assert state["status"] == "FOUND"
+    assert state["value"] == "NON EMERGONO ABUSI"
+    assert state["chosen_candidate"]["page"] == 7
+
+
+def test_later_authoritative_urbanistica_non_compliant_beats_earlier_weak_positive():
+    pages = [
+        {"page_number": 1, "text": "Nota storica: in passato non emergevano abusi edilizi sul bene.\n"},
+        {"page_number": 8, "text": "ABUSI EDILIZI E CONFORMITA URBANISTICA\nSi rilevano difformità urbanistiche e opere abusive da sanare.\n"},
+    ]
+    state = server._extract_regolarita_urbanistica_state(pages)
+    assert state["status"] == "FOUND"
+    assert state["value"] == "PRESENTI DIFFORMITÀ"
+    assert state["chosen_candidate"]["page"] == 8
+
+
+def test_urbanistica_strong_unresolved_conflict_yields_review_required_output():
+    pages = [
+        {"page_number": 4, "text": "REGOLARITA URBANISTICA\nNon risultano abusi edilizi e il bene appare conforme urbanisticamente.\n"},
+        {"page_number": 5, "text": "CONFORMITA URBANISTICA\nSi rilevano difformità urbanistiche e opere abusive da sanare.\n"},
+    ]
+    state = server._extract_regolarita_urbanistica_state(pages)
+    assert state["value"] == "DA VERIFICARE"
+    assert state["status"] == "LOW_CONFIDENCE"
+    assert state["review_required"] is True
+    assert state["needs_user_confirmation"] is True
+    assert state["conflicts"]
+
+
+def test_urbanistica_table_like_mentions_are_downweighted_against_narrative():
+    pages = [
+        {"page_number": 1, "text": "ONERI DI REGOLARIZZAZIONE URBANISTICA | condono € 7.000 | valore finale € 120.000\n"},
+        {"page_number": 3, "text": "ABUSI EDILIZI E CONFORMITA URBANISTICA\nNon risultano difformità urbanistiche né abusi edilizi.\n"},
+    ]
+    state = server._extract_regolarita_urbanistica_state(pages)
+    assert state["value"] == "NON EMERGONO ABUSI"
+    assert state["chosen_candidate"]["is_table_like"] is False
+
+
+def test_urbanistica_uncertain_case_exposes_top_two_candidates():
+    pages = [
+        {"page_number": 6, "text": "REGOLARITA URBANISTICA\nNon risultano abusi edilizi e il bene risulta conforme urbanisticamente.\n"},
+        {"page_number": 7, "text": "ABUSI EDILIZI\nSono presenti difformità urbanistiche e irregolarità da sanare.\n"},
+    ]
+    state = server._extract_regolarita_urbanistica_state(pages)
+    assert state["review_required"] is True
+    assert len(state["top_candidates"]) == 2
+    assert {state["top_candidates"][0]["value"], state["top_candidates"][1]["value"]} == {"NON EMERGONO ABUSI", "PRESENTI DIFFORMITÀ"}
+
+
 @pytest.mark.anyio
 async def test_occupazione_user_confirmation_is_stored_and_applied(fake_db, monkeypatch):
     pages = [
@@ -146,6 +202,43 @@ async def test_occupazione_user_confirmation_is_stored_and_applied(fake_db, monk
         field_state = detail.json()["result"]["field_states"]["stato_occupativo"]
         assert field_state["status"] == "USER_PROVIDED"
         assert field_state["value"] == "LIBERO"
+
+
+@pytest.mark.anyio
+async def test_urbanistica_user_confirmation_is_stored_and_applied_without_breaking_consumers(fake_db, monkeypatch):
+    pages = [
+        {"page_number": 4, "text": "REGOLARITA URBANISTICA\nNon risultano abusi edilizi e il bene appare conforme urbanisticamente.\n"},
+        {"page_number": 5, "text": "CONFORMITA URBANISTICA\nSi rilevano difformità urbanistiche e opere abusive da sanare.\n"},
+    ]
+    result = _build_result_for_pages(pages)
+    _seed_analysis(fake_db, analysis_id="analysis_urb", user_id="user_1", result=result)
+
+    async def fake_require_auth(_request):
+        return _user()
+
+    monkeypatch.setattr(server, "require_auth", fake_require_auth)
+    transport = httpx.ASGITransport(app=server.app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        resp = await client.post(
+            "/api/analysis/perizia/analysis_urb/confirmations",
+            json={"check_type": "regolarita_urbanistica", "value": "NON EMERGONO ABUSI", "notes": "Confermato da tecnico"},
+        )
+        assert resp.status_code == 200
+        assert len(fake_db.perizia_confirmations.items) == 1
+        record = fake_db.perizia_confirmations.items[0]
+        assert record["check_type"] == "regolarita_urbanistica"
+        assert record["field_key"] == "field_states.regolarita_urbanistica"
+        assert record["user_confirmed_value"] == "NON EMERGONO ABUSI"
+        assert record["notes"] == "Confermato da tecnico"
+        assert record["candidate_1_value"]
+        detail = await client.get("/api/analysis/perizia/analysis_urb")
+        assert detail.status_code == 200
+        payload = detail.json()["result"]
+        field_state = payload["field_states"]["regolarita_urbanistica"]
+        assert field_state["status"] == "USER_PROVIDED"
+        assert field_state["value"] == "NON EMERGONO ABUSI"
+        assert payload["abusi_edilizi_conformita"]["conformita_urbanistica"]["status"] == "CONFORME"
+        assert payload["abusi_edilizi_conformita"]["conformita_urbanistica"]["detail_it"] == "NON EMERGONO ABUSI"
 
 
 @pytest.mark.anyio
@@ -226,6 +319,54 @@ async def test_address_confirmation_endpoint_preserves_notes_and_export_includes
         zf = zipfile.ZipFile(io.BytesIO(export_resp.content))
         sheet_xml = zf.read("xl/worksheets/sheet1.xml").decode("utf-8")
         assert "indirizzo verificato manualmente" in sheet_xml
+
+
+@pytest.mark.anyio
+async def test_admin_export_includes_urbanistica_confirmation_rows(fake_db, monkeypatch):
+    pages = [
+        {"page_number": 4, "text": "REGOLARITA URBANISTICA\nNon risultano abusi edilizi e il bene appare conforme urbanisticamente.\n"},
+        {"page_number": 5, "text": "CONFORMITA URBANISTICA\nSi rilevano difformità urbanistiche e opere abusive da sanare.\n"},
+    ]
+    result = _build_result_for_pages(pages)
+    _seed_analysis(fake_db, analysis_id="analysis_urb_export", user_id="user_1", result=result)
+    admin_session = _seed_session(
+        fake_db,
+        {
+            "user_id": "user_admin",
+            "email": "admin@example.com",
+            "name": "Admin",
+            "plan": "enterprise",
+            "is_master_admin": True,
+            "quota": {},
+        },
+        session_token="sess_admin_urbanistica_export",
+    )
+
+    original_require_auth = server.require_auth
+
+    async def fake_require_auth(_request):
+        return _user()
+
+    monkeypatch.setattr(server, "require_auth", fake_require_auth)
+    transport = httpx.ASGITransport(app=server.app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        confirm_resp = await client.post(
+            "/api/analysis/perizia/analysis_urb_export/confirmations",
+            json={"check_type": "regolarita_urbanistica", "value": "PRESENTI DIFFORMITÀ", "notes": "Difformita confermate"},
+        )
+        assert confirm_resp.status_code == 200
+
+        monkeypatch.setattr(server, "require_auth", original_require_auth)
+        export_resp = await client.get(
+            "/api/admin/perizia-confirmations/export.xlsx",
+            headers={"Authorization": f"Bearer {admin_session}"},
+        )
+        assert export_resp.status_code == 200
+        zf = zipfile.ZipFile(io.BytesIO(export_resp.content))
+        sheet_xml = zf.read("xl/worksheets/sheet1.xml").decode("utf-8")
+        assert "regolarita_urbanistica" in sheet_xml
+        assert "PRESENTI DIFFORMITÀ" in sheet_xml
+        assert "Difformita confermate" in sheet_xml
 
 
 @pytest.mark.anyio
