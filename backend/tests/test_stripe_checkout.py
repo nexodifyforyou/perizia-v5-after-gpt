@@ -349,6 +349,30 @@ async def test_checkout_status_is_read_only_and_session_specific(fake_db, monkey
 
 
 @pytest.mark.anyio
+@pytest.mark.parametrize("invalid_session_id", ["{CHECKOUT_SESSION_ID}", "CHECKOUT_SESSION_ID", "not-a-session"])
+async def test_checkout_status_rejects_invalid_session_ids_before_stripe(fake_db, monkeypatch, invalid_session_id):
+    class FakeStripeSessionApi:
+        @staticmethod
+        def retrieve(_session_id):
+            raise AssertionError("Stripe should not be called for invalid checkout session ids")
+
+    class FakeStripeModule:
+        api_key = None
+        checkout = type("CheckoutNamespace", (), {"Session": FakeStripeSessionApi})
+
+    monkeypatch.setitem(sys.modules, "stripe", FakeStripeModule)
+
+    session_token = _seed_default_checkout_user(fake_db)
+
+    transport = httpx.ASGITransport(app=server.app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        response = await client.get(f"/api/checkout/status/{invalid_session_id}", headers={"Authorization": f"Bearer {session_token}"})
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == "Invalid checkout session id"
+
+
+@pytest.mark.anyio
 async def test_starter_webhook_does_not_grant_when_payment_intent_not_succeeded(fake_db, monkeypatch):
     next_event = {}
 

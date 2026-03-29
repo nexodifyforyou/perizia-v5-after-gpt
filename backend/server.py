@@ -6941,6 +6941,17 @@ def _build_stripe_return_urls(origin_url: Optional[str] = None) -> Tuple[str, st
     cancel_url = _with_query_params(cancel_base, {"checkout": "cancel"})
     return success_url, cancel_url
 
+def _is_valid_checkout_session_id(session_id: Optional[str]) -> bool:
+    normalized = str(session_id or "").strip()
+    if not normalized:
+        return False
+    upper = normalized.upper()
+    if "CHECKOUT_SESSION_ID" in upper:
+        return False
+    if "{" in normalized or "}" in normalized:
+        return False
+    return bool(re.fullmatch(r"cs_[A-Za-z0-9_]+", normalized))
+
 async def _update_billing_record(
     billing_record_id: str,
     *,
@@ -8504,6 +8515,9 @@ async def create_checkout(request: Request):
 async def get_checkout_status(session_id: str, request: Request):
     """Get checkout session status"""
     user = await require_auth(request)
+
+    if not _is_valid_checkout_session_id(session_id):
+        raise HTTPException(status_code=400, detail="Invalid checkout session id")
 
     if not STRIPE_SECRET_KEY:
         raise HTTPException(status_code=503, detail="Stripe not configured")

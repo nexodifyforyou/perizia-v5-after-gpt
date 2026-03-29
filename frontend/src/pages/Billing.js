@@ -162,18 +162,32 @@ const clearTrackedCheckoutSession = () => {
   }
 };
 
+const normalizeCheckoutSessionId = (value) => {
+  const sessionId = String(value || '').trim();
+  if (!sessionId) return '';
+  const upper = sessionId.toUpperCase();
+  if (upper.includes('CHECKOUT_SESSION_ID')) return '';
+  if (sessionId.includes('{') || sessionId.includes('}')) return '';
+  return /^cs_[A-Za-z0-9_]+$/.test(sessionId) ? sessionId : '';
+};
+
 const getCheckoutReturnState = () => {
   const params = new URLSearchParams(window.location.search);
   const checkout = params.get('checkout') || '';
-  const sessionId = params.get('session_id') || '';
+  const rawSessionId = params.get('session_id') || '';
+  const sessionId = normalizeCheckoutSessionId(rawSessionId);
   const trackedSession = readTrackedCheckoutSession();
-  const trackedSessionId = trackedSession?.sessionId || '';
+  const rawTrackedSessionId = trackedSession?.sessionId || '';
+  const trackedSessionId = normalizeCheckoutSessionId(rawTrackedSessionId);
   return {
     checkout,
     sessionId,
     trackedSessionId,
-    hasReturnParams: Boolean(checkout || sessionId),
+    hasReturnParams: Boolean(checkout || rawSessionId),
     hasTrackedSession: Boolean(trackedSessionId),
+    hasInvalidSessionId: Boolean((rawSessionId && !sessionId) || (rawTrackedSessionId && !trackedSessionId)),
+    hasInvalidUrlSessionId: Boolean(rawSessionId && !sessionId),
+    hasInvalidTrackedSessionId: Boolean(rawTrackedSessionId && !trackedSessionId),
     key: `${checkout}::${sessionId}::${trackedSessionId}`,
   };
 };
@@ -543,6 +557,23 @@ const Billing = () => {
     const reconciliationSessionId = returnState.sessionId || returnState.trackedSessionId || '';
     const hasNoParamTrackedReturn = !returnState.hasReturnParams && Boolean(returnState.trackedSessionId);
     const hasVisibleStaleCheckoutUi = Boolean(checkoutLoadingPlanId);
+
+    if (returnState.hasInvalidSessionId && !reconciliationSessionId) {
+      checkoutHandledKeyRef.current = '';
+      clearCheckoutProcessingState({
+        clearTrackedSession: returnState.hasInvalidTrackedSessionId,
+        clearUrlState: returnState.hasInvalidUrlSessionId,
+      });
+      if (hasVisibleStaleCheckoutUi) {
+        try {
+          await refreshAccountData();
+        } finally {
+          setCheckoutLoadingPlanId('');
+          setCheckingPayment(false);
+        }
+      }
+      return;
+    }
 
     if (!returnState.hasReturnParams && !returnState.hasTrackedSession) {
       checkoutHandledKeyRef.current = '';
