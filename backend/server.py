@@ -2489,7 +2489,7 @@ def _extract_prezzo_base_asta_state(pages: List[Dict[str, Any]]) -> Dict[str, An
 def _extract_superficie_state(pages: List[Dict[str, Any]], dati_certi: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     keywords = ["superficie", "mq", "m²", "superficie commerciale", "superficie catastale"]
     dati_certi = dati_certi if isinstance(dati_certi, dict) else {}
-    existing = dati_certi.get("superficie_catastale")
+    existing = dati_certi.get("superficie")
     if isinstance(existing, dict):
         value = existing.get("value")
         evidence = existing.get("evidence", [])
@@ -2506,7 +2506,7 @@ def _extract_superficie_state(pages: List[Dict[str, Any]], dati_certi: Optional[
                     0,
                     len(quote),
                     max_len=220,
-                    field_key="superficie_catastale",
+                    field_key="superficie",
                     anchor_hint=quote,
                 )
                 if not n_quote or "superficie" not in n_quote.lower():
@@ -2524,7 +2524,7 @@ def _extract_superficie_state(pages: List[Dict[str, Any]], dati_certi: Optional[
                 except Exception:
                     value = existing.get("value")
         if value is not None and normalized_existing_evidence:
-            searched_in = _make_searched_in(pages, keywords, "FOUND", field_key="superficie_catastale")
+            searched_in = _make_searched_in(pages, keywords, "FOUND", field_key="superficie")
             return _build_field_state(value=value, status="FOUND", evidence=normalized_existing_evidence, searched_in=searched_in)
 
     pattern = re.compile(
@@ -2557,16 +2557,16 @@ def _extract_superficie_state(pages: List[Dict[str, Any]], dati_certi: Optional[
                     int(p.get("page_number", 0) or 0),
                     start,
                     end,
-                    field_key="superficie_catastale",
+                    field_key="superficie",
                     anchor_hint=m.group(0),
                 )
             ]
             if not evidence or not str(evidence[0].get("quote") or "").strip() or _is_toc_like_quote(str(evidence[0].get("quote") or "")):
                 continue
             value = {"value": value_num, "unit": unit, "label": _normalize_headline_text(m.group(1))}
-            searched_in = _make_searched_in(pages, keywords, "FOUND", field_key="superficie_catastale")
+            searched_in = _make_searched_in(pages, keywords, "FOUND", field_key="superficie")
             return _build_field_state(value=value, status="FOUND", evidence=evidence, searched_in=searched_in)
-    searched_in = _make_searched_in(pages, keywords, "NOT_FOUND", field_key="superficie_catastale")
+    searched_in = _make_searched_in(pages, keywords, "NOT_FOUND", field_key="superficie")
     return _build_field_state(value=None, status="NOT_FOUND", evidence=[], searched_in=searched_in)
 
 def _extract_diritto_reale_state(pages: List[Dict[str, Any]]) -> Dict[str, Any]:
@@ -4470,6 +4470,10 @@ def _apply_decision_states_to_result(result: Dict[str, Any], states: Dict[str, A
     superficie_display = _field_state_display_value(superficie_state)
     if isinstance(superficie_value, dict) and superficie_value.get("value") is not None:
         superficie_display = _format_mq_value(superficie_value.get("value"))
+    dati["superficie"] = {
+        "value": superficie_display,
+        "evidence": superficie_state.get("evidence", []),
+    }
 
     diritto_display = _field_state_display_value(diritto_state)
     diritto_clean, quota_clean = _extract_right_and_quota(diritto_display)
@@ -5370,6 +5374,26 @@ def _sanitize_money_box_for_customer(result: Dict[str, Any]) -> None:
     supported_numeric_total = 0.0
     has_document_backed_buyer_burden = False
     is_multi_lot = bool(result.get("is_multi_lot")) or len(result.get("lots", []) if isinstance(result.get("lots"), list) else []) > 1
+    spese_state = result.get("field_states", {}).get("spese_condominiali_arretrate", {}) if isinstance(result.get("field_states"), dict) else {}
+    suppress_condo_burden = _normalize_signal_text(_field_state_display_value(spese_state)) == _normalize_signal_text("NON PRESENTI")
+    if suppress_condo_burden:
+        cleaned_items = [
+            item for item in cleaned_items
+            if not (
+                isinstance(item, dict)
+                and (
+                    str(item.get("code") or "").upper() == "E"
+                    or "spese condominiali" in _normalize_signal_text(item.get("label_it") or item.get("label_en") or item.get("stima_nota") or "")
+                )
+            )
+        ]
+        supplement_burdens = [
+            burden for burden in supplement_burdens
+            if not (
+                isinstance(burden, dict)
+                and "spese condominiali" in _normalize_signal_text(burden.get("label_it") or burden.get("label_en") or "")
+            )
+        ]
 
     for item in cleaned_items:
         if not isinstance(item, dict):
@@ -5411,6 +5435,14 @@ def _sanitize_money_box_for_customer(result: Dict[str, Any]) -> None:
 
     if not is_multi_lot and supported_numeric_total <= 0:
         qualitative_burdens = supplement_burdens or _build_conservative_cost_burdens(result, cleaned_items)
+        if suppress_condo_burden:
+            qualitative_burdens = [
+                burden for burden in qualitative_burdens
+                if not (
+                    isinstance(burden, dict)
+                    and "spese condominiali" in _normalize_signal_text(burden.get("label_it") or burden.get("label_en") or "")
+                )
+            ]
         money_box["policy"] = "CONSERVATIVE"
         money_box.pop("total_extra_costs_range", None)
         money_box["qualitative_burdens"] = copy.deepcopy(qualitative_burdens)
@@ -9116,6 +9148,59 @@ def _extract_cadastral_surface_summary(pages: List[Dict[str, Any]]) -> Tuple[Opt
     return " + ".join(label for label, _ in deduped[:3]), [ev for _, ev in deduped[:3]]
 
 
+def _extract_conventional_surface_summary(
+    pages: List[Dict[str, Any]],
+    beni: Optional[List[Dict[str, Any]]] = None,
+) -> Tuple[Optional[str], List[Dict[str, Any]]]:
+    if isinstance(beni, list):
+        for bene in beni:
+            if not isinstance(bene, dict):
+                continue
+            superficie_val = _extract_bene_surface_value(bene)
+            evidence_map = bene.get("evidence", {}) if isinstance(bene.get("evidence"), dict) else {}
+            superficie_evidence = _normalize_contract_evidence_list(evidence_map.get("superficie", []), max_items=2)
+            if isinstance(superficie_val, (int, float)):
+                return _format_mq_value(superficie_val), superficie_evidence
+
+    patterns = [
+        re.compile(r"(Totale\s+superficie\s+convenzionale[:\s]*)(?P<value>[0-9]{1,4}(?:,[0-9]{1,2})?)\s*mq", re.I),
+        re.compile(r"(Superficie\s+convenzionale[:\s]*)(?P<value>[0-9]{1,4}(?:,[0-9]{1,2})?)\s*mq", re.I),
+        re.compile(r"(Superficie[:\s]*)(?P<value>[0-9]{1,4}(?:,[0-9]{1,2})?)\s*mq", re.I),
+    ]
+    schema_pages = [p for p in pages if "SCHEMA RIASSUNTIVO" in str(p.get("text", "") or "").upper()]
+    page_groups = [schema_pages, pages] if schema_pages else [pages]
+    for group in page_groups:
+        for p in group:
+            text = str(p.get("text", "") or "")
+            if not text:
+                continue
+            for pattern in patterns:
+                for match in pattern.finditer(text):
+                    line_start, line_end = _line_bounds(text, match.start(), match.end())
+                    evidence = _build_evidence(
+                        text,
+                        int(p.get("page_number", 0) or 0),
+                        line_start,
+                        line_end,
+                        field_key="superficie",
+                        anchor_hint=match.group(0),
+                    )
+                    quote = str(evidence.get("quote") or "")
+                    if not quote.strip() or _is_toc_like_quote(quote):
+                        continue
+                    if "superficiecatastale" in _normalize_signal_text(quote):
+                        continue
+                    raw = str(match.group("value") or "").replace(".", "").replace(",", ".")
+                    try:
+                        parsed = float(raw)
+                    except Exception:
+                        continue
+                    return _format_mq_value(parsed), [evidence]
+        if group:
+            break
+    return None, []
+
+
 def _repair_identity_and_cadastral_storage(result: Dict[str, Any], pages: List[Dict[str, Any]]) -> None:
     report_header = result.get("report_header", {}) if isinstance(result.get("report_header"), dict) else {}
     case_header = result.get("case_header", {}) if isinstance(result.get("case_header"), dict) else {}
@@ -9140,6 +9225,18 @@ def _repair_identity_and_cadastral_storage(result: Dict[str, Any], pages: List[D
         dati["diritto_reale"] = diritto_obj
     if quota_value:
         dati["quota"] = {"value": quota_value, "evidence": copy.deepcopy((diritto_obj or {}).get("evidence", []))}
+
+    superficie_value, superficie_evidence = _extract_conventional_surface_summary(
+        pages,
+        result.get("beni") if isinstance(result.get("beni"), list) else None,
+    )
+    if superficie_value:
+        dati["superficie"] = {
+            "value": superficie_value,
+            "evidence": superficie_evidence,
+        }
+    elif "superficie" not in dati:
+        dati["superficie"] = {"value": "NON SPECIFICATO IN PERIZIA", "evidence": []}
 
     superficie_catastale_value, superficie_catastale_evidence = _extract_cadastral_surface_summary(pages)
     if superficie_catastale_value:

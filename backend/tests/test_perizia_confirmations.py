@@ -1394,6 +1394,48 @@ def test_explicit_absence_of_condominial_burdens_is_captured():
     assert state["value"] == "NON PRESENTI"
 
 
+def test_conventional_surface_is_normalized_into_customer_facing_backend_path():
+    pages = [
+        {
+            "page_number": 13,
+            "text": (
+                "SCHEMA RIASSUNTIVO\n"
+                "Bene N° 1 - Fabbricato civile\n"
+                "Ubicazione: Borgo Virgilio (MN) - Via Ippolito Nievo 1/3\n"
+                "Superficie 161,64 mq\n"
+            ),
+        },
+    ]
+    result = _build_result_for_pages(pages)
+    assert result["field_states"]["superficie"]["status"] == "FOUND"
+    assert result["dati_certi_del_lotto"]["superficie"]["value"] == "161.64 mq"
+    assert result["dati_certi_del_lotto"]["superficie"]["evidence"][0]["page"] == 13
+
+
+def test_superficie_catastale_remains_separate_from_conventional_surface():
+    pages = [
+        {
+            "page_number": 5,
+            "text": (
+                "DATI CATASTALI\n"
+                "30 323 1 A2 46 158 mq 387,34 € T-1\n"
+                "30 323 2 C6 21 22 mq 43,18 € T\n"
+            ),
+        },
+        {
+            "page_number": 13,
+            "text": (
+                "SCHEMA RIASSUNTIVO\n"
+                "Bene N° 1 - Fabbricato civile\n"
+                "Superficie 161,64 mq\n"
+            ),
+        },
+    ]
+    result = _build_result_for_pages(pages)
+    assert result["dati_certi_del_lotto"]["superficie"]["value"] == "161.64 mq"
+    assert result["dati_certi_del_lotto"]["superficie_catastale"]["value"] != "161.64 mq"
+
+
 def test_ape_explicit_existence_without_class_is_coherent_across_storage_layers():
     pages = [
         {"page_number": 3, "text": "Bene N° 1 - Fabbricato civile ubicato a Borgo Virgilio (MN) - Via Ippolito Nievo 1/3\n"},
@@ -1475,6 +1517,41 @@ def test_indice_prezzo_base_is_not_polluted_without_evidence():
     result = {"indice_di_convenienza": {"prezzo_base_asta": 233105.19}}
     cleaned = server.enforce_evidence_or_low_confidence(result)
     assert cleaned["indice_di_convenienza"]["prezzo_base_asta"] is None
+
+
+def test_money_box_suppresses_condo_placeholder_when_condo_burdens_are_explicitly_absent():
+    pages = [
+        {
+            "page_number": 9,
+            "text": "VINCOLI OD ONERI CONDOMINIALI\nNon sono presenti vincoli od oneri condominiali.\n",
+        },
+    ]
+    result = _build_result_for_pages(pages)
+    item_codes = [item["code"] for item in result["money_box"]["items"]]
+    burden_labels = [item["label_it"] for item in result["money_box"].get("qualitative_burdens", [])]
+    assert "E" not in item_codes
+    assert not any("condominiali" in label.lower() for label in burden_labels)
+
+
+def test_money_box_contract_remains_usable_after_condo_suppression():
+    pages = [
+        {"page_number": 4, "text": "Oneri di regolarizzazione urbanistica da verificare.\n"},
+        {"page_number": 9, "text": "VINCOLI OD ONERI CONDOMINIALI\nNon sono presenti vincoli od oneri condominiali.\n"},
+    ]
+    result = _build_result_for_pages(pages)
+    assert result["money_box"]["policy"] == "CONSERVATIVE"
+    assert isinstance(result["money_box"]["items"], list)
+    assert isinstance(result["money_box"].get("qualitative_burdens", []), list)
+    assert result["money_box"]["total_extra_costs"]["min"] == "NON_QUANTIFICATO_IN_PERIZIA"
+
+
+def test_non_condo_money_box_behavior_remains_conservative():
+    pages = [
+        {"page_number": 4, "text": "Sono necessari oneri di regolarizzazione urbanistica da verificare.\n"},
+    ]
+    result = _build_result_for_pages(pages)
+    labels = [item["label_it"] for item in result["money_box"].get("qualitative_burdens", [])]
+    assert any("Regolarizzazione" in label for label in labels)
 
 
 @pytest.mark.anyio
