@@ -26,6 +26,7 @@ import {
 import axios from 'axios';
 import { toast } from 'sonner';
 import { downloadPdfBlob } from '../utils/pdfDownload';
+import { parseSurfaceNumber } from '../lib/surfaceFormatting';
 
 const API_URL = process.env.REACT_APP_BACKEND_URL;
 
@@ -202,7 +203,7 @@ const normalizeUiSeverity = (value, fallback = 'AMBER') => {
 const formatMeasuredValue = (value, defaultUnit = '') => {
   const rendered = safeRender(value, '').trim();
   if (!rendered) return '';
-  const numeric = parseNumericEuro(rendered);
+  const numeric = parseSurfaceNumber(rendered);
   if (numeric === null) return rendered;
   const explicitUnit = /m²/i.test(rendered) ? 'm²' : (/\bmq\b/i.test(rendered) ? 'mq' : '');
   const unit = explicitUnit || defaultUnit;
@@ -976,9 +977,26 @@ const AnalysisResult = () => {
   const dati = selectedLot ? {
     prezzo_base_asta: { value: selectedLot.prezzo_base_value, formatted: selectedLot.prezzo_base_eur, evidence: selectedLot.evidence?.prezzo_base || [] },
     ubicazione: { value: selectedLot.ubicazione, evidence: selectedLot.evidence?.ubicazione || [] },
-    diritto_reale: { value: selectedLot.diritto_reale, evidence: selectedLot.evidence?.diritto_reale || [] },
-    quota: { value: selectedLot.quota, evidence: selectedLot.evidence?.quota || selectedLot.evidence?.diritto_reale || [] },
-    superficie: { value: pickFirstNonEmpty(selectedLot.superficie_convenzionale_mq, selectedLot.superficie_convenzionale, selectedLot.superficie_mq), evidence: selectedLot.evidence?.superficie || [] },
+    diritto_reale: {
+      value: pickFirstNonEmpty(selectedLot.diritto_reale, section4?.diritto_reale?.value, section4?.diritto_reale, result.dati_certi_del_lotto?.diritto_reale?.value, result.dati_certi_del_lotto?.diritto_reale),
+      evidence: selectedLot.evidence?.diritto_reale || getEvidence(section4?.diritto_reale) || []
+    },
+    quota: {
+      value: pickFirstNonEmpty(selectedLot.quota, section4?.quota?.value, section4?.quota, result.dati_certi_del_lotto?.quota?.value, result.dati_certi_del_lotto?.quota),
+      evidence: selectedLot.evidence?.quota || getEvidence(section4?.quota) || selectedLot.evidence?.diritto_reale || []
+    },
+    superficie: {
+      value: pickFirstNonEmpty(
+        selectedLot.superficie_convenzionale_mq,
+        selectedLot.superficie_convenzionale,
+        section4?.superficie?.value,
+        section4?.superficie,
+        result.dati_certi_del_lotto?.superficie?.value,
+        result.dati_certi_del_lotto?.superficie,
+        selectedLot.superficie_mq
+      ),
+      evidence: selectedLot.evidence?.superficie || getEvidence(section4?.superficie) || []
+    },
     superficie_catastale: { value: selectedLot.superficie_mq, evidence: selectedLot.evidence?.superficie || [] },
     tipologia: { value: selectedLot.tipologia, evidence: [] }
   } : (section4.prezzo_base_asta ? section4 : (result.dati_certi_del_lotto || {}));
@@ -1349,10 +1367,12 @@ const AnalysisResult = () => {
     const shortLocation = safeRender(pickFirstNonEmpty(contractBene?.short_location, sourceBene?.short_location, sourceBene?.ubicazione, sourceBene?.indirizzo), '').trim();
     const piano = safeRender(pickFirstNonEmpty(contractBene?.piano, sourceBene?.piano), '').trim();
     const superficieRaw = pickFirstNonEmpty(
-      contractBene?.superficie_mq,
-      sourceBene?.superficie_mq,
       sourceBene?.superficie_convenzionale_mq,
       sourceBene?.superficie_convenzionale,
+      contractBene?.superficie_convenzionale_mq,
+      contractBene?.superficie_convenzionale,
+      sourceBene?.superficie_mq,
+      contractBene?.superficie_mq,
       sourceBene?.superficie,
       beneNumbers.length === 1 ? dati?.superficie?.value : null,
       beneNumbers.length === 1 ? getFieldState('superficie')?.value?.value : null,
@@ -2303,6 +2323,7 @@ const AnalysisResult = () => {
       background_note: []
     };
     const seen = new Set();
+    const clusterIndex = new Map();
 
     const mapToGroup = (category) => {
       return legalKindByCategory[category] || 'background_note';
@@ -2325,16 +2346,26 @@ const AnalysisResult = () => {
         .replace(/[^a-z0-9 ]/g, '')
         .trim()
         .slice(0, 170);
+      const semanticClusterKey = `${bucket}|${normalizeComparableText(labelIt)}|${normalizeComparableText(displayValue)}`;
       const dedupeKey = `${bucket}|${page}|${normalizedQuote || `${labelIt}|${displayValue}`.toLowerCase().slice(0, 170)}`;
       if (seen.has(dedupeKey)) return;
       seen.add(dedupeKey);
-      groups[bucket].push({
+      const nextItem = {
         key: dedupeKey,
         labelIt,
         labelEn,
         displayValue,
         evidence: Array.isArray(item?.__evidence) ? item.__evidence : []
-      });
+      };
+      const shouldClusterBySemanticKey = bucket === 'execution_context' || bucket === 'material_blocker';
+      if (shouldClusterBySemanticKey && clusterIndex.has(semanticClusterKey)) {
+        const target = clusterIndex.get(semanticClusterKey);
+        target.evidence = mergeEvidence(target.evidence, nextItem.evidence);
+        if (!target.displayValue && nextItem.displayValue) target.displayValue = nextItem.displayValue;
+        return;
+      }
+      groups[bucket].push(nextItem);
+      if (shouldClusterBySemanticKey) clusterIndex.set(semanticClusterKey, nextItem);
     });
 
     return [
@@ -2512,12 +2543,18 @@ const AnalysisResult = () => {
     .filter((item) => !hasStrongDrivers || item.score >= 15)
     .map((item) => item.driver)
     .slice(0, 4);
-  const displayDecisionIt = scoreSummarySignal(decisionIt) < 10 && displayedDecisionBullets[0]?.score >= 30
-    ? displayedDecisionBullets[0].bullet
-    : decisionIt;
-  const displayDecisionEn = scoreSummarySignal(decisionEn) < 10 && displayedDecisionBullets[0]?.bulletEn
-    ? displayedDecisionBullets[0].bulletEn
-    : decisionEn;
+  const topMaterialLegalItem = topLegalChecklistItems.find((item) => item?.kind === 'material_blocker');
+  const summaryHasWeakServituBias = /servit|usi civici/.test(normalizeComparableText(decisionIt));
+  const displayDecisionIt = summaryHasWeakServituBias && topMaterialLegalItem
+    ? safeRender(topMaterialLegalItem.killer, decisionIt)
+    : scoreSummarySignal(decisionIt) < 10 && displayedDecisionBullets[0]?.score >= 30
+      ? displayedDecisionBullets[0].bullet
+      : decisionIt;
+  const displayDecisionEn = summaryHasWeakServituBias
+    ? decisionEn
+    : scoreSummarySignal(decisionEn) < 10 && displayedDecisionBullets[0]?.bulletEn
+      ? displayedDecisionBullets[0].bulletEn
+      : decisionEn;
 
   // Debug logging for troubleshooting
   if (process.env.NODE_ENV === 'development') {

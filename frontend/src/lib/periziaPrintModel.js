@@ -1,3 +1,5 @@
+import { parseSurfaceNumber } from './surfaceFormatting';
+
 const MISSING_TEXT = 'Non specificato in perizia';
 const EURO_FORMATTER = new Intl.NumberFormat('it-IT', {
   maximumFractionDigits: 0,
@@ -177,12 +179,12 @@ const formatSurfaceValue = (value) => {
       value?.status
     );
     const unit = safeRender(pickFirstNonEmpty(value?.unit, value?.uom), '').trim() || 'mq';
-    const numeric = parseNumericEuro(safeRender(measured, ''));
+    const numeric = parseSurfaceNumber(safeRender(measured, ''));
     if (numeric !== null) return `${AREA_FORMATTER.format(numeric)} ${unit}`.trim();
     return safeRender(measured, '').trim();
   }
   const rendered = safeRender(value, '').trim();
-  const numeric = parseNumericEuro(rendered);
+  const numeric = parseSurfaceNumber(rendered);
   if (numeric === null) return rendered;
   const explicitUnit = /m²/i.test(rendered) ? 'm²' : (/\bmq\b/i.test(rendered) ? 'mq' : 'mq');
   return `${AREA_FORMATTER.format(numeric)} ${explicitUnit}`.trim();
