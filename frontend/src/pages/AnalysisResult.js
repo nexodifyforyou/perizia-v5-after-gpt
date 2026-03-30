@@ -231,6 +231,27 @@ const formatSurfaceDisplay = (...values) => {
   return '';
 };
 
+const normalizeComparableText = (value) => safeRender(value, '')
+  .normalize('NFD')
+  .replace(/[\u0300-\u036f]/g, '')
+  .replace(/\s+/g, ' ')
+  .trim()
+  .toLowerCase();
+
+const escapeRegExp = (value) => String(value).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+const splitQuotaFromDiritto = (dirittoValue, quotaValue) => {
+  const diritto = safeRender(dirittoValue, '').trim();
+  const quota = safeRender(quotaValue, '').trim();
+  if (!diritto) return '';
+  if (!quota) return diritto;
+  const cleaned = diritto
+    .replace(new RegExp(`(?:quota\\s*)?${escapeRegExp(quota)}`, 'ig'), '')
+    .replace(/[|,;:/-]+$/g, '')
+    .trim();
+  return cleaned || diritto;
+};
+
 const getShortText = (value, max = 110) => {
   const text = safeRender(value, '').trim();
   if (!text) return '';
@@ -720,7 +741,7 @@ const MultiLotSelector = ({ lots, selectedLot, onSelectLot }) => {
                 <td className="py-2 px-3 font-mono text-emerald-400">{lot.prezzo_base_eur || 'TBD'}</td>
                 <td className="py-2 px-3 text-zinc-300">{(lot.ubicazione || 'NON SPECIFICATO').substring(0, 40)}...</td>
                 <td className="py-2 px-3 text-zinc-300">{formatSurfaceDisplay(lot.superficie_convenzionale_mq, lot.superficie_convenzionale, lot.superficie_mq) || 'TBD'}</td>
-                <td className="py-2 px-3 text-zinc-300">{(lot.diritto_reale || 'NON SPECIFICATO').substring(0, 20)}</td>
+                <td className="py-2 px-3 text-zinc-300">{splitQuotaFromDiritto(lot.diritto_reale || 'NON SPECIFICATO', lot.quota).substring(0, 20)}</td>
               </tr>
             ))}
           </tbody>
@@ -1341,15 +1362,6 @@ const AnalysisResult = () => {
     const valoreNum = parseNumericEuro(pickFirstNonEmpty(contractBene?.valore_stima_eur, sourceBene?.valore_stima_eur, sourceBene?.valore_stima_bene, sourceBene?.valore_di_stima_bene, sourceBene?.valore_stima));
 
     const catastoValue = formatCatastoCompact(pickFirstNonEmpty(sourceBene?.catasto, contractBene?.catasto)) || parseCatastoFromEvidence(sourceEvidenceObj?.catasto);
-    const dirittoRealeValue = getRichFieldDisplayValue(
-      'diritto_reale',
-      null,
-      sourceBene?.diritto_reale,
-      sourceBene?.diritto,
-      contractBene?.diritto_reale,
-      dati?.diritto_reale?.value,
-      dati?.diritto_reale
-    );
     const quotaValue = getRichFieldDisplayValue(
       'quota',
       null,
@@ -1357,6 +1369,18 @@ const AnalysisResult = () => {
       contractBene?.quota,
       dati?.quota?.value,
       dati?.quota
+    );
+    const dirittoRealeValue = splitQuotaFromDiritto(
+      getRichFieldDisplayValue(
+        'diritto_reale',
+        null,
+        sourceBene?.diritto_reale,
+        sourceBene?.diritto,
+        contractBene?.diritto_reale,
+        dati?.diritto_reale?.value,
+        dati?.diritto_reale
+      ),
+      quotaValue
     );
     const statoOccupativoValue = safeRender(pickFirstNonEmpty(sourceBene?.occupancy_status, sourceBene?.stato_occupativo, sourceBene?.occupazione_status, sourceBene?.occupazione, occupativo?.status_it, occupativo?.status), '').trim();
     const urbanisticaValue = getRichFieldDisplayValue(
@@ -1640,7 +1664,7 @@ const AnalysisResult = () => {
             {
               key: 'diritto_reale',
               label: 'Diritto reale',
-              value: getRichFieldDisplayValue('diritto_reale', null, lot?.diritto_reale),
+              value: splitQuotaFromDiritto(getRichFieldDisplayValue('diritto_reale', null, lot?.diritto_reale), getRichFieldDisplayValue('quota', null, lot?.quota)),
               evidence: mergeEvidence(lotEvidence?.diritto_reale)
             },
             {
@@ -2161,6 +2185,12 @@ const AnalysisResult = () => {
     caution_watch: 'Cautela / verifica',
     background_note: 'Nota di sfondo'
   };
+  const occupancyDisplayTruth = normalizeComparableText(getRichFieldDisplayValue('stato_occupativo', occupativo, occupativo?.status_it, occupativo?.status));
+  const agibilitaDisplayTruth = normalizeComparableText(pickFirstNonEmpty(fieldStates?.agibilita?.value, fieldStates?.agibilita?.status_it, abusi?.agibilita?.status, abusi?.agibilita));
+  const hasPositiveOccupancyTruth = /(libero|non occupato|disponibile)/.test(occupancyDisplayTruth)
+    && !/(occupato da terzi|locato|opponibil|detent|debitore occupa)/.test(occupancyDisplayTruth);
+  const hasPositiveAgibilitaTruth = /(presente|rilasciat|agibil|abitabil)/.test(agibilitaDisplayTruth)
+    && !/(non|assen|manc|irregolar)/.test(agibilitaDisplayTruth);
 
   const normalizeLegalSeverity = (category, sourceStatus) => {
     const baseSeverity = normalizeUiSeverity(sourceStatus || severityByCategory[category], severityByCategory[category]);
@@ -2207,6 +2237,16 @@ const AnalysisResult = () => {
       });
       const best = eligible[0];
       const source = best.entry || {};
+      const sourceText = normalizeComparableText([
+        source?.killer,
+        source?.label_it,
+        source?.status_it,
+        source?.reason_it,
+        source?.action_required_it,
+        source?.value_it
+      ].join(' '));
+      if (category === 'occupazione' && hasPositiveOccupancyTruth) return;
+      if (category === 'agibilita_docs' && hasPositiveAgibilitaTruth && !/(non|assen|manc|irregolar)/.test(sourceText)) return;
       const kind = legalKindByCategory[category];
       out.push({
         killer: categoryLabelMap[category],
@@ -2331,6 +2371,9 @@ const AnalysisResult = () => {
   };
   const classifyStoredRedFlag = (title, detail) => {
     const text = `${title} ${detail}`.toLowerCase();
+    if (/(risolt|resolved|gia verificat|positivo|regolare)/.test(text)) {
+      return { group: 'missingData', kind: 'coverage_gap', severity: 'INFO' };
+    }
     if (/(cost|costi|stima|assunzion|quantificat)/.test(text)) {
       return { group: 'costUncertainty', kind: 'cost_uncertainty', severity: 'AMBER' };
     }
@@ -2341,6 +2384,11 @@ const AnalysisResult = () => {
       return /(non specificat|mancant|copertura|manual review|verificar)/.test(text)
         ? { group: 'missingData', kind: 'coverage_gap', severity: 'INFO' }
         : { group: 'technical', kind: 'confirmed_risk', severity: 'AMBER' };
+    }
+    if (/(servit|usi civici|censo|livello)/.test(text)) {
+      return /(passaggio|fondo dominante|fondo servente|atto di servitu|diritti demaniali presenti)/.test(text)
+        ? { group: 'legal', kind: 'confirmed_risk', severity: 'AMBER' }
+        : { group: 'missingData', kind: 'coverage_gap', severity: 'INFO' };
     }
     if (/(pignorament|ipotec|formalit|servit|usi civici|vincol)/.test(text)) {
       return /(pignorament|esecuzione immobiliare)/.test(text)
@@ -2367,7 +2415,7 @@ const AnalysisResult = () => {
   });
 
   topLegalChecklistItems.forEach((item, idx) => {
-    if (!item || item.kind === 'execution_context') return;
+    if (!item || item.kind === 'execution_context' || item.kind === 'background_note') return;
     addRedFlag('legal', {
       key: `legal_check_${idx}`,
       label: safeRender(item?.killer, 'Segnalazione legale'),
@@ -2387,6 +2435,16 @@ const AnalysisResult = () => {
     const label = safeRender(item?.label, '').toLowerCase();
     return !label.includes('occupazione');
   });
+  if (hasPositiveOccupancyTruth) {
+    redFlagGroups.occupancy = redFlagGroups.occupancy.filter((item) => normalizeUiSeverity(item?.severity, 'AMBER') === 'RED');
+  }
+  if (hasPositiveAgibilitaTruth) {
+    redFlagGroups.technical = redFlagGroups.technical.filter((item) => {
+      const label = normalizeComparableText(item?.label);
+      if (!/(agibil|abitabil)/.test(label)) return true;
+      return normalizeUiSeverity(item?.severity, 'AMBER') === 'RED';
+    });
+  }
 
   // Dedupe broad legal difformita when technical split flags are present.
   const hasTechUrbanisticaFlag = redFlagGroups.technical.some((item) => item?.key === 'tech_urbanistica');
@@ -2454,6 +2512,12 @@ const AnalysisResult = () => {
     .filter((item) => !hasStrongDrivers || item.score >= 15)
     .map((item) => item.driver)
     .slice(0, 4);
+  const displayDecisionIt = scoreSummarySignal(decisionIt) < 10 && displayedDecisionBullets[0]?.score >= 30
+    ? displayedDecisionBullets[0].bullet
+    : decisionIt;
+  const displayDecisionEn = scoreSummarySignal(decisionEn) < 10 && displayedDecisionBullets[0]?.bulletEn
+    ? displayedDecisionBullets[0].bulletEn
+    : decisionEn;
 
   // Debug logging for troubleshooting
   if (process.env.NODE_ENV === 'development') {
@@ -2823,8 +2887,8 @@ const AnalysisResult = () => {
                     {decisionSourceLabel}
                   </span>
                 </div>
-                <p className="text-lg font-semibold text-zinc-100">{decisionIt}</p>
-                <p className="text-sm text-zinc-500 mt-1">{decisionEn}</p>
+                <p className="text-lg font-semibold text-zinc-100">{displayDecisionIt}</p>
+                <p className="text-sm text-zinc-500 mt-1">{displayDecisionEn}</p>
                 {displayedDecisionBullets.length > 0 && (
                   <ul className="mt-3 space-y-1 text-sm text-zinc-300 list-disc pl-5">
                     {displayedDecisionBullets.map((item) => (
@@ -3117,7 +3181,7 @@ const AnalysisResult = () => {
               />
               <PanoramicaDataValueCard
                 label="Diritto Reale" 
-                value={normalizeOverviewValue(dati.diritto_reale?.value || dati.diritto_reale)}
+                value={splitQuotaFromDiritto(getRichFieldDisplayValue('diritto_reale', null, dati.diritto_reale?.value || dati.diritto_reale), getRichFieldDisplayValue('quota', null, dati?.quota?.value || dati?.quota))}
                 evidence={getEvidence(dati.diritto_reale)}
               />
               <PanoramicaDataValueCard

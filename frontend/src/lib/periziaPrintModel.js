@@ -188,6 +188,20 @@ const formatSurfaceValue = (value) => {
   return `${AREA_FORMATTER.format(numeric)} ${explicitUnit}`.trim();
 };
 
+const escapeRegExp = (value) => String(value).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+const splitQuotaFromDiritto = (dirittoValue, quotaValue) => {
+  const diritto = safeRender(dirittoValue, '').trim();
+  const quota = safeRender(quotaValue, '').trim();
+  if (!diritto) return '';
+  if (!quota) return diritto;
+  const cleaned = diritto
+    .replace(new RegExp(`(?:quota\\s*)?${escapeRegExp(quota)}`, 'ig'), '')
+    .replace(/[|,;:/-]+$/g, '')
+    .trim();
+  return cleaned || diritto;
+};
+
 const getFieldStateEvidence = (state, fallback = null) => {
   if (state && Array.isArray(state.evidence) && state.evidence.length > 0) return state.evidence;
   return getEvidence(fallback);
@@ -603,7 +617,7 @@ const buildDetails = (result) => {
         valoreStima: formatMoney(lot?.valore_stima_eur),
         topEvidence: getPrimaryEvidence(evidenceObj?.ubicazione, evidenceObj?.tipologia, evidenceObj?.superficie, evidenceObj?.valore_stima),
         detailRows: [
-          { label: 'Diritto reale', value: safeRender(lot?.diritto_reale, ''), evidence: getPrimaryEvidence(evidenceObj?.diritto_reale) },
+          { label: 'Diritto reale', value: splitQuotaFromDiritto(safeRender(lot?.diritto_reale, ''), safeRender(lot?.quota, '')), evidence: getPrimaryEvidence(evidenceObj?.diritto_reale) },
           { label: 'Quota', value: safeRender(lot?.quota, ''), evidence: getPrimaryEvidence(evidenceObj?.quota, evidenceObj?.diritto_reale) },
           { label: 'Diritti condivisi', value: sharedRightsNote, evidence: getPrimaryEvidence(evidenceObj?.note) },
           { label: 'Prezzo base', value: safeRender(lot?.prezzo_base_eur, ''), evidence: getPrimaryEvidence(evidenceObj?.prezzo_base) },
@@ -624,8 +638,25 @@ const buildDetails = (result) => {
   const fieldStates = result.field_states || {};
   const abusi = result.section_5_abusi_conformita?.conformita_urbanistica ? result.section_5_abusi_conformita : (result.abusi_edilizi_conformita || {});
   const occupativo = result.section_6_stato_occupativo?.status ? result.section_6_stato_occupativo : (result.stato_occupativo || {});
-  const dirittoReale = safeRender(result.dati_certi_del_lotto?.diritto_reale || result.section_4_dati_certi?.diritto_reale, '');
-  const quota = safeRender(result.dati_certi_del_lotto?.quota || result.section_4_dati_certi?.quota, '');
+  const quota = safeRender(
+    pickFirstNonEmpty(
+      getFieldStateValue(fieldStates.quota),
+      result.dati_certi_del_lotto?.quota,
+      result.section_4_dati_certi?.quota
+    ),
+    ''
+  );
+  const dirittoReale = splitQuotaFromDiritto(
+    safeRender(
+      pickFirstNonEmpty(
+        getFieldStateValue(fieldStates.diritto_reale),
+        result.dati_certi_del_lotto?.diritto_reale,
+        result.section_4_dati_certi?.diritto_reale
+      ),
+      ''
+    ),
+    quota
+  );
   const fallbackSurface = pickFirstNonEmpty(
     result.dati_certi_del_lotto?.superficie?.value,
     result.dati_certi_del_lotto?.superficie,
