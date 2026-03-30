@@ -2315,6 +2315,12 @@ const AnalysisResult = () => {
     return cleaned;
   })();
 
+  const summaryHasWeakBackgroundLegalBias = (textRaw) => {
+    const text = normalizeComparableText(textRaw);
+    if (!text) return false;
+    return /(servit|usi civici|censo|livello|vincolo|contesto esecutivo|procedura esecutiva)/.test(text);
+  };
+
   const groupedLegalDetailSections = (() => {
     const groups = {
       execution_context: [],
@@ -2346,7 +2352,7 @@ const AnalysisResult = () => {
         .replace(/[^a-z0-9 ]/g, '')
         .trim()
         .slice(0, 170);
-      const semanticClusterKey = `${bucket}|${normalizeComparableText(labelIt)}|${normalizeComparableText(displayValue)}`;
+      const semanticClusterKey = `${bucket}|${category || 'uncategorized'}|${normalizeComparableText(displayValue) || normalizeComparableText(labelIt)}`;
       const dedupeKey = `${bucket}|${page}|${normalizedQuote || `${labelIt}|${displayValue}`.toLowerCase().slice(0, 170)}`;
       if (seen.has(dedupeKey)) return;
       seen.add(dedupeKey);
@@ -2544,13 +2550,12 @@ const AnalysisResult = () => {
     .map((item) => item.driver)
     .slice(0, 4);
   const topMaterialLegalItem = topLegalChecklistItems.find((item) => item?.kind === 'material_blocker');
-  const summaryHasWeakServituBias = /servit|usi civici/.test(normalizeComparableText(decisionIt));
-  const displayDecisionIt = summaryHasWeakServituBias && topMaterialLegalItem
+  const displayDecisionIt = summaryHasWeakBackgroundLegalBias(decisionIt) && topMaterialLegalItem
     ? safeRender(topMaterialLegalItem.killer, decisionIt)
     : scoreSummarySignal(decisionIt) < 10 && displayedDecisionBullets[0]?.score >= 30
       ? displayedDecisionBullets[0].bullet
       : decisionIt;
-  const displayDecisionEn = summaryHasWeakServituBias
+  const displayDecisionEn = summaryHasWeakBackgroundLegalBias(decisionEn)
     ? decisionEn
     : scoreSummarySignal(decisionEn) < 10 && displayedDecisionBullets[0]?.bulletEn
       ? displayedDecisionBullets[0].bulletEn

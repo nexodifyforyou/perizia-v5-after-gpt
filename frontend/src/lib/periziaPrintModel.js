@@ -428,6 +428,70 @@ const buildClientFacingDriver = (semaforo, decision) => {
   return safeRender(semaforo?.driver?.value || semaforo?.reason_it, "Prima dell'offerta e' consigliabile una verifica documentale puntuale.");
 };
 
+const inferLegalCategory = (title, detail, evidence) => {
+  const primaryText = [
+    safeRender(title, ''),
+    safeRender(detail, '')
+  ].join(' ').toLowerCase();
+  const evidenceText = getEvidence(evidence)
+    .map((item) => `${safeRender(item?.quote, '')} ${safeRender(item?.search_hint, '')}`)
+    .join(' ')
+    .toLowerCase();
+  const texts = [primaryText, evidenceText].filter(Boolean);
+  for (const text of texts) {
+    if (/(occupat|debitore|coniuge|opponibil)/.test(text)) return 'occupazione';
+    if (/(pignorament|esecuzione immobiliare)/.test(text)) return 'pignoramento_esecuzione';
+    if (/(ipotec|formalit|trascrizion)/.test(text)) return 'ipoteca_formalita';
+    if (/(difform|catast|urbanistic|regolarit)/.test(text)) return 'difformita_urb_cat';
+    if (/(agibil|abitabil|ape|impiant|documentaz)/.test(text)) return 'agibilita_docs';
+    if (/(accesso|mappal|atto\s+di\s+vincolo|vincoli?\s+ancora\s+vigenti|a\s+carico\s+del\s+proprietario)/.test(text)) return 'accesso_vincolo';
+    if (/(servitù|servitu|usi civici|censo|livello)/.test(text)) return 'servitu_usi_civici';
+  }
+  return null;
+};
+
+const legalKindByCategory = {
+  occupazione: 'material_blocker',
+  pignoramento_esecuzione: 'execution_context',
+  ipoteca_formalita: 'material_blocker',
+  difformita_urb_cat: 'material_blocker',
+  agibilita_docs: 'caution_watch',
+  accesso_vincolo: 'caution_watch',
+  servitu_usi_civici: 'background_note'
+};
+
+const isWeakBackgroundLegalSummary = (textRaw) => {
+  const text = normalizeComparableText(textRaw);
+  if (!text) return false;
+  return /(servit|usi civici|censo|livello|vincolo|contesto esecutivo|procedura esecutiva)/.test(text);
+};
+
+const legalKindRank = {
+  material_blocker: 0,
+  caution_watch: 1,
+  execution_context: 2,
+  background_note: 3
+};
+
+const shouldSuppressPositiveLegalFieldItem = (key, detail) => {
+  const text = normalizeComparableText(detail);
+  if (!text) return false;
+  if (key === 'regolarita_urbanistica') {
+    if (/non emergono abusi/.test(text)) return true;
+    return /(conforme|regolare)/.test(text) && !/(non conform|abus|difform|irregolar)/.test(text);
+  }
+  if (key === 'conformita_catastale') {
+    return /(conforme|regolare)/.test(text) && !/(non conform|difform|irregolar)/.test(text);
+  }
+  if (key === 'stato_occupativo') {
+    return /(libero|non occupato|disponibile)/.test(text) && !/(occupato|locato|opponibil|detent)/.test(text);
+  }
+  if (key === 'agibilita') {
+    return /(presente|rilasciat|agibil|abitabil)/.test(text) && !/(non|assen|manc|irregolar)/.test(text);
+  }
+  return false;
+};
+
 const buildCostBuckets = (result, panoramicaContract) => {
   const moneyBox = result.section_3_money_box?.items ? result.section_3_money_box : (result.money_box || {});
   const valuation = panoramicaContract?.valuation_waterfall || {};
@@ -544,14 +608,29 @@ const buildLegalItems = (result) => {
     const renderedTitle = safeRender(title, '');
     const renderedDetail = safeRender(detail, '');
     if (!renderedTitle || !renderedDetail || renderedDetail === MISSING_TEXT) return;
+    if (shouldSuppressPositiveLegalFieldItem(key, renderedDetail)) return;
     if (!safeRender(key, '').startsWith('section9-') && isWeakLegalFallback(renderedTitle, renderedDetail, evidence)) return;
-    if (items.some((item) => item.key === key || (item.title === renderedTitle && item.detail === renderedDetail))) return;
+    const category = inferLegalCategory(renderedTitle, renderedDetail, evidence);
+    const kind = legalKindByCategory[category] || 'background_note';
+    const semanticKey = `${category || 'uncategorized'}|${normalizeComparableText(renderedDetail) || normalizeComparableText(renderedTitle)}`;
+    const existing = items.find((item) =>
+      item.key === key ||
+      item.semanticKey === semanticKey ||
+      (item.title === renderedTitle && item.detail === renderedDetail)
+    );
+    if (existing) {
+      existing.evidence = [...new Map([...existing.evidence, ...(Array.isArray(evidence) ? evidence.slice(0, 2) : [])].map((ev, idx) => [`${safeRender(ev?.page, '')}|${safeRender(ev?.quote, '')}|${idx}`, ev])).values()].slice(0, 2);
+      if (renderedDetail.length > existing.detail.length) existing.detail = renderedDetail;
+      return;
+    }
     items.push({
       key,
+      semanticKey,
       title: renderedTitle,
       status: normalizeSeverity(status),
       detail: renderedDetail,
       evidence: Array.isArray(evidence) ? evidence.slice(0, 2) : [],
+      kind,
     });
   };
 
@@ -572,7 +651,15 @@ const buildLegalItems = (result) => {
     );
   });
 
-  return items;
+  const hasHigherPriorityLegalItem = items.some((item) => item.kind === 'material_blocker' || item.kind === 'caution_watch');
+  const filtered = hasHigherPriorityLegalItem
+    ? items.filter((item) => item.kind !== 'background_note')
+    : items;
+  return filtered.sort((a, b) => {
+    const rankDelta = (legalKindRank[a.kind] ?? 9) - (legalKindRank[b.kind] ?? 9);
+    if (rankDelta !== 0) return rankDelta;
+    return a.title.localeCompare(b.title, 'it');
+  });
 };
 
 const buildSharedRightsNote = (lot) => {
@@ -773,7 +860,7 @@ const buildDetails = (result) => {
     });
 };
 
-const buildFlags = (result) => {
+const buildFlags = (result, legalItems = []) => {
   const rawFlags = Array.isArray(result.section_11_red_flags) && result.section_11_red_flags.length > 0
     ? result.section_11_red_flags
     : (Array.isArray(result.red_flags_operativi) ? result.red_flags_operativi : []);
@@ -827,6 +914,17 @@ const buildFlags = (result) => {
     );
   });
 
+  legalItems.forEach((item, index) => {
+    if (!item || item.kind === 'background_note' || item.kind === 'execution_context') return;
+    pushItem(
+      `legal-${index}`,
+      item.title,
+      item.detail,
+      item.status,
+      item.evidence
+    );
+  });
+
   const severityOrder = { Critico: 0, Attenzione: 1, Info: 2, 'Da verificare': 3 };
   return items.sort((a, b) => (severityOrder[a.severity] || 9) - (severityOrder[b.severity] || 9));
 };
@@ -857,8 +955,8 @@ export const buildPeriziaPrintReportModel = (rawAnalysis) => {
   const details = buildDetails(result);
   const costBuckets = buildCostBuckets(result, panoramicaContract);
   const legalItems = buildLegalItems(result);
-  const flags = buildFlags(result);
-  const coverSummaryIt = safeRender(
+  const flags = buildFlags(result, legalItems);
+  const rawCoverSummaryIt = safeRender(
     pickFirstNonEmpty(
       narratedDecision.it,
       decision.summary_it,
@@ -866,7 +964,13 @@ export const buildPeriziaPrintReportModel = (rawAnalysis) => {
     ),
     ''
   );
-  const overviewDecisionIt = safeRender(
+  const topMaterialLegalItem = legalItems.find((item) => item.kind === 'material_blocker');
+  const coverSummaryIt = isWeakBackgroundLegalSummary(rawCoverSummaryIt) && topMaterialLegalItem
+    ? topMaterialLegalItem.title
+    : rawCoverSummaryIt;
+  const overviewDecisionIt = isWeakBackgroundLegalSummary(rawCoverSummaryIt) && topMaterialLegalItem
+    ? topMaterialLegalItem.title
+    : safeRender(
     pickFirstNonEmpty(
       narratedDecision.it,
       decision.summary_it,
