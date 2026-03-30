@@ -1,4 +1,11 @@
 import { parseSurfaceNumber } from './surfaceFormatting';
+import {
+  buildCanonicalLegalPriorityMeta,
+  isPositiveOrNeutralLegalTruth,
+  isWeakBackgroundLegalSummary,
+  LEGAL_KIND_RANK,
+  pickCanonicalTopAttentionItem
+} from './legalPriority';
 
 const MISSING_TEXT = 'Non specificato in perizia';
 const EURO_FORMATTER = new Intl.NumberFormat('it-IT', {
@@ -428,70 +435,6 @@ const buildClientFacingDriver = (semaforo, decision) => {
   return safeRender(semaforo?.driver?.value || semaforo?.reason_it, "Prima dell'offerta e' consigliabile una verifica documentale puntuale.");
 };
 
-const inferLegalCategory = (title, detail, evidence) => {
-  const primaryText = [
-    safeRender(title, ''),
-    safeRender(detail, '')
-  ].join(' ').toLowerCase();
-  const evidenceText = getEvidence(evidence)
-    .map((item) => `${safeRender(item?.quote, '')} ${safeRender(item?.search_hint, '')}`)
-    .join(' ')
-    .toLowerCase();
-  const texts = [primaryText, evidenceText].filter(Boolean);
-  for (const text of texts) {
-    if (/(occupat|debitore|coniuge|opponibil)/.test(text)) return 'occupazione';
-    if (/(pignorament|esecuzione immobiliare)/.test(text)) return 'pignoramento_esecuzione';
-    if (/(ipotec|formalit|trascrizion)/.test(text)) return 'ipoteca_formalita';
-    if (/(difform|catast|urbanistic|regolarit)/.test(text)) return 'difformita_urb_cat';
-    if (/(agibil|abitabil|ape|impiant|documentaz)/.test(text)) return 'agibilita_docs';
-    if (/(accesso|mappal|atto\s+di\s+vincolo|vincoli?\s+ancora\s+vigenti|a\s+carico\s+del\s+proprietario)/.test(text)) return 'accesso_vincolo';
-    if (/(servitù|servitu|usi civici|censo|livello)/.test(text)) return 'servitu_usi_civici';
-  }
-  return null;
-};
-
-const legalKindByCategory = {
-  occupazione: 'material_blocker',
-  pignoramento_esecuzione: 'execution_context',
-  ipoteca_formalita: 'material_blocker',
-  difformita_urb_cat: 'material_blocker',
-  agibilita_docs: 'caution_watch',
-  accesso_vincolo: 'caution_watch',
-  servitu_usi_civici: 'background_note'
-};
-
-const isWeakBackgroundLegalSummary = (textRaw) => {
-  const text = normalizeComparableText(textRaw);
-  if (!text) return false;
-  return /(servit|usi civici|censo|livello|vincolo|contesto esecutivo|procedura esecutiva)/.test(text);
-};
-
-const legalKindRank = {
-  material_blocker: 0,
-  caution_watch: 1,
-  execution_context: 2,
-  background_note: 3
-};
-
-const shouldSuppressPositiveLegalFieldItem = (key, detail) => {
-  const text = normalizeComparableText(detail);
-  if (!text) return false;
-  if (key === 'regolarita_urbanistica') {
-    if (/non emergono abusi/.test(text)) return true;
-    return /(conforme|regolare)/.test(text) && !/(non conform|abus|difform|irregolar)/.test(text);
-  }
-  if (key === 'conformita_catastale') {
-    return /(conforme|regolare)/.test(text) && !/(non conform|difform|irregolar)/.test(text);
-  }
-  if (key === 'stato_occupativo') {
-    return /(libero|non occupato|disponibile)/.test(text) && !/(occupato|locato|opponibil|detent)/.test(text);
-  }
-  if (key === 'agibilita') {
-    return /(presente|rilasciat|agibil|abitabil)/.test(text) && !/(non|assen|manc|irregolar)/.test(text);
-  }
-  return false;
-};
-
 const buildCostBuckets = (result, panoramicaContract) => {
   const moneyBox = result.section_3_money_box?.items ? result.section_3_money_box : (result.money_box || {});
   const valuation = panoramicaContract?.valuation_waterfall || {};
@@ -608,11 +551,19 @@ const buildLegalItems = (result) => {
     const renderedTitle = safeRender(title, '');
     const renderedDetail = safeRender(detail, '');
     if (!renderedTitle || !renderedDetail || renderedDetail === MISSING_TEXT) return;
-    if (shouldSuppressPositiveLegalFieldItem(key, renderedDetail)) return;
+    if (isPositiveOrNeutralLegalTruth(key, renderedDetail)) return;
     if (!safeRender(key, '').startsWith('section9-') && isWeakLegalFallback(renderedTitle, renderedDetail, evidence)) return;
-    const category = inferLegalCategory(renderedTitle, renderedDetail, evidence);
-    const kind = legalKindByCategory[category] || 'background_note';
-    const semanticKey = `${category || 'uncategorized'}|${normalizeComparableText(renderedDetail) || normalizeComparableText(renderedTitle)}`;
+    const evidenceText = getEvidence(evidence)
+      .map((item) => `${safeRender(item?.quote, '')} ${safeRender(item?.search_hint, '')}`)
+      .join(' ');
+    const canonicalMeta = buildCanonicalLegalPriorityMeta({
+      key,
+      title: renderedTitle,
+      detail: renderedDetail,
+      evidenceText
+    });
+    if (canonicalMeta.kind === 'neutral_truth') return;
+    const { category, kind, semanticKey } = canonicalMeta;
     const existing = items.find((item) =>
       item.key === key ||
       item.semanticKey === semanticKey ||
@@ -656,7 +607,7 @@ const buildLegalItems = (result) => {
     ? items.filter((item) => item.kind !== 'background_note')
     : items;
   return filtered.sort((a, b) => {
-    const rankDelta = (legalKindRank[a.kind] ?? 9) - (legalKindRank[b.kind] ?? 9);
+    const rankDelta = (LEGAL_KIND_RANK[a.kind] ?? 9) - (LEGAL_KIND_RANK[b.kind] ?? 9);
     if (rankDelta !== 0) return rankDelta;
     return a.title.localeCompare(b.title, 'it');
   });
@@ -964,20 +915,22 @@ export const buildPeriziaPrintReportModel = (rawAnalysis) => {
     ),
     ''
   );
-  const topMaterialLegalItem = legalItems.find((item) => item.kind === 'material_blocker');
-  const coverSummaryIt = isWeakBackgroundLegalSummary(rawCoverSummaryIt) && topMaterialLegalItem
-    ? topMaterialLegalItem.title
-    : rawCoverSummaryIt;
-  const overviewDecisionIt = isWeakBackgroundLegalSummary(rawCoverSummaryIt) && topMaterialLegalItem
-    ? topMaterialLegalItem.title
+  const topAttentionLegalItem = pickCanonicalTopAttentionItem(legalItems);
+  const coverSummaryIt = topAttentionLegalItem
+    ? safeRender(topAttentionLegalItem.title, rawCoverSummaryIt)
+    : isWeakBackgroundLegalSummary(rawCoverSummaryIt)
+      ? safeRender(decision.summary_it || summary.summary_it, rawCoverSummaryIt)
+      : rawCoverSummaryIt;
+  const overviewDecisionIt = topAttentionLegalItem
+    ? safeRender(topAttentionLegalItem.title, rawCoverSummaryIt)
     : safeRender(
-    pickFirstNonEmpty(
-      narratedDecision.it,
-      decision.summary_it,
-      summary.summary_it
-    ),
-    ''
-  );
+      pickFirstNonEmpty(
+        narratedDecision.it,
+        decision.summary_it,
+        summary.summary_it
+      ),
+      ''
+    );
   const coverAddress = safeRender(
     pickFirstNonEmpty(
       lotSummary.ubicazione,

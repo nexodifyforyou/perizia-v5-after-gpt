@@ -27,6 +27,7 @@ import axios from 'axios';
 import { toast } from 'sonner';
 import { downloadPdfBlob } from '../utils/pdfDownload';
 import { parseSurfaceNumber } from '../lib/surfaceFormatting';
+import { buildCanonicalLegalPriorityMeta, isWeakBackgroundLegalSummary, pickCanonicalTopAttentionItem } from '../lib/legalPriority';
 
 const API_URL = process.env.REACT_APP_BACKEND_URL;
 
@@ -2269,13 +2270,14 @@ const AnalysisResult = () => {
       if (category === 'agibilita_docs' && hasPositiveAgibilitaTruth && !/(non|assen|manc|irregolar)/.test(sourceText)) return;
       const kind = legalKindByCategory[category];
       out.push({
-        killer: categoryLabelMap[category],
+        killer: safeRender(source?.killer || source?.label_it || source?.label, categoryLabelMap[category]),
         status: normalizeLegalSeverity(category, source?.status),
         status_it: safeRender(source?.status_it, ''),
         action: safeRender(source?.reason_it || source?.action_required_it || source?.action, ''),
         evidence: getEvidence(source),
         kind,
-        contextLabel: legalKindLabelMap[kind]
+        contextLabel: legalKindLabelMap[kind],
+        decisionScore: Number.isFinite(source?.decision_score) ? source.decision_score : null
       });
     });
     return out;
@@ -2315,12 +2317,6 @@ const AnalysisResult = () => {
     return cleaned;
   })();
 
-  const summaryHasWeakBackgroundLegalBias = (textRaw) => {
-    const text = normalizeComparableText(textRaw);
-    if (!text) return false;
-    return /(servit|usi civici|censo|livello|vincolo|contesto esecutivo|procedura esecutiva)/.test(text);
-  };
-
   const groupedLegalDetailSections = (() => {
     const groups = {
       execution_context: [],
@@ -2342,7 +2338,6 @@ const AnalysisResult = () => {
       const page = firstEv?.page ?? '';
       const category = pickLegalCategory(item);
       if (category === 'servitu_usi_civici' && !isSubstantiveServituEvidence(quote, searchHint)) return;
-      const bucket = mapToGroup(category);
       const labelIt = safeRender(item?.label_it || item?.__label, 'Voce');
       const labelEn = safeRender(item?.label_en, '');
       const displayValue = getEstrattoItemDisplayValue(item);
@@ -2352,7 +2347,15 @@ const AnalysisResult = () => {
         .replace(/[^a-z0-9 ]/g, '')
         .trim()
         .slice(0, 170);
-      const semanticClusterKey = `${bucket}|${category || 'uncategorized'}|${normalizeComparableText(displayValue) || normalizeComparableText(labelIt)}`;
+      const canonicalMeta = buildCanonicalLegalPriorityMeta({
+        key: category || '',
+        title: labelIt,
+        detail: displayValue,
+        evidenceText: `${quote} ${searchHint}`
+      });
+      if (canonicalMeta.kind === 'neutral_truth') return;
+      const bucket = canonicalMeta.kind || mapToGroup(category);
+      const semanticClusterKey = canonicalMeta.semanticKey;
       const dedupeKey = `${bucket}|${page}|${normalizedQuote || `${labelIt}|${displayValue}`.toLowerCase().slice(0, 170)}`;
       if (seen.has(dedupeKey)) return;
       seen.add(dedupeKey);
@@ -2363,7 +2366,7 @@ const AnalysisResult = () => {
         displayValue,
         evidence: Array.isArray(item?.__evidence) ? item.__evidence : []
       };
-      const shouldClusterBySemanticKey = bucket === 'execution_context' || bucket === 'material_blocker';
+      const shouldClusterBySemanticKey = bucket !== 'background_note';
       if (shouldClusterBySemanticKey && clusterIndex.has(semanticClusterKey)) {
         const target = clusterIndex.get(semanticClusterKey);
         target.evidence = mergeEvidence(target.evidence, nextItem.evidence);
@@ -2549,17 +2552,21 @@ const AnalysisResult = () => {
     .filter((item) => !hasStrongDrivers || item.score >= 15)
     .map((item) => item.driver)
     .slice(0, 4);
-  const topMaterialLegalItem = topLegalChecklistItems.find((item) => item?.kind === 'material_blocker');
-  const displayDecisionIt = summaryHasWeakBackgroundLegalBias(decisionIt) && topMaterialLegalItem
-    ? safeRender(topMaterialLegalItem.killer, decisionIt)
-    : scoreSummarySignal(decisionIt) < 10 && displayedDecisionBullets[0]?.score >= 30
+  const topAttentionLegalItem = pickCanonicalTopAttentionItem(topLegalChecklistItems);
+  const displayDecisionIt = topAttentionLegalItem
+    ? safeRender(topAttentionLegalItem.killer, decisionIt)
+    : isWeakBackgroundLegalSummary(decisionIt) && displayedDecisionBullets[0]?.score >= 30
       ? displayedDecisionBullets[0].bullet
-      : decisionIt;
-  const displayDecisionEn = summaryHasWeakBackgroundLegalBias(decisionEn)
-    ? decisionEn
-    : scoreSummarySignal(decisionEn) < 10 && displayedDecisionBullets[0]?.bulletEn
-      ? displayedDecisionBullets[0].bulletEn
-      : decisionEn;
+      : scoreSummarySignal(decisionIt) < 10 && displayedDecisionBullets[0]?.score >= 30
+        ? displayedDecisionBullets[0].bullet
+        : decisionIt;
+  const displayDecisionEn = topAttentionLegalItem
+    ? safeRender(topAttentionLegalItem.killer, decisionEn)
+    : isWeakBackgroundLegalSummary(decisionEn)
+      ? decisionEn
+      : scoreSummarySignal(decisionEn) < 10 && displayedDecisionBullets[0]?.bulletEn
+        ? displayedDecisionBullets[0].bulletEn
+        : decisionEn;
 
   // Debug logging for troubleshooting
   if (process.env.NODE_ENV === 'development') {
