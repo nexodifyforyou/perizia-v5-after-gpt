@@ -135,14 +135,100 @@ const formatMoney = (value) => {
   return value;
 };
 
+const AREA_FORMATTER = new Intl.NumberFormat('it-IT', {
+  minimumFractionDigits: 0,
+  maximumFractionDigits: 2
+});
+
 const parseNumericEuro = (value) => {
   if (typeof value === 'number' && Number.isFinite(value)) return value;
-  if (typeof value === 'string') {
-    const normalized = value.replace(/[^\d,.-]/g, '').replace(/\./g, '').replace(',', '.');
-    const parsed = parseFloat(normalized);
+  if (typeof value !== 'string') return null;
+  const cleaned = value.replace(/[^\d,.-]/g, '').trim();
+  if (!cleaned) return null;
+
+  const lastComma = cleaned.lastIndexOf(',');
+  const lastDot = cleaned.lastIndexOf('.');
+  const decimalIndex = Math.max(lastComma, lastDot);
+
+  if (decimalIndex === -1) {
+    const parsed = parseFloat(cleaned);
     return Number.isFinite(parsed) ? parsed : null;
   }
-  return null;
+
+  const decimalDigits = cleaned.slice(decimalIndex + 1).replace(/[^\d]/g, '');
+  const hasExplicitDecimal = decimalDigits.length > 0 && decimalDigits.length <= 2;
+  const decimalSeparator = decimalIndex === lastComma ? ',' : '.';
+  const thousandsSeparator = decimalSeparator === ',' ? '.' : ',';
+
+  const normalized = hasExplicitDecimal
+    ? `${cleaned.slice(0, decimalIndex).replace(new RegExp(`\\${thousandsSeparator}`, 'g'), '')}.${decimalDigits}`
+    : cleaned.replace(/[.,]/g, '');
+
+  const parsed = parseFloat(normalized);
+  return Number.isFinite(parsed) ? parsed : null;
+};
+
+const isMeaningfulValue = (value) => {
+  if (value === null || value === undefined) return false;
+  if (typeof value === 'string') {
+    const upper = value.trim().toUpperCase();
+    return Boolean(
+      upper &&
+      !['NONE', 'N/A', 'NOT_SPECIFIED_IN_PERIZIA', 'NOT_SPECIFIED', 'UNKNOWN', 'TBD', 'NULL', 'NON SPECIFICATO IN PERIZIA'].includes(upper)
+    );
+  }
+  if (Array.isArray(value)) return value.some((item) => isMeaningfulValue(item));
+  if (typeof value === 'object') {
+    return [
+      value?.detail_it,
+      value?.status_it,
+      value?.status,
+      value?.formatted,
+      value?.value,
+      value?.label_it,
+      value?.full
+    ].some((item) => isMeaningfulValue(item));
+  }
+  return true;
+};
+
+const normalizeUiSeverity = (value, fallback = 'AMBER') => {
+  const normalized = safeRender(value, fallback).toUpperCase();
+  if (['RED', 'ROSSO', 'CRITICAL', 'CRITICO', 'ERROR'].includes(normalized)) return 'RED';
+  if (['INFO', 'LOW', 'GREEN', 'VERDE', 'OK'].includes(normalized)) return 'INFO';
+  return 'AMBER';
+};
+
+const formatMeasuredValue = (value, defaultUnit = '') => {
+  const rendered = safeRender(value, '').trim();
+  if (!rendered) return '';
+  const numeric = parseNumericEuro(rendered);
+  if (numeric === null) return rendered;
+  const explicitUnit = /m²/i.test(rendered) ? 'm²' : (/\bmq\b/i.test(rendered) ? 'mq' : '');
+  const unit = explicitUnit || defaultUnit;
+  return `${AREA_FORMATTER.format(numeric)}${unit ? ` ${unit}` : ''}`.trim();
+};
+
+const formatSurfaceDisplay = (...values) => {
+  for (const value of values) {
+    if (!isMeaningfulValue(value)) continue;
+    if (value && typeof value === 'object' && !Array.isArray(value)) {
+      const measured = formatMeasuredValue(
+        pickFirstNonEmpty(
+          value?.formatted,
+          value?.value,
+          value?.detail_it,
+          value?.status_it,
+          value?.status
+        ),
+        safeRender(pickFirstNonEmpty(value?.unit, value?.uom), '').trim() || 'mq'
+      );
+      if (measured) return measured;
+    }
+    const measured = formatMeasuredValue(value, 'mq');
+    if (measured) return measured;
+  }
+  return '';
 };
 
 const getShortText = (value, max = 110) => {
@@ -453,22 +539,20 @@ const MoneyBoxItem = ({ item }) => {
 
 // Legal Killer Item Component with Evidence - supports both old and ROMA STANDARD formats
 const LegalKillerItem = ({ name, data }) => {
-  const status = safeRender(data?.status, 'Non specificato in perizia');
+  const status = normalizeUiSeverity(data?.status, 'AMBER');
   const evidence = getEvidence(data);
   const hasEvidence = evidence.length > 0;
   const pages = hasEvidence ? [...new Set(evidence.map(e => e.page).filter(Boolean))] : [];
   
   const getStatusIcon = (status) => {
-    const normalizedStatus = status.toUpperCase();
-    if (normalizedStatus === 'YES' || normalizedStatus === 'SI') return <XCircle className="w-5 h-5 text-red-400" />;
-    if (normalizedStatus === 'NO') return <CheckCircle className="w-5 h-5 text-emerald-400" />;
-    return <HelpCircle className="w-5 h-5 text-amber-400" />;
+    if (status === 'RED') return <XCircle className="w-5 h-5 text-red-400" />;
+    if (status === 'INFO') return <HelpCircle className="w-5 h-5 text-zinc-400" />;
+    return <AlertTriangle className="w-5 h-5 text-amber-400" />;
   };
 
   const getStatusBg = (status) => {
-    const normalizedStatus = status.toUpperCase();
-    if (normalizedStatus === 'YES' || normalizedStatus === 'SI') return 'bg-red-500/10 border-red-500/30';
-    if (normalizedStatus === 'NO') return 'bg-emerald-500/10 border-emerald-500/30';
+    if (status === 'RED') return 'bg-red-500/10 border-red-500/30';
+    if (status === 'INFO') return 'bg-zinc-800/80 border-zinc-700';
     return 'bg-amber-500/10 border-amber-500/30';
   };
 
@@ -486,6 +570,7 @@ const LegalKillerItem = ({ name, data }) => {
   
   // Get the display name - use 'killer' from new format or formatted name
   const displayName = data?.killer || formatName(name);
+  const contextLabel = safeRender(data?.contextLabel, '');
 
   return (
     <div className={`p-4 rounded-lg border ${getStatusBg(status)}`}>
@@ -494,6 +579,11 @@ const LegalKillerItem = ({ name, data }) => {
         <div className="flex-1">
           <div className="flex items-center gap-2">
             <p className="text-sm font-medium text-zinc-100">{displayName}</p>
+            {contextLabel && (
+              <span className="text-[10px] px-2 py-0.5 rounded border border-zinc-700 text-zinc-400 uppercase tracking-wide">
+                {contextLabel}
+              </span>
+            )}
             {hasEvidence && (
               <span className="text-xs font-mono text-gold flex items-center gap-1">
                 <FileText className="w-3 h-3" />
@@ -559,18 +649,28 @@ const RedFlagItem = ({ flag }) => {
 };
 
 const RedFlagMatrixItem = ({ item }) => {
-  const severity = safeRender(item?.severity, 'AMBER').toUpperCase();
+  const severity = normalizeUiSeverity(item?.severity, 'AMBER');
   const evidence = Array.isArray(item?.evidence) ? item.evidence : [];
   const pages = [...new Set(evidence.map((e) => e?.page).filter(Boolean))];
   const toneClass = severity === 'RED'
     ? 'border-red-500/30 bg-red-500/5'
-    : 'border-amber-500/30 bg-amber-500/5';
+    : severity === 'INFO'
+      ? 'border-zinc-700 bg-zinc-800/60'
+      : 'border-amber-500/30 bg-amber-500/5';
+  const kindLabel = safeRender(item?.kindLabel, '');
 
   return (
     <div className={`p-3 rounded-lg border ${toneClass}`}>
       <div className="flex items-start justify-between gap-2">
         <div>
-          <p className="text-sm font-medium text-zinc-100">{safeRender(item?.label, 'Rischio')}</p>
+          <div className="flex flex-wrap items-center gap-2">
+            <p className="text-sm font-medium text-zinc-100">{safeRender(item?.label, 'Rischio')}</p>
+            {kindLabel && (
+              <span className="text-[10px] px-2 py-0.5 rounded border border-zinc-700 text-zinc-400 uppercase tracking-wide">
+                {kindLabel}
+              </span>
+            )}
+          </div>
           {item?.explanation && <p className="text-xs text-zinc-400 mt-1">{safeRender(item.explanation, '')}</p>}
         </div>
         {evidence.length > 0 && <EvidenceBadge evidence={evidence} />}
@@ -619,7 +719,7 @@ const MultiLotSelector = ({ lots, selectedLot, onSelectLot }) => {
                 <td className="py-2 px-3 font-mono text-gold">Lotto {lot.lot_number}</td>
                 <td className="py-2 px-3 font-mono text-emerald-400">{lot.prezzo_base_eur || 'TBD'}</td>
                 <td className="py-2 px-3 text-zinc-300">{(lot.ubicazione || 'NON SPECIFICATO').substring(0, 40)}...</td>
-                <td className="py-2 px-3 text-zinc-300">{lot.superficie_mq || 'TBD'}</td>
+                <td className="py-2 px-3 text-zinc-300">{formatSurfaceDisplay(lot.superficie_convenzionale_mq, lot.superficie_convenzionale, lot.superficie_mq) || 'TBD'}</td>
                 <td className="py-2 px-3 text-zinc-300">{(lot.diritto_reale || 'NON SPECIFICATO').substring(0, 20)}</td>
               </tr>
             ))}
@@ -856,8 +956,8 @@ const AnalysisResult = () => {
     prezzo_base_asta: { value: selectedLot.prezzo_base_value, formatted: selectedLot.prezzo_base_eur, evidence: selectedLot.evidence?.prezzo_base || [] },
     ubicazione: { value: selectedLot.ubicazione, evidence: selectedLot.evidence?.ubicazione || [] },
     diritto_reale: { value: selectedLot.diritto_reale, evidence: selectedLot.evidence?.diritto_reale || [] },
-    quota: { value: selectedLot.quota, evidence: selectedLot.evidence?.diritto_reale || [] },
-    superficie: { value: selectedLot.superficie_mq, evidence: selectedLot.evidence?.superficie || [] },
+    quota: { value: selectedLot.quota, evidence: selectedLot.evidence?.quota || selectedLot.evidence?.diritto_reale || [] },
+    superficie: { value: pickFirstNonEmpty(selectedLot.superficie_convenzionale_mq, selectedLot.superficie_convenzionale, selectedLot.superficie_mq), evidence: selectedLot.evidence?.superficie || [] },
     superficie_catastale: { value: selectedLot.superficie_mq, evidence: selectedLot.evidence?.superficie || [] },
     tipologia: { value: selectedLot.tipologia, evidence: [] }
   } : (section4.prezzo_base_asta ? section4 : (result.dati_certi_del_lotto || {}));
@@ -959,10 +1059,7 @@ const AnalysisResult = () => {
         bene?.mq,
         bene?.superficie
       );
-      const superficieValue = parseNumericEuro(superficieRaw);
-      const superficieDisplay = superficieValue !== null
-        ? `${superficieValue.toLocaleString()} mq`
-        : safeRender(superficieRaw, '');
+      const superficieDisplay = formatSurfaceDisplay(superficieRaw) || safeRender(superficieRaw, '');
       const valoreStimaRaw = pickFirstNonEmpty(
         bene?.valore_di_stima_bene,
         bene?.valore_stima_bene,
@@ -1013,7 +1110,7 @@ const AnalysisResult = () => {
       tipologia: safeRender(item?.tipologia, ''),
       location: safeRender(item?.short_location, ''),
       piano: safeRender(item?.piano, ''),
-      superficie: superficieValue !== null ? `${superficieValue.toLocaleString()} mq` : '',
+      superficie: formatSurfaceDisplay(item?.superficie_mq) || '',
       valoreStima: valoreStimaValue !== null ? `€${valoreStimaValue.toLocaleString()}` : '',
       evidence: condensedEvidence,
       hasData: Boolean(
@@ -1051,17 +1148,34 @@ const AnalysisResult = () => {
     return pickFirstNonEmpty(value?.detail_it, value?.status_it, value?.status, value?.formatted, value?.value);
   };
 
+  const getFieldStateDisplayValue = (state) => {
+    if (!state || typeof state !== 'object') return null;
+    const raw = pickFirstNonEmpty(
+      state?.detail_it,
+      state?.status_it,
+      state?.formatted,
+      state?.value?.detail_it,
+      state?.value?.status_it,
+      state?.value?.formatted,
+      state?.value,
+      state?.status
+    );
+    return isMeaningfulValue(raw) ? raw : null;
+  };
+
   const getRichFieldDisplayValue = (key, legacyValue, ...fallbacks) => {
-    const rawStateValue = getFieldValue(key, null);
-    const stateValue = key === 'superficie' && rawStateValue && typeof rawStateValue === 'object'
-      ? `${safeRender(rawStateValue?.value, '')}${safeRender(rawStateValue?.unit, '') ? ` ${safeRender(rawStateValue.unit, '')}` : ''}`.trim()
-      : rawStateValue;
+    const stateValue = getFieldStateDisplayValue(getFieldState(key));
     const legacyDetail = getFieldLegacyDetail(legacyValue);
+    if (key === 'superficie') {
+      return normalizeDettagliValue(formatSurfaceDisplay(stateValue, legacyDetail, ...fallbacks));
+    }
     return normalizeDettagliValue(pickFirstNonEmpty(stateValue, legacyDetail, ...fallbacks));
   };
 
   const getSurfaceDisplayValue = (key, legacyValue, ...fallbacks) =>
-    normalizeOverviewValue(getRichFieldDisplayValue(key, legacyValue, ...fallbacks));
+    key === 'superficie'
+      ? normalizeOverviewValue(formatSurfaceDisplay(getRichFieldDisplayValue(key, legacyValue, ...fallbacks)))
+      : normalizeOverviewValue(getRichFieldDisplayValue(key, legacyValue, ...fallbacks));
 
   const formatCatastoCompact = (catasto) => {
     if (!catasto) return '';
@@ -1091,9 +1205,9 @@ const AnalysisResult = () => {
     if (subalterni.length > 0) {
       const renderedSubs = [...new Set(subalterni)];
       if (sharedPrefix.length > 0) {
-        return `${sharedPrefix.join(' - ')} - ${renderedSubs.join(' | ')}`;
+        return `${sharedPrefix.join(' - ')} - ${renderedSubs.join('; ')}`;
       }
-      return renderedSubs.join(' | ');
+      return renderedSubs.join('; ');
     }
     return rootValue;
   };
@@ -1223,20 +1337,26 @@ const AnalysisResult = () => {
       beneNumbers.length === 1 ? getFieldState('superficie')?.value?.value : null,
       beneNumbers.length === 1 ? getFieldState('superficie')?.value : null
     );
-    const superficieNum = parseNumericEuro(superficieRaw);
+    const superficieDisplay = formatSurfaceDisplay(superficieRaw);
     const valoreNum = parseNumericEuro(pickFirstNonEmpty(contractBene?.valore_stima_eur, sourceBene?.valore_stima_eur, sourceBene?.valore_stima_bene, sourceBene?.valore_di_stima_bene, sourceBene?.valore_stima));
 
-    const catastoValue = formatCatastoCompact(pickFirstNonEmpty(sourceBene?.catasto, contractBene?.catasto));
-    const dirittoRealeValue = normalizeDettagliValue(
-      pickFirstNonEmpty(sourceBene?.diritto_reale, sourceBene?.diritto, contractBene?.diritto_reale, dati?.diritto_reale?.value, dati?.diritto_reale)
+    const catastoValue = formatCatastoCompact(pickFirstNonEmpty(sourceBene?.catasto, contractBene?.catasto)) || parseCatastoFromEvidence(sourceEvidenceObj?.catasto);
+    const dirittoRealeValue = getRichFieldDisplayValue(
+      'diritto_reale',
+      null,
+      sourceBene?.diritto_reale,
+      sourceBene?.diritto,
+      contractBene?.diritto_reale,
+      dati?.diritto_reale?.value,
+      dati?.diritto_reale
     );
-    const quotaValue = normalizeDettagliValue(
-      pickFirstNonEmpty(
-        sourceBene?.quota,
-        contractBene?.quota,
-        dati?.quota?.value,
-        dati?.quota
-      )
+    const quotaValue = getRichFieldDisplayValue(
+      'quota',
+      null,
+      sourceBene?.quota,
+      contractBene?.quota,
+      dati?.quota?.value,
+      dati?.quota
     );
     const statoOccupativoValue = safeRender(pickFirstNonEmpty(sourceBene?.occupancy_status, sourceBene?.stato_occupativo, sourceBene?.occupazione_status, sourceBene?.occupazione, occupativo?.status_it, occupativo?.status), '').trim();
     const urbanisticaValue = getRichFieldDisplayValue(
@@ -1367,7 +1487,7 @@ const AnalysisResult = () => {
       tipologia,
       shortLocation,
       piano,
-      superficie: superficieNum !== null ? `${superficieNum.toLocaleString()} mq` : '',
+      superficie: superficieDisplay || '',
       valoreStima: valoreNum !== null ? `€${valoreNum.toLocaleString()}` : '',
       topEvidence: mergeEvidence(
         contractEvidenceObj?.tipologia,
@@ -1390,7 +1510,7 @@ const AnalysisResult = () => {
           key: 'quota',
           label: 'Quota',
           value: quotaValue,
-          evidence: mergeEvidence(sourceEvidenceObj?.diritto_reale, dati?.quota?.evidence)
+          evidence: mergeEvidence(sourceEvidenceObj?.quota, contractEvidenceObj?.quota, dati?.quota?.evidence, sourceEvidenceObj?.diritto_reale)
         },
         {
           key: 'stato_occupativo',
@@ -1494,8 +1614,8 @@ const AnalysisResult = () => {
               value: [
                 safeRender(bene?.tipologia, ''),
                 safeRender(pickFirstNonEmpty(bene?.ubicazione, bene?.indirizzo, bene?.short_location), ''),
-                safeRender(bene?.superficie_mq, '')
-                  ? `${safeRender(bene?.superficie_mq, '')} mq`
+                formatSurfaceDisplay(bene?.superficie_convenzionale_mq, bene?.superficie_convenzionale, bene?.superficie_mq)
+                  ? formatSurfaceDisplay(bene?.superficie_convenzionale_mq, bene?.superficie_convenzionale, bene?.superficie_mq)
                   : ''
               ].filter(Boolean).join(' | ')
             })).filter((bene) => bene.value)
@@ -1506,9 +1626,7 @@ const AnalysisResult = () => {
           lotNumber: lot?.lot_number || idx + 1,
           tipologia: safeRender(lot?.tipologia, ''),
           shortLocation: safeRender(lot?.ubicazione, ''),
-          superficie: safeRender(lot?.superficie_mq, '')
-            ? `${safeRender(lot?.superficie_mq, '')} mq`
-            : '',
+          superficie: formatSurfaceDisplay(lot?.superficie_convenzionale_mq, lot?.superficie_convenzionale, lot?.superficie_mq) || '',
           valoreStima: lot?.valore_stima_eur ? formatMoney(lot.valore_stima_eur) : '',
           prezzoBase: lot?.prezzo_base_eur || '',
           topEvidence: mergeEvidence(
@@ -1522,14 +1640,20 @@ const AnalysisResult = () => {
             {
               key: 'diritto_reale',
               label: 'Diritto reale',
-              value: normalizeDettagliValue(lot?.diritto_reale),
+              value: getRichFieldDisplayValue('diritto_reale', null, lot?.diritto_reale),
               evidence: mergeEvidence(lotEvidence?.diritto_reale)
             },
             {
+              key: 'quota',
+              label: 'Quota',
+              value: getRichFieldDisplayValue('quota', null, lot?.quota),
+              evidence: mergeEvidence(lotEvidence?.quota, lotEvidence?.diritto_reale)
+            },
+            {
               key: 'shared_rights',
-              label: 'Quota / diritti condivisi',
+              label: 'Diritti condivisi',
               value: sharedRightsNote,
-              evidence: mergeEvidence(lotEvidence?.diritto_reale, lotEvidence?.note)
+              evidence: mergeEvidence(lotEvidence?.note)
             },
             {
               key: 'stato_occupativo',
@@ -1540,7 +1664,7 @@ const AnalysisResult = () => {
             {
               key: 'catasto',
               label: 'Catasto',
-              value: normalizeDettagliValue(safeRender(lot?.catasto, '')),
+              value: formatCatastoCompact(lot?.catasto) || normalizeDettagliValue(safeRender(lot?.catasto, '')),
               evidence: mergeEvidence(lotEvidence?.catasto)
             },
             {
@@ -2015,12 +2139,35 @@ const AnalysisResult = () => {
 
   const severityByCategory = {
     occupazione: 'GIALLO',
-    pignoramento_esecuzione: 'ROSSO',
+    pignoramento_esecuzione: 'GIALLO',
     ipoteca_formalita: 'ROSSO',
     difformita_urb_cat: 'ROSSO',
     agibilita_docs: 'GIALLO',
     accesso_vincolo: 'GIALLO',
     servitu_usi_civici: 'GIALLO'
+  };
+  const legalKindByCategory = {
+    occupazione: 'material_blocker',
+    pignoramento_esecuzione: 'execution_context',
+    ipoteca_formalita: 'material_blocker',
+    difformita_urb_cat: 'material_blocker',
+    agibilita_docs: 'caution_watch',
+    accesso_vincolo: 'caution_watch',
+    servitu_usi_civici: 'background_note'
+  };
+  const legalKindLabelMap = {
+    execution_context: 'Contesto esecutivo',
+    material_blocker: 'Blocco materiale',
+    caution_watch: 'Cautela / verifica',
+    background_note: 'Nota di sfondo'
+  };
+
+  const normalizeLegalSeverity = (category, sourceStatus) => {
+    const baseSeverity = normalizeUiSeverity(sourceStatus || severityByCategory[category], severityByCategory[category]);
+    const kind = legalKindByCategory[category];
+    if (kind === 'execution_context' && baseSeverity === 'RED') return 'AMBER';
+    if (kind === 'background_note' && baseSeverity === 'RED') return 'AMBER';
+    return baseSeverity;
   };
 
   const buildTopLegalChecklist = () => {
@@ -2036,30 +2183,39 @@ const AnalysisResult = () => {
     const out = [];
     ordered.forEach((category) => {
       const candidates = legalCategoryCandidates[category] || [];
+      const preserved = candidates.filter((c) => c.fromSection9);
       let substantive = candidates.filter((c) => c.isSubstantive);
       if (category === 'servitu_usi_civici') {
-        substantive = substantive.filter((c) => c.fromSection9 || isSubstantiveServituEvidence(c.quote, c.searchHint));
+        substantive = candidates.filter((c) => c.fromSection9 || isSubstantiveServituEvidence(c.quote, c.searchHint));
       }
       if (category === 'accesso_vincolo') {
-        substantive = substantive.filter((c) => {
+        substantive = candidates.filter((c) => c.fromSection9 || (
+          c.isSubstantive && (() => {
           const txt = `${safeRender(c.quote, '')} ${safeRender(c.searchHint, '')}`.toLowerCase();
           return /(accesso|mappal|atto\s+di\s+vincolo|vincoli?\s+ancora\s+vigenti|proprietario\s+debitore)/.test(txt)
             && !isTocLikeLegalEvidence(c.quote, c.searchHint);
-        });
+          })()
+        ));
       }
-      if (substantive.length === 0) return;
-      substantive.sort((a, b) => {
+      const eligible = preserved.length > 0 ? preserved : substantive;
+      if (eligible.length === 0) return;
+      eligible.sort((a, b) => {
+        if (a.fromSection9 !== b.fromSection9) return a.fromSection9 ? -1 : 1;
+        if (a.isSubstantive !== b.isSubstantive) return a.isSubstantive ? -1 : 1;
         if (a.page !== b.page) return a.page - b.page;
         return b.quoteLen - a.quoteLen;
       });
-      const best = substantive[0];
+      const best = eligible[0];
       const source = best.entry || {};
+      const kind = legalKindByCategory[category];
       out.push({
         killer: categoryLabelMap[category],
-        status: safeRender(source?.status, severityByCategory[category]),
+        status: normalizeLegalSeverity(category, source?.status),
         status_it: safeRender(source?.status_it, ''),
         action: safeRender(source?.reason_it || source?.action_required_it || source?.action, ''),
         evidence: getEvidence(source),
+        kind,
+        contextLabel: legalKindLabelMap[kind]
       });
     });
     return out;
@@ -2101,18 +2257,15 @@ const AnalysisResult = () => {
 
   const groupedLegalDetailSections = (() => {
     const groups = {
-      pignoramento_esecuzione: [],
-      ipoteca_formalita: [],
-      accesso_vincolo: [],
-      other_legal_mentions: []
+      execution_context: [],
+      material_blocker: [],
+      caution_watch: [],
+      background_note: []
     };
     const seen = new Set();
 
     const mapToGroup = (category) => {
-      if (category === 'pignoramento_esecuzione') return 'pignoramento_esecuzione';
-      if (category === 'ipoteca_formalita') return 'ipoteca_formalita';
-      if (category === 'accesso_vincolo') return 'accesso_vincolo';
-      return 'other_legal_mentions';
+      return legalKindByCategory[category] || 'background_note';
     };
 
     filteredLegalDetailItems.forEach((item) => {
@@ -2145,10 +2298,10 @@ const AnalysisResult = () => {
     });
 
     return [
-      { key: 'pignoramento_esecuzione', title: 'Pignoramento / Esecuzione', items: groups.pignoramento_esecuzione },
-      { key: 'ipoteca_formalita', title: 'Ipoteca / Formalità pregiudizievoli', items: groups.ipoteca_formalita },
-      { key: 'accesso_vincolo', title: 'Accesso / vincolo', items: groups.accesso_vincolo },
-      { key: 'other_legal_mentions', title: 'Other legal mentions', items: groups.other_legal_mentions }
+      { key: 'execution_context', title: 'Contesto esecutivo', items: groups.execution_context },
+      { key: 'material_blocker', title: 'Blocchi materiali', items: groups.material_blocker },
+      { key: 'caution_watch', title: 'Cautele / verifiche', items: groups.caution_watch },
+      { key: 'background_note', title: 'Note di sfondo', items: groups.background_note }
     ].filter((group) => Array.isArray(group.items) && group.items.length > 0);
   })();
 
@@ -2170,17 +2323,62 @@ const AnalysisResult = () => {
     redFlagGroups[groupKey].push(item);
   };
 
+  const redFlagKindLabels = {
+    confirmed_risk: 'Rischio confermato',
+    unresolved_conflict: 'Conflitto irrisolto',
+    coverage_gap: 'Copertura documento',
+    cost_uncertainty: 'Incertezza costi'
+  };
+  const classifyStoredRedFlag = (title, detail) => {
+    const text = `${title} ${detail}`.toLowerCase();
+    if (/(cost|costi|stima|assunzion|quantificat)/.test(text)) {
+      return { group: 'costUncertainty', kind: 'cost_uncertainty', severity: 'AMBER' };
+    }
+    if (/(occupaz|liberaz|opponibil)/.test(text)) {
+      return { group: 'occupancy', kind: 'unresolved_conflict', severity: 'AMBER' };
+    }
+    if (/(urbanistic|catast|agibil|abitabil|ape|impiant)/.test(text)) {
+      return /(non specificat|mancant|copertura|manual review|verificar)/.test(text)
+        ? { group: 'missingData', kind: 'coverage_gap', severity: 'INFO' }
+        : { group: 'technical', kind: 'confirmed_risk', severity: 'AMBER' };
+    }
+    if (/(pignorament|ipotec|formalit|servit|usi civici|vincol)/.test(text)) {
+      return /(pignorament|esecuzione immobiliare)/.test(text)
+        ? { group: 'legal', kind: 'coverage_gap', severity: 'INFO' }
+        : { group: 'legal', kind: 'confirmed_risk', severity: 'AMBER' };
+    }
+    return { group: 'missingData', kind: 'coverage_gap', severity: 'INFO' };
+  };
+
   redFlags.forEach((flag, idx) => {
     if (typeof flag === 'string') return;
     const title = safeRender(flag?.flag_it || flag?.label || flag?.title_it || flag?.title, '').trim();
     const detail = safeRender(flag?.action_it || flag?.explanation || flag?.detail || flag?.reason_it, '').trim();
-    if (!title || /manual[_\s-]?review/i.test(title)) return;
-    addRedFlag('missingData', {
+    if (!title) return;
+    const classified = classifyStoredRedFlag(title, detail);
+    addRedFlag(classified.group, {
       key: `stored_flag_${idx}`,
       label: title,
       explanation: detail || 'Verificare in perizia originale.',
-      severity: safeRender(flag?.severity || flag?.status, 'AMBER').toUpperCase() === 'RED' ? 'RED' : 'AMBER',
-      evidence: Array.isArray(flag?.evidence) ? flag.evidence : []
+      severity: normalizeUiSeverity(flag?.severity || flag?.status, classified.severity),
+      evidence: Array.isArray(flag?.evidence) ? flag.evidence : [],
+      kindLabel: redFlagKindLabels[classified.kind]
+    });
+  });
+
+  topLegalChecklistItems.forEach((item, idx) => {
+    if (!item || item.kind === 'execution_context') return;
+    addRedFlag('legal', {
+      key: `legal_check_${idx}`,
+      label: safeRender(item?.killer, 'Segnalazione legale'),
+      explanation: safeRender(item?.action || item?.status_it || item?.contextLabel, ''),
+      severity: normalizeUiSeverity(item?.status, item?.kind === 'background_note' ? 'INFO' : 'AMBER'),
+      evidence: getEvidence(item),
+      kindLabel: item.kind === 'material_blocker'
+        ? redFlagKindLabels.confirmed_risk
+        : item.kind === 'caution_watch'
+          ? redFlagKindLabels.unresolved_conflict
+          : redFlagKindLabels.coverage_gap
     });
   });
 
@@ -2219,10 +2417,43 @@ const AnalysisResult = () => {
     { key: 'legal', title: 'Legale / Formalità', items: redFlagGroups.legal },
     { key: 'technical', title: 'Tecnico / Compliance', items: redFlagGroups.technical },
     { key: 'occupancy', title: 'Occupazione', items: redFlagGroups.occupancy },
-    { key: 'missingData', title: 'Dati mancanti / Copertura', items: redFlagGroups.missingData },
+    { key: 'missingData', title: 'Copertura documento / Dati mancanti', items: redFlagGroups.missingData },
     { key: 'costUncertainty', title: 'Incertezza costi / Assunzioni', items: redFlagGroups.costUncertainty }
   ];
   const hasGroupedRedFlags = groupedRedFlags.some((group) => group.items.length > 0);
+
+  const scoreSummarySignal = (textRaw) => {
+    const text = safeRender(textRaw, '').toLowerCase();
+    if (!text) return 0;
+    let score = 0;
+    if (/(difform|abus|non conform|irregolar|occupat|opponibil|blocc|criticit|agibilit assente)/.test(text)) score += 50;
+    if (/(libero|non emergono abusi|conforme|ape presente|agibilit present)/.test(text)) score += 35;
+    if (/(pignorament|esecuzione immobiliare|trascrizion|ipotec)/.test(text)) score += 10;
+    if (/(servit|vincolo|contesto esecutivo|procedura esecutiva|asta)/.test(text)) score -= 5;
+    return score;
+  };
+
+  const weightedDecisionBullets = decisionBulletsIt
+    .map((bullet, idx) => ({ bullet, bulletEn: decisionBulletsEn[idx] || '', idx, score: scoreSummarySignal(bullet) }))
+    .sort((a, b) => b.score - a.score || a.idx - b.idx);
+  const hasStrongDecisionSignals = weightedDecisionBullets.some((item) => item.score >= 30);
+  const displayedDecisionBullets = weightedDecisionBullets
+    .filter((item) => !hasStrongDecisionSignals || item.score >= 10)
+    .slice(0, 5);
+  const weightedDrivers = Array.isArray(decision.driver_rosso)
+    ? decision.driver_rosso
+        .map((driver, idx) => ({
+          driver,
+          idx,
+          score: scoreSummarySignal(`${safeRender(driver?.headline_it, '')} ${safeRender(driver?.reason_it || driver?.headline_en, '')}`)
+        }))
+        .sort((a, b) => b.score - a.score || a.idx - b.idx)
+    : [];
+  const hasStrongDrivers = weightedDrivers.some((item) => item.score >= 30);
+  const displayedDrivers = weightedDrivers
+    .filter((item) => !hasStrongDrivers || item.score >= 15)
+    .map((item) => item.driver)
+    .slice(0, 4);
 
   // Debug logging for troubleshooting
   if (process.env.NODE_ENV === 'development') {
@@ -2246,7 +2477,7 @@ const AnalysisResult = () => {
       tipologia: safeRender(b?.tipologia, ''),
       note: safeRender(b?.note, '')
     })) : [],
-    ape_status: safeRender(getFieldValue('ape', abusi.ape?.status || result.ape), 'Non specificato in perizia'),
+    ape_status: getSurfaceDisplayValue('ape', abusi.ape, result.ape),
     spese_condominiali_arretrate: formatFieldStateDisplay('spese_condominiali_arretrate', result.spese_condominiali_arretrate || result.spese_condominiali),
     sanatoria_estimate: moneyBoxItemA?.stima_euro ?? result?.sanatoria_estimate ?? null,
     prezzo_base: safeRender(dati.prezzo_base_asta?.formatted || dati.prezzo_base_asta?.value || dati.prezzo_base_asta, 'Non specificato in perizia'),
@@ -2594,17 +2825,17 @@ const AnalysisResult = () => {
                 </div>
                 <p className="text-lg font-semibold text-zinc-100">{decisionIt}</p>
                 <p className="text-sm text-zinc-500 mt-1">{decisionEn}</p>
-                {decisionBulletsIt.length > 0 && (
+                {displayedDecisionBullets.length > 0 && (
                   <ul className="mt-3 space-y-1 text-sm text-zinc-300 list-disc pl-5">
-                    {decisionBulletsIt.slice(0, 5).map((item, idx) => (
-                      <li key={`it-bullet-${idx}`}>{safeRender(item, '')}</li>
+                    {displayedDecisionBullets.map((item) => (
+                      <li key={`it-bullet-${item.idx}`}>{safeRender(item.bullet, '')}</li>
                     ))}
                   </ul>
                 )}
-                {decisionBulletsEn.length > 0 && (
+                {displayedDecisionBullets.some((item) => item.bulletEn) && (
                   <ul className="mt-2 space-y-1 text-xs text-zinc-500 list-disc pl-5">
-                    {decisionBulletsEn.slice(0, 5).map((item, idx) => (
-                      <li key={`en-bullet-${idx}`}>{safeRender(item, '')}</li>
+                    {displayedDecisionBullets.filter((item) => item.bulletEn).map((item) => (
+                      <li key={`en-bullet-${item.idx}`}>{safeRender(item.bulletEn, '')}</li>
                     ))}
                   </ul>
                 )}
@@ -2621,10 +2852,10 @@ const AnalysisResult = () => {
                 )}
                 
                 {/* Driver Rosso with Evidence - old format */}
-                {decision.driver_rosso && decision.driver_rosso.length > 0 && (
+                {displayedDrivers.length > 0 && (
                   <div className="mt-4 space-y-2">
                     <p className="text-xs font-mono text-red-400 uppercase">Criticità Rilevate:</p>
-                    {decision.driver_rosso.map((driver, idx) => (
+                    {displayedDrivers.map((driver, idx) => (
                       <div key={idx} className="p-2 bg-red-500/10 rounded border border-red-500/20">
                         <div className="flex flex-wrap items-center gap-2">
                           <AlertTriangle className="w-4 h-4 text-red-400" />
@@ -2738,7 +2969,7 @@ const AnalysisResult = () => {
                 />
                 <PanoramicaDataValueCard
                   label="APE"
-                  value={safeRender(getFieldValue('ape', abusi.ape?.status || result.ape), 'Non specificato in perizia')}
+                  value={getSurfaceDisplayValue('ape', abusi.ape, result.ape)}
                   evidence={getFieldEvidence('ape', abusi.ape || result.ape)}
                 />
                 {datiAsta && (

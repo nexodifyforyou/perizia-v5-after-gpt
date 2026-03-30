@@ -4,6 +4,11 @@ const EURO_FORMATTER = new Intl.NumberFormat('it-IT', {
   minimumFractionDigits: 0,
   useGrouping: 'always',
 });
+const AREA_FORMATTER = new Intl.NumberFormat('it-IT', {
+  maximumFractionDigits: 2,
+  minimumFractionDigits: 0,
+  useGrouping: 'always',
+});
 
 export const normalizeAnalysisResponse = (payload) => {
   if (!payload || typeof payload !== 'object') return payload;
@@ -69,9 +74,22 @@ export const safeRender = (value, fallback = MISSING_TEXT) => {
 export const parseNumericEuro = (value) => {
   if (typeof value === 'number' && Number.isFinite(value)) return value;
   if (typeof value !== 'string') return null;
-  const cleaned = value.replace(/[^\d,.-]/g, '');
+  const cleaned = value.replace(/[^\d,.-]/g, '').trim();
   if (!cleaned) return null;
-  const normalized = cleaned.includes(',') ? cleaned.replace(/\./g, '').replace(',', '.') : cleaned;
+  const lastComma = cleaned.lastIndexOf(',');
+  const lastDot = cleaned.lastIndexOf('.');
+  const decimalIndex = Math.max(lastComma, lastDot);
+  if (decimalIndex === -1) {
+    const parsed = Number.parseFloat(cleaned);
+    return Number.isFinite(parsed) ? parsed : null;
+  }
+  const decimalDigits = cleaned.slice(decimalIndex + 1).replace(/[^\d]/g, '');
+  const hasExplicitDecimal = decimalDigits.length > 0 && decimalDigits.length <= 2;
+  const decimalSeparator = decimalIndex === lastComma ? ',' : '.';
+  const thousandsSeparator = decimalSeparator === ',' ? '.' : ',';
+  const normalized = hasExplicitDecimal
+    ? `${cleaned.slice(0, decimalIndex).replace(new RegExp(`\\${thousandsSeparator}`, 'g'), '')}.${decimalDigits}`
+    : cleaned.replace(/[.,]/g, '');
   const parsed = Number.parseFloat(normalized);
   return Number.isFinite(parsed) ? parsed : null;
 };
@@ -104,8 +122,38 @@ const pickFirstNonEmpty = (...values) => {
   return null;
 };
 
+const isMeaningfulValue = (value) => {
+  if (value === null || value === undefined) return false;
+  if (typeof value === 'string') {
+    const upper = value.trim().toUpperCase();
+    return Boolean(
+      upper &&
+      !['NONE', 'N/A', 'NOT_SPECIFIED', 'NOT_SPECIFIED_IN_PERIZIA', 'UNKNOWN', 'TBD', 'NULL', MISSING_TEXT.toUpperCase()].includes(upper)
+    );
+  }
+  if (Array.isArray(value)) return value.some((item) => isMeaningfulValue(item));
+  if (typeof value === 'object') {
+    return [
+      value?.detail_it,
+      value?.status_it,
+      value?.status,
+      value?.formatted,
+      value?.value,
+      value?.label_it,
+      value?.full
+    ].some((item) => isMeaningfulValue(item));
+  }
+  return true;
+};
+
 const getFieldStateValue = (state) => {
   if (!state || typeof state !== 'object') return null;
+  if (isMeaningfulValue(state?.detail_it)) return state.detail_it;
+  if (isMeaningfulValue(state?.status_it)) return state.status_it;
+  if (isMeaningfulValue(state?.formatted)) return state.formatted;
+  if (isMeaningfulValue(state?.value?.detail_it)) return state.value.detail_it;
+  if (isMeaningfulValue(state?.value?.status_it)) return state.value.status_it;
+  if (isMeaningfulValue(state?.value?.formatted)) return state.value.formatted;
   if (state.value !== null && state.value !== undefined && state.value !== '') return state.value;
   return null;
 };
@@ -119,13 +167,25 @@ const getRichDisplayValue = (state, legacyValue, ...fallbacks) =>
   pickFirstNonEmpty(getFieldStateValue(state), getLegacyDetailValue(legacyValue), ...fallbacks);
 
 const formatSurfaceValue = (value) => {
+  if (!isMeaningfulValue(value)) return '';
   if (value && typeof value === 'object' && !Array.isArray(value)) {
-    const amount = safeRender(value?.value, '').trim();
-    const unit = safeRender(value?.unit, '').trim();
-    const combined = `${amount}${unit ? ` ${unit}` : ''}`.trim();
-    return combined || '';
+    const measured = pickFirstNonEmpty(
+      value?.formatted,
+      value?.value,
+      value?.detail_it,
+      value?.status_it,
+      value?.status
+    );
+    const unit = safeRender(pickFirstNonEmpty(value?.unit, value?.uom), '').trim() || 'mq';
+    const numeric = parseNumericEuro(safeRender(measured, ''));
+    if (numeric !== null) return `${AREA_FORMATTER.format(numeric)} ${unit}`.trim();
+    return safeRender(measured, '').trim();
   }
-  return safeRender(value, '').trim();
+  const rendered = safeRender(value, '').trim();
+  const numeric = parseNumericEuro(rendered);
+  if (numeric === null) return rendered;
+  const explicitUnit = /m²/i.test(rendered) ? 'm²' : (/\bmq\b/i.test(rendered) ? 'mq' : 'mq');
+  return `${AREA_FORMATTER.format(numeric)} ${explicitUnit}`.trim();
 };
 
 const getFieldStateEvidence = (state, fallback = null) => {
@@ -177,8 +237,8 @@ const formatCatastoCompact = (catasto) => {
       .filter((part) => part.startsWith('Fg.') || part.startsWith('Part.'));
     const renderedSubs = [...new Set(subalterni)];
     return prefix.length > 0
-      ? `${prefix.join(' - ')} - ${renderedSubs.join(' | ')}`
-      : renderedSubs.join(' | ');
+      ? `${prefix.join(' - ')} - ${renderedSubs.join('; ')}`
+      : renderedSubs.join('; ');
   }
   return renderEntry(catasto);
 };
@@ -539,12 +599,13 @@ const buildDetails = (result) => {
         title: `Lotto ${lot?.lot_number || index + 1}${safeRender(lot?.tipologia, '') ? ` - ${safeRender(lot?.tipologia, '')}` : ''}`,
         location: safeRender(lot?.ubicazione, ''),
         piano: '',
-        superficie: safeRender(lot?.superficie_mq, '') ? `${safeRender(lot?.superficie_mq, '')} mq` : '',
+        superficie: formatSurfaceValue(pickFirstNonEmpty(lot?.superficie_convenzionale_mq, lot?.superficie_convenzionale, lot?.superficie_mq)),
         valoreStima: formatMoney(lot?.valore_stima_eur),
         topEvidence: getPrimaryEvidence(evidenceObj?.ubicazione, evidenceObj?.tipologia, evidenceObj?.superficie, evidenceObj?.valore_stima),
         detailRows: [
           { label: 'Diritto reale', value: safeRender(lot?.diritto_reale, ''), evidence: getPrimaryEvidence(evidenceObj?.diritto_reale) },
-          { label: 'Quota / diritti condivisi', value: sharedRightsNote, evidence: getPrimaryEvidence(evidenceObj?.diritto_reale, evidenceObj?.note) },
+          { label: 'Quota', value: safeRender(lot?.quota, ''), evidence: getPrimaryEvidence(evidenceObj?.quota, evidenceObj?.diritto_reale) },
+          { label: 'Diritti condivisi', value: sharedRightsNote, evidence: getPrimaryEvidence(evidenceObj?.note) },
           { label: 'Prezzo base', value: safeRender(lot?.prezzo_base_eur, ''), evidence: getPrimaryEvidence(evidenceObj?.prezzo_base) },
           { label: 'Stato occupativo', value: safeRender(lot?.occupancy_status || lot?.stato_occupativo, ''), evidence: getPrimaryEvidence(evidenceObj?.occupancy_status) },
           { label: 'Catasto', value: formatCatastoCompact(lot?.catasto) || safeRender(lot?.catasto, ''), evidence: getPrimaryEvidence(evidenceObj?.catasto) },
@@ -626,7 +687,7 @@ const buildDetails = (result) => {
         getLegacyDetailValue(abusi?.impianti?.gas)
       );
       const catastoFromEvidence = parseCatastoFromEvidence(evidenceObj?.catasto);
-      const catastoValue = catastoFromEvidence || formatCatastoCompact(bene?.catasto);
+      const catastoValue = formatCatastoCompact(bene?.catasto) || catastoFromEvidence;
       const catastoEvidence = evidenceMatchesCatasto(evidenceObj?.catasto, catastoValue)
         ? getPrimaryEvidence(evidenceObj?.catasto)
         : [];
@@ -662,9 +723,14 @@ const buildDetails = (result) => {
         title: `Bene ${bene?.bene_number || index + 1}${safeRender(bene?.tipologia, '') ? ` - ${safeRender(bene?.tipologia, '')}` : ''}`,
         location: safeRender(pickFirstNonEmpty(bene?.short_location, bene?.ubicazione, bene?.indirizzo), ''),
         piano: safeRender(bene?.piano, ''),
-        superficie: parseNumericEuro(pickFirstNonEmpty(bene?.superficie_mq, fallbackSurface)) !== null
-          ? `${parseNumericEuro(pickFirstNonEmpty(bene?.superficie_mq, fallbackSurface)).toLocaleString('it-IT')} mq`
-          : safeRender(pickFirstNonEmpty(bene?.superficie_mq, fallbackSurface), ''),
+        superficie: formatSurfaceValue(
+          pickFirstNonEmpty(
+            bene?.superficie_convenzionale_mq,
+            bene?.superficie_convenzionale,
+            bene?.superficie_mq,
+            fallbackSurface
+          )
+        ),
         valoreStima: formatMoney(pickFirstNonEmpty(bene?.valore_stima_eur, bene?.valore_stima_bene, bene?.valore_di_stima_bene)),
         topEvidence: getPrimaryEvidence(evidenceObj?.location_piano, evidenceObj?.superficie_mq, evidenceObj?.valore_stima_eur),
         detailRows,
@@ -828,9 +894,7 @@ export const buildPeriziaPrintReportModel = (rawAnalysis) => {
         type: safeRender(item?.tipologia, ''),
         location: safeRender(item?.short_location || item?.ubicazione, ''),
         piano: safeRender(item?.piano, ''),
-        superficie: parseNumericEuro(pickFirstNonEmpty(item?.superficie_mq, lotComposition.length === 1 ? normalizedSurface : null)) !== null
-          ? `${parseNumericEuro(pickFirstNonEmpty(item?.superficie_mq, lotComposition.length === 1 ? normalizedSurface : null)).toLocaleString('it-IT')} mq`
-          : '',
+        superficie: formatSurfaceValue(pickFirstNonEmpty(item?.superficie_convenzionale_mq, item?.superficie_convenzionale, item?.superficie_mq, lotComposition.length === 1 ? normalizedSurface : null)),
         valoreStima: formatMoney(item?.valore_stima_eur || item?.prezzo_base_eur),
         evidence: getPrimaryEvidence(item?.evidence?.location_piano, item?.evidence?.valore_stima_eur, item?.evidence?.ubicazione),
       })),
