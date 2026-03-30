@@ -115,6 +115,19 @@ const getLegacyDetailValue = (value) => {
   return pickFirstNonEmpty(value?.detail_it, value?.status_it, value?.status, value?.formatted, value?.value);
 };
 
+const getRichDisplayValue = (state, legacyValue, ...fallbacks) =>
+  pickFirstNonEmpty(getFieldStateValue(state), getLegacyDetailValue(legacyValue), ...fallbacks);
+
+const formatSurfaceValue = (value) => {
+  if (value && typeof value === 'object' && !Array.isArray(value)) {
+    const amount = safeRender(value?.value, '').trim();
+    const unit = safeRender(value?.unit, '').trim();
+    const combined = `${amount}${unit ? ` ${unit}` : ''}`.trim();
+    return combined || '';
+  }
+  return safeRender(value, '').trim();
+};
+
 const getFieldStateEvidence = (state, fallback = null) => {
   if (state && Array.isArray(state.evidence) && state.evidence.length > 0) return state.evidence;
   return getEvidence(fallback);
@@ -142,16 +155,32 @@ const formatCatastoCompact = (catasto) => {
   if (!catasto) return '';
   if (typeof catasto === 'string') return safeRender(catasto, '');
   if (typeof catasto !== 'object') return '';
-  const bits = [];
-  const foglio = safeRender(catasto.foglio, '').trim();
-  const particella = safeRender(catasto.particella, '').trim();
-  const sub = safeRender(catasto.sub, '').trim();
-  const categoria = safeRender(catasto.categoria, '').trim();
-  if (foglio) bits.push(`Fg. ${foglio}`);
-  if (particella) bits.push(`Part. ${particella}`);
-  if (sub) bits.push(`Sub. ${sub}`);
-  if (categoria) bits.push(`Cat. ${categoria}`);
-  return bits.join(' - ');
+  const renderEntry = (entry, options = {}) => {
+    const bits = [];
+    const foglio = safeRender(pickFirstNonEmpty(entry?.foglio, catasto?.foglio), '').trim();
+    const particella = safeRender(pickFirstNonEmpty(entry?.particella, catasto?.particella), '').trim();
+    const sub = safeRender(pickFirstNonEmpty(entry?.sub, entry?.subalterno, entry?.subalterno_numero, entry?.numero), '').trim();
+    const categoria = safeRender(pickFirstNonEmpty(entry?.categoria, entry?.categoria_catastale), '').trim();
+    if (!options.omitShared && foglio) bits.push(`Fg. ${foglio}`);
+    if (!options.omitShared && particella) bits.push(`Part. ${particella}`);
+    if (sub) bits.push(`Sub. ${sub}`);
+    if (categoria) bits.push(`Cat. ${categoria}`);
+    return bits.join(' - ');
+  };
+
+  const subalterni = Array.isArray(catasto.subalterni)
+    ? catasto.subalterni.map((entry) => renderEntry(entry, { omitShared: true })).filter(Boolean)
+    : [];
+  if (subalterni.length > 0) {
+    const prefix = renderEntry(catasto)
+      .split(' - ')
+      .filter((part) => part.startsWith('Fg.') || part.startsWith('Part.'));
+    const renderedSubs = [...new Set(subalterni)];
+    return prefix.length > 0
+      ? `${prefix.join(' - ')} - ${renderedSubs.join(' | ')}`
+      : renderedSubs.join(' | ');
+  }
+  return renderEntry(catasto);
 };
 
 const compactEvidenceLabel = (evidence) => {
@@ -439,7 +468,7 @@ const buildLegalItems = (result) => {
     const renderedTitle = safeRender(title, '');
     const renderedDetail = safeRender(detail, '');
     if (!renderedTitle || !renderedDetail || renderedDetail === MISSING_TEXT) return;
-    if (isWeakLegalFallback(renderedTitle, renderedDetail, evidence)) return;
+    if (!safeRender(key, '').startsWith('section9-') && isWeakLegalFallback(renderedTitle, renderedDetail, evidence)) return;
     if (items.some((item) => item.key === key || (item.title === renderedTitle && item.detail === renderedDetail))) return;
     items.push({
       key,
@@ -535,6 +564,12 @@ const buildDetails = (result) => {
   const abusi = result.section_5_abusi_conformita?.conformita_urbanistica ? result.section_5_abusi_conformita : (result.abusi_edilizi_conformita || {});
   const occupativo = result.section_6_stato_occupativo?.status ? result.section_6_stato_occupativo : (result.stato_occupativo || {});
   const dirittoReale = safeRender(result.dati_certi_del_lotto?.diritto_reale || result.section_4_dati_certi?.diritto_reale, '');
+  const quota = safeRender(result.dati_certi_del_lotto?.quota || result.section_4_dati_certi?.quota, '');
+  const fallbackSurface = pickFirstNonEmpty(
+    result.dati_certi_del_lotto?.superficie?.value,
+    result.dati_certi_del_lotto?.superficie,
+    formatSurfaceValue(getFieldStateValue(fieldStates.superficie))
+  );
 
   const byNumber = new Map();
   [...contractBeni, ...sourceBeni].forEach((bene, index) => {
@@ -563,18 +598,14 @@ const buildDetails = (result) => {
         occupativo?.status
       );
       const urbanisticaValue = pickFirstNonEmpty(
-        getFieldStateValue(fieldStates.regolarita_urbanistica),
+        getRichDisplayValue(fieldStates.regolarita_urbanistica, abusi?.conformita_urbanistica),
         bene?.urbanistica,
         bene?.regolarita_urbanistica,
-        bene?.conformita_urbanistica,
-        abusi?.conformita_urbanistica?.detail_it,
-        abusi?.conformita_urbanistica?.status
+        bene?.conformita_urbanistica
       );
       const apeValue = pickFirstNonEmpty(
-        getFieldStateValue(fieldStates.ape),
+        getRichDisplayValue(fieldStates.ape, abusi?.ape),
         bene?.ape,
-        abusi?.ape?.detail_it,
-        abusi?.ape?.status
       );
       const elettricoDeclarationValue = pickFirstNonEmpty(
         bene?.dichiarazioni?.dichiarazione_impianto_elettrico,
@@ -602,6 +633,7 @@ const buildDetails = (result) => {
       const agibilitaDetail = buildAgibilitaDetail(bene, abusi, fieldStates);
       const detailRows = [
         { label: 'Diritto reale', value: dirittoReale, evidence: [] },
+        { label: 'Quota', value: quota, evidence: [] },
         { label: 'Stato occupativo', value: safeRender(occupazioneValue, ''), evidence: getPrimaryEvidence(evidenceObj?.occupancy_status, getFieldStateEvidence(fieldStates.stato_occupativo, occupativo)) },
         { label: 'Catasto', value: catastoValue, evidence: catastoEvidence },
         { label: 'Urbanistica', value: safeRender(urbanisticaValue, ''), evidence: getPrimaryEvidence(evidenceObj?.urbanistica, getFieldStateEvidence(fieldStates.regolarita_urbanistica, abusi?.conformita_urbanistica)) },
@@ -630,7 +662,9 @@ const buildDetails = (result) => {
         title: `Bene ${bene?.bene_number || index + 1}${safeRender(bene?.tipologia, '') ? ` - ${safeRender(bene?.tipologia, '')}` : ''}`,
         location: safeRender(pickFirstNonEmpty(bene?.short_location, bene?.ubicazione, bene?.indirizzo), ''),
         piano: safeRender(bene?.piano, ''),
-        superficie: parseNumericEuro(bene?.superficie_mq) !== null ? `${parseNumericEuro(bene?.superficie_mq).toLocaleString('it-IT')} mq` : safeRender(bene?.superficie_mq, ''),
+        superficie: parseNumericEuro(pickFirstNonEmpty(bene?.superficie_mq, fallbackSurface)) !== null
+          ? `${parseNumericEuro(pickFirstNonEmpty(bene?.superficie_mq, fallbackSurface)).toLocaleString('it-IT')} mq`
+          : safeRender(pickFirstNonEmpty(bene?.superficie_mq, fallbackSurface), ''),
         valoreStima: formatMoney(pickFirstNonEmpty(bene?.valore_stima_eur, bene?.valore_stima_bene, bene?.valore_di_stima_bene)),
         topEvidence: getPrimaryEvidence(evidenceObj?.location_piano, evidenceObj?.superficie_mq, evidenceObj?.valore_stima_eur),
         detailRows,
@@ -644,8 +678,6 @@ const buildFlags = (result) => {
   const rawFlags = Array.isArray(result.section_11_red_flags) && result.section_11_red_flags.length > 0
     ? result.section_11_red_flags
     : (Array.isArray(result.red_flags_operativi) ? result.red_flags_operativi : []);
-  const userMessages = Array.isArray(result.user_messages) ? result.user_messages : [];
-  const fieldStates = result.field_states || {};
   const items = [];
   const semanticFlagKey = (title, detail) => {
     const combined = `${normalizeComparableText(title)} ${normalizeComparableText(detail)}`;
@@ -680,43 +712,6 @@ const buildFlags = (result) => {
     });
   };
 
-  if (normalizeComparableText(fieldStates.regolarita_urbanistica?.value).includes('difform')) {
-    pushItem(
-      'flag-urbanistica',
-      'Difformita urbanistiche e catastali',
-      'La perizia segnala incongruenze nello stato di fatto e nella conformita catastale.',
-      'AMBER',
-      mergeEvidence(fieldStates.regolarita_urbanistica, fieldStates.conformita_catastale)
-    );
-  }
-  if (normalizeComparableText(fieldStates.agibilita?.value).includes('assente')) {
-    pushItem(
-      'flag-agibilita',
-      'Agibilita da chiarire prima dell\'offerta',
-      'La documentazione segnala assenza o incertezza sulla abitabilita/agibilita.',
-      'AMBER',
-      getEvidence(fieldStates.agibilita)
-    );
-  }
-  if (normalizeComparableText(fieldStates.stato_occupativo?.value).includes('occupato')) {
-    pushItem(
-      'flag-occupazione',
-      'Immobile occupato',
-      'Lo stato occupativo richiede verifica operativa su liberazione e tempi.',
-      'AMBER',
-      getEvidence(fieldStates.stato_occupativo)
-    );
-  }
-  if (fieldStates.dati_asta?.status === 'NOT_FOUND') {
-    pushItem(
-      'flag-dati-asta',
-      'Dati asta mancanti nel documento',
-      'Data e ora asta vanno confermate sul portale ufficiale della procedura.',
-      'AMBER',
-      getEvidence(fieldStates.dati_asta)
-    );
-  }
-
   rawFlags.forEach((flag, index) => {
     if (typeof flag === 'string') {
       pushItem(`flag-${index}`, `Segnalazione ${index + 1}`, flag, 'AMBER', []);
@@ -730,20 +725,6 @@ const buildFlags = (result) => {
       flag?.action_it || flag?.explanation || flag?.detail || flag?.reason_it,
       flag?.severity || flag?.status || 'AMBER',
       flag?.evidence
-    );
-  });
-
-  userMessages.forEach((msg, index) => {
-    const severity = safeRender(msg?.severity, '').toUpperCase();
-    if (!['WARNING', 'ERROR', 'CRITICAL', 'AMBER', 'RED'].includes(severity)) return;
-    const label = normalizeComparableText(msg?.title_it || msg?.code);
-    if (label.includes('revisione manuale') || label.includes('manual_review')) return;
-    pushItem(
-      `message-${index}`,
-      msg?.title_it || msg?.code,
-      msg?.body_it || msg?.reason_it,
-      msg?.severity,
-      msg?.evidence
     );
   });
 
@@ -769,6 +750,11 @@ export const buildPeriziaPrintReportModel = (rawAnalysis) => {
   const lotComposition = Array.isArray(panoramicaContract.lots_overview) && panoramicaContract.lots_overview.length > 0
     ? panoramicaContract.lots_overview
     : (Array.isArray(panoramicaContract.lot_composition) ? panoramicaContract.lot_composition : []);
+  const normalizedSurface = pickFirstNonEmpty(
+    result.dati_certi_del_lotto?.superficie?.value,
+    result.dati_certi_del_lotto?.superficie,
+    formatSurfaceValue(getFieldStateValue(fieldStates.superficie))
+  );
   const details = buildDetails(result);
   const costBuckets = buildCostBuckets(result, panoramicaContract);
   const legalItems = buildLegalItems(result);
@@ -842,7 +828,9 @@ export const buildPeriziaPrintReportModel = (rawAnalysis) => {
         type: safeRender(item?.tipologia, ''),
         location: safeRender(item?.short_location || item?.ubicazione, ''),
         piano: safeRender(item?.piano, ''),
-        superficie: parseNumericEuro(item?.superficie_mq) !== null ? `${parseNumericEuro(item?.superficie_mq).toLocaleString('it-IT')} mq` : '',
+        superficie: parseNumericEuro(pickFirstNonEmpty(item?.superficie_mq, lotComposition.length === 1 ? normalizedSurface : null)) !== null
+          ? `${parseNumericEuro(pickFirstNonEmpty(item?.superficie_mq, lotComposition.length === 1 ? normalizedSurface : null)).toLocaleString('it-IT')} mq`
+          : '',
         valoreStima: formatMoney(item?.valore_stima_eur || item?.prezzo_base_eur),
         evidence: getPrimaryEvidence(item?.evidence?.location_piano, item?.evidence?.valore_stima_eur, item?.evidence?.ubicazione),
       })),
