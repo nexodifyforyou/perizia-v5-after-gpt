@@ -31,7 +31,7 @@ from openai import AsyncOpenAI
 from candidate_miner import run_candidate_miner_for_analysis
 from section_builder import build_estratto_quality
 from evidence_utils import normalize_evidence_quote
-from narrator import build_decisione_rapida_narration
+from narrator import build_decisione_rapida_narration, build_deterministic_summary_for_client, build_summary_for_client_bundle
 from cost_market_ranges import market_range_for_item
 
 ROOT_DIR = Path(__file__).parent
@@ -6815,6 +6815,14 @@ def _refresh_customer_facing_result_on_read(
         result["decision_rapida_narrated"] = case_aware_narration
     else:
         result.pop("decision_rapida_narrated", None)
+
+    summary = result.get("summary_for_client") if isinstance(result.get("summary_for_client"), dict) else {}
+    deterministic_summary = build_deterministic_summary_for_client(result)
+    summary["summary_it"] = deterministic_summary.get("summary_it", summary.get("summary_it", ""))
+    summary["summary_en"] = deterministic_summary.get("summary_en", summary.get("summary_en", ""))
+    summary.setdefault("disclaimer_it", "Documento informativo. Non costituisce consulenza legale. Consultare un professionista qualificato.")
+    summary.setdefault("disclaimer_en", "Informational document. Not legal advice. Consult a qualified professional.")
+    result["summary_for_client"] = summary
 
     _refresh_red_flags_operativi(result)
 
@@ -14149,7 +14157,7 @@ def _build_pdf_subset_for_pages(contents: bytes, page_numbers: List[int]) -> Tup
     return out.getvalue(), selected
 
 
-async def _enrich_summary_with_optional_llm(result: Dict[str, Any], file_name: str, full_text: str, request_id: str) -> None:
+async def _enrich_summary_with_optional_llm(result: Dict[str, Any], request_id: str) -> None:
     """
     Optional LLM summary generation.
     Fail-open by design: on timeout/error keep deterministic report and only mark summary/QA warning.
@@ -14160,6 +14168,11 @@ async def _enrich_summary_with_optional_llm(result: Dict[str, Any], file_name: s
     if not isinstance(summary, dict):
         summary = {}
         result["summary_for_client"] = summary
+    deterministic_summary = build_deterministic_summary_for_client(result)
+    summary["summary_it"] = deterministic_summary.get("summary_it", summary.get("summary_it", ""))
+    summary["summary_en"] = deterministic_summary.get("summary_en", summary.get("summary_en", ""))
+
+    bundle = build_summary_for_client_bundle(result)
 
     prompt = f"""Genera SOLO JSON valido con campi:
 {{
@@ -14167,12 +14180,18 @@ async def _enrich_summary_with_optional_llm(result: Dict[str, Any], file_name: s
   "summary_en": "..."
 }}
 Regole:
-- Riassunto cliente breve (max 70 parole per lingua)
+- Riassunto cliente breve (max 55 parole per lingua)
 - Nessun numero inventato
 - Tono prudente
+- Usa SOLO il bundle fornito
+- Apri dal problema materiale principale se presente
+- Includi il prossimo controllo richiesto
+- Non citare il nome file
+- Non descrivere genericamente l'immobile
+- Non usare formule tipo "analisi del documento" o "the document pertains"
 
-FILE: {file_name}
-TESTO (estratto): {full_text[:12000]}
+SUMMARY_BUNDLE_JSON:
+{json.dumps(bundle, ensure_ascii=False)}
 """
     try:
         response = await asyncio.wait_for(
@@ -14393,10 +14412,6 @@ async def analyze_perizia(request: Request, file: UploadFile = File(...)):
         result = create_fallback_analysis(file.filename, case_id, run_id, pages, full_text, extracted_lots, detected_legal_killers)
         logger.info(f"[{request_id}] deterministic_analysis_end")
 
-        # Optional summary generation, fail-open by design
-        if not offline_qa:
-            await _enrich_summary_with_optional_llm(result, file.filename, full_text, request_id)
-
         return result, pages, full_text, extraction_payload
 
     try:
@@ -14493,6 +14508,8 @@ async def analyze_perizia(request: Request, file: UploadFile = File(...)):
     if case_aware_narration:
         result["decision_rapida_narrated"] = case_aware_narration
     logger.info(f"[{request_id}] narrator status={narrator_meta.get('status')} enabled={narrator_meta.get('enabled')}")
+    if not offline_qa:
+        await _enrich_summary_with_optional_llm(result, request_id)
     result["debug"] = debug_obj
     logger.info(f"[{request_id}] assemble_output analysis_id={analysis_id}")
 

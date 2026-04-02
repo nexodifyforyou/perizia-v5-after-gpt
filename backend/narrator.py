@@ -187,6 +187,137 @@ def build_fact_pack(result: Dict[str, Any]) -> Dict[str, Any]:
     return fact_pack
 
 
+def _first_non_empty(*values: Any) -> str:
+    for value in values:
+        text = str(value or "").strip()
+        if text:
+            return text
+    return ""
+
+
+def _truncate_sentence(text: Any, limit: int = 220) -> str:
+    value = str(text or "").strip()
+    if not value:
+        return ""
+    return value[:limit]
+
+
+def build_summary_for_client_bundle(result: Dict[str, Any]) -> Dict[str, Any]:
+    decision = result.get("decision_rapida_client", {}) if isinstance(result.get("decision_rapida_client"), dict) else {}
+    section2 = result.get("section_2_decisione_rapida", {}) if isinstance(result.get("section_2_decisione_rapida"), dict) else {}
+    narrated = result.get("decision_rapida_narrated", {}) if isinstance(result.get("decision_rapida_narrated"), dict) else {}
+    semaforo = result.get("semaforo_generale", {}) if isinstance(result.get("semaforo_generale"), dict) else {}
+    section_legal = result.get("section_9_legal_killers", {}) if isinstance(result.get("section_9_legal_killers"), dict) else {}
+    legal_items = section_legal.get("top_items", [])
+    if not isinstance(legal_items, list) or not legal_items:
+        legal_items = section_legal.get("items", []) if isinstance(section_legal.get("items"), list) else []
+    user_messages = result.get("user_messages", []) if isinstance(result.get("user_messages"), list) else []
+    document_quality = result.get("document_quality", {}) if isinstance(result.get("document_quality"), dict) else {}
+
+    top_issue_it = ""
+    top_issue_evidence: List[Dict[str, Any]] = []
+    if legal_items:
+        first = legal_items[0] if isinstance(legal_items[0], dict) else {}
+        top_issue_it = _truncate_sentence(first.get("killer"), 140)
+        if isinstance(first.get("evidence"), list):
+            top_issue_evidence = [ev for ev in first.get("evidence", []) if isinstance(ev, dict)][:2]
+
+    bullets_it = narrated.get("bullets_it", []) if isinstance(narrated.get("bullets_it"), list) else []
+    bullets_en = narrated.get("bullets_en", []) if isinstance(narrated.get("bullets_en"), list) else []
+    next_step_it = _truncate_sentence(_first_non_empty(
+        bullets_it[0] if bullets_it else "",
+        decision.get("summary_it"),
+        section2.get("summary_it"),
+    ))
+    next_step_en = _truncate_sentence(_first_non_empty(
+        bullets_en[0] if bullets_en else "",
+        decision.get("summary_en"),
+        section2.get("summary_en"),
+    ))
+
+    caution_points_it: List[str] = []
+    for bullet in bullets_it[1:3]:
+        text = _truncate_sentence(bullet, 180)
+        if text:
+            caution_points_it.append(text)
+    if not caution_points_it:
+        for item in legal_items[1:3]:
+            if not isinstance(item, dict):
+                continue
+            text = _truncate_sentence(item.get("killer"), 140)
+            if text and text not in caution_points_it:
+                caution_points_it.append(text)
+
+    messages_it: List[str] = []
+    for item in user_messages[:3]:
+        if not isinstance(item, dict):
+            continue
+        text = _truncate_sentence(item.get("title_it") or item.get("body_it"), 180)
+        if text:
+            messages_it.append(text)
+
+    evidence_snippets: List[Dict[str, Any]] = []
+    for ev in top_issue_evidence[:2]:
+        page = ev.get("page")
+        quote = _truncate_sentence(ev.get("quote"), 240)
+        if isinstance(page, int) and quote:
+            evidence_snippets.append({"page": page, "quote": quote})
+
+    return {
+        "top_issue_it": top_issue_it,
+        "next_step_it": next_step_it,
+        "next_step_en": next_step_en,
+        "caution_points_it": caution_points_it[:2],
+        "user_messages_it": messages_it[:2],
+        "document_quality_status": _truncate_sentence(document_quality.get("status"), 40),
+        "semaforo_status": _truncate_sentence(semaforo.get("status"), 20),
+        "decision_summary_it": _truncate_sentence(_first_non_empty(narrated.get("it"), decision.get("summary_it"), section2.get("summary_it")), 320),
+        "decision_summary_en": _truncate_sentence(_first_non_empty(narrated.get("en"), decision.get("summary_en"), section2.get("summary_en")), 320),
+        "evidence_snippets": evidence_snippets,
+    }
+
+
+def build_deterministic_summary_for_client(result: Dict[str, Any]) -> Dict[str, str]:
+    bundle = build_summary_for_client_bundle(result)
+    top_issue_it = bundle.get("top_issue_it", "")
+    next_step_it = bundle.get("next_step_it", "")
+    next_step_en = bundle.get("next_step_en", "")
+    caution_points_it = bundle.get("caution_points_it", []) if isinstance(bundle.get("caution_points_it"), list) else []
+
+    summary_it_parts: List[str] = []
+    if top_issue_it:
+        summary_it_parts.append(str(top_issue_it))
+    decision_it = str(bundle.get("decision_summary_it") or "").strip()
+    if not top_issue_it and decision_it:
+        summary_it_parts.append(decision_it)
+    if next_step_it:
+        summary_it_parts.append(next_step_it)
+    elif caution_points_it:
+        summary_it_parts.append(str(caution_points_it[0]))
+    if not summary_it_parts:
+        summary_it_parts.append("Analisi completata con verifiche manuali ancora necessarie.")
+
+    summary_en_parts: List[str] = []
+    decision_en = str(bundle.get("decision_summary_en") or "").strip()
+    if top_issue_it:
+        summary_en_parts.append(f"Key issue: {top_issue_it}.")
+    elif decision_en:
+        summary_en_parts.append(decision_en)
+    if next_step_en:
+        summary_en_parts.append(next_step_en)
+    elif next_step_it:
+        summary_en_parts.append(f"Next check: {next_step_it}.")
+    elif caution_points_it:
+        summary_en_parts.append(f"Next check: {caution_points_it[0]}.")
+    if not summary_en_parts:
+        summary_en_parts.append("Analysis completed with manual checks still required.")
+
+    return {
+        "summary_it": " ".join(part.strip().rstrip(".") + "." for part in summary_it_parts if str(part).strip())[:1500],
+        "summary_en": " ".join(part.strip().rstrip(".") + "." for part in summary_en_parts if str(part).strip())[:1500],
+    }
+
+
 def _extract_json_payload(raw: str) -> Dict[str, Any]:
     payload = str(raw or "").strip()
     if payload.startswith("```json"):
