@@ -27,6 +27,7 @@ import axios from 'axios';
 import { toast } from 'sonner';
 import { downloadPdfBlob } from '../utils/pdfDownload';
 import { parseSurfaceNumber } from '../lib/surfaceFormatting';
+import { buildCustomerCostPolicy } from '../lib/costPolicy';
 import { buildCanonicalLegalPriorityMeta, getCanonicalTopAttentionText, isWeakBackgroundLegalSummary, pickCanonicalTopAttentionItem } from '../lib/legalPriority';
 
 const API_URL = process.env.REACT_APP_BACKEND_URL;
@@ -1937,77 +1938,14 @@ const AnalysisResult = () => {
     return valuationSummaryMarkers.some((marker) => textBlob.includes(marker));
   };
 
-  const explicitCostMentions = (() => {
-    const candidates = moneyBoxItems.filter((item) => {
-      const value = parseNumericEuro(item?.stima_euro);
-      if (value === null || value <= 0) return false;
-      if (isJunkOrValuationSummaryCost(item)) return false;
-      const code = safeRender(item?.code || item?.voce, '').toUpperCase();
-      if (!code.startsWith('S3C')) return false;
-      return true;
-    });
-
-    const seen = new Set();
-    return candidates
-      .filter((item) => {
-        const value = parseNumericEuro(item?.stima_euro);
-        const evidence = getItemEvidence(item);
-        const firstQuote = safeRender(evidence?.[0]?.quote, '').toLowerCase();
-        const dedupeKey = `${Math.round(value || 0)}|${firstQuote.replace(/\s+/g, ' ').slice(0, 120)}`;
-        if (seen.has(dedupeKey)) return false;
-        seen.add(dedupeKey);
-        return true;
-      })
-      .sort((a, b) => (parseNumericEuro(b?.stima_euro) || 0) - (parseNumericEuro(a?.stima_euro) || 0));
-  })();
-
   const canonicalMoneyBoxItems = moneyBoxItems.filter((item) => {
     const code = safeRender(item?.code || item?.voce, '').toUpperCase();
     return canonicalCostCodes.has(code);
   });
-
-  const explicitAmountKeys = new Set(
-    explicitCostMentions
-      .map((item) => parseNumericEuro(item?.stima_euro))
-      .filter((value) => typeof value === 'number' && Number.isFinite(value) && value > 0)
-      .map((value) => Math.round(value))
-  );
-  const nexodifyEstimateItems = [...canonicalMoneyBoxItems]
-    .filter((item) => {
-      const { isDocumentBacked, isEstimated } = classifyMoneyBoxItem(item);
-      if (!isEstimated) return false;
-
-      const numericValue = parseNumericEuro(item?.stima_euro);
-      const roundedValue = typeof numericValue === 'number' && Number.isFinite(numericValue)
-        ? Math.round(numericValue)
-        : null;
-
-      // Keep Nexodify bucket semantically pure: drop estimate rows that duplicate
-      // a deterministic explicit cost already shown in the document-backed bucket.
-      if (isDocumentBacked && roundedValue !== null && explicitAmountKeys.has(roundedValue)) {
-        return false;
-      }
-      return true;
-    })
-    .sort((a, b) => {
-      const aCode = safeRender(a?.code || a?.voce, '').toUpperCase();
-      const bCode = safeRender(b?.code || b?.voce, '').toUpperCase();
-      return aCode.localeCompare(bCode);
-    });
-  const qualitativeBurdens = (() => {
-    const sourceItems = Array.isArray(moneyBox.qualitative_burdens) && moneyBox.qualitative_burdens.length > 0
-      ? moneyBox.qualitative_burdens
-      : moneyBoxItems.filter((item) => safeRender(item?.type, '').toUpperCase() === 'QUALITATIVE');
-    const seen = new Set();
-    return sourceItems.filter((item) => {
-      const label = safeRender(item?.label_it || item?.label || item?.voce, '').trim();
-      if (!label) return false;
-      const key = label.toLowerCase();
-      if (seen.has(key)) return false;
-      seen.add(key);
-      return true;
-    });
-  })();
+  const customerCostPolicy = buildCustomerCostPolicy(result);
+  const explicitCostMentions = customerCostPolicy.explicitBuyerCosts;
+  const groundedUnquantifiedBurdens = customerCostPolicy.groundedUnquantifiedBurdens;
+  const costTotalSummary = customerCostPolicy.totalSummary;
   const moneyBoxBreakdown = canonicalMoneyBoxItems.reduce((acc, item) => {
     const euroValue = parseNumericEuro(item?.stima_euro);
     const marketRange = item?.market_range_eur && typeof item.market_range_eur === 'object'
@@ -3461,17 +3399,6 @@ const AnalysisResult = () => {
                 )}
               </div>
 
-              {moneyBoxTotalRange && typeof moneyBoxTotalRange.min_eur === 'number' && typeof moneyBoxTotalRange.max_eur === 'number' && (
-                <div className="mb-5 p-4 bg-zinc-950 rounded-lg border border-gold/30">
-                  <p className="text-lg font-semibold text-zinc-100">
-                    Scenario stima extra-costi (escl. deprezzamenti): €{moneyBoxTotalRange.min_eur.toLocaleString()} - €{moneyBoxTotalRange.max_eur.toLocaleString()}
-                  </p>
-                  <p className="text-xs text-zinc-500 mt-1">
-                    Range indicativo di extra-costi; le stime Nexodify sono assunzioni e non frasi dirette della perizia.
-                  </p>
-                </div>
-              )}
-
               <div className="p-4 rounded-lg border border-zinc-800 bg-zinc-950/40 mb-5">
                 <h3 className="text-sm font-semibold text-zinc-100 mb-3">Costi espliciti citati nel testo / Explicit cost mentions from text</h3>
                 {explicitCostMentions.length > 0 ? (
@@ -3486,62 +3413,40 @@ const AnalysisResult = () => {
               </div>
 
               <div className="p-4 rounded-lg border border-zinc-800 bg-zinc-950/40">
-                <h3 className="text-sm font-semibold text-zinc-100 mb-3">Stime Nexodify / Nexodify estimates</h3>
+                <h3 className="text-sm font-semibold text-zinc-100 mb-3">Oneri buyer-side non quantificati / Grounded unquantified buyer-side burdens</h3>
                 <p className="text-xs text-zinc-500 mb-3">
-                  Voci canoniche A-H mostrate come stime/assunzioni operative, non come dichiarazioni dirette della perizia.
+                  Mostrati solo quando la perizia supporta un onere lato acquirente reale ma non quantificato in modo difendibile.
                 </p>
-                {isConservativeCostMode ? (
-                  qualitativeBurdens.length > 0 ? (
-                    <div className="space-y-2">
-                      {qualitativeBurdens.map((item, index) => (
-                        <div key={`burden_${index}`} className="rounded-lg border border-zinc-800 bg-zinc-950/60 px-4 py-3">
-                          <p className="text-sm font-medium text-zinc-100">
-                            {safeRender(item?.label_it || item?.label || item?.voce, 'Onere qualitativo da verificare')}
-                          </p>
-                          <p className="text-xs text-zinc-500 mt-1">
-                            Onere grounded lato acquirente, non quantificato in modo difendibile dalla perizia.
-                          </p>
+                {groundedUnquantifiedBurdens.length > 0 ? (
+                  <div className="space-y-2">
+                    {groundedUnquantifiedBurdens.map((item) => (
+                      <div key={item.key} className="rounded-lg border border-zinc-800 bg-zinc-950/60 px-4 py-3">
+                        <div className="flex items-center justify-between gap-2">
+                          <p className="text-sm font-medium text-zinc-100">{item.label}</p>
+                          {item.evidence?.length > 0 && <EvidenceBadge evidence={item.evidence} />}
                         </div>
-                      ))}
-                    </div>
-                  ) : (
-                    <p className="text-zinc-500 text-sm">Nessun onere qualitativo grounded disponibile.</p>
-                  )
-                ) : nexodifyEstimateItems.length > 0 ? (
-                  <div className="space-y-3">
-                    {nexodifyEstimateItems.map((item, index) => (
-                      <MoneyBoxItem key={`nexo_${index}`} item={item} />
+                        <p className="text-xs text-zinc-500 mt-1">{item.note}</p>
+                      </div>
                     ))}
                   </div>
                 ) : (
-                  <p className="text-zinc-500 text-sm">Nessuna stima Nexodify disponibile.</p>
+                  <p className="text-zinc-500 text-sm">Nessun onere buyer-side non quantificato difendibile disponibile.</p>
                 )}
               </div>
 
-              {/* Total - support TBD and numeric totals */}
-              {(moneyBoxTotal || moneyBox.total_extra_costs) && !moneyBoxTotalRange && (
-                <div className="mt-6 p-4 bg-gold/10 border border-gold/30 rounded-lg">
-                  <div className="flex items-center justify-between">
-                    <span className="text-lg font-semibold text-zinc-100">Totale stima extra-costi (escl. deprezzamenti)</span>
-                    <span className={`text-2xl font-mono font-bold ${(isConservativeCostMode || isTotalTBD || !moneyBoxNumericTotal) ? 'text-amber-400' : 'text-gold'}`}>
-                      {isConservativeCostMode || isTotalTBD || !moneyBoxNumericTotal ? (
-                        'NON QUANTIFICATO IN PERIZIA'
-                      ) : (
-                        `€${moneyBoxNumericTotal.min.toLocaleString()} - €${moneyBoxNumericTotal.max.toLocaleString()}`
-                      )}
-                      {!isConservativeCostMode && !isTotalTBD && moneyBoxNumericTotal && (moneyBoxTotal?.nota?.includes('+') || moneyBox.total_extra_costs?.max_is_open) && '+'}
-                    </span>
-                  </div>
-                  {moneyBoxTotal?.nota && (
-                    <p className="text-xs text-zinc-400 mt-2">{moneyBoxTotal.nota}</p>
-                  )}
-                  {(isConservativeCostMode || isTotalTBD || !moneyBoxNumericTotal) && (
-                    <p className="text-xs text-amber-400 mt-2">
-                      Costi non quantificati in perizia. Verifica tecnico/legale obbligatoria.
-                    </p>
-                  )}
+              <div className="mt-6 p-4 bg-gold/10 border border-gold/30 rounded-lg">
+                <div className="flex items-center justify-between gap-3">
+                  <span className="text-lg font-semibold text-zinc-100">Sintesi costi buyer-side</span>
+                  <span className={`text-right text-xl font-mono font-bold ${
+                    costTotalSummary.kind === 'explicit_total' ? 'text-gold' : 'text-amber-400'
+                  }`}>
+                    {costTotalSummary.text}
+                  </span>
                 </div>
-              )}
+                {costTotalSummary.note && (
+                  <p className="text-xs text-zinc-400 mt-2">{costTotalSummary.note}</p>
+                )}
+              </div>
             </div>
           </TabsContent>
           

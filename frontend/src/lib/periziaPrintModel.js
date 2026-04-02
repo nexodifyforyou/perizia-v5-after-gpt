@@ -7,6 +7,7 @@ import {
   LEGAL_KIND_RANK,
   pickCanonicalTopAttentionItem
 } from './legalPriority';
+import { buildCustomerCostPolicy } from './costPolicy';
 
 const MISSING_TEXT = 'Non specificato in perizia';
 const EURO_FORMATTER = new Intl.NumberFormat('it-IT', {
@@ -396,34 +397,6 @@ const buildAgibilitaDetail = (bene, abusi, fieldStates) => {
   };
 };
 
-const classifyExplicitCost = (item) => {
-  const evidence = mergeEvidence(item?.fonte_perizia, item);
-  const quote = normalizeComparableText(compactEvidenceQuote(evidence));
-  const amount = parseNumericEuro(item?.stima_euro);
-  if (amount === null || amount <= 0 || !quote) return null;
-  if (quote.includes('valore finale di stima') || quote.includes('prezzo base')) return null;
-  if (quote.includes('mancata garanzia')) return null;
-  if (quote.includes('regolarizzazione urbanistica 23000')) return null;
-
-  let label = '';
-  if (quote.includes('completamento lavori') && amount === 15000) label = 'Completamento lavori';
-  else if (quote.includes('pratiche per abitabilita') && amount === 5000) label = 'Pratiche per abitabilita';
-  else if (quote.includes('completamento lavori') && !quote.includes('pratiche per abitabilita')) label = 'Completamento lavori';
-  else if (quote.includes('pratiche per abitabilita')) label = 'Pratiche per abitabilita';
-  else if (quote.includes('oblazione')) label = 'Oblazione art. 36-bis';
-  else if (quote.includes('sanatoria') || quote.includes('spese di massima presunte')) label = 'Sanatoria urbanistica';
-  else if (quote.includes('abitabilita')) label = 'Pratiche per abitabilita';
-  else return null;
-
-  return {
-    key: `${label}-${amount}`,
-    label,
-    amount: formatMoney(amount),
-    note: 'Costo esplicitamente citato nella perizia.',
-    evidence: evidence.slice(0, 2),
-  };
-};
-
 const buildClientFacingDriver = (semaforo, decision) => {
   const base = normalizeComparableText(semaforo?.driver?.value || semaforo?.reason_it);
   const decisionText = normalizeComparableText(decision?.summary_it);
@@ -436,93 +409,24 @@ const buildClientFacingDriver = (semaforo, decision) => {
   return safeRender(semaforo?.driver?.value || semaforo?.reason_it, "Prima dell'offerta e' consigliabile una verifica documentale puntuale.");
 };
 
-const buildCostBuckets = (result, panoramicaContract) => {
-  const moneyBox = result.section_3_money_box?.items ? result.section_3_money_box : (result.money_box || {});
-  const valuation = panoramicaContract?.valuation_waterfall || {};
-  if (safeRender(moneyBox?.policy, '').toUpperCase() === 'LOT_CONSERVATIVE') {
-    const lotItemsSource = Array.isArray(moneyBox?.lots) ? moneyBox.lots : [];
-    const flatQualitativeItems = lotItemsSource.flatMap((lot) => {
-      const lotNumber = safeRender(lot?.lot_number, '');
-      const items = Array.isArray(lot?.items)
-        ? lot.items
-        : (Array.isArray(lot?.burdens) ? lot.burdens : []);
-      return items.map((item, index) => ({
-        key: `lot-${lotNumber || 'x'}-${index}`,
-        label: lotNumber ? `Lotto ${lotNumber} - ${safeRender(item?.label_it || item?.label || item?.title, 'Voce qualitativa')}` : safeRender(item?.label_it || item?.label || item?.title, 'Voce qualitativa'),
-        amount: 'Non quantificato',
-        note: safeRender(item?.note_it || item?.note || item?.detail || item?.burden_type || "Oneri potenziali a carico dell'acquirente, non quantificati nella perizia.", ''),
-        evidence: getPrimaryEvidence(item?.evidence, lot?.evidence),
-      }));
-    });
-    const rootQualitativeItems = flatQualitativeItems.length > 0
-      ? flatQualitativeItems
-      : (Array.isArray(moneyBox?.items) ? moneyBox.items : []).map((item, index) => ({
-          key: `qual-${index}`,
-          label: [
-            safeRender(item?.lot_number, '') ? `Lotto ${safeRender(item?.lot_number, '')}` : '',
-            safeRender(item?.label_it || item?.label || item?.title, 'Voce qualitativa')
-          ].filter(Boolean).join(' - '),
-          amount: 'Non quantificato',
-          note: safeRender(item?.note_it || item?.note || item?.detail || "Oneri potenziali a carico dell'acquirente, non quantificati nella perizia.", ''),
-          evidence: getPrimaryEvidence(item?.evidence),
-        }));
-    return {
-      valuationAdjustments: {
-        amount: formatMoney(valuation.deprezzamenti_eur),
-        evidence: getPrimaryEvidence(valuation?.evidence?.deprezzamenti_eur),
-        note: 'Deprezzamento di perizia: catena economica del lotto, non tabella di extra-costi.',
-      },
-      scenarioRange: '',
-      explicitCostMentions: rootQualitativeItems,
-      nexodifyEstimateItems: [],
-    };
-  }
-  const items = Array.isArray(moneyBox.items) ? moneyBox.items : [];
-  const canonical = items.filter((item) => /^[A-H]$/i.test(safeRender(item?.code || item?.voce, '')));
-  const explicitMap = new Map();
-  items
-    .filter((item) => /^S3C/i.test(safeRender(item?.code, '')) || safeRender(item?.code, '') === 'A')
-    .forEach((item) => {
-      const classified = classifyExplicitCost(item);
-      if (!classified || explicitMap.has(classified.key)) return;
-      explicitMap.set(classified.key, classified);
-    });
-  const explicit = [...explicitMap.values()];
-
-  const nexodify = canonical.map((item) => ({
-    key: safeRender(item?.code, 'cost-item'),
-    code: safeRender(item?.code, ''),
-    label: safeRender(item?.label_it || item?.label || item?.voce, ''),
-    amount: formatMoney(item?.stima_euro),
-    note: '',
-    evidence: [],
-    isQuantified: parseNumericEuro(item?.stima_euro) !== null,
-    sourceLabel: normalizeComparableText(item?.source || item?.fonte_perizia?.value || item?.fonte_perizia),
-  }));
-
-  const unknownItems = nexodify.filter((item) => !item.isQuantified);
-  const quantifiedItems = nexodify.filter((item) => item.isQuantified && item.sourceLabel.includes('market'));
-  const groupedUnknown = unknownItems.length > 0 ? {
-    key: 'nexodify-unknown',
-    label: 'Voci da quantificare con verifica tecnica',
-    amount: MISSING_TEXT,
-    note: `${unknownItems.slice(0, 4).map((item) => item.label).join(', ')}${unknownItems.length > 4 ? ' e altre voci' : ''}.`,
-    evidence: [],
-  } : null;
-
-  const range = moneyBox.total_extra_costs_range || {};
-  const rangeMin = parseNumericEuro(range.min_eur);
-  const rangeMax = parseNumericEuro(range.max_eur);
-
+const buildCostBuckets = (result) => {
+  const policy = buildCustomerCostPolicy(result);
   return {
-    valuationAdjustments: {
-      amount: formatMoney(valuation.deprezzamenti_eur),
-      evidence: getPrimaryEvidence(valuation?.evidence?.deprezzamenti_eur),
-      note: 'Deprezzamento di perizia: non equivale automaticamente a cassa extra lato acquirente.',
-    },
-    scenarioRange: rangeMin !== null && rangeMax !== null ? `${formatMoney(rangeMin)} - ${formatMoney(rangeMax)}` : '',
-    explicitCostMentions: explicit.sort((a, b) => (parseNumericEuro(b.amount) || 0) - (parseNumericEuro(a.amount) || 0)),
-    nexodifyEstimateItems: groupedUnknown ? [...quantifiedItems, groupedUnknown] : quantifiedItems,
+    valuationAdjustments: policy.valuationAdjustments,
+    explicitCostMentions: policy.explicitBuyerCosts.map((item) => ({
+      key: item.__policy_key,
+      label: item.__policy_label,
+      amount: formatMoney(item.__policy_amount),
+      note: item.__policy_note,
+      evidence: item.__policy_evidence || [],
+    })),
+    groundedUnquantifiedBurdens: policy.groundedUnquantifiedBurdens.map((item) => ({
+      key: item.key,
+      label: item.label,
+      note: item.note,
+      evidence: item.evidence || [],
+    })),
+    totalSummary: policy.totalSummary,
   };
 };
 
@@ -907,7 +811,7 @@ export const buildPeriziaPrintReportModel = (rawAnalysis) => {
     formatSurfaceValue(getFieldStateValue(fieldStates.superficie))
   );
   const details = buildDetails(result);
-  const costBuckets = buildCostBuckets(result, panoramicaContract);
+  const costBuckets = buildCostBuckets(result);
   const legalItems = buildLegalItems(result);
   const flags = buildFlags(result, legalItems);
   const rawCoverSummaryIt = safeRender(

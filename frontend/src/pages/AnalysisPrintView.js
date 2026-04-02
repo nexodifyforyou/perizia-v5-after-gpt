@@ -212,18 +212,16 @@ const AnalysisPrintView = () => {
                 <p className="print-card-subvalue">{model.costs.valuationAdjustments.note}</p>
                 <EvidenceFootnote evidence={model.costs.valuationAdjustments.evidence} />
               </div>
-              {model.costs.scenarioRange ? (
-                <div className="print-info-card accent">
-                  <p className="print-card-label">Scenario extra-costi stimato</p>
-                  <p className="print-card-value">{model.costs.scenarioRange}</p>
-                  <p className="print-card-subvalue">Range operativo basato sulle stime Nexodify, esclusi i deprezzamenti.</p>
-                </div>
-              ) : null}
+              <div className="print-info-card accent">
+                <p className="print-card-label">Sintesi costi buyer-side</p>
+                <p className="print-card-value">{model.costs.totalSummary.text}</p>
+                <p className="print-card-subvalue">{model.costs.totalSummary.note}</p>
+              </div>
             </div>
             <div className="print-subgrid">
               <h3 className="print-subtitle">Costi espliciti citati nel testo</h3>
-                <div className="print-list">
-                  {model.costs.explicitCostMentions.length > 0 ? model.costs.explicitCostMentions.map((item) => (
+              <div className="print-list">
+                {model.costs.explicitCostMentions.length > 0 ? model.costs.explicitCostMentions.map((item) => (
                   <div key={item.key} className="print-list-row">
                     <div>
                       <p className="print-card-value">{item.label}</p>
@@ -236,18 +234,17 @@ const AnalysisPrintView = () => {
               </div>
             </div>
             <div className="print-subgrid">
-              <h3 className="print-subtitle">Stime Nexodify</h3>
+              <h3 className="print-subtitle">Oneri buyer-side non quantificati</h3>
               <div className="print-list">
-                {model.costs.nexodifyEstimateItems.length > 0 ? model.costs.nexodifyEstimateItems.map((item) => (
+                {model.costs.groundedUnquantifiedBurdens.length > 0 ? model.costs.groundedUnquantifiedBurdens.map((item) => (
                   <div key={item.key} className="print-list-row">
                     <div>
                       <p className="print-card-value">{item.label}</p>
                       {item.note ? <p className="print-card-subvalue">{item.note}</p> : null}
                       <EvidenceFootnote evidence={item.evidence} showQuote={false} />
                     </div>
-                    <strong>{item.amount}</strong>
                   </div>
-                )) : <p className="print-empty-state">Nessuna stima Nexodify disponibile.</p>}
+                )) : <p className="print-empty-state">Nessun onere buyer-side non quantificato difendibile disponibile.</p>}
               </div>
             </div>
           </section>
