@@ -1,6 +1,7 @@
 import { parseSurfaceNumber } from './surfaceFormatting';
 import {
   buildCanonicalLegalPriorityMeta,
+  getCanonicalTopAttentionItems,
   isPositiveOrNeutralLegalTruth,
   isWeakBackgroundLegalSummary,
   LEGAL_KIND_RANK,
@@ -865,7 +866,9 @@ const buildFlags = (result, legalItems = []) => {
     );
   });
 
-  legalItems.forEach((item, index) => {
+  const canonicalPrintAttentionItems = getCanonicalTopAttentionItems(legalItems);
+
+  canonicalPrintAttentionItems.forEach((item, index) => {
     if (!item || item.kind === 'background_note' || item.kind === 'execution_context') return;
     pushItem(
       `legal-${index}`,

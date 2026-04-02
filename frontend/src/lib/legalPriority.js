@@ -123,3 +123,30 @@ export const pickCanonicalTopAttentionItem = (items = []) => {
     return 0;
   })[0] || null;
 };
+
+export const getCanonicalTopAttentionItems = (items = []) => {
+  const normalized = Array.isArray(items) ? items.filter((item) => item && typeof item === 'object') : [];
+  const eligible = normalized.filter((item) => TOP_LEVEL_ATTENTION_KINDS.includes(item.kind));
+  if (eligible.length === 0) return [];
+  const topRank = eligible.reduce((best, item) => Math.min(best, LEGAL_KIND_RANK[item.kind] ?? 9), 9);
+  return [...eligible]
+    .filter((item) => (LEGAL_KIND_RANK[item.kind] ?? 9) === topRank)
+    .sort((a, b) => {
+      const scoreA = Number.isFinite(a.decisionScore) ? a.decisionScore : -1;
+      const scoreB = Number.isFinite(b.decisionScore) ? b.decisionScore : -1;
+      if (scoreA !== scoreB) return scoreB - scoreA;
+      const labelA = String(a.killer || a.title || '').trim();
+      const labelB = String(b.killer || b.title || '').trim();
+      return labelA.localeCompare(labelB, 'it');
+    });
+};
+
+export const getCanonicalTopAttentionText = ({ topAttentionItem = null, primaryText = '', fallbackText = '' }) => {
+  const primary = String(primaryText ?? '').trim();
+  const fallback = String(fallbackText ?? '').trim();
+  if (topAttentionItem) {
+    return String(topAttentionItem.killer || topAttentionItem.title || primary || fallback).trim();
+  }
+  if (isWeakBackgroundLegalSummary(primary) && fallback) return fallback;
+  return primary || fallback;
+};
