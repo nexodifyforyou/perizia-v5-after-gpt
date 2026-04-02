@@ -27,6 +27,7 @@ import axios from 'axios';
 import { toast } from 'sonner';
 import { downloadPdfBlob } from '../utils/pdfDownload';
 import { parseSurfaceNumber } from '../lib/surfaceFormatting';
+import { resolveAgibilitaDetail } from '../lib/agibilita';
 import { buildCustomerCostPolicy } from '../lib/costPolicy';
 import { buildCanonicalLegalPriorityMeta, getCanonicalTopAttentionText, isWeakBackgroundLegalSummary, pickCanonicalTopAttentionItem } from '../lib/legalPriority';
 
@@ -1412,7 +1413,24 @@ const AnalysisResult = () => {
       sourceBene?.regolarita_urbanistica,
       sourceBene?.conformita_urbanistica
     );
-    const agibilitaValue = safeRender(pickFirstNonEmpty(sourceBene?.agibilita, sourceBene?.abitabilita, abusi?.agibilita?.status), '').trim();
+    const agibilitaDetail = resolveAgibilitaDetail({
+      candidateValues: [
+        sourceBene?.agibilita,
+        sourceBene?.abitabilita,
+        contractBene?.agibilita,
+        contractBene?.abitabilita,
+        abusi?.agibilita?.status,
+        fieldStates?.agibilita?.value
+      ],
+      evidenceSources: [
+        sourceEvidenceObj?.agibilita,
+        sourceEvidenceObj?.note,
+        contractEvidenceObj?.agibilita,
+        contractEvidenceObj?.note,
+        getFieldEvidence('agibilita', abusi?.agibilita),
+        fieldStates?.agibilita
+      ]
+    });
     const statoConservativoValue = getDettagliStatusValue(
       pickFirstNonEmpty(sourceBene?.stato_conservativo, contractBene?.stato_conservativo)
     );
@@ -1579,8 +1597,9 @@ const AnalysisResult = () => {
         {
           key: 'agibilita',
           label: 'Agibilità / Abitabilità',
-          value: agibilitaValue,
-          evidence: mergeEvidence(sourceEvidenceObj?.agibilita, sourceEvidenceObj?.note, getFieldEvidence('agibilita', abusi?.agibilita))
+          value: agibilitaDetail.value,
+          note: agibilitaDetail.note,
+          evidence: agibilitaDetail.evidence
         },
         {
           key: 'stato_conservativo',
@@ -1730,6 +1749,16 @@ const AnalysisResult = () => {
         };
       })
     : [];
+  const compactAgibilitaDetail = resolveAgibilitaDetail({
+    candidateValues: [
+      abusi?.agibilita?.status,
+      fieldStates?.agibilita?.value
+    ],
+    evidenceSources: [
+      getFieldEvidence('agibilita', abusi?.agibilita),
+      fieldStates?.agibilita
+    ]
+  });
 
   const contractWaterfall = panoramicaContract?.valuation_waterfall && typeof panoramicaContract.valuation_waterfall === 'object'
     ? panoramicaContract.valuation_waterfall
@@ -3683,8 +3712,8 @@ const AnalysisResult = () => {
                 />
                 <DataValueWithEvidence
                   label="Agibilità/Abitabilità"
-                  value={safeRender(abusi.agibilita?.status || abusi.agibilita, 'Non specificato in perizia')}
-                  evidence={getFieldEvidence('agibilita', abusi.agibilita)}
+                  value={safeRender(compactAgibilitaDetail.value, 'Non specificato in perizia')}
+                  evidence={compactAgibilitaDetail.evidence}
                 />
                 <DataValueWithEvidence
                   label="APE (Certificato Energetico)"

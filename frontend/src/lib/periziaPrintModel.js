@@ -8,6 +8,7 @@ import {
   pickCanonicalTopAttentionItem
 } from './legalPriority';
 import { buildCustomerCostPolicy } from './costPolicy';
+import { resolveAgibilitaDetail } from './agibilita';
 
 const MISSING_TEXT = 'Non specificato in perizia';
 const EURO_FORMATTER = new Intl.NumberFormat('it-IT', {
@@ -333,68 +334,22 @@ const parseCatastoFromEvidence = (evidence) => {
   return parsed.includes('Fg.') && parsed.includes('Part.') && (sub || categoria) ? parsed : '';
 };
 
-const classifyAgibilitaSignal = (value) => {
-  const text = normalizeComparableText(value);
-  if (!text) return '';
-  if (
-    text.includes('non risulta agibile') ||
-    text.includes('non e presente l’abitabilita') ||
-    text.includes('non e presente l\'abitabilita') ||
-    text.includes('assente')
-  ) {
-    return 'absent';
-  }
-  if (text.includes('risulta agibile') || text.includes('agibile')) {
-    return 'present';
-  }
-  return '';
-};
-
 const buildAgibilitaDetail = (bene, abusi, fieldStates) => {
   const evidenceObj = bene?.evidence && typeof bene.evidence === 'object' ? bene.evidence : {};
-  const mergedEvidence = mergeEvidence(
-    evidenceObj?.agibilita,
-    evidenceObj?.note,
-    fieldStates?.agibilita,
-    abusi?.agibilita
-  );
-  const renderedStatus = safeRender(
-    pickFirstNonEmpty(bene?.agibilita, bene?.abitabilita, abusi?.agibilita?.status, fieldStates?.agibilita?.value),
-    ''
-  );
-  const statusSignal = classifyAgibilitaSignal(renderedStatus);
-  const evidenceSignals = mergedEvidence.map((item) => classifyAgibilitaSignal(item?.quote || item?.search_hint)).filter(Boolean);
-  const hasPresent = evidenceSignals.includes('present');
-  const hasAbsent = evidenceSignals.includes('absent') || statusSignal === 'absent';
-
-  if ((hasPresent && hasAbsent) || (statusSignal === 'absent' && hasPresent)) {
-    return {
-      value: 'Da verificare',
-      note: 'Indicazioni contrastanti sulla agibilita nella perizia.',
-      evidence: mergedEvidence.slice(0, 2),
-    };
-  }
-  if (hasAbsent || statusSignal === 'absent') {
-    const absentEvidence = mergedEvidence.filter((item) => classifyAgibilitaSignal(item?.quote || item?.search_hint) === 'absent');
-    return {
-      value: 'Assente',
-      note: '',
-      evidence: (absentEvidence.length > 0 ? absentEvidence : mergedEvidence).slice(0, 2),
-    };
-  }
-  if (hasPresent) {
-    const presentEvidence = mergedEvidence.filter((item) => classifyAgibilitaSignal(item?.quote || item?.search_hint) === 'present');
-    return {
-      value: 'Da verificare',
-      note: 'Nel testo compaiono riferimenti non univoci sulla agibilita.',
-      evidence: presentEvidence.slice(0, 2),
-    };
-  }
-  return {
-    value: renderedStatus,
-    note: '',
-    evidence: mergedEvidence.slice(0, 2),
-  };
+  return resolveAgibilitaDetail({
+    candidateValues: [
+      bene?.agibilita,
+      bene?.abitabilita,
+      abusi?.agibilita?.status,
+      fieldStates?.agibilita?.value
+    ],
+    evidenceSources: [
+      evidenceObj?.agibilita,
+      evidenceObj?.note,
+      fieldStates?.agibilita,
+      abusi?.agibilita
+    ]
+  });
 };
 
 const buildClientFacingDriver = (semaforo, decision) => {
