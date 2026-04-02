@@ -141,11 +141,14 @@ export const getCanonicalTopAttentionItems = (items = []) => {
     });
 };
 
-export const getCanonicalTopAttentionText = ({ topAttentionItem = null, primaryText = '', fallbackText = '' }) => {
+export const getCanonicalTopAttentionText = ({ topAttentionItem = null, primaryText = '', fallbackText = '', itemTextKeys = [] }) => {
   const primary = String(primaryText ?? '').trim();
   const fallback = String(fallbackText ?? '').trim();
   if (topAttentionItem) {
-    return String(topAttentionItem.killer || topAttentionItem.title || primary || fallback).trim();
+    const preferredItemText = itemTextKeys
+      .map((key) => String(topAttentionItem?.[key] ?? '').trim())
+      .find(Boolean);
+    return String(preferredItemText || topAttentionItem.killer || topAttentionItem.title || primary || fallback).trim();
   }
   if (isWeakBackgroundLegalSummary(primary) && fallback) return fallback;
   return primary || fallback;

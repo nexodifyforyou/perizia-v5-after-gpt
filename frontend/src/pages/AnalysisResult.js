@@ -2127,6 +2127,15 @@ const AnalysisResult = () => {
     accesso_vincolo: 'Accesso / vincolo da verificare',
     servitu_usi_civici: 'Servitù / usi civici'
   };
+  const categoryLabelMapEn = {
+    occupazione: 'Occupancy issue',
+    pignoramento_esecuzione: 'Foreclosure / execution context',
+    ipoteca_formalita: 'Encumbrances to be cancelled',
+    difformita_urb_cat: 'Urban / cadastral discrepancies',
+    agibilita_docs: 'Habitability / technical documentation issue',
+    accesso_vincolo: 'Access / binding restriction to verify',
+    servitu_usi_civici: 'Easement / civic-use issue'
+  };
 
   const baseLegalItems = Array.isArray(legalKillers?.items) ? legalKillers.items : [];
   const detailLegalItems = Array.isArray(estrattoLegalSection?.__items) ? estrattoLegalSection.__items : [];
@@ -2271,6 +2280,7 @@ const AnalysisResult = () => {
       const kind = legalKindByCategory[category];
       out.push({
         killer: safeRender(source?.killer || source?.label_it || source?.label, categoryLabelMap[category]),
+        headlineEn: safeRender(source?.headline_en || source?.label_en, categoryLabelMapEn[category]),
         status: normalizeLegalSeverity(category, source?.status),
         status_it: safeRender(source?.status_it, ''),
         action: safeRender(source?.reason_it || source?.action_required_it || source?.action, ''),
@@ -2581,6 +2591,26 @@ const AnalysisResult = () => {
     primaryText: semaforo.status_label || semaforo.reason_it || semaforo.status_it || '',
     fallbackText: displayHeaderDriverIt || displayDecisionIt
   });
+  const displayHeaderSummaryEn = getCanonicalTopAttentionText({
+    topAttentionItem: topAttentionLegalItem,
+    primaryText: semaforo.reason_en || semaforo.status_en || '',
+    fallbackText: displayDecisionEn,
+    itemTextKeys: ['headlineEn', 'headline_en']
+  });
+  const canonicalTopAttentionNeedle = normalizeComparableText(topAttentionLegalItem?.killer || '');
+  const summaryMentionsCanonicalIssue = canonicalTopAttentionNeedle
+    ? normalizeComparableText(summary.summary_it).includes(canonicalTopAttentionNeedle)
+    : true;
+  const summaryHasGenericDocumentFraming = /^(il documento riguarda|analisi del documento|the document pertains|analysis of document)/.test(normalizeComparableText(summary.summary_it || summary.summary_en));
+  const shouldUseCanonicalSummaryFallback = Boolean(topAttentionLegalItem) && (!summaryMentionsCanonicalIssue || summaryHasGenericDocumentFraming);
+  const summaryFallbackIt = [displayDecisionIt, decisionBulletsIt[0]].filter(Boolean).join('. ').trim();
+  const summaryFallbackEn = [displayHeaderSummaryEn, decisionBulletsEn[0]].filter(Boolean).join('. ').trim();
+  const displaySummaryForClientIt = shouldUseCanonicalSummaryFallback
+    ? summaryFallbackIt
+    : safeRender(summary.summary_it, 'Analisi documento completata.');
+  const displaySummaryForClientEn = shouldUseCanonicalSummaryFallback
+    ? summaryFallbackEn
+    : safeRender(summary.summary_en, '');
 
   // Debug logging for troubleshooting
   if (process.env.NODE_ENV === 'development') {
@@ -2924,7 +2954,7 @@ const AnalysisResult = () => {
                 {displayHeaderSummaryIt}
               </p>
               <p className="text-xs text-zinc-500 mt-1">
-                {safeRender(semaforo.reason_en || semaforo.status_en, '')}
+                {displayHeaderSummaryEn}
               </p>
               <div className="xl:text-right">
                 {/* Show driver/reason for semaforo */}
@@ -3048,12 +3078,12 @@ const AnalysisResult = () => {
                   )}
                   
                   <div className="p-4 bg-zinc-950 rounded-lg">
-                    <p className="text-zinc-300 leading-relaxed">{safeRender(summary.summary_it, 'Analisi documento completata.')}</p>
+                    <p className="text-zinc-300 leading-relaxed">{displaySummaryForClientIt}</p>
                   </div>
                   
-                  {summary.summary_en && (
+                  {displaySummaryForClientEn && (
                     <div className="p-4 bg-zinc-950/50 rounded-lg border-l-2 border-gold/30">
-                      <p className="text-zinc-400 text-sm italic">{safeRender(summary.summary_en)}</p>
+                      <p className="text-zinc-400 text-sm italic">{displaySummaryForClientEn}</p>
                     </div>
                   )}
                 </div>
