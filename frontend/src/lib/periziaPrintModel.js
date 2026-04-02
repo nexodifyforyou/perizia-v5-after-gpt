@@ -202,7 +202,7 @@ const formatSurfaceValue = (value) => {
 
 const escapeRegExp = (value) => String(value).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
-const splitQuotaFromDiritto = (dirittoValue, quotaValue) => {
+export const splitQuotaFromDiritto = (dirittoValue, quotaValue) => {
   const diritto = safeRender(dirittoValue, '').trim();
   const quota = safeRender(quotaValue, '').trim();
   if (!diritto) return '';
