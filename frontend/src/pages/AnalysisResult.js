@@ -27,7 +27,7 @@ import axios from 'axios';
 import { toast } from 'sonner';
 import { downloadPdfBlob } from '../utils/pdfDownload';
 import { parseSurfaceNumber } from '../lib/surfaceFormatting';
-import { buildCanonicalLegalPriorityMeta, isWeakBackgroundLegalSummary, pickCanonicalTopAttentionItem } from '../lib/legalPriority';
+import { buildCanonicalLegalPriorityMeta, getCanonicalTopAttentionText, isWeakBackgroundLegalSummary, pickCanonicalTopAttentionItem } from '../lib/legalPriority';
 
 const API_URL = process.env.REACT_APP_BACKEND_URL;
 
@@ -2554,7 +2554,11 @@ const AnalysisResult = () => {
     .slice(0, 4);
   const topAttentionLegalItem = pickCanonicalTopAttentionItem(topLegalChecklistItems);
   const displayDecisionIt = topAttentionLegalItem
-    ? safeRender(topAttentionLegalItem.killer, decisionIt)
+    ? getCanonicalTopAttentionText({
+        topAttentionItem: topAttentionLegalItem,
+        primaryText: decisionIt,
+        fallbackText: displayedDecisionBullets[0]?.bullet || ''
+      })
     : isWeakBackgroundLegalSummary(decisionIt) && displayedDecisionBullets[0]?.score >= 30
       ? displayedDecisionBullets[0].bullet
       : scoreSummarySignal(decisionIt) < 10 && displayedDecisionBullets[0]?.score >= 30
@@ -2567,6 +2571,16 @@ const AnalysisResult = () => {
       : scoreSummarySignal(decisionEn) < 10 && displayedDecisionBullets[0]?.bulletEn
         ? displayedDecisionBullets[0].bulletEn
         : decisionEn;
+  const displayHeaderDriverIt = getCanonicalTopAttentionText({
+    topAttentionItem: topAttentionLegalItem,
+    primaryText: semaforo.driver?.value || semaforo.reason_it || '',
+    fallbackText: displayDecisionIt
+  });
+  const displayHeaderSummaryIt = getCanonicalTopAttentionText({
+    topAttentionItem: topAttentionLegalItem,
+    primaryText: semaforo.status_label || semaforo.reason_it || semaforo.status_it || '',
+    fallbackText: displayHeaderDriverIt || displayDecisionIt
+  });
 
   // Debug logging for troubleshooting
   if (process.env.NODE_ENV === 'development') {
@@ -2907,16 +2921,16 @@ const AnalysisResult = () => {
           {activeTab === 'overview' && (
             <>
               <p className="text-sm text-zinc-400 mt-3">
-                {safeRender(semaforo.status_label || semaforo.reason_it || semaforo.status_it, '')}
+                {displayHeaderSummaryIt}
               </p>
               <p className="text-xs text-zinc-500 mt-1">
                 {safeRender(semaforo.reason_en || semaforo.status_en, '')}
               </p>
               <div className="xl:text-right">
                 {/* Show driver/reason for semaforo */}
-                {semaforo.driver?.value && (
+                {displayHeaderDriverIt && (
                   <p className="text-xs text-amber-400 mt-1">
-                    Driver: {semaforo.driver.value}
+                    Driver: {displayHeaderDriverIt}
                   </p>
                 )}
                 {/* Show evidence pages */}
