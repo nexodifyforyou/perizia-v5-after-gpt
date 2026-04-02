@@ -6817,9 +6817,12 @@ def _refresh_customer_facing_result_on_read(
         result.pop("decision_rapida_narrated", None)
 
     summary = result.get("summary_for_client") if isinstance(result.get("summary_for_client"), dict) else {}
+    generation_mode = str(summary.get("generation_mode") or "").strip()
     deterministic_summary = build_deterministic_summary_for_client(result)
-    summary["summary_it"] = deterministic_summary.get("summary_it", summary.get("summary_it", ""))
-    summary["summary_en"] = deterministic_summary.get("summary_en", summary.get("summary_en", ""))
+    if generation_mode != "llm_canonical_bundle":
+        summary["summary_it"] = deterministic_summary.get("summary_it", summary.get("summary_it", ""))
+        summary["summary_en"] = deterministic_summary.get("summary_en", summary.get("summary_en", ""))
+        summary["generation_mode"] = "deterministic_canonical_bundle"
     summary.setdefault("disclaimer_it", "Documento informativo. Non costituisce consulenza legale. Consultare un professionista qualificato.")
     summary.setdefault("disclaimer_en", "Informational document. Not legal advice. Consult a qualified professional.")
     result["summary_for_client"] = summary
@@ -14171,6 +14174,7 @@ async def _enrich_summary_with_optional_llm(result: Dict[str, Any], request_id: 
     deterministic_summary = build_deterministic_summary_for_client(result)
     summary["summary_it"] = deterministic_summary.get("summary_it", summary.get("summary_it", ""))
     summary["summary_en"] = deterministic_summary.get("summary_en", summary.get("summary_en", ""))
+    summary["generation_mode"] = "deterministic_canonical_bundle"
 
     bundle = build_summary_for_client_bundle(result)
 
@@ -14211,6 +14215,7 @@ SUMMARY_BUNDLE_JSON:
                 summary["summary_it"] = str(parsed["summary_it"])[:1500]
             if parsed.get("summary_en"):
                 summary["summary_en"] = str(parsed["summary_en"])[:1500]
+            summary["generation_mode"] = "llm_canonical_bundle"
         qa_checks.append({
             "code": "QA-LLM-Summary",
             "result": "OK",

@@ -202,6 +202,26 @@ def _truncate_sentence(text: Any, limit: int = 220) -> str:
     return value[:limit]
 
 
+def _canonical_issue_it_to_en(text: Any) -> str:
+    value = _safe_text(text, 180)
+    normalized = value.lower()
+    if "formalità da cancellare" in normalized or "formalita da cancellare" in normalized:
+        return "Encumbrances to be cancelled"
+    if "servitù" in normalized or "servitu" in normalized:
+        return "Easement detected"
+    if "occupazione" in normalized:
+        return "Occupancy issue"
+    if "agibilità" in normalized or "agibilita" in normalized or "abitabilità" in normalized or "abitabilita" in normalized:
+        return "Habitability issue"
+    if "difformità" in normalized or "difformita" in normalized or "catastal" in normalized or "urbanistic" in normalized:
+        return "Urban / cadastral discrepancies"
+    if "pignoramento" in normalized or "esecuzione" in normalized:
+        return "Foreclosure / execution context"
+    if "vincolo" in normalized or "accesso" in normalized:
+        return "Access / binding restriction to verify"
+    return ""
+
+
 def build_summary_for_client_bundle(result: Dict[str, Any]) -> Dict[str, Any]:
     decision = result.get("decision_rapida_client", {}) if isinstance(result.get("decision_rapida_client"), dict) else {}
     section2 = result.get("section_2_decisione_rapida", {}) if isinstance(result.get("section_2_decisione_rapida"), dict) else {}
@@ -215,10 +235,20 @@ def build_summary_for_client_bundle(result: Dict[str, Any]) -> Dict[str, Any]:
     document_quality = result.get("document_quality", {}) if isinstance(result.get("document_quality"), dict) else {}
 
     top_issue_it = ""
+    top_issue_en = ""
     top_issue_evidence: List[Dict[str, Any]] = []
     if legal_items:
         first = legal_items[0] if isinstance(legal_items[0], dict) else {}
         top_issue_it = _truncate_sentence(first.get("killer"), 140)
+        top_issue_en = _truncate_sentence(
+            _first_non_empty(
+                first.get("killer_en"),
+                first.get("title_en"),
+                first.get("label_en"),
+                _canonical_issue_it_to_en(first.get("killer")),
+            ),
+            140,
+        )
         if isinstance(first.get("evidence"), list):
             top_issue_evidence = [ev for ev in first.get("evidence", []) if isinstance(ev, dict)][:2]
 
@@ -265,6 +295,7 @@ def build_summary_for_client_bundle(result: Dict[str, Any]) -> Dict[str, Any]:
 
     return {
         "top_issue_it": top_issue_it,
+        "top_issue_en": top_issue_en,
         "next_step_it": next_step_it,
         "next_step_en": next_step_en,
         "caution_points_it": caution_points_it[:2],
@@ -280,6 +311,7 @@ def build_summary_for_client_bundle(result: Dict[str, Any]) -> Dict[str, Any]:
 def build_deterministic_summary_for_client(result: Dict[str, Any]) -> Dict[str, str]:
     bundle = build_summary_for_client_bundle(result)
     top_issue_it = bundle.get("top_issue_it", "")
+    top_issue_en = bundle.get("top_issue_en", "")
     next_step_it = bundle.get("next_step_it", "")
     next_step_en = bundle.get("next_step_en", "")
     caution_points_it = bundle.get("caution_points_it", []) if isinstance(bundle.get("caution_points_it"), list) else []
@@ -299,8 +331,8 @@ def build_deterministic_summary_for_client(result: Dict[str, Any]) -> Dict[str, 
 
     summary_en_parts: List[str] = []
     decision_en = str(bundle.get("decision_summary_en") or "").strip()
-    if top_issue_it:
-        summary_en_parts.append(f"Key issue: {top_issue_it}.")
+    if top_issue_en:
+        summary_en_parts.append(f"Key issue: {top_issue_en}.")
     elif decision_en:
         summary_en_parts.append(decision_en)
     if next_step_en:
