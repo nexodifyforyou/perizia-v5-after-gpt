@@ -1,4 +1,5 @@
 import math
+import json
 import sys
 from pathlib import Path
 
@@ -6,6 +7,21 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from perizia_qa.fixture_runner import run_named_fixture
 from perizia_runtime.runtime import apply_verifier_to_result, run_quality_verifier
+
+
+def _repo_fixture(name: str):
+    fixture_dir = Path(__file__).resolve().parents[1] / "perizia_qa" / "fixtures" / name
+    result = json.loads((fixture_dir / "result_seed.json").read_text(encoding="utf-8"))
+    pages = json.loads((fixture_dir / "pages_raw.json").read_text(encoding="utf-8"))
+    normalized_pages = [
+        {
+            "page_number": int(row.get("page_number") or row.get("page") or idx),
+            "text": str(row.get("text") or ""),
+        }
+        for idx, row in enumerate(pages or [], start=1)
+        if isinstance(row, dict)
+    ]
+    return result, normalized_pages
 
 
 def _silvabella_fixture():
@@ -102,5 +118,27 @@ def test_verifier_bridge_updates_legacy_result_for_routed_fields():
 def test_named_fixture_runner_for_existing_cases():
     silvabella = run_named_fixture("silvabella")
     assert silvabella["status"] == "PASS"
-    mantova = run_named_fixture("mantova")
-    assert mantova["status"] in {"PASS", "WARN"}
+    rmei = run_named_fixture("rmei_928_2022")
+    assert rmei["status"] == "PASS"
+
+
+def test_verifier_emits_legal_attention_fallback_for_cancellable_only_cases():
+    for analysis_id, fixture_name in [
+        ("mantova", "mantova"),
+        ("multilot_69_2024", "multilot_69_2024"),
+    ]:
+        result, pages = _repo_fixture(fixture_name)
+        payload = run_quality_verifier(
+            analysis_id=analysis_id,
+            result=result,
+            pages=pages,
+            full_text="\n\n".join(page["text"] for page in pages),
+        )
+        top_issue = payload["canonical_case"]["priority"]["top_issue"]
+        summary = payload["canonical_case"]["summary_bundle"]
+        assert top_issue["code"] == "LEGAL_CANCELLABLE_ATTENTION"
+        assert "Formalità da cancellare" in top_issue["title_it"]
+        assert top_issue["category"] == "legal_background"
+        assert summary["top_issue_it"] == top_issue["title_it"]
+        assert summary["decision_summary_it"] != "Verifica manualmente i punti critici prima dell'offerta."
+        assert "cancellazione delle formalità" in summary["decision_summary_it"]

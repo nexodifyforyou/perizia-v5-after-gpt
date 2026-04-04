@@ -10,7 +10,11 @@ def run_summary_agent(state: RuntimeState) -> None:
     top_issue_it = str(top_issue.get("title_it") or "").strip()
     if not top_issue_it and costs.get("explicit_total"):
         top_issue_it = f"Costi espliciti a carico dell'acquirente: € {float(costs['explicit_total']):,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
-    next_step_it = str(top_issue.get("action_it") or "").strip() or "Verifica manualmente i punti critici prima dell'offerta."
+    next_step_it = str(top_issue.get("action_it") or "").strip()
+    if not next_step_it and str(top_issue.get("code") or "") == "LEGAL_CANCELLABLE_ATTENTION":
+        next_step_it = "Verifica che il decreto di trasferimento disponga la cancellazione delle formalità indicate."
+    if not next_step_it:
+        next_step_it = "Verifica manualmente i punti critici prima dell'offerta."
     caution_points_it = []
     if occupancy.get("opponibilita") == "NON VERIFICABILE":
         caution_points_it.append("Opponibilità non verificabile dalla perizia")
@@ -37,4 +41,3 @@ def run_summary_agent(state: RuntimeState) -> None:
         ],
         "source": "canonical_issue_bundle",
     }
-

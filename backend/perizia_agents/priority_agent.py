@@ -38,6 +38,28 @@ def _policy_bucket(item, *, has_surviving_legal: bool, occupancy_supported: bool
     return 2
 
 
+def _build_cancellable_attention_issue(legal):
+    cancellable = legal.get("cancellable", []) if isinstance(legal, dict) else []
+    if not cancellable:
+        return None
+    evidence = cancellable[0].get("evidence", []) if isinstance(cancellable[0], dict) else []
+    count = len(cancellable)
+    title_it = "Formalità da cancellare"
+    if count > 1:
+        title_it = f"Formalità da cancellare ({count})"
+    return {
+        "code": "LEGAL_CANCELLABLE_ATTENTION",
+        "title_it": title_it,
+        "severity": "AMBER",
+        "category": "legal_background",
+        "priority_score": 34.0,
+        "evidence": evidence,
+        "summary_it": "La perizia segnala formalità da cancellare con la procedura; serve un controllo legale del perimetro delle iscrizioni e trascrizioni.",
+        "action_it": "Verifica che il decreto di trasferimento disponga la cancellazione delle formalità indicate.",
+        "metadata": {"cancellable_count": count},
+    }
+
+
 def run_priority_agent(state: RuntimeState) -> None:
     issues = list(state.issues)
     legal = state.canonical_case.legal
@@ -62,6 +84,19 @@ def run_priority_agent(state: RuntimeState) -> None:
         str(item.get("code") or "") == "EXPLICIT_BUYER_COSTS" and _has_grounded_evidence(item)
         for item in normalized
     )
+    has_stronger_issue = any(
+        _policy_bucket(
+            item,
+            has_surviving_legal=has_surviving_legal,
+            occupancy_supported=occupancy_supported,
+            has_evidenced_cost_issue=has_evidenced_cost_issue,
+        ) >= 2
+        for item in normalized
+    )
+    if not has_stronger_issue and legal.get("cancellable"):
+        fallback_issue = _build_cancellable_attention_issue(legal)
+        if fallback_issue and not any(str(item.get("code") or "") == fallback_issue["code"] for item in normalized):
+            normalized.append(fallback_issue)
     normalized.sort(
         key=lambda item: (
             -_policy_bucket(

@@ -19,13 +19,13 @@
     "explicit_item_count": 0
   },
   "top_issue": {
-    "code": null,
-    "title_it": null,
-    "category": null
+    "code": "LEGAL_CANCELLABLE_ATTENTION",
+    "title_it": "Formalità da cancellare (2)",
+    "category": "legal_background"
   },
-  "summary_mentions_top_issue": false,
-  "summary_top_issue_it": "",
-  "summary_decision_it": "Verifica manualmente i punti critici prima dell'offerta.",
+  "summary_mentions_top_issue": true,
+  "summary_top_issue_it": "Formalità da cancellare (2)",
+  "summary_decision_it": "Formalità da cancellare (2). Verifica che il decreto di trasferimento disponga la cancellazione delle formalità indicate.",
   "legal_notes": {
     "cancellable_count": 2,
     "surviving_count": 0,
