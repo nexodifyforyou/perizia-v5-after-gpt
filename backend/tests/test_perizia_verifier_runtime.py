@@ -158,3 +158,56 @@ def test_multibene_occupancy_prefers_property_occupied_state_over_libero_noise()
     assert canonical["priority"]["top_issue"]["code"] == "OCCUPANCY_RISK"
     assert canonical["summary_bundle"]["decision_summary_it"] != "Verifica manualmente i punti critici prima dell'offerta."
     assert any(item["reason"] == "non_property_libero_noise" for item in invalid_occ)
+
+
+def test_bare_nessuno_does_not_create_libero_without_property_anchor():
+    result = {
+        "field_states": {},
+        "dati_certi_del_lotto": {},
+        "document_quality": {"status": "TEXT_OK"},
+        "semaforo_generale": {"status": "AMBER"},
+    }
+    pages = [
+        {
+            "page_number": 1,
+            "text": "Tipologia del diritto 1/1 di piena proprietà. Comproprietari: Nessuno.",
+        },
+        {
+            "page_number": 2,
+            "text": "È presente un contratto di locazione stipulato in data anteriore al pignoramento.",
+        },
+    ]
+    payload = run_quality_verifier(
+        analysis_id="synthetic_bare_nessuno_block",
+        result=result,
+        pages=pages,
+        full_text="\n\n".join(page["text"] for page in pages),
+    )
+    canonical = payload["canonical_case"]
+    assert canonical["occupancy"]["status"] is None
+    assert not canonical["occupancy"]["candidates"]
+
+
+def test_tenure_signal_creates_nonfree_occupancy_with_cautious_opponibilita():
+    result = {
+        "field_states": {},
+        "dati_certi_del_lotto": {},
+        "document_quality": {"status": "TEXT_OK"},
+        "semaforo_generale": {"status": "AMBER"},
+    }
+    pages = [
+        {
+            "page_number": 1,
+            "text": "È presente un contratto di locazione stipulato in data anteriore al pignoramento per una porzione del bene.",
+        },
+    ]
+    payload = run_quality_verifier(
+        analysis_id="synthetic_tenure_signal_occupancy",
+        result=result,
+        pages=pages,
+        full_text="\n\n".join(page["text"] for page in pages),
+    )
+    canonical = payload["canonical_case"]
+    assert canonical["occupancy"]["status"] == "OCCUPATO"
+    assert canonical["occupancy"]["opponibilita"] == "LOCAZIONE DA VERIFICARE"
+    assert canonical["priority"]["top_issue"]["code"] == "OCCUPANCY_RISK"
