@@ -1,0 +1,2519 @@
+{
+  "report_header": {
+    "title": "NEXODIFY INTELLIGENCE | Auction Scan",
+    "procedure": {
+      "value": "Esecuzione Immobiliare 62/2024 R.G.E.",
+      "evidence": [
+        {
+          "page": 1,
+          "quote": "Esecuzione Immobiliare 62/2024 del R.G.E",
+          "start_offset": 146,
+          "end_offset": 190,
+          "bbox": null,
+          "offset_mode": "PAGE_LOCAL",
+          "page_text_hash": "43b985a961d58686f7ba8edceed3e85a91de1b0ec6a76c1d44b6f8b429dc55a4",
+          "search_hint": "Esecuzione Immobiliare 62/2024 del R.G.E"
+        }
+      ]
+    },
+    "lotto": {
+      "value": "Lotto Unico",
+      "evidence": [
+        {
+          "page": 45,
+          "quote": "LOTTO UNICO",
+          "search_hint": "LOTTO UNICO",
+          "start_offset": 78,
+          "end_offset": 89,
+          "offset_mode": "PAGE_LOCAL",
+          "page_text_hash": "bf502c617bb4cf7d1f6c34d977e4e0997f94b3cdf0a724526e393984a7078b8d",
+          "bbox": null
+        },
+        {
+          "page": 45,
+          "quote": "LOTTO UNICO",
+          "start_offset": 78,
+          "end_offset": 89,
+          "bbox": null,
+          "offset_mode": "PAGE_LOCAL",
+          "page_text_hash": "bf502c617bb4cf7d1f6c34d977e4e0997f94b3cdf0a724526e393984a7078b8d",
+          "search_hint": "LOTTO UNICO"
+        }
+      ]
+    },
+    "tribunale": {
+      "value": "TRIBUNALE DI MANTOVA",
+      "evidence": [
+        {
+          "page": 1,
+          "quote": "TRIBUNALE DI MANTOVA",
+          "start_offset": 13,
+          "end_offset": 105,
+          "bbox": null,
+          "offset_mode": "PAGE_LOCAL",
+          "page_text_hash": "43b985a961d58686f7ba8edceed3e85a91de1b0ec6a76c1d44b6f8b429dc55a4",
+          "search_hint": "TRIBUNALE DI MANTOVA"
+        }
+      ]
+    },
+    "address": {
+      "value": "San Giorgio Bigarello (MN) - Via Sordello n. 5, piano Terra-primo",
+      "evidence": [
+        {
+          "page": 45,
+          "quote": "Ubicazione: San Giorgio B igarello (MN) - Via Sordello n. 5, piano Terra -primo",
+          "start_offset": 149,
+          "end_offset": 231,
+          "bbox": null,
+          "offset_mode": "PAGE_LOCAL",
+          "page_text_hash": "bf502c617bb4cf7d1f6c34d977e4e0997f94b3cdf0a724526e393984a7078b8d",
+          "search_hint": "Ubicazione: San Giorgio B igarello (MN) - Via Sordello n. 5, piano Terra -primo"
+        }
+      ]
+    },
+    "is_multi_lot": false,
+    "generated_at": "2026-03-09T01:16:43.104856+00:00"
+  },
+  "section_9_legal_killers": {
+    "items": [
+      {
+        "killer": "Servitù rilevata",
+        "status": "GIALLO",
+        "status_it": "ATTENZIONE",
+        "reason_it": "Rilevata criticita: Servitù rilevata",
+        "evidence": [
+          {
+            "page": 3,
+            "quote": "..................... ... 17  Servitù, censo, livello, usi civici  ................................ ................................ ................................ .",
+            "start_offset": 2133,
+            "end_offset": 2170,
+            "bbox": null,
+            "offset_mode": "PAGE_LOCAL",
+            "page_text_hash": "9c5d6b6f00d6ca0663c34dd4cb80b82a16cf5448f05036be4327e00c42ba7869"
+          },
+          {
+            "page": 17,
+            "quote": "a entrambi i proprietari.     SERVITÙ, CENSO, LIVE LLO, USI CIVICI   BENE N° 1  - UFFICIO UBICATO A SA N GIORGIO BIGARE LLO (MN) - VIA SORDELLO N. 5, P IANO  TERRA -PRIMO   Il bene pignorato non risul",
+            "start_offset": 463,
+            "end_offset": 578,
+            "bbox": null,
+            "offset_mode": "PAGE_LOCAL",
+            "page_text_hash": "fc2d56b833e9d4e64d9085ea385a406c04e32d7610af4d35ba638483ab5c002b"
+          },
+          {
+            "page": 37,
+            "quote": "tenza di  eventuali vincoli e servitù passive o attive, suoi dati metrici ed infine la situazione del mercato e della domanda  e dell'offerta. Tutti questi e lementi, in coesistenza all'esame di alcun",
+            "start_offset": 761,
+            "end_offset": 872,
+            "bbox": null,
+            "offset_mode": "PAGE_LOCAL",
+            "page_text_hash": "4ad57c4eaf3b7a72d52639d73c1b7de17d0b3b51cb5f9ab259c69a9ab1958b0e"
+          }
+        ],
+        "searched_in": null
+      },
+      {
+        "killer": "Usi civici",
+        "status": "ROSSO",
+        "status_it": "CRITICO",
+        "reason_it": "Rilevata criticita: Usi civici",
+        "evidence": [
+          {
+            "page": 3,
+            "quote": " 17  Servitù, censo, livello, usi civici  ................................ ................................ ................................",
+            "start_offset": 2158,
+            "end_offset": 2168,
+            "bbox": null,
+            "offset_mode": "PAGE_LOCAL",
+            "page_text_hash": "9c5d6b6f00d6ca0663c34dd4cb80b82a16cf5448f05036be4327e00c42ba7869"
+          },
+          {
+            "page": 17,
+            "quote": "    SERVITÙ, CENSO, LIVE LLO, USI CIVICI   BENE N° 1  - UFFICIO UBICATO A SA N GIORGIO BIGARE LLO (MN) - VIA SORDELLO N. 5, P IANO  TERRA -P",
+            "start_offset": 489,
+            "end_offset": 499,
+            "bbox": null,
+            "offset_mode": "PAGE_LOCAL",
+            "page_text_hash": "fc2d56b833e9d4e64d9085ea385a406c04e32d7610af4d35ba638483ab5c002b"
+          },
+          {
+            "page": 34,
+            "quote": " presenti diritti demaniali o usi civici. L'immobile  non risulta agibile.   A seguito della richiesta di acce sso agli atti presso il Comun",
+            "start_offset": 642,
+            "end_offset": 652,
+            "bbox": null,
+            "offset_mode": "PAGE_LOCAL",
+            "page_text_hash": "7db91d6a4968da84f0a41e210bb5c2b3961d0727b8ec89cdc19fb6d905b487d8"
+          },
+          {
+            "page": 35,
+            "quote": " presenti diritti demaniali o usi civici. L'immobile  non risulta agibile.   A seguito della richiesta di accesso agli atti presso il Comune",
+            "start_offset": 308,
+            "end_offset": 318,
+            "bbox": null,
+            "offset_mode": "PAGE_LOCAL",
+            "page_text_hash": "84f26b717fb03386ac25b0a9af083fcbec797667dbde4d3b1fe560e57a882b66"
+          },
+          {
+            "page": 36,
+            "quote": " presenti diritti demaniali o usi civici. L'immobile  risulta agibile.   A seguito della richiesta di accesso agli atti presso il Comune di ",
+            "start_offset": 994,
+            "end_offset": 1004,
+            "bbox": null,
+            "offset_mode": "PAGE_LOCAL",
+            "page_text_hash": "0fa04c0d53d1ec7ef997a4e127c04e876f5e60547d4a5d639c34165c5245a9cc"
+          }
+        ],
+        "searched_in": null
+      }
+    ]
+  },
+  "field_states": {
+    "tribunale": {
+      "value": "TRIBUNALE DI MANTOVA",
+      "status": "FOUND",
+      "confidence": 0.9,
+      "evidence": [
+        {
+          "page": 1,
+          "quote": "TRIBUNALE DI MANTOVA",
+          "start_offset": 13,
+          "end_offset": 105,
+          "bbox": null,
+          "offset_mode": "PAGE_LOCAL",
+          "page_text_hash": "43b985a961d58686f7ba8edceed3e85a91de1b0ec6a76c1d44b6f8b429dc55a4",
+          "search_hint": "TRIBUNALE DI MANTOVA"
+        }
+      ],
+      "searched_in": [],
+      "user_prompt_it": null
+    },
+    "procedura": {
+      "value": "Esecuzione Immobiliare 62/2024 R.G.E.",
+      "status": "FOUND",
+      "confidence": 0.9,
+      "evidence": [
+        {
+          "page": 1,
+          "quote": "Esecuzione Immobiliare 62/2024 del R.G.E",
+          "start_offset": 146,
+          "end_offset": 190,
+          "bbox": null,
+          "offset_mode": "PAGE_LOCAL",
+          "page_text_hash": "43b985a961d58686f7ba8edceed3e85a91de1b0ec6a76c1d44b6f8b429dc55a4",
+          "search_hint": "Esecuzione Immobiliare 62/2024 del R.G.E"
+        }
+      ],
+      "searched_in": [],
+      "user_prompt_it": null
+    },
+    "lotto": {
+      "value": "Lotto Unico",
+      "status": "FOUND",
+      "confidence": 0.9,
+      "evidence": [
+        {
+          "page": 45,
+          "quote": "LOTTO UNICO",
+          "search_hint": "LOTTO UNICO",
+          "start_offset": 78,
+          "end_offset": 89,
+          "offset_mode": "PAGE_LOCAL",
+          "page_text_hash": "bf502c617bb4cf7d1f6c34d977e4e0997f94b3cdf0a724526e393984a7078b8d",
+          "bbox": null
+        },
+        {
+          "page": 45,
+          "quote": "LOTTO UNICO",
+          "start_offset": 78,
+          "end_offset": 89,
+          "bbox": null,
+          "offset_mode": "PAGE_LOCAL",
+          "page_text_hash": "bf502c617bb4cf7d1f6c34d977e4e0997f94b3cdf0a724526e393984a7078b8d",
+          "search_hint": "LOTTO UNICO"
+        }
+      ],
+      "searched_in": [],
+      "user_prompt_it": null
+    },
+    "address": {
+      "value": "San Giorgio Bigarello (MN) - Via Sordello n. 5, piano Terra-primo",
+      "status": "FOUND",
+      "confidence": 0.9,
+      "evidence": [
+        {
+          "page": 45,
+          "quote": "Ubicazione: San Giorgio B igarello (MN) - Via Sordello n. 5, piano Terra -primo",
+          "start_offset": 149,
+          "end_offset": 231,
+          "bbox": null,
+          "offset_mode": "PAGE_LOCAL",
+          "page_text_hash": "bf502c617bb4cf7d1f6c34d977e4e0997f94b3cdf0a724526e393984a7078b8d",
+          "search_hint": "Ubicazione: San Giorgio B igarello (MN) - Via Sordello n. 5, piano Terra -primo"
+        }
+      ],
+      "searched_in": [],
+      "user_prompt_it": null
+    },
+    "prezzo_base_asta": {
+      "value": 391849.0,
+      "status": "FOUND",
+      "confidence": 0.9,
+      "evidence": [
+        {
+          "page": 45,
+          "quote": "Prezzo base d'asta: € 391.849,00",
+          "start_offset": 78,
+          "end_offset": 126,
+          "bbox": null,
+          "offset_mode": "PAGE_LOCAL",
+          "page_text_hash": "bf502c617bb4cf7d1f6c34d977e4e0997f94b3cdf0a724526e393984a7078b8d",
+          "search_hint": "Prezzo base d'asta: € 391.849,00"
+        }
+      ],
+      "searched_in": [],
+      "user_prompt_it": null
+    },
+    "superficie": {
+      "value": 116.39,
+      "status": "FOUND",
+      "confidence": 0.9,
+      "evidence": [
+        {
+          "page": 45,
+          "quote": "Superficie 116,39 mq",
+          "search_hint": "Superficie 116,39 mq",
+          "start_offset": 0,
+          "end_offset": 20,
+          "offset_mode": "PAGE_LOCAL",
+          "page_text_hash": "bf502c617bb4cf7d1f6c34d977e4e0997f94b3cdf0a724526e393984a7078b8d",
+          "bbox": null
+        }
+      ],
+      "searched_in": [],
+      "user_prompt_it": null
+    },
+    "diritto_reale": {
+      "value": "Proprietà",
+      "status": "FOUND",
+      "confidence": 0.9,
+      "evidence": [
+        {
+          "page": 45,
+          "quote": "Diritto reale: Proprietà",
+          "start_offset": 248,
+          "end_offset": 259,
+          "bbox": null,
+          "offset_mode": "PAGE_LOCAL",
+          "page_text_hash": "bf502c617bb4cf7d1f6c34d977e4e0997f94b3cdf0a724526e393984a7078b8d",
+          "search_hint": "Diritto reale: Proprietà"
+        }
+      ],
+      "searched_in": [],
+      "user_prompt_it": null
+    },
+    "stato_occupativo": {
+      "value": "OCCUPATO DAL DEBITORE",
+      "status": "FOUND",
+      "confidence": 0.9,
+      "evidence": [
+        {
+          "page": 21,
+          "quote": "Occupato da **** Omissis ****, debitore .",
+          "start_offset": 978,
+          "end_offset": 1020,
+          "bbox": null,
+          "offset_mode": "PAGE_LOCAL",
+          "page_text_hash": "541d604eb22b01c77d454ce85fddc2fa5ebc2a2e1610f1d137d0147d2496985a",
+          "search_hint": "Occupato da **** Omissis ****, debitore"
+        }
+      ],
+      "searched_in": [],
+      "user_prompt_it": null
+    },
+    "regolarita_urbanistica": {
+      "value": "PRESENTI DIFFORMITÀ",
+      "status": "FOUND",
+      "confidence": 0.9,
+      "evidence": [
+        {
+          "page": 13,
+          "quote": "Durante il sopralluogo in data 14/06/2024 sono state riscontrate incongruenze nello stato di fatto attuale",
+          "start_offset": 918,
+          "end_offset": 1025,
+          "bbox": null,
+          "offset_mode": "PAGE_LOCAL",
+          "page_text_hash": "ad0f06395591575c40d8951ccca78e60b446bcca5eb09739a8ed556721a5dda9",
+          "search_hint": "incongruenze nello stato di fatto"
+        }
+      ],
+      "searched_in": [],
+      "user_prompt_it": null
+    },
+    "conformita_catastale": {
+      "value": "PRESENTI DIFFORMITÀ",
+      "status": "FOUND",
+      "confidence": 0.9,
+      "evidence": [
+        {
+          "page": 13,
+          "quote": "Durante il sopralluogo in data 14/06/2024 sono state riscontrate incongruenze nello stato di fatto attuale\nrispetto alla planimetria catastale esistente, riguardanti:",
+          "start_offset": 983,
+          "end_offset": 1061,
+          "bbox": null,
+          "offset_mode": "PAGE_LOCAL",
+          "page_text_hash": "ad0f06395591575c40d8951ccca78e60b446bcca5eb09739a8ed556721a5dda9",
+          "search_hint": "incongruenze nello stato di fatto attuale rispetto alla planimetria catastale"
+        }
+      ],
+      "searched_in": [],
+      "user_prompt_it": null
+    },
+    "spese_condominiali_arretrate": {
+      "value": null,
+      "status": "NOT_FOUND",
+      "confidence": 0.0,
+      "evidence": [],
+      "searched_in": [
+        {
+          "page": 1,
+          "quote": "Ricerca eseguita: spese condominiali, arretrate, arretrati, oneri condominiali, morosità. Nessuna occorrenza trovata nel documento.",
+          "start_offset": 0,
+          "end_offset": 0,
+          "bbox": null,
+          "offset_mode": "PAGE_LOCAL",
+          "page_text_hash": null
+        }
+      ],
+      "user_prompt_it": "Verifica le spese condominiali arretrate nella perizia o presso l'amministratore."
+    },
+    "ape": {
+      "value": "ASSENTE",
+      "status": "FOUND",
+      "confidence": 0.9,
+      "evidence": [
+        {
+          "page": 34,
+          "quote": " Non esiste il certificato energetico dell'immobile / APE.",
+          "start_offset": 1152,
+          "end_offset": 1213,
+          "bbox": null,
+          "offset_mode": "PAGE_LOCAL",
+          "page_text_hash": "7db91d6a4968da84f0a41e210bb5c2b3961d0727b8ec89cdc19fb6d905b487d8",
+          "search_hint": "Non esiste il certificato energetico dell'immobile / APE"
+        }
+      ],
+      "searched_in": [],
+      "user_prompt_it": null
+    },
+    "agibilita": {
+      "value": "ASSENTE",
+      "status": "FOUND",
+      "confidence": 0.9,
+      "evidence": [
+        {
+          "page": 34,
+          "quote": "- non è presente l’abitabilità.",
+          "start_offset": 1600,
+          "end_offset": 1633,
+          "bbox": null,
+          "offset_mode": "PAGE_LOCAL",
+          "page_text_hash": "7db91d6a4968da84f0a41e210bb5c2b3961d0727b8ec89cdc19fb6d905b487d8",
+          "search_hint": "non è presente l’abitabilità."
+        }
+      ],
+      "searched_in": [],
+      "user_prompt_it": null
+    },
+    "dati_asta": {
+      "value": null,
+      "status": "NOT_FOUND",
+      "confidence": 0.0,
+      "evidence": [],
+      "searched_in": [
+        {
+          "page": 5,
+          "quote": "E’ pres ente in adiacenza dell’ufficio e del rustico, un serbatoi o combustibile.\nAllegato n° 1\nLa vendita del bene non è soggetta IVA.\nPer il bene in questione non è stato effettuato un accesso forzoso.",
+          "start_offset": 1696,
+          "end_offset": 1816,
+          "bbox": null,
+          "offset_mode": "PAGE_LOCAL",
+          "page_text_hash": "61beb5cba858f81d0046ac0b92ac573d54fefc8c60a77b59838280f970708eba"
+        },
+        {
+          "page": 6,
+          "quote": "Si accede al fabbricato da Via Sordello e dagli uffic i adiacenti; l’autorimessa è costituita al piano terra da un\nunico locale.\nAllegato n° 1\nLa vendita del bene non è soggetta IVA.\nPer il bene in questione non è stato effettuato un accesso forzoso.",
+          "start_offset": 333,
+          "end_offset": 453,
+          "bbox": null,
+          "offset_mode": "PAGE_LOCAL",
+          "page_text_hash": "57fa9478ab9c7b363bb11a3cb08c85dd4cb6cf18bf84d58f4c2b8f37310925fe"
+        },
+        {
+          "page": 7,
+          "quote": "camere da lett o matrimoniali, due bagni ed un ripostiglio n ell’ammezzato.\nAllegato n° 1\nLa vendita del bene non è soggetta IVA.\nPer il bene in questione non è stato effettuato un accesso forzoso.",
+          "start_offset": 72,
+          "end_offset": 192,
+          "bbox": null,
+          "offset_mode": "PAGE_LOCAL",
+          "page_text_hash": "273bb911be9dec7b247e6995b786ba54c716c0a5edc1af93b244d1b20742896e"
+        }
+      ],
+      "user_prompt_it": null
+    },
+    "formalita_pregiudizievoli": {
+      "value": "PRESENTI FORMALITÀ",
+      "status": "FOUND",
+      "confidence": 0.9,
+      "evidence": [
+        {
+          "page": 3,
+          "quote": "Servitù, censo, livello, usi civici ................................ ................................ ................................ ................................ ........................... 17",
+          "start_offset": 2133,
+          "end_offset": 2334,
+          "bbox": null,
+          "offset_mode": "PAGE_LOCAL",
+          "page_text_hash": "9c5d6b6f00d6ca0663c34dd4cb80b82a16cf5448f05036be4327e00c42ba7869",
+          "search_hint": "Servitù, censo, livello, usi civici ................................"
+        }
+      ],
+      "searched_in": [],
+      "user_prompt_it": null
+    }
+  },
+  "dati_certi_del_lotto": {
+    "prezzo_base_asta": {
+      "value": 391849.0,
+      "formatted": "€391,849",
+      "evidence": [
+        {
+          "page": 45,
+          "quote": "Prezzo base d'asta: € 391.849,00",
+          "start_offset": 78,
+          "end_offset": 126,
+          "bbox": null,
+          "offset_mode": "PAGE_LOCAL",
+          "page_text_hash": "bf502c617bb4cf7d1f6c34d977e4e0997f94b3cdf0a724526e393984a7078b8d",
+          "search_hint": "Prezzo base d'asta: € 391.849,00"
+        }
+      ]
+    },
+    "superficie_catastale": {
+      "value": "116.39",
+      "evidence": [
+        {
+          "page": 45,
+          "quote": "Superficie 116,39 mq",
+          "search_hint": "Superficie 116,39 mq",
+          "start_offset": 0,
+          "end_offset": 20,
+          "offset_mode": "PAGE_LOCAL",
+          "page_text_hash": "bf502c617bb4cf7d1f6c34d977e4e0997f94b3cdf0a724526e393984a7078b8d",
+          "bbox": null
+        }
+      ]
+    },
+    "catasto": {
+      "categoria": "NON SPECIFICATO IN PERIZIA",
+      "classe": "NON SPECIFICATO IN PERIZIA",
+      "vani": "NON SPECIFICATO IN PERIZIA"
+    },
+    "diritto_reale": {
+      "value": "Proprietà",
+      "evidence": [
+        {
+          "page": 45,
+          "quote": "Diritto reale: Proprietà",
+          "start_offset": 248,
+          "end_offset": 259,
+          "bbox": null,
+          "offset_mode": "PAGE_LOCAL",
+          "page_text_hash": "bf502c617bb4cf7d1f6c34d977e4e0997f94b3cdf0a724526e393984a7078b8d",
+          "search_hint": "Diritto reale: Proprietà"
+        }
+      ]
+    }
+  },
+  "document_quality": {
+    "status": "TEXT_OK",
+    "reason": "Embedded text quality appears sufficient for deterministic extraction.",
+    "pages_total": 50,
+    "pages_needing_ocr": [
+      2,
+      3,
+      4
+    ],
+    "thresholds": {
+      "page_needs_ocr": {
+        "word_count_lt": 30,
+        "chars_non_ws_lt": 200,
+        "alpha_ratio_lt": 0.3,
+        "garbage_ratio_gt": 0.25,
+        "fail_flags": [
+          "word_extract_failed",
+          "text_extract_failed"
+        ]
+      },
+      "document_status": {
+        "needs_ocr_ratio_gte": 0.35,
+        "needs_ocr_ratio_gte_with_images": 0.2,
+        "avg_image_count_per_page_gte": 1.0,
+        "unreadable_ratio_gte": 0.75,
+        "unreadable_median_word_count_lt": 10,
+        "unreadable_avg_alpha_ratio_lt": 0.15
+      }
+    },
+    "metrics_summary": {
+      "needs_ocr_pages_ratio": 0.06,
+      "avg_image_count_per_page": 0.0,
+      "median_word_count": 269,
+      "avg_alpha_ratio": 0.804847
+    },
+    "customer_message_it": "Documento leggibile in modo automatico con qualità accettabile.",
+    "customer_message_en": "Document appears machine-readable with acceptable quality."
+  },
+  "semaforo_generale": {
+    "status": "AMBER",
+    "status_it": "ATTENZIONE",
+    "status_en": "CAUTION",
+    "reason_it": "Analisi automatica parziale - revisione manuale raccomandata",
+    "reason_en": "Partial automatic analysis - manual review recommended",
+    "evidence": [],
+    "top_blockers": [
+      {
+        "key": "dati_asta",
+        "label_it": "Dati asta",
+        "status": "NOT_FOUND",
+        "value": "NON SPECIFICATO IN PERIZIA",
+        "evidence": [],
+        "searched_in": [
+          {
+            "page": 5,
+            "quote": "E’ pres ente in adiacenza dell’ufficio e del rustico, un serbatoi o combustibile.\nAllegato n° 1\nLa vendita del bene non è soggetta IVA.\nPer il bene in questione non è stato effettuato un accesso forzoso.",
+            "start_offset": 1696,
+            "end_offset": 1816,
+            "bbox": null,
+            "offset_mode": "PAGE_LOCAL",
+            "page_text_hash": "61beb5cba858f81d0046ac0b92ac573d54fefc8c60a77b59838280f970708eba"
+          },
+          {
+            "page": 6,
+            "quote": "Si accede al fabbricato da Via Sordello e dagli uffic i adiacenti; l’autorimessa è costituita al piano terra da un\nunico locale.\nAllegato n° 1\nLa vendita del bene non è soggetta IVA.\nPer il bene in questione non è stato effettuato un accesso forzoso.",
+            "start_offset": 333,
+            "end_offset": 453,
+            "bbox": null,
+            "offset_mode": "PAGE_LOCAL",
+            "page_text_hash": "57fa9478ab9c7b363bb11a3cb08c85dd4cb6cf18bf84d58f4c2b8f37310925fe"
+          },
+          {
+            "page": 7,
+            "quote": "camere da lett o matrimoniali, due bagni ed un ripostiglio n ell’ammezzato.\nAllegato n° 1\nLa vendita del bene non è soggetta IVA.\nPer il bene in questione non è stato effettuato un accesso forzoso.",
+            "start_offset": 72,
+            "end_offset": 192,
+            "bbox": null,
+            "offset_mode": "PAGE_LOCAL",
+            "page_text_hash": "273bb911be9dec7b247e6995b786ba54c716c0a5edc1af93b244d1b20742896e"
+          }
+        ]
+      }
+    ]
+  },
+  "summary_for_client": {
+    "summary_it": "La perizia, redatta dall'Arch. Bonaffini Massimo, riguarda un'esecuzione immobiliare a San Giorgio Bigarello, Mantova. I beni descritti comprendono un ufficio, due garage e una villetta. Le proprietà si trovano tutte nella stessa area e sono descritte nei dettagli, incluse le condizioni di conservazione e la situazione di occupazione.",
+    "summary_en": "The report, prepared by Arch. Bonaffini Massimo, concerns a property execution in San Giorgio Bigarello, Mantua. The assets described include an office, two garages, and a villa. All properties are located in the same area, with detailed descriptions provided, including their conservation status and occupancy situation.",
+    "disclaimer_it": "Documento informativo. Non costituisce consulenza legale. Consultare un professionista qualificato.",
+    "disclaimer_en": "Informational document. Not legal advice. Consult a qualified professional."
+  },
+  "lots": [
+    {
+      "lot_number": 1,
+      "prezzo_base_eur": "€ 391.849,00",
+      "prezzo_base_value": 391849.0,
+      "ubicazione": "San Giorgio Bigarello (MN) - Via Sordello n. 5, piano Terra-primo",
+      "diritto_reale": "Proprietà",
+      "superficie_mq": 116.39,
+      "tipologia": "immobile: Ufficio",
+      "evidence": {
+        "lotto": [
+          {
+            "page": 45,
+            "quote": "LOTTO UNICO",
+            "start_offset": 78,
+            "end_offset": 89,
+            "bbox": null,
+            "offset_mode": "PAGE_LOCAL",
+            "page_text_hash": "bf502c617bb4cf7d1f6c34d977e4e0997f94b3cdf0a724526e393984a7078b8d",
+            "search_hint": "LOTTO UNICO"
+          }
+        ],
+        "prezzo_base": [
+          {
+            "page": 45,
+            "quote": "Prezzo base d'asta: € 391.849,00",
+            "start_offset": 92,
+            "end_offset": 124,
+            "bbox": null,
+            "offset_mode": "PAGE_LOCAL",
+            "page_text_hash": "bf502c617bb4cf7d1f6c34d977e4e0997f94b3cdf0a724526e393984a7078b8d",
+            "search_hint": "Prezzo base d'asta: € 391.849,00"
+          }
+        ],
+        "ubicazione": [
+          {
+            "page": 45,
+            "quote": "Ubicazione: San Giorgio B igarello (MN) - Via Sordello n. 5, piano Terra -primo",
+            "start_offset": 149,
+            "end_offset": 231,
+            "bbox": null,
+            "offset_mode": "PAGE_LOCAL",
+            "page_text_hash": "bf502c617bb4cf7d1f6c34d977e4e0997f94b3cdf0a724526e393984a7078b8d",
+            "search_hint": "Ubicazione: San Giorgio B igarello (MN) - Via Sordello n. 5, piano Terra -primo"
+          }
+        ],
+        "superficie": [
+          {
+            "page": 45,
+            "quote": "Superficie 116,39 mq",
+            "start_offset": 388,
+            "end_offset": 409,
+            "bbox": null,
+            "offset_mode": "PAGE_LOCAL",
+            "page_text_hash": "bf502c617bb4cf7d1f6c34d977e4e0997f94b3cdf0a724526e393984a7078b8d",
+            "search_hint": "Superficie 116,39 mq"
+          }
+        ],
+        "diritto_reale": [
+          {
+            "page": 45,
+            "quote": "Diritto reale: Proprietà",
+            "start_offset": 232,
+            "end_offset": 259,
+            "bbox": null,
+            "offset_mode": "PAGE_LOCAL",
+            "page_text_hash": "bf502c617bb4cf7d1f6c34d977e4e0997f94b3cdf0a724526e393984a7078b8d",
+            "search_hint": "Diritto reale: Proprietà"
+          }
+        ],
+        "tipologia": [
+          {
+            "page": 45,
+            "quote": "Tipologia immobile: Ufficio",
+            "start_offset": 275,
+            "end_offset": 305,
+            "bbox": null,
+            "offset_mode": "PAGE_LOCAL",
+            "page_text_hash": "bf502c617bb4cf7d1f6c34d977e4e0997f94b3cdf0a724526e393984a7078b8d",
+            "search_hint": "Tipologia immobile: Ufficio"
+          }
+        ]
+      },
+      "beni": [
+        {
+          "bene_number": 1,
+          "tipologia": "Ufficio",
+          "short_location": "Ufficio San Giorgio Bigarello (MN) - Via Sordello n. 5",
+          "piano": "Terra - primo",
+          "superficie_mq": 116.39,
+          "valore_stima_eur": 104751,
+          "catasto": {
+            "consistenza": "Superficie",
+            "rendita": "€ 623,62",
+            "foglio": "20",
+            "particella": "433",
+            "sub": "301",
+            "categoria": "A10"
+          },
+          "note": [
+            "non risulta agibile."
+          ],
+          "ape": "Non esiste",
+          "dichiarazioni_impianti": {
+            "elettrico": "Non esiste",
+            "termico": "Non esiste",
+            "idrico": "Non esiste"
+          },
+          "dichiarazioni": {
+            "dichiarazione_impianto_elettrico": "Non esiste",
+            "dichiarazione_impianto_termico": "Non esiste",
+            "dichiarazione_impianto_idrico": "Non esiste"
+          },
+          "evidence": {
+            "tipologia": [
+              {
+                "page": 2,
+                "quote": "Bene N° 1 - Ufficio ubicato a San Giorgio Bigarello (MN) - Via Sordello n. 5, piano Terra -primo ............................. 5",
+                "start_offset": 705,
+                "end_offset": 837,
+                "bbox": null,
+                "offset_mode": "PAGE_LOCAL",
+                "page_text_hash": "93eff6a24152f5f76dedab5b71d7b0dd468be6bc28023a39f0796806a9ce712e",
+                "search_hint": "Bene N° 1 - Ufficio ubicato a San Giorgio Bigarello (MN) - Via Sordello n. 5,"
+              }
+            ],
+            "location_piano": [
+              {
+                "page": 39,
+                "quote": "Bene N° 1 - Ufficio San Giorgio Bigarello (MN) - Via Sordello n. 5, piano Terra -primo 116,39 mq 900,00 €/mq € 104.751,00",
+                "search_hint": "Bene N° 1 - Ufficio San Giorgio Bigarello (MN) - Via Sordello n. 5, piano Terra -primo 116,39 mq 900,00 €/mq € 104.751,0"
+              }
+            ],
+            "superficie": [
+              {
+                "page": 39,
+                "quote": "Bene N° 1 - Ufficio San Giorgio Bigarello (MN) - Via Sordello n. 5, piano Terra -primo 116,39 mq 900,00 €/mq € 104.751,00",
+                "search_hint": "Bene N° 1 - Ufficio San Giorgio Bigarello (MN) - Via Sordello n. 5, piano Terra -primo 116,39 mq 900,00 €/mq € 104.751,0"
+              }
+            ],
+            "valore_stima": [
+              {
+                "page": 37,
+                "quote": "Valore di stima del bene: € 104.751,00",
+                "start_offset": 2398,
+                "end_offset": 2438,
+                "bbox": null,
+                "offset_mode": "PAGE_LOCAL",
+                "page_text_hash": "4ad57c4eaf3b7a72d52639d73c1b7de17d0b3b51cb5f9ab259c69a9ab1958b0e",
+                "search_hint": "Valore di stima del bene: € 104.751,00"
+              }
+            ],
+            "catasto": [
+              {
+                "page": 37,
+                "quote": "Identificato al catasto Fabbricati - Fg. 20, Part. 433, Sub. 301, Categoria A10",
+                "start_offset": 2246,
+                "end_offset": 2327,
+                "bbox": null,
+                "offset_mode": "PAGE_LOCAL",
+                "page_text_hash": "4ad57c4eaf3b7a72d52639d73c1b7de17d0b3b51cb5f9ab259c69a9ab1958b0e",
+                "search_hint": "Identificato al catasto Fabbricati - Fg. 20, Part. 433, Sub. 301, Categoria A10"
+              }
+            ],
+            "note": [
+              {
+                "page": 34,
+                "quote": "non risulta agibile.\nA seguito della richiesta di acce sso agli atti presso il Comune di S. Giorgio Bigarello, sono state reperite le",
+                "start_offset": 666,
+                "end_offset": 688,
+                "bbox": null,
+                "offset_mode": "PAGE_LOCAL",
+                "page_text_hash": "7db91d6a4968da84f0a41e210bb5c2b3961d0727b8ec89cdc19fb6d905b487d8",
+                "search_hint": "non risulta agibile. A seguito della richiesta di acce sso agli atti presso il"
+              }
+            ],
+            "ape": [
+              {
+                "page": 34,
+                "quote": " Non esiste il certificato energetico dell'immobile / APE.",
+                "start_offset": 1152,
+                "end_offset": 1214,
+                "bbox": null,
+                "offset_mode": "PAGE_LOCAL",
+                "page_text_hash": "7db91d6a4968da84f0a41e210bb5c2b3961d0727b8ec89cdc19fb6d905b487d8",
+                "search_hint": " Non esiste il certificato energetico dell'immobile / APE."
+              }
+            ],
+            "dichiarazioni_impianti": {
+              "elettrico": [
+                {
+                  "page": 34,
+                  "quote": " Non esiste la dichiarazione di conformità del l'impianto elettrico.",
+                  "start_offset": 1214,
+                  "end_offset": 1286,
+                  "bbox": null,
+                  "offset_mode": "PAGE_LOCAL",
+                  "page_text_hash": "7db91d6a4968da84f0a41e210bb5c2b3961d0727b8ec89cdc19fb6d905b487d8",
+                  "search_hint": " Non esiste la dichiarazione di conformità del l'impianto elettrico."
+                }
+              ],
+              "termico": [
+                {
+                  "page": 34,
+                  "quote": " Non esiste la dichiarazione di conformità dell'impianto termico.",
+                  "start_offset": 1286,
+                  "end_offset": 1355,
+                  "bbox": null,
+                  "offset_mode": "PAGE_LOCAL",
+                  "page_text_hash": "7db91d6a4968da84f0a41e210bb5c2b3961d0727b8ec89cdc19fb6d905b487d8",
+                  "search_hint": " Non esiste la dichiarazione di conformità dell'impianto termico."
+                }
+              ],
+              "idrico": [
+                {
+                  "page": 34,
+                  "quote": " Non esiste la dichiarazione di conformità dell'impianto idrico.",
+                  "start_offset": 1355,
+                  "end_offset": 1423,
+                  "bbox": null,
+                  "offset_mode": "PAGE_LOCAL",
+                  "page_text_hash": "7db91d6a4968da84f0a41e210bb5c2b3961d0727b8ec89cdc19fb6d905b487d8",
+                  "search_hint": " Non esiste la dichiarazione di conformità dell'impianto idrico."
+                }
+              ]
+            },
+            "dichiarazioni": {
+              "dichiarazione_impianto_elettrico": [
+                {
+                  "page": 34,
+                  "quote": " Non esiste la dichiarazione di conformità del l'impianto elettrico.",
+                  "start_offset": 1214,
+                  "end_offset": 1286,
+                  "bbox": null,
+                  "offset_mode": "PAGE_LOCAL",
+                  "page_text_hash": "7db91d6a4968da84f0a41e210bb5c2b3961d0727b8ec89cdc19fb6d905b487d8",
+                  "search_hint": " Non esiste la dichiarazione di conformità del l'impianto elettrico."
+                }
+              ],
+              "dichiarazione_impianto_termico": [
+                {
+                  "page": 34,
+                  "quote": " Non esiste la dichiarazione di conformità dell'impianto termico.",
+                  "start_offset": 1286,
+                  "end_offset": 1355,
+                  "bbox": null,
+                  "offset_mode": "PAGE_LOCAL",
+                  "page_text_hash": "7db91d6a4968da84f0a41e210bb5c2b3961d0727b8ec89cdc19fb6d905b487d8",
+                  "search_hint": " Non esiste la dichiarazione di conformità dell'impianto termico."
+                }
+              ],
+              "dichiarazione_impianto_idrico": [
+                {
+                  "page": 34,
+                  "quote": " Non esiste la dichiarazione di conformità dell'impianto idrico.",
+                  "start_offset": 1355,
+                  "end_offset": 1423,
+                  "bbox": null,
+                  "offset_mode": "PAGE_LOCAL",
+                  "page_text_hash": "7db91d6a4968da84f0a41e210bb5c2b3961d0727b8ec89cdc19fb6d905b487d8",
+                  "search_hint": " Non esiste la dichiarazione di conformità dell'impianto idrico."
+                }
+              ]
+            }
+          }
+        },
+        {
+          "bene_number": 2,
+          "tipologia": "Garage",
+          "short_location": "Garage San Giorgio Bigarello (MN) - Via Sordello n. 5",
+          "piano": "Terra",
+          "superficie_mq": 38.5,
+          "valore_stima_eur": 34650,
+          "catasto": {
+            "foglio": "20",
+            "particella": "433",
+            "sub": "301",
+            "categoria": "A10"
+          },
+          "note": [],
+          "ape": "Non esiste",
+          "dichiarazioni_impianti": {
+            "elettrico": "Non esiste",
+            "termico": "Non esiste",
+            "idrico": "Non esiste"
+          },
+          "dichiarazioni": {
+            "dichiarazione_impianto_elettrico": "Non esiste",
+            "dichiarazione_impianto_termico": "Non esiste",
+            "dichiarazione_impianto_idrico": "Non esiste"
+          },
+          "evidence": {
+            "tipologia": [
+              {
+                "page": 2,
+                "quote": "Bene N° 2 - Garage ubicato a San Giorgio Bigarello (MN) - Via Sordello n. 5, piano Terra ................................ .......... 5",
+                "start_offset": 838,
+                "end_offset": 976,
+                "bbox": null,
+                "offset_mode": "PAGE_LOCAL",
+                "page_text_hash": "93eff6a24152f5f76dedab5b71d7b0dd468be6bc28023a39f0796806a9ce712e",
+                "search_hint": "Bene N° 2 - Garage ubicato a San Giorgio Bigarello (MN) - Via Sordello n. 5,"
+              }
+            ],
+            "location_piano": [
+              {
+                "page": 39,
+                "quote": "Bene N° 2 - Garage San Giorgio Bigarello (MN) - Via Sordello n. 5, piano Terra 38,50 mq 900,00 €/mq € 34.650,00",
+                "search_hint": "Bene N° 2 - Garage San Giorgio Bigarello (MN) - Via Sordello n. 5, piano Terra 38,50 mq 900,00 €/mq € 34.650,00"
+              }
+            ],
+            "superficie": [
+              {
+                "page": 39,
+                "quote": "Bene N° 2 - Garage San Giorgio Bigarello (MN) - Via Sordello n. 5, piano Terra 38,50 mq 900,00 €/mq € 34.650,00",
+                "search_hint": "Bene N° 2 - Garage San Giorgio Bigarello (MN) - Via Sordello n. 5, piano Terra 38,50 mq 900,00 €/mq € 34.650,00"
+              }
+            ],
+            "valore_stima": [
+              {
+                "page": 38,
+                "quote": "Valore di stima del bene: € 34.650,00",
+                "start_offset": 614,
+                "end_offset": 653,
+                "bbox": null,
+                "offset_mode": "PAGE_LOCAL",
+                "page_text_hash": "5fce227d8123aeebf713e681d1be6fa2a9d866497e38d0f6d50279401f046ac7",
+                "search_hint": "Valore di stima del bene: € 34.650,00"
+              }
+            ],
+            "catasto": [
+              {
+                "page": 42,
+                "quote": "Identificato al catasto Fabbricati - Fg. 20, Part. 433, Sub. 302, Categoria C6",
+                "start_offset": 3018,
+                "end_offset": 3098,
+                "bbox": null,
+                "offset_mode": "PAGE_LOCAL",
+                "page_text_hash": "887b37b5973286dfecb92b49498c504e0f1cbd6c511ca9db807bf4c7da4a177f",
+                "search_hint": "Identificato al catasto Fabbricati - Fg. 20, Part. 433, Sub. 302, Categoria C6"
+              }
+            ],
+            "note": [],
+            "ape": [
+              {
+                "page": 35,
+                "quote": " Non esiste il certificato energetico dell'immobile / APE.",
+                "start_offset": 818,
+                "end_offset": 880,
+                "bbox": null,
+                "offset_mode": "PAGE_LOCAL",
+                "page_text_hash": "84f26b717fb03386ac25b0a9af083fcbec797667dbde4d3b1fe560e57a882b66",
+                "search_hint": " Non esiste il certificato energetico dell'immobile / APE."
+              }
+            ],
+            "dichiarazioni_impianti": {
+              "elettrico": [
+                {
+                  "page": 35,
+                  "quote": " Non esiste la dichiarazione di conformità dell'impianto elettrico.",
+                  "start_offset": 880,
+                  "end_offset": 951,
+                  "bbox": null,
+                  "offset_mode": "PAGE_LOCAL",
+                  "page_text_hash": "84f26b717fb03386ac25b0a9af083fcbec797667dbde4d3b1fe560e57a882b66",
+                  "search_hint": " Non esiste la dichiarazione di conformità dell'impianto elettrico."
+                }
+              ],
+              "termico": [
+                {
+                  "page": 35,
+                  "quote": " Non esiste la dichiarazio ne di conformità dell'impianto termico.",
+                  "start_offset": 951,
+                  "end_offset": 1021,
+                  "bbox": null,
+                  "offset_mode": "PAGE_LOCAL",
+                  "page_text_hash": "84f26b717fb03386ac25b0a9af083fcbec797667dbde4d3b1fe560e57a882b66",
+                  "search_hint": " Non esiste la dichiarazio ne di conformità dell'impianto termico."
+                }
+              ],
+              "idrico": [
+                {
+                  "page": 35,
+                  "quote": " Non esiste la dichiarazione di conformità dell'impianto idrico.",
+                  "start_offset": 1021,
+                  "end_offset": 1089,
+                  "bbox": null,
+                  "offset_mode": "PAGE_LOCAL",
+                  "page_text_hash": "84f26b717fb03386ac25b0a9af083fcbec797667dbde4d3b1fe560e57a882b66",
+                  "search_hint": " Non esiste la dichiarazione di conformità dell'impianto idrico."
+                }
+              ]
+            },
+            "dichiarazioni": {
+              "dichiarazione_impianto_elettrico": [
+                {
+                  "page": 35,
+                  "quote": " Non esiste la dichiarazione di conformità dell'impianto elettrico.",
+                  "start_offset": 880,
+                  "end_offset": 951,
+                  "bbox": null,
+                  "offset_mode": "PAGE_LOCAL",
+                  "page_text_hash": "84f26b717fb03386ac25b0a9af083fcbec797667dbde4d3b1fe560e57a882b66",
+                  "search_hint": " Non esiste la dichiarazione di conformità dell'impianto elettrico."
+                }
+              ],
+              "dichiarazione_impianto_termico": [
+                {
+                  "page": 35,
+                  "quote": " Non esiste la dichiarazio ne di conformità dell'impianto termico.",
+                  "start_offset": 951,
+                  "end_offset": 1021,
+                  "bbox": null,
+                  "offset_mode": "PAGE_LOCAL",
+                  "page_text_hash": "84f26b717fb03386ac25b0a9af083fcbec797667dbde4d3b1fe560e57a882b66",
+                  "search_hint": " Non esiste la dichiarazio ne di conformità dell'impianto termico."
+                }
+              ],
+              "dichiarazione_impianto_idrico": [
+                {
+                  "page": 35,
+                  "quote": " Non esiste la dichiarazione di conformità dell'impianto idrico.",
+                  "start_offset": 1021,
+                  "end_offset": 1089,
+                  "bbox": null,
+                  "offset_mode": "PAGE_LOCAL",
+                  "page_text_hash": "84f26b717fb03386ac25b0a9af083fcbec797667dbde4d3b1fe560e57a882b66",
+                  "search_hint": " Non esiste la dichiarazione di conformità dell'impianto idrico."
+                }
+              ]
+            }
+          }
+        },
+        {
+          "bene_number": 3,
+          "tipologia": "Garage",
+          "short_location": "Garage San Giorgio Bigarello (MN) - Via Sordello n. 5",
+          "piano": "Seminterrato",
+          "superficie_mq": 35.22,
+          "valore_stima_eur": 49308,
+          "catasto": {
+            "consistenza": "Superficie",
+            "rendita": "€ 85,53.",
+            "foglio": "20",
+            "particella": "433",
+            "sub": "302",
+            "categoria": "C6"
+          },
+          "note": [
+            "non risulta agibile.",
+            "risulta agibile."
+          ],
+          "ape": "Non esiste",
+          "dichiarazioni_impianti": {
+            "elettrico": "Non esiste",
+            "termico": "Non esiste",
+            "idrico": "Non esiste"
+          },
+          "dichiarazioni": {
+            "dichiarazione_impianto_elettrico": "Non esiste",
+            "dichiarazione_impianto_termico": "Non esiste",
+            "dichiarazione_impianto_idrico": "Non esiste"
+          },
+          "evidence": {
+            "tipologia": [
+              {
+                "page": 2,
+                "quote": "Bene N° 3 - Garage ubicato a San Giorgio Bigarello (MN) - Via Sordello n. 5, piano Seminterrato ........................... 6",
+                "start_offset": 977,
+                "end_offset": 1106,
+                "bbox": null,
+                "offset_mode": "PAGE_LOCAL",
+                "page_text_hash": "93eff6a24152f5f76dedab5b71d7b0dd468be6bc28023a39f0796806a9ce712e",
+                "search_hint": "Bene N° 3 - Garage ubicato a San Giorgio Bigarello (MN) - Via Sordello n. 5,"
+              }
+            ],
+            "location_piano": [
+              {
+                "page": 39,
+                "quote": "Bene N° 3 - Garage San Giorgio Bigarello (MN) - Via Sordello n. 5, piano Seminterrato 35,22 mq 1.400,00 €/mq € 49.3 08,00",
+                "search_hint": "Bene N° 3 - Garage San Giorgio Bigarello (MN) - Via Sordello n. 5, piano Seminterrato 35,22 mq 1.400,00 €/mq € 49.3 08,0"
+              }
+            ],
+            "superficie": [
+              {
+                "page": 39,
+                "quote": "Bene N° 3 - Garage San Giorgio Bigarello (MN) - Via Sordello n. 5, piano Seminterrato 35,22 mq 1.400,00 €/mq € 49.3 08,00",
+                "search_hint": "Bene N° 3 - Garage San Giorgio Bigarello (MN) - Via Sordello n. 5, piano Seminterrato 35,22 mq 1.400,00 €/mq € 49.3 08,0"
+              }
+            ],
+            "valore_stima": [
+              {
+                "page": 38,
+                "quote": "Valore di stima del bene: € 49.308,00",
+                "start_offset": 1937,
+                "end_offset": 1976,
+                "bbox": null,
+                "offset_mode": "PAGE_LOCAL",
+                "page_text_hash": "5fce227d8123aeebf713e681d1be6fa2a9d866497e38d0f6d50279401f046ac7",
+                "search_hint": "Valore di stima del bene: € 49.308,00"
+              }
+            ],
+            "catasto": [
+              {
+                "page": 45,
+                "quote": "Identificato al catasto Fabbricati - Fg. 20, Part. 433, Sub.",
+                "start_offset": 1648,
+                "end_offset": 1709,
+                "bbox": null,
+                "offset_mode": "PAGE_LOCAL",
+                "page_text_hash": "bf502c617bb4cf7d1f6c34d977e4e0997f94b3cdf0a724526e393984a7078b8d",
+                "search_hint": "Identificato al catasto Fabbricati - Fg. 20, Part. 433, Sub."
+              }
+            ],
+            "note": [
+              {
+                "page": 35,
+                "quote": "risulta agibile.\nA seguito della richiesta di accesso agli atti presso il Comune di S. Giorgio Bigarello, sono state reperite le",
+                "start_offset": 1608,
+                "end_offset": 1626,
+                "bbox": null,
+                "offset_mode": "PAGE_LOCAL",
+                "page_text_hash": "84f26b717fb03386ac25b0a9af083fcbec797667dbde4d3b1fe560e57a882b66",
+                "search_hint": "risulta agibile. A seguito della richiesta di accesso agli atti presso il Comune"
+              }
+            ],
+            "ape": [
+              {
+                "page": 36,
+                "quote": " Non esiste il certificato energetico dell'immobile / APE.",
+                "start_offset": 218,
+                "end_offset": 280,
+                "bbox": null,
+                "offset_mode": "PAGE_LOCAL",
+                "page_text_hash": "0fa04c0d53d1ec7ef997a4e127c04e876f5e60547d4a5d639c34165c5245a9cc",
+                "search_hint": " Non esiste il certificato energetico dell'immobile / APE."
+              }
+            ],
+            "dichiarazioni_impianti": {
+              "elettrico": [
+                {
+                  "page": 36,
+                  "quote": " Non esiste la dichiarazione di conformità dell'impianto elettrico.",
+                  "start_offset": 280,
+                  "end_offset": 351,
+                  "bbox": null,
+                  "offset_mode": "PAGE_LOCAL",
+                  "page_text_hash": "0fa04c0d53d1ec7ef997a4e127c04e876f5e60547d4a5d639c34165c5245a9cc",
+                  "search_hint": " Non esiste la dichiarazione di conformità dell'impianto elettrico."
+                }
+              ],
+              "termico": [
+                {
+                  "page": 36,
+                  "quote": " Non esiste la dichiaraz ione di conformità dell'impianto termico.",
+                  "start_offset": 351,
+                  "end_offset": 421,
+                  "bbox": null,
+                  "offset_mode": "PAGE_LOCAL",
+                  "page_text_hash": "0fa04c0d53d1ec7ef997a4e127c04e876f5e60547d4a5d639c34165c5245a9cc",
+                  "search_hint": " Non esiste la dichiaraz ione di conformità dell'impianto termico."
+                }
+              ],
+              "idrico": [
+                {
+                  "page": 36,
+                  "quote": " Non esiste la dichiarazione di conformità dell'impianto idrico.",
+                  "start_offset": 421,
+                  "end_offset": 489,
+                  "bbox": null,
+                  "offset_mode": "PAGE_LOCAL",
+                  "page_text_hash": "0fa04c0d53d1ec7ef997a4e127c04e876f5e60547d4a5d639c34165c5245a9cc",
+                  "search_hint": " Non esiste la dichiarazione di conformità dell'impianto idrico."
+                }
+              ]
+            },
+            "dichiarazioni": {
+              "dichiarazione_impianto_elettrico": [
+                {
+                  "page": 36,
+                  "quote": " Non esiste la dichiarazione di conformità dell'impianto elettrico.",
+                  "start_offset": 280,
+                  "end_offset": 351,
+                  "bbox": null,
+                  "offset_mode": "PAGE_LOCAL",
+                  "page_text_hash": "0fa04c0d53d1ec7ef997a4e127c04e876f5e60547d4a5d639c34165c5245a9cc",
+                  "search_hint": " Non esiste la dichiarazione di conformità dell'impianto elettrico."
+                }
+              ],
+              "dichiarazione_impianto_termico": [
+                {
+                  "page": 36,
+                  "quote": " Non esiste la dichiaraz ione di conformità dell'impianto termico.",
+                  "start_offset": 351,
+                  "end_offset": 421,
+                  "bbox": null,
+                  "offset_mode": "PAGE_LOCAL",
+                  "page_text_hash": "0fa04c0d53d1ec7ef997a4e127c04e876f5e60547d4a5d639c34165c5245a9cc",
+                  "search_hint": " Non esiste la dichiaraz ione di conformità dell'impianto termico."
+                }
+              ],
+              "dichiarazione_impianto_idrico": [
+                {
+                  "page": 36,
+                  "quote": " Non esiste la dichiarazione di conformità dell'impianto idrico.",
+                  "start_offset": 421,
+                  "end_offset": 489,
+                  "bbox": null,
+                  "offset_mode": "PAGE_LOCAL",
+                  "page_text_hash": "0fa04c0d53d1ec7ef997a4e127c04e876f5e60547d4a5d639c34165c5245a9cc",
+                  "search_hint": " Non esiste la dichiarazione di conformità dell'impianto idrico."
+                }
+              ]
+            }
+          }
+        },
+        {
+          "bene_number": 4,
+          "tipologia": "Villetta",
+          "short_location": "Villetta San Giorgio Bigarello (MN) - Via Sordello n. 5",
+          "piano": "terra rialzato - primo",
+          "superficie_mq": 165.1,
+          "valore_stima_eur": 231140,
+          "catasto": {
+            "consistenza": "................................ ................................ ................................ ................................ ................................ ................................ . 10",
+            "rendita": "€ 43,90.",
+            "foglio": "20",
+            "particella": "600",
+            "sub": "3",
+            "categoria": "A7"
+          },
+          "note": [
+            "risulta agibile."
+          ],
+          "ape": "Non esiste",
+          "dichiarazioni_impianti": {
+            "elettrico": "Non esiste",
+            "termico": "Non esiste",
+            "idrico": "Non esiste"
+          },
+          "dichiarazioni": {
+            "dichiarazione_impianto_elettrico": "Non esiste",
+            "dichiarazione_impianto_termico": "Non esiste",
+            "dichiarazione_impianto_idrico": "Non esiste"
+          },
+          "evidence": {
+            "tipologia": [
+              {
+                "page": 2,
+                "quote": "Bene N° 4 - Villetta ubicata a San Giorgio Bigarello (MN) - Via Sordello n. 5, piano Piano terra rialzato -primo 6",
+                "start_offset": 1107,
+                "end_offset": 1225,
+                "bbox": null,
+                "offset_mode": "PAGE_LOCAL",
+                "page_text_hash": "93eff6a24152f5f76dedab5b71d7b0dd468be6bc28023a39f0796806a9ce712e",
+                "search_hint": "Bene N° 4 - Villetta ubicata a San Giorgio Bigarello (MN) - Via Sordello n. 5,"
+              }
+            ],
+            "location_piano": [
+              {
+                "page": 39,
+                "quote": "Bene N° 4 - Villetta San Giorgio Bigarello (MN) - Via Sordello n. 5, piano Piano terra rialzato -primo 165,10 mq 1.400,00 €/mq € 231.140,00",
+                "search_hint": "Bene N° 4 - Villetta San Giorgio Bigarello (MN) - Via Sordello n. 5, piano Piano terra rialzato -primo 165,10 mq 1.400,0"
+              }
+            ],
+            "superficie": [
+              {
+                "page": 39,
+                "quote": "Bene N° 4 - Villetta San Giorgio Bigarello (MN) - Via Sordello n. 5, piano Piano terra rialzato -primo 165,10 mq 1.400,00 €/mq € 231.140,00",
+                "search_hint": "Bene N° 4 - Villetta San Giorgio Bigarello (MN) - Via Sordello n. 5, piano Piano terra rialzato -primo 165,10 mq 1.400,0"
+              }
+            ],
+            "valore_stima": [
+              {
+                "page": 39,
+                "quote": "Bene N° 4 - Villetta San Giorgio Bigarello (MN) - Via Sordello n. 5, piano Piano terra rialzato -primo 165,10 mq 1.400,00 €/mq € 231.140,00",
+                "search_hint": "Bene N° 4 - Villetta San Giorgio Bigarello (MN) - Via Sordello n. 5, piano Piano terra rialzato -primo 165,10 mq 1.400,0"
+              }
+            ],
+            "catasto": [
+              {
+                "page": 46,
+                "quote": "Identificato al catasto Fa bbricati - Fg. 20, Part. 600, Sub.",
+                "start_offset": 1419,
+                "end_offset": 1481,
+                "bbox": null,
+                "offset_mode": "PAGE_LOCAL",
+                "page_text_hash": "4209bb4c65b9a81359098d8d9889e8cd45dc58237617f1ae558284e01c143fa7",
+                "search_hint": "Identificato al catasto Fa bbricati - Fg. 20, Part. 600, Sub."
+              }
+            ],
+            "note": [
+              {
+                "page": 36,
+                "quote": "risulta agibile.\nA seguito della richiesta di accesso agli atti presso il Comune di S. Giorgio Bigarello, sono state reperite le",
+                "start_offset": 1018,
+                "end_offset": 1036,
+                "bbox": null,
+                "offset_mode": "PAGE_LOCAL",
+                "page_text_hash": "0fa04c0d53d1ec7ef997a4e127c04e876f5e60547d4a5d639c34165c5245a9cc",
+                "search_hint": "risulta agibile. A seguito della richiesta di accesso agli atti presso il Comune"
+              }
+            ],
+            "ape": [
+              {
+                "page": 36,
+                "quote": " Non esiste il certificato energetico dell'immobile / APE.",
+                "start_offset": 1573,
+                "end_offset": 1635,
+                "bbox": null,
+                "offset_mode": "PAGE_LOCAL",
+                "page_text_hash": "0fa04c0d53d1ec7ef997a4e127c04e876f5e60547d4a5d639c34165c5245a9cc",
+                "search_hint": " Non esiste il certificato energetico dell'immobile / APE."
+              }
+            ],
+            "dichiarazioni_impianti": {
+              "elettrico": [
+                {
+                  "page": 37,
+                  "quote": " Non esiste la dichiarazione di conformità dell'impianto elettrico.",
+                  "start_offset": 11,
+                  "end_offset": 83,
+                  "bbox": null,
+                  "offset_mode": "PAGE_LOCAL",
+                  "page_text_hash": "4ad57c4eaf3b7a72d52639d73c1b7de17d0b3b51cb5f9ab259c69a9ab1958b0e",
+                  "search_hint": " Non esiste la dichiarazione di conformità dell'impianto elettrico."
+                }
+              ],
+              "termico": [
+                {
+                  "page": 37,
+                  "quote": " Non esiste la dichiarazione di conformità dell'impianto termico.",
+                  "start_offset": 83,
+                  "end_offset": 153,
+                  "bbox": null,
+                  "offset_mode": "PAGE_LOCAL",
+                  "page_text_hash": "4ad57c4eaf3b7a72d52639d73c1b7de17d0b3b51cb5f9ab259c69a9ab1958b0e",
+                  "search_hint": " Non esiste la dichiarazione di conformità dell'impianto termico."
+                }
+              ],
+              "idrico": [
+                {
+                  "page": 37,
+                  "quote": " Non esiste la dichiarazione di conformità dell'impianto idrico.",
+                  "start_offset": 153,
+                  "end_offset": 221,
+                  "bbox": null,
+                  "offset_mode": "PAGE_LOCAL",
+                  "page_text_hash": "4ad57c4eaf3b7a72d52639d73c1b7de17d0b3b51cb5f9ab259c69a9ab1958b0e",
+                  "search_hint": " Non esiste la dichiarazione di conformità dell'impianto idrico."
+                }
+              ]
+            },
+            "dichiarazioni": {
+              "dichiarazione_impianto_elettrico": [
+                {
+                  "page": 37,
+                  "quote": " Non esiste la dichiarazione di conformità dell'impianto elettrico.",
+                  "start_offset": 11,
+                  "end_offset": 83,
+                  "bbox": null,
+                  "offset_mode": "PAGE_LOCAL",
+                  "page_text_hash": "4ad57c4eaf3b7a72d52639d73c1b7de17d0b3b51cb5f9ab259c69a9ab1958b0e",
+                  "search_hint": " Non esiste la dichiarazione di conformità dell'impianto elettrico."
+                }
+              ],
+              "dichiarazione_impianto_termico": [
+                {
+                  "page": 37,
+                  "quote": " Non esiste la dichiarazione di conformità dell'impianto termico.",
+                  "start_offset": 83,
+                  "end_offset": 153,
+                  "bbox": null,
+                  "offset_mode": "PAGE_LOCAL",
+                  "page_text_hash": "4ad57c4eaf3b7a72d52639d73c1b7de17d0b3b51cb5f9ab259c69a9ab1958b0e",
+                  "search_hint": " Non esiste la dichiarazione di conformità dell'impianto termico."
+                }
+              ],
+              "dichiarazione_impianto_idrico": [
+                {
+                  "page": 37,
+                  "quote": " Non esiste la dichiarazione di conformità dell'impianto idrico.",
+                  "start_offset": 153,
+                  "end_offset": 221,
+                  "bbox": null,
+                  "offset_mode": "PAGE_LOCAL",
+                  "page_text_hash": "4ad57c4eaf3b7a72d52639d73c1b7de17d0b3b51cb5f9ab259c69a9ab1958b0e",
+                  "search_hint": " Non esiste la dichiarazione di conformità dell'impianto idrico."
+                }
+              ]
+            }
+          }
+        }
+      ]
+    }
+  ],
+  "beni": [
+    {
+      "bene_number": 1,
+      "tipologia": "Ufficio",
+      "short_location": "Ufficio San Giorgio Bigarello (MN) - Via Sordello n. 5",
+      "piano": "Terra - primo",
+      "superficie_mq": 116.39,
+      "valore_stima_eur": 104751,
+      "catasto": {
+        "consistenza": "Superficie",
+        "rendita": "€ 623,62",
+        "foglio": "20",
+        "particella": "433",
+        "sub": "301",
+        "categoria": "A10"
+      },
+      "note": [
+        "non risulta agibile."
+      ],
+      "ape": "Non esiste",
+      "dichiarazioni_impianti": {
+        "elettrico": "Non esiste",
+        "termico": "Non esiste",
+        "idrico": "Non esiste"
+      },
+      "dichiarazioni": {
+        "dichiarazione_impianto_elettrico": "Non esiste",
+        "dichiarazione_impianto_termico": "Non esiste",
+        "dichiarazione_impianto_idrico": "Non esiste"
+      },
+      "evidence": {
+        "tipologia": [
+          {
+            "page": 2,
+            "quote": "Bene N° 1 - Ufficio ubicato a San Giorgio Bigarello (MN) - Via Sordello n. 5, piano Terra -primo ............................. 5",
+            "start_offset": 705,
+            "end_offset": 837,
+            "bbox": null,
+            "offset_mode": "PAGE_LOCAL",
+            "page_text_hash": "93eff6a24152f5f76dedab5b71d7b0dd468be6bc28023a39f0796806a9ce712e",
+            "search_hint": "Bene N° 1 - Ufficio ubicato a San Giorgio Bigarello (MN) - Via Sordello n. 5,"
+          }
+        ],
+        "location_piano": [
+          {
+            "page": 39,
+            "quote": "Bene N° 1 - Ufficio San Giorgio Bigarello (MN) - Via Sordello n. 5, piano Terra -primo 116,39 mq 900,00 €/mq € 104.751,00",
+            "search_hint": "Bene N° 1 - Ufficio San Giorgio Bigarello (MN) - Via Sordello n. 5, piano Terra -primo 116,39 mq 900,00 €/mq € 104.751,0"
+          }
+        ],
+        "superficie": [
+          {
+            "page": 39,
+            "quote": "Bene N° 1 - Ufficio San Giorgio Bigarello (MN) - Via Sordello n. 5, piano Terra -primo 116,39 mq 900,00 €/mq € 104.751,00",
+            "search_hint": "Bene N° 1 - Ufficio San Giorgio Bigarello (MN) - Via Sordello n. 5, piano Terra -primo 116,39 mq 900,00 €/mq € 104.751,0"
+          }
+        ],
+        "valore_stima": [
+          {
+            "page": 37,
+            "quote": "Valore di stima del bene: € 104.751,00",
+            "start_offset": 2398,
+            "end_offset": 2438,
+            "bbox": null,
+            "offset_mode": "PAGE_LOCAL",
+            "page_text_hash": "4ad57c4eaf3b7a72d52639d73c1b7de17d0b3b51cb5f9ab259c69a9ab1958b0e",
+            "search_hint": "Valore di stima del bene: € 104.751,00"
+          }
+        ],
+        "catasto": [
+          {
+            "page": 37,
+            "quote": "Identificato al catasto Fabbricati - Fg. 20, Part. 433, Sub. 301, Categoria A10",
+            "start_offset": 2246,
+            "end_offset": 2327,
+            "bbox": null,
+            "offset_mode": "PAGE_LOCAL",
+            "page_text_hash": "4ad57c4eaf3b7a72d52639d73c1b7de17d0b3b51cb5f9ab259c69a9ab1958b0e",
+            "search_hint": "Identificato al catasto Fabbricati - Fg. 20, Part. 433, Sub. 301, Categoria A10"
+          }
+        ],
+        "note": [
+          {
+            "page": 34,
+            "quote": "non risulta agibile.\nA seguito della richiesta di acce sso agli atti presso il Comune di S. Giorgio Bigarello, sono state reperite le",
+            "start_offset": 666,
+            "end_offset": 688,
+            "bbox": null,
+            "offset_mode": "PAGE_LOCAL",
+            "page_text_hash": "7db91d6a4968da84f0a41e210bb5c2b3961d0727b8ec89cdc19fb6d905b487d8",
+            "search_hint": "non risulta agibile. A seguito della richiesta di acce sso agli atti presso il"
+          }
+        ],
+        "ape": [
+          {
+            "page": 34,
+            "quote": " Non esiste il certificato energetico dell'immobile / APE.",
+            "start_offset": 1152,
+            "end_offset": 1214,
+            "bbox": null,
+            "offset_mode": "PAGE_LOCAL",
+            "page_text_hash": "7db91d6a4968da84f0a41e210bb5c2b3961d0727b8ec89cdc19fb6d905b487d8",
+            "search_hint": " Non esiste il certificato energetico dell'immobile / APE."
+          }
+        ],
+        "dichiarazioni_impianti": {
+          "elettrico": [
+            {
+              "page": 34,
+              "quote": " Non esiste la dichiarazione di conformità del l'impianto elettrico.",
+              "start_offset": 1214,
+              "end_offset": 1286,
+              "bbox": null,
+              "offset_mode": "PAGE_LOCAL",
+              "page_text_hash": "7db91d6a4968da84f0a41e210bb5c2b3961d0727b8ec89cdc19fb6d905b487d8",
+              "search_hint": " Non esiste la dichiarazione di conformità del l'impianto elettrico."
+            }
+          ],
+          "termico": [
+            {
+              "page": 34,
+              "quote": " Non esiste la dichiarazione di conformità dell'impianto termico.",
+              "start_offset": 1286,
+              "end_offset": 1355,
+              "bbox": null,
+              "offset_mode": "PAGE_LOCAL",
+              "page_text_hash": "7db91d6a4968da84f0a41e210bb5c2b3961d0727b8ec89cdc19fb6d905b487d8",
+              "search_hint": " Non esiste la dichiarazione di conformità dell'impianto termico."
+            }
+          ],
+          "idrico": [
+            {
+              "page": 34,
+              "quote": " Non esiste la dichiarazione di conformità dell'impianto idrico.",
+              "start_offset": 1355,
+              "end_offset": 1423,
+              "bbox": null,
+              "offset_mode": "PAGE_LOCAL",
+              "page_text_hash": "7db91d6a4968da84f0a41e210bb5c2b3961d0727b8ec89cdc19fb6d905b487d8",
+              "search_hint": " Non esiste la dichiarazione di conformità dell'impianto idrico."
+            }
+          ]
+        },
+        "dichiarazioni": {
+          "dichiarazione_impianto_elettrico": [
+            {
+              "page": 34,
+              "quote": " Non esiste la dichiarazione di conformità del l'impianto elettrico.",
+              "start_offset": 1214,
+              "end_offset": 1286,
+              "bbox": null,
+              "offset_mode": "PAGE_LOCAL",
+              "page_text_hash": "7db91d6a4968da84f0a41e210bb5c2b3961d0727b8ec89cdc19fb6d905b487d8",
+              "search_hint": " Non esiste la dichiarazione di conformità del l'impianto elettrico."
+            }
+          ],
+          "dichiarazione_impianto_termico": [
+            {
+              "page": 34,
+              "quote": " Non esiste la dichiarazione di conformità dell'impianto termico.",
+              "start_offset": 1286,
+              "end_offset": 1355,
+              "bbox": null,
+              "offset_mode": "PAGE_LOCAL",
+              "page_text_hash": "7db91d6a4968da84f0a41e210bb5c2b3961d0727b8ec89cdc19fb6d905b487d8",
+              "search_hint": " Non esiste la dichiarazione di conformità dell'impianto termico."
+            }
+          ],
+          "dichiarazione_impianto_idrico": [
+            {
+              "page": 34,
+              "quote": " Non esiste la dichiarazione di conformità dell'impianto idrico.",
+              "start_offset": 1355,
+              "end_offset": 1423,
+              "bbox": null,
+              "offset_mode": "PAGE_LOCAL",
+              "page_text_hash": "7db91d6a4968da84f0a41e210bb5c2b3961d0727b8ec89cdc19fb6d905b487d8",
+              "search_hint": " Non esiste la dichiarazione di conformità dell'impianto idrico."
+            }
+          ]
+        }
+      }
+    },
+    {
+      "bene_number": 2,
+      "tipologia": "Garage",
+      "short_location": "Garage San Giorgio Bigarello (MN) - Via Sordello n. 5",
+      "piano": "Terra",
+      "superficie_mq": 38.5,
+      "valore_stima_eur": 34650,
+      "catasto": {
+        "foglio": "20",
+        "particella": "433",
+        "sub": "301",
+        "categoria": "A10"
+      },
+      "note": [],
+      "ape": "Non esiste",
+      "dichiarazioni_impianti": {
+        "elettrico": "Non esiste",
+        "termico": "Non esiste",
+        "idrico": "Non esiste"
+      },
+      "dichiarazioni": {
+        "dichiarazione_impianto_elettrico": "Non esiste",
+        "dichiarazione_impianto_termico": "Non esiste",
+        "dichiarazione_impianto_idrico": "Non esiste"
+      },
+      "evidence": {
+        "tipologia": [
+          {
+            "page": 2,
+            "quote": "Bene N° 2 - Garage ubicato a San Giorgio Bigarello (MN) - Via Sordello n. 5, piano Terra ................................ .......... 5",
+            "start_offset": 838,
+            "end_offset": 976,
+            "bbox": null,
+            "offset_mode": "PAGE_LOCAL",
+            "page_text_hash": "93eff6a24152f5f76dedab5b71d7b0dd468be6bc28023a39f0796806a9ce712e",
+            "search_hint": "Bene N° 2 - Garage ubicato a San Giorgio Bigarello (MN) - Via Sordello n. 5,"
+          }
+        ],
+        "location_piano": [
+          {
+            "page": 39,
+            "quote": "Bene N° 2 - Garage San Giorgio Bigarello (MN) - Via Sordello n. 5, piano Terra 38,50 mq 900,00 €/mq € 34.650,00",
+            "search_hint": "Bene N° 2 - Garage San Giorgio Bigarello (MN) - Via Sordello n. 5, piano Terra 38,50 mq 900,00 €/mq € 34.650,00"
+          }
+        ],
+        "superficie": [
+          {
+            "page": 39,
+            "quote": "Bene N° 2 - Garage San Giorgio Bigarello (MN) - Via Sordello n. 5, piano Terra 38,50 mq 900,00 €/mq € 34.650,00",
+            "search_hint": "Bene N° 2 - Garage San Giorgio Bigarello (MN) - Via Sordello n. 5, piano Terra 38,50 mq 900,00 €/mq € 34.650,00"
+          }
+        ],
+        "valore_stima": [
+          {
+            "page": 38,
+            "quote": "Valore di stima del bene: € 34.650,00",
+            "start_offset": 614,
+            "end_offset": 653,
+            "bbox": null,
+            "offset_mode": "PAGE_LOCAL",
+            "page_text_hash": "5fce227d8123aeebf713e681d1be6fa2a9d866497e38d0f6d50279401f046ac7",
+            "search_hint": "Valore di stima del bene: € 34.650,00"
+          }
+        ],
+        "catasto": [
+          {
+            "page": 42,
+            "quote": "Identificato al catasto Fabbricati - Fg. 20, Part. 433, Sub. 302, Categoria C6",
+            "start_offset": 3018,
+            "end_offset": 3098,
+            "bbox": null,
+            "offset_mode": "PAGE_LOCAL",
+            "page_text_hash": "887b37b5973286dfecb92b49498c504e0f1cbd6c511ca9db807bf4c7da4a177f",
+            "search_hint": "Identificato al catasto Fabbricati - Fg. 20, Part. 433, Sub. 302, Categoria C6"
+          }
+        ],
+        "note": [],
+        "ape": [
+          {
+            "page": 35,
+            "quote": " Non esiste il certificato energetico dell'immobile / APE.",
+            "start_offset": 818,
+            "end_offset": 880,
+            "bbox": null,
+            "offset_mode": "PAGE_LOCAL",
+            "page_text_hash": "84f26b717fb03386ac25b0a9af083fcbec797667dbde4d3b1fe560e57a882b66",
+            "search_hint": " Non esiste il certificato energetico dell'immobile / APE."
+          }
+        ],
+        "dichiarazioni_impianti": {
+          "elettrico": [
+            {
+              "page": 35,
+              "quote": " Non esiste la dichiarazione di conformità dell'impianto elettrico.",
+              "start_offset": 880,
+              "end_offset": 951,
+              "bbox": null,
+              "offset_mode": "PAGE_LOCAL",
+              "page_text_hash": "84f26b717fb03386ac25b0a9af083fcbec797667dbde4d3b1fe560e57a882b66",
+              "search_hint": " Non esiste la dichiarazione di conformità dell'impianto elettrico."
+            }
+          ],
+          "termico": [
+            {
+              "page": 35,
+              "quote": " Non esiste la dichiarazio ne di conformità dell'impianto termico.",
+              "start_offset": 951,
+              "end_offset": 1021,
+              "bbox": null,
+              "offset_mode": "PAGE_LOCAL",
+              "page_text_hash": "84f26b717fb03386ac25b0a9af083fcbec797667dbde4d3b1fe560e57a882b66",
+              "search_hint": " Non esiste la dichiarazio ne di conformità dell'impianto termico."
+            }
+          ],
+          "idrico": [
+            {
+              "page": 35,
+              "quote": " Non esiste la dichiarazione di conformità dell'impianto idrico.",
+              "start_offset": 1021,
+              "end_offset": 1089,
+              "bbox": null,
+              "offset_mode": "PAGE_LOCAL",
+              "page_text_hash": "84f26b717fb03386ac25b0a9af083fcbec797667dbde4d3b1fe560e57a882b66",
+              "search_hint": " Non esiste la dichiarazione di conformità dell'impianto idrico."
+            }
+          ]
+        },
+        "dichiarazioni": {
+          "dichiarazione_impianto_elettrico": [
+            {
+              "page": 35,
+              "quote": " Non esiste la dichiarazione di conformità dell'impianto elettrico.",
+              "start_offset": 880,
+              "end_offset": 951,
+              "bbox": null,
+              "offset_mode": "PAGE_LOCAL",
+              "page_text_hash": "84f26b717fb03386ac25b0a9af083fcbec797667dbde4d3b1fe560e57a882b66",
+              "search_hint": " Non esiste la dichiarazione di conformità dell'impianto elettrico."
+            }
+          ],
+          "dichiarazione_impianto_termico": [
+            {
+              "page": 35,
+              "quote": " Non esiste la dichiarazio ne di conformità dell'impianto termico.",
+              "start_offset": 951,
+              "end_offset": 1021,
+              "bbox": null,
+              "offset_mode": "PAGE_LOCAL",
+              "page_text_hash": "84f26b717fb03386ac25b0a9af083fcbec797667dbde4d3b1fe560e57a882b66",
+              "search_hint": " Non esiste la dichiarazio ne di conformità dell'impianto termico."
+            }
+          ],
+          "dichiarazione_impianto_idrico": [
+            {
+              "page": 35,
+              "quote": " Non esiste la dichiarazione di conformità dell'impianto idrico.",
+              "start_offset": 1021,
+              "end_offset": 1089,
+              "bbox": null,
+              "offset_mode": "PAGE_LOCAL",
+              "page_text_hash": "84f26b717fb03386ac25b0a9af083fcbec797667dbde4d3b1fe560e57a882b66",
+              "search_hint": " Non esiste la dichiarazione di conformità dell'impianto idrico."
+            }
+          ]
+        }
+      }
+    },
+    {
+      "bene_number": 3,
+      "tipologia": "Garage",
+      "short_location": "Garage San Giorgio Bigarello (MN) - Via Sordello n. 5",
+      "piano": "Seminterrato",
+      "superficie_mq": 35.22,
+      "valore_stima_eur": 49308,
+      "catasto": {
+        "consistenza": "Superficie",
+        "rendita": "€ 85,53.",
+        "foglio": "20",
+        "particella": "433",
+        "sub": "302",
+        "categoria": "C6"
+      },
+      "note": [
+        "non risulta agibile.",
+        "risulta agibile."
+      ],
+      "ape": "Non esiste",
+      "dichiarazioni_impianti": {
+        "elettrico": "Non esiste",
+        "termico": "Non esiste",
+        "idrico": "Non esiste"
+      },
+      "dichiarazioni": {
+        "dichiarazione_impianto_elettrico": "Non esiste",
+        "dichiarazione_impianto_termico": "Non esiste",
+        "dichiarazione_impianto_idrico": "Non esiste"
+      },
+      "evidence": {
+        "tipologia": [
+          {
+            "page": 2,
+            "quote": "Bene N° 3 - Garage ubicato a San Giorgio Bigarello (MN) - Via Sordello n. 5, piano Seminterrato ........................... 6",
+            "start_offset": 977,
+            "end_offset": 1106,
+            "bbox": null,
+            "offset_mode": "PAGE_LOCAL",
+            "page_text_hash": "93eff6a24152f5f76dedab5b71d7b0dd468be6bc28023a39f0796806a9ce712e",
+            "search_hint": "Bene N° 3 - Garage ubicato a San Giorgio Bigarello (MN) - Via Sordello n. 5,"
+          }
+        ],
+        "location_piano": [
+          {
+            "page": 39,
+            "quote": "Bene N° 3 - Garage San Giorgio Bigarello (MN) - Via Sordello n. 5, piano Seminterrato 35,22 mq 1.400,00 €/mq € 49.3 08,00",
+            "search_hint": "Bene N° 3 - Garage San Giorgio Bigarello (MN) - Via Sordello n. 5, piano Seminterrato 35,22 mq 1.400,00 €/mq € 49.3 08,0"
+          }
+        ],
+        "superficie": [
+          {
+            "page": 39,
+            "quote": "Bene N° 3 - Garage San Giorgio Bigarello (MN) - Via Sordello n. 5, piano Seminterrato 35,22 mq 1.400,00 €/mq € 49.3 08,00",
+            "search_hint": "Bene N° 3 - Garage San Giorgio Bigarello (MN) - Via Sordello n. 5, piano Seminterrato 35,22 mq 1.400,00 €/mq € 49.3 08,0"
+          }
+        ],
+        "valore_stima": [
+          {
+            "page": 38,
+            "quote": "Valore di stima del bene: € 49.308,00",
+            "start_offset": 1937,
+            "end_offset": 1976,
+            "bbox": null,
+            "offset_mode": "PAGE_LOCAL",
+            "page_text_hash": "5fce227d8123aeebf713e681d1be6fa2a9d866497e38d0f6d50279401f046ac7",
+            "search_hint": "Valore di stima del bene: € 49.308,00"
+          }
+        ],
+        "catasto": [
+          {
+            "page": 45,
+            "quote": "Identificato al catasto Fabbricati - Fg. 20, Part. 433, Sub.",
+            "start_offset": 1648,
+            "end_offset": 1709,
+            "bbox": null,
+            "offset_mode": "PAGE_LOCAL",
+            "page_text_hash": "bf502c617bb4cf7d1f6c34d977e4e0997f94b3cdf0a724526e393984a7078b8d",
+            "search_hint": "Identificato al catasto Fabbricati - Fg. 20, Part. 433, Sub."
+          }
+        ],
+        "note": [
+          {
+            "page": 35,
+            "quote": "risulta agibile.\nA seguito della richiesta di accesso agli atti presso il Comune di S. Giorgio Bigarello, sono state reperite le",
+            "start_offset": 1608,
+            "end_offset": 1626,
+            "bbox": null,
+            "offset_mode": "PAGE_LOCAL",
+            "page_text_hash": "84f26b717fb03386ac25b0a9af083fcbec797667dbde4d3b1fe560e57a882b66",
+            "search_hint": "risulta agibile. A seguito della richiesta di accesso agli atti presso il Comune"
+          }
+        ],
+        "ape": [
+          {
+            "page": 36,
+            "quote": " Non esiste il certificato energetico dell'immobile / APE.",
+            "start_offset": 218,
+            "end_offset": 280,
+            "bbox": null,
+            "offset_mode": "PAGE_LOCAL",
+            "page_text_hash": "0fa04c0d53d1ec7ef997a4e127c04e876f5e60547d4a5d639c34165c5245a9cc",
+            "search_hint": " Non esiste il certificato energetico dell'immobile / APE."
+          }
+        ],
+        "dichiarazioni_impianti": {
+          "elettrico": [
+            {
+              "page": 36,
+              "quote": " Non esiste la dichiarazione di conformità dell'impianto elettrico.",
+              "start_offset": 280,
+              "end_offset": 351,
+              "bbox": null,
+              "offset_mode": "PAGE_LOCAL",
+              "page_text_hash": "0fa04c0d53d1ec7ef997a4e127c04e876f5e60547d4a5d639c34165c5245a9cc",
+              "search_hint": " Non esiste la dichiarazione di conformità dell'impianto elettrico."
+            }
+          ],
+          "termico": [
+            {
+              "page": 36,
+              "quote": " Non esiste la dichiaraz ione di conformità dell'impianto termico.",
+              "start_offset": 351,
+              "end_offset": 421,
+              "bbox": null,
+              "offset_mode": "PAGE_LOCAL",
+              "page_text_hash": "0fa04c0d53d1ec7ef997a4e127c04e876f5e60547d4a5d639c34165c5245a9cc",
+              "search_hint": " Non esiste la dichiaraz ione di conformità dell'impianto termico."
+            }
+          ],
+          "idrico": [
+            {
+              "page": 36,
+              "quote": " Non esiste la dichiarazione di conformità dell'impianto idrico.",
+              "start_offset": 421,
+              "end_offset": 489,
+              "bbox": null,
+              "offset_mode": "PAGE_LOCAL",
+              "page_text_hash": "0fa04c0d53d1ec7ef997a4e127c04e876f5e60547d4a5d639c34165c5245a9cc",
+              "search_hint": " Non esiste la dichiarazione di conformità dell'impianto idrico."
+            }
+          ]
+        },
+        "dichiarazioni": {
+          "dichiarazione_impianto_elettrico": [
+            {
+              "page": 36,
+              "quote": " Non esiste la dichiarazione di conformità dell'impianto elettrico.",
+              "start_offset": 280,
+              "end_offset": 351,
+              "bbox": null,
+              "offset_mode": "PAGE_LOCAL",
+              "page_text_hash": "0fa04c0d53d1ec7ef997a4e127c04e876f5e60547d4a5d639c34165c5245a9cc",
+              "search_hint": " Non esiste la dichiarazione di conformità dell'impianto elettrico."
+            }
+          ],
+          "dichiarazione_impianto_termico": [
+            {
+              "page": 36,
+              "quote": " Non esiste la dichiaraz ione di conformità dell'impianto termico.",
+              "start_offset": 351,
+              "end_offset": 421,
+              "bbox": null,
+              "offset_mode": "PAGE_LOCAL",
+              "page_text_hash": "0fa04c0d53d1ec7ef997a4e127c04e876f5e60547d4a5d639c34165c5245a9cc",
+              "search_hint": " Non esiste la dichiaraz ione di conformità dell'impianto termico."
+            }
+          ],
+          "dichiarazione_impianto_idrico": [
+            {
+              "page": 36,
+              "quote": " Non esiste la dichiarazione di conformità dell'impianto idrico.",
+              "start_offset": 421,
+              "end_offset": 489,
+              "bbox": null,
+              "offset_mode": "PAGE_LOCAL",
+              "page_text_hash": "0fa04c0d53d1ec7ef997a4e127c04e876f5e60547d4a5d639c34165c5245a9cc",
+              "search_hint": " Non esiste la dichiarazione di conformità dell'impianto idrico."
+            }
+          ]
+        }
+      }
+    },
+    {
+      "bene_number": 4,
+      "tipologia": "Villetta",
+      "short_location": "Villetta San Giorgio Bigarello (MN) - Via Sordello n. 5",
+      "piano": "terra rialzato - primo",
+      "superficie_mq": 165.1,
+      "valore_stima_eur": 231140,
+      "catasto": {
+        "consistenza": "................................ ................................ ................................ ................................ ................................ ................................ . 10",
+        "rendita": "€ 43,90.",
+        "foglio": "20",
+        "particella": "600",
+        "sub": "3",
+        "categoria": "A7"
+      },
+      "note": [
+        "risulta agibile."
+      ],
+      "ape": "Non esiste",
+      "dichiarazioni_impianti": {
+        "elettrico": "Non esiste",
+        "termico": "Non esiste",
+        "idrico": "Non esiste"
+      },
+      "dichiarazioni": {
+        "dichiarazione_impianto_elettrico": "Non esiste",
+        "dichiarazione_impianto_termico": "Non esiste",
+        "dichiarazione_impianto_idrico": "Non esiste"
+      },
+      "evidence": {
+        "tipologia": [
+          {
+            "page": 2,
+            "quote": "Bene N° 4 - Villetta ubicata a San Giorgio Bigarello (MN) - Via Sordello n. 5, piano Piano terra rialzato -primo 6",
+            "start_offset": 1107,
+            "end_offset": 1225,
+            "bbox": null,
+            "offset_mode": "PAGE_LOCAL",
+            "page_text_hash": "93eff6a24152f5f76dedab5b71d7b0dd468be6bc28023a39f0796806a9ce712e",
+            "search_hint": "Bene N° 4 - Villetta ubicata a San Giorgio Bigarello (MN) - Via Sordello n. 5,"
+          }
+        ],
+        "location_piano": [
+          {
+            "page": 39,
+            "quote": "Bene N° 4 - Villetta San Giorgio Bigarello (MN) - Via Sordello n. 5, piano Piano terra rialzato -primo 165,10 mq 1.400,00 €/mq € 231.140,00",
+            "search_hint": "Bene N° 4 - Villetta San Giorgio Bigarello (MN) - Via Sordello n. 5, piano Piano terra rialzato -primo 165,10 mq 1.400,0"
+          }
+        ],
+        "superficie": [
+          {
+            "page": 39,
+            "quote": "Bene N° 4 - Villetta San Giorgio Bigarello (MN) - Via Sordello n. 5, piano Piano terra rialzato -primo 165,10 mq 1.400,00 €/mq € 231.140,00",
+            "search_hint": "Bene N° 4 - Villetta San Giorgio Bigarello (MN) - Via Sordello n. 5, piano Piano terra rialzato -primo 165,10 mq 1.400,0"
+          }
+        ],
+        "valore_stima": [
+          {
+            "page": 39,
+            "quote": "Bene N° 4 - Villetta San Giorgio Bigarello (MN) - Via Sordello n. 5, piano Piano terra rialzato -primo 165,10 mq 1.400,00 €/mq € 231.140,00",
+            "search_hint": "Bene N° 4 - Villetta San Giorgio Bigarello (MN) - Via Sordello n. 5, piano Piano terra rialzato -primo 165,10 mq 1.400,0"
+          }
+        ],
+        "catasto": [
+          {
+            "page": 46,
+            "quote": "Identificato al catasto Fa bbricati - Fg. 20, Part. 600, Sub.",
+            "start_offset": 1419,
+            "end_offset": 1481,
+            "bbox": null,
+            "offset_mode": "PAGE_LOCAL",
+            "page_text_hash": "4209bb4c65b9a81359098d8d9889e8cd45dc58237617f1ae558284e01c143fa7",
+            "search_hint": "Identificato al catasto Fa bbricati - Fg. 20, Part. 600, Sub."
+          }
+        ],
+        "note": [
+          {
+            "page": 36,
+            "quote": "risulta agibile.\nA seguito della richiesta di accesso agli atti presso il Comune di S. Giorgio Bigarello, sono state reperite le",
+            "start_offset": 1018,
+            "end_offset": 1036,
+            "bbox": null,
+            "offset_mode": "PAGE_LOCAL",
+            "page_text_hash": "0fa04c0d53d1ec7ef997a4e127c04e876f5e60547d4a5d639c34165c5245a9cc",
+            "search_hint": "risulta agibile. A seguito della richiesta di accesso agli atti presso il Comune"
+          }
+        ],
+        "ape": [
+          {
+            "page": 36,
+            "quote": " Non esiste il certificato energetico dell'immobile / APE.",
+            "start_offset": 1573,
+            "end_offset": 1635,
+            "bbox": null,
+            "offset_mode": "PAGE_LOCAL",
+            "page_text_hash": "0fa04c0d53d1ec7ef997a4e127c04e876f5e60547d4a5d639c34165c5245a9cc",
+            "search_hint": " Non esiste il certificato energetico dell'immobile / APE."
+          }
+        ],
+        "dichiarazioni_impianti": {
+          "elettrico": [
+            {
+              "page": 37,
+              "quote": " Non esiste la dichiarazione di conformità dell'impianto elettrico.",
+              "start_offset": 11,
+              "end_offset": 83,
+              "bbox": null,
+              "offset_mode": "PAGE_LOCAL",
+              "page_text_hash": "4ad57c4eaf3b7a72d52639d73c1b7de17d0b3b51cb5f9ab259c69a9ab1958b0e",
+              "search_hint": " Non esiste la dichiarazione di conformità dell'impianto elettrico."
+            }
+          ],
+          "termico": [
+            {
+              "page": 37,
+              "quote": " Non esiste la dichiarazione di conformità dell'impianto termico.",
+              "start_offset": 83,
+              "end_offset": 153,
+              "bbox": null,
+              "offset_mode": "PAGE_LOCAL",
+              "page_text_hash": "4ad57c4eaf3b7a72d52639d73c1b7de17d0b3b51cb5f9ab259c69a9ab1958b0e",
+              "search_hint": " Non esiste la dichiarazione di conformità dell'impianto termico."
+            }
+          ],
+          "idrico": [
+            {
+              "page": 37,
+              "quote": " Non esiste la dichiarazione di conformità dell'impianto idrico.",
+              "start_offset": 153,
+              "end_offset": 221,
+              "bbox": null,
+              "offset_mode": "PAGE_LOCAL",
+              "page_text_hash": "4ad57c4eaf3b7a72d52639d73c1b7de17d0b3b51cb5f9ab259c69a9ab1958b0e",
+              "search_hint": " Non esiste la dichiarazione di conformità dell'impianto idrico."
+            }
+          ]
+        },
+        "dichiarazioni": {
+          "dichiarazione_impianto_elettrico": [
+            {
+              "page": 37,
+              "quote": " Non esiste la dichiarazione di conformità dell'impianto elettrico.",
+              "start_offset": 11,
+              "end_offset": 83,
+              "bbox": null,
+              "offset_mode": "PAGE_LOCAL",
+              "page_text_hash": "4ad57c4eaf3b7a72d52639d73c1b7de17d0b3b51cb5f9ab259c69a9ab1958b0e",
+              "search_hint": " Non esiste la dichiarazione di conformità dell'impianto elettrico."
+            }
+          ],
+          "dichiarazione_impianto_termico": [
+            {
+              "page": 37,
+              "quote": " Non esiste la dichiarazione di conformità dell'impianto termico.",
+              "start_offset": 83,
+              "end_offset": 153,
+              "bbox": null,
+              "offset_mode": "PAGE_LOCAL",
+              "page_text_hash": "4ad57c4eaf3b7a72d52639d73c1b7de17d0b3b51cb5f9ab259c69a9ab1958b0e",
+              "search_hint": " Non esiste la dichiarazione di conformità dell'impianto termico."
+            }
+          ],
+          "dichiarazione_impianto_idrico": [
+            {
+              "page": 37,
+              "quote": " Non esiste la dichiarazione di conformità dell'impianto idrico.",
+              "start_offset": 153,
+              "end_offset": 221,
+              "bbox": null,
+              "offset_mode": "PAGE_LOCAL",
+              "page_text_hash": "4ad57c4eaf3b7a72d52639d73c1b7de17d0b3b51cb5f9ab259c69a9ab1958b0e",
+              "search_hint": " Non esiste la dichiarazione di conformità dell'impianto idrico."
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "lots_count": 1,
+  "is_multi_lot": false,
+  "money_box": {
+    "items": [
+      {
+        "code": "A",
+        "label_it": "Regolarizzazione urbanistica",
+        "label_en": "Urban regularization",
+        "type": "ESTIMATE",
+        "stima_euro": 3000.0,
+        "stima_nota": "Perizia: sanatoria stimata",
+        "fonte_perizia": {
+          "value": "Perizia",
+          "evidence": [
+            {
+              "page": 38,
+              "quote": "spese di massima presunte: € 3.000,00.",
+              "start_offset": 2472,
+              "end_offset": 2512,
+              "bbox": null,
+              "offset_mode": "PAGE_LOCAL",
+              "page_text_hash": "5fce227d8123aeebf713e681d1be6fa2a9d866497e38d0f6d50279401f046ac7",
+              "search_hint": "spese di massima presunte: € 3.000,00."
+            }
+          ]
+        },
+        "action_required_it": "Verificare con tecnico",
+        "action_required_en": "Verify with technician"
+      },
+      {
+        "code": "B",
+        "label_it": "Oneri tecnici / istruttoria",
+        "label_en": "Technical fees",
+        "type": "TBD",
+        "stima_euro": "TBD",
+        "stima_nota": "TBD (NON SPECIFICATO IN PERIZIA) — Stima indicativa di mercato (non presente in perizia)",
+        "source": "TBD",
+        "market_range_eur": {
+          "min": 800.0,
+          "max": 2500.0,
+          "basis_it": "Stima indicativa di mercato (non presente in perizia)",
+          "basis_en": "Indicative market estimate (not present in the appraisal)"
+        },
+        "source_market": "MARKET_ESTIMATE"
+      },
+      {
+        "code": "C",
+        "label_it": "Rischio ripristini",
+        "label_en": "Restoration risk",
+        "type": "TBD",
+        "stima_euro": "TBD",
+        "stima_nota": "TBD (NON SPECIFICATO IN PERIZIA) — Stima indicativa di mercato (non presente in perizia)",
+        "fonte_perizia": {
+          "value": "Non specificato",
+          "evidence": []
+        },
+        "source": "TBD",
+        "market_range_eur": {
+          "min": 0.0,
+          "max": 15000.0,
+          "basis_it": "Stima indicativa di mercato (non presente in perizia)",
+          "basis_en": "Indicative market estimate (not present in the appraisal)"
+        },
+        "source_market": "MARKET_ESTIMATE"
+      },
+      {
+        "code": "D",
+        "label_it": "Allineamento catastale",
+        "label_en": "Cadastral alignment",
+        "type": "TBD",
+        "stima_euro": "TBD",
+        "stima_nota": "TBD (NON SPECIFICATO IN PERIZIA) — Stima indicativa di mercato (non presente in perizia)",
+        "source": "TBD",
+        "market_range_eur": {
+          "min": 500.0,
+          "max": 2500.0,
+          "basis_it": "Stima indicativa di mercato (non presente in perizia)",
+          "basis_en": "Indicative market estimate (not present in the appraisal)"
+        },
+        "source_market": "MARKET_ESTIMATE"
+      },
+      {
+        "code": "E",
+        "label_it": "Spese condominiali arretrate",
+        "label_en": "Condo arrears",
+        "type": "TBD",
+        "stima_euro": "TBD",
+        "stima_nota": "NON SPECIFICATO IN PERIZIA — Stima indicativa di mercato (non presente in perizia)",
+        "action_required_it": "Verificare con amministratore",
+        "action_required_en": "Verify with administrator",
+        "fonte_perizia": {
+          "value": "Non specificato in perizia",
+          "evidence": []
+        },
+        "source": "Non specificato in perizia",
+        "market_range_eur": {
+          "min": 0.0,
+          "max": 3000.0,
+          "basis_it": "Stima indicativa di mercato (non presente in perizia)",
+          "basis_en": "Indicative market estimate (not present in the appraisal)"
+        },
+        "source_market": "MARKET_ESTIMATE"
+      },
+      {
+        "code": "F",
+        "label_it": "Costi procedura",
+        "label_en": "Procedure costs",
+        "type": "TBD",
+        "stima_euro": "TBD",
+        "stima_nota": "TBD (NON SPECIFICATO IN PERIZIA) — Stima indicativa di mercato (non presente in perizia)",
+        "action_required_it": "Verificare con delegato",
+        "action_required_en": "Verify with delegate",
+        "market_range_eur": {
+          "min": 2000.0,
+          "max": 8000.0,
+          "basis_it": "Stima indicativa di mercato (non presente in perizia)",
+          "basis_en": "Indicative market estimate (not present in the appraisal)"
+        },
+        "source": "MARKET_ESTIMATE"
+      },
+      {
+        "code": "G",
+        "label_it": "Cancellazione formalità",
+        "label_en": "Formality cancellation",
+        "type": "INFO_ONLY",
+        "stima_euro": "TBD",
+        "stima_nota": "Da liquidare con decreto di trasferimento — Stima indicativa di mercato (non presente in perizia)",
+        "market_range_eur": {
+          "min": 0.0,
+          "max": 2000.0,
+          "basis_it": "Stima indicativa di mercato (non presente in perizia)",
+          "basis_en": "Indicative market estimate (not present in the appraisal)"
+        },
+        "source": "MARKET_ESTIMATE"
+      },
+      {
+        "code": "H",
+        "label_it": "Costo liberazione",
+        "label_en": "Liberation cost",
+        "type": "TBD",
+        "stima_euro": "TBD",
+        "stima_nota": "TBD (NON SPECIFICATO IN PERIZIA) — Stima indicativa di mercato (non presente in perizia)",
+        "source": "TBD",
+        "market_range_eur": {
+          "min": 3000.0,
+          "max": 15000.0,
+          "basis_it": "Stima indicativa di mercato (non presente in perizia)",
+          "basis_en": "Indicative market estimate (not present in the appraisal)"
+        },
+        "source_market": "MARKET_ESTIMATE"
+      },
+      {
+        "code": "S3C01",
+        "label_it": "Costo rilevato da perizia",
+        "label_en": "Cost extracted from appraisal",
+        "type": "ESTIMATE",
+        "stima_euro": 5000.0,
+        "stima_nota": "Deterministic candidate-based cost",
+        "fonte_perizia": {
+          "value": "Perizia",
+          "evidence": [
+            {
+              "page": 37,
+              "quote": "- Completamento lavori € 15.000,00; - pratiche per abitabilità € 5.000,00 Astalegale.net - E' vietata la stampa e la riproduzione dei documen",
+              "search_hint": "- Completamento lavori € 15.000,00; - pratiche per abitabilità € 5.000,00"
+            }
+          ]
+        },
+        "action_required_it": "Verifica documentale",
+        "action_required_en": "Document check",
+        "source": "step3_candidates",
+        "candidate_ids": [
+          "m_000026"
+        ]
+      },
+      {
+        "code": "S3C02",
+        "label_it": "Costo rilevato da perizia",
+        "label_en": "Cost extracted from appraisal",
+        "type": "ESTIMATE",
+        "stima_euro": 15000.0,
+        "stima_nota": "Deterministic candidate-based cost",
+        "fonte_perizia": {
+          "value": "Perizia",
+          "evidence": [
+            {
+              "page": 37,
+              "quote": "bile e per le pratiche dell’abitabilità: - Completamento lavori € 15.000,00; - pratiche per abitabilità € 5.000,00 Astalegale.net - E' viet",
+              "search_hint": "bile e per le pratiche dell’abitabilità: - Completamento lavori € 15.000,00; -"
+            }
+          ]
+        },
+        "action_required_it": "Verifica documentale",
+        "action_required_en": "Document check",
+        "source": "step3_candidates",
+        "candidate_ids": [
+          "m_000027"
+        ]
+      },
+      {
+        "code": "S3C03",
+        "label_it": "Costo rilevato da perizia",
+        "label_en": "Cost extracted from appraisal",
+        "type": "ESTIMATE",
+        "stima_euro": 1032.0,
+        "stima_nota": "Deterministic candidate-based cost",
+        "fonte_perizia": {
+          "value": "Perizia",
+          "evidence": [
+            {
+              "page": 38,
+              "quote": "nico comunale. N.B. si specifica che il costo dell’oblazione di € 1.032,00 (art. 36 bis) è indicativo e si consiglia di verificare Astalegale.n",
+              "search_hint": "nico comunale. N.B. si specifica che il costo dell’oblazione di € 1.032,00 (art."
+            }
+          ]
+        },
+        "action_required_it": "Verifica documentale",
+        "action_required_en": "Document check",
+        "source": "step3_candidates",
+        "candidate_ids": [
+          "m_000029"
+        ]
+      },
+      {
+        "code": "S3C04",
+        "label_it": "Costo rilevato da perizia",
+        "label_en": "Cost extracted from appraisal",
+        "type": "ESTIMATE",
+        "stima_euro": 3000.0,
+        "stima_nota": "Deterministic candidate-based cost",
+        "fonte_perizia": {
+          "value": "Perizia",
+          "evidence": [
+            {
+              "page": 38,
+              "quote": ", le spese di massima della sanatoria: spese di massima presunte: € 3.000,00. N.B. Si specifica che da informazioni presso l’Ufficio Tecnico",
+              "search_hint": ", le spese di massima della sanatoria: spese di massima presunte: € 3.000,00."
+            }
+          ]
+        },
+        "action_required_it": "Verifica documentale",
+        "action_required_en": "Document check",
+        "source": "step3_candidates",
+        "candidate_ids": [
+          "m_000030"
+        ]
+      },
+      {
+        "code": "S3C05",
+        "label_it": "Costo rilevato da perizia",
+        "label_en": "Cost extracted from appraisal",
+        "type": "ESTIMATE",
+        "stima_euro": 5000.0,
+        "stima_nota": "Deterministic candidate-based cost",
+        "fonte_perizia": {
+          "value": "Perizia",
+          "evidence": [
+            {
+              "page": 38,
+              "quote": "a per le pratiche dell’abitabilità: - pratiche per abitabilità € 5.000,00 (già conteggiate)  Bene N° 3 - Garage ubicato a San Giorgio",
+              "search_hint": "a per le pratiche dell’abitabilità: - pratiche per abitabilità € 5.000,00 (già"
+            }
+          ]
+        },
+        "action_required_it": "Verifica documentale",
+        "action_required_en": "Document check",
+        "source": "step3_candidates",
+        "candidate_ids": [
+          "m_000031"
+        ]
+      },
+      {
+        "code": "S3C06",
+        "label_it": "Costo rilevato da perizia",
+        "label_en": "Cost extracted from appraisal",
+        "type": "ESTIMATE",
+        "stima_euro": 0.0,
+        "stima_nota": "Deterministic candidate-based cost",
+        "fonte_perizia": {
+          "value": "Perizia",
+          "evidence": [
+            {
+              "page": 40,
+              "quote": "eprezzamento Valore Tipo Oneri di regolarizzazione urbanistica 23000,00 € Rischio assunto per mancata garanzia 5000,00 € Valore finale di",
+              "search_hint": "eprezzamento Valore Tipo Oneri di regolarizzazione urbanistica 23000,00 €"
+            }
+          ]
+        },
+        "action_required_it": "Verifica documentale",
+        "action_required_en": "Document check",
+        "source": "step3_candidates",
+        "candidate_ids": [
+          "m_000049"
+        ]
+      },
+      {
+        "code": "S3C07",
+        "label_it": "Costo rilevato da perizia",
+        "label_en": "Cost extracted from appraisal",
+        "type": "ESTIMATE",
+        "stima_euro": 0.0,
+        "stima_nota": "Deterministic candidate-based cost",
+        "fonte_perizia": {
+          "value": "Perizia",
+          "evidence": [
+            {
+              "page": 40,
+              "quote": "ne urbanistica 23000,00 € Rischio assunto per mancata garanzia 5000,00 € Valore finale di stima: € 391.849,00 Assolto il pr",
+              "search_hint": "ne urbanistica 23000,00 € Rischio assunto per mancata garanzia 5000,00 € Valore"
+            }
+          ]
+        },
+        "action_required_it": "Verifica documentale",
+        "action_required_en": "Document check",
+        "source": "step3_candidates",
+        "candidate_ids": [
+          "m_000050"
+        ]
+      },
+      {
+        "code": "S3C08",
+        "label_it": "Costo rilevato da perizia",
+        "label_en": "Cost extracted from appraisal",
+        "type": "ESTIMATE",
+        "stima_euro": 391849.0,
+        "stima_nota": "Deterministic candidate-based cost",
+        "fonte_perizia": {
+          "value": "Perizia",
+          "evidence": [
+            {
+              "page": 40,
+              "quote": "o assunto per mancata garanzia 5000,00 € Valore finale di stima: € 391.849,00 Assolto il proprio mandato, il sottoscritto Esperto e",
+              "search_hint": "o assunto per mancata garanzia 5000,00 € Valore finale di stima: € 391.849,00"
+            }
+          ]
+        },
+        "action_required_it": "Verifica documentale",
+        "action_required_en": "Document check",
+        "source": "step3_candidates",
+        "candidate_ids": [
+          "m_000051"
+        ]
+      }
+    ],
+    "total_extra_costs": {
+      "range": {
+        "min": "TBD",
+        "max": "TBD"
+      },
+      "max_is_open": true,
+      "note": "TBD because one or more cost items are unspecified"
+    },
+    "total_extra_costs_range": {
+      "min_eur": 9300.0,
+      "max_eur": 51000.0,
+      "includes_market_estimates": true
+    }
+  },
+  "formalita": {
+    "ipoteca": {
+      "status": "UNKNOWN",
+      "evidence": []
+    },
+    "pignoramento": {
+      "status": "UNKNOWN",
+      "evidence": []
+    },
+    "cancellazione_decreto": {
+      "status": "UNKNOWN",
+      "evidence": []
+    },
+    "summary_it": "PRESENTI FORMALITÀ",
+    "summary_evidence": [
+      {
+        "page": 3,
+        "quote": "Servitù, censo, livello, usi civici ................................ ................................ ................................ ................................ ........................... 17",
+        "start_offset": 2133,
+        "end_offset": 2334,
+        "bbox": null,
+        "offset_mode": "PAGE_LOCAL",
+        "page_text_hash": "9c5d6b6f00d6ca0663c34dd4cb80b82a16cf5448f05036be4327e00c42ba7869",
+        "search_hint": "Servitù, censo, livello, usi civici ................................"
+      }
+    ]
+  }
+}

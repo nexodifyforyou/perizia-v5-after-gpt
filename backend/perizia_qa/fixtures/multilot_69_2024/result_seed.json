@@ -1,0 +1,4542 @@
+{
+  "report_header": {
+    "title": "NEXODIFY INTELLIGENCE | Auction Scan",
+    "procedure": {
+      "value": "Esecuzione Immobiliare 69/2024 R.G.E.",
+      "evidence": [
+        {
+          "page": 1,
+          "quote": "Esecuzione Immobiliare 69/2024 del R.G.E",
+          "start_offset": 140,
+          "end_offset": 182,
+          "bbox": null,
+          "offset_mode": "PAGE_LOCAL",
+          "page_text_hash": "dee06f4cdf40478b764c68dc616a5723677772559ad90df9a6cc860fe46ff22b",
+          "search_hint": "Esecuzione Immobiliare 69/2024 del R.G.E"
+        }
+      ]
+    },
+    "lotto": {
+      "value": "Lotto 1",
+      "evidence": [
+        {
+          "page": 5,
+          "quote": "5 di 81 LOTTO 1",
+          "search_hint": "LOTTO 1"
+        }
+      ]
+    },
+    "tribunale": {
+      "value": "TRIBUNALE DI PISTOIA",
+      "evidence": [
+        {
+          "page": 1,
+          "quote": "TRIBUNALE DI PISTOIASEZIONEEE",
+          "start_offset": 8,
+          "end_offset": 102,
+          "bbox": null,
+          "offset_mode": "PAGE_LOCAL",
+          "page_text_hash": "dee06f4cdf40478b764c68dc616a5723677772559ad90df9a6cc860fe46ff22b",
+          "search_hint": "TRIBUNALE DI PISTOIASEZIONEEE"
+        }
+      ]
+    },
+    "address": {
+      "value": "Montecatini-Terme (PT)-via Giuseppe Garibaldi n.c. 23",
+      "evidence": [
+        {
+          "page": 3,
+          "quote": "Bene N° 1 - Fabbricato civile ubicato a Montecatini-Terme (PT) - via Giuseppe Garibaldi n.c. 23 .............74",
+          "start_offset": 6386,
+          "end_offset": 6497,
+          "bbox": null,
+          "offset_mode": "PAGE_LOCAL",
+          "page_text_hash": "61735bd4532d3d1bbbb41ce7b3ef645d71fb4e84876f8a444bc96524140a0906",
+          "search_hint": "Bene N° 1 - Fabbricato civile ubicato a Montecatini-Terme (PT) - via Giuseppe"
+        }
+      ]
+    },
+    "is_multi_lot": true,
+    "generated_at": "2026-03-11T23:25:48.887686+00:00"
+  },
+  "section_9_legal_killers": {
+    "items": [
+      {
+        "killer": "Lotto 1: Fibro-cemento / amianto",
+        "status": "DA_VERIFICARE",
+        "status_it": "DA VERIFICARE",
+        "reason_it": "Rilevata criticita: Lotto 1: Fibro-cemento / amianto",
+        "evidence": [],
+        "searched_in": {
+          "pages": [
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7,
+            8,
+            9,
+            10,
+            11,
+            12,
+            13,
+            14,
+            15,
+            16,
+            17,
+            18,
+            19,
+            20,
+            21,
+            22,
+            23,
+            24,
+            25,
+            26,
+            27,
+            28,
+            29,
+            30,
+            31,
+            32,
+            33,
+            34,
+            35,
+            36,
+            37,
+            38,
+            39,
+            40,
+            41,
+            42,
+            43,
+            44,
+            45,
+            46,
+            47,
+            48,
+            49,
+            50,
+            51,
+            52,
+            53,
+            54,
+            55,
+            56,
+            57,
+            58,
+            59,
+            60,
+            61,
+            62,
+            63,
+            64,
+            65,
+            66,
+            67,
+            68,
+            69,
+            70,
+            71,
+            72,
+            73,
+            74,
+            75,
+            76,
+            77,
+            78,
+            79,
+            80,
+            81
+          ],
+          "keywords": [
+            "Lotto 1: Fibro-cemento / amianto"
+          ],
+          "sections": [
+            "section_9_legal_killers"
+          ]
+        },
+        "decision_bucket": "REAL_BLOCKER",
+        "decision_score": 100
+      },
+      {
+        "killer": "Lotto 1: Non agibile",
+        "status": "DA_VERIFICARE",
+        "status_it": "DA VERIFICARE",
+        "reason_it": "Rilevata criticita: Lotto 1: Non agibile",
+        "evidence": [],
+        "searched_in": {
+          "pages": [
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7,
+            8,
+            9,
+            10,
+            11,
+            12,
+            13,
+            14,
+            15,
+            16,
+            17,
+            18,
+            19,
+            20,
+            21,
+            22,
+            23,
+            24,
+            25,
+            26,
+            27,
+            28,
+            29,
+            30,
+            31,
+            32,
+            33,
+            34,
+            35,
+            36,
+            37,
+            38,
+            39,
+            40,
+            41,
+            42,
+            43,
+            44,
+            45,
+            46,
+            47,
+            48,
+            49,
+            50,
+            51,
+            52,
+            53,
+            54,
+            55,
+            56,
+            57,
+            58,
+            59,
+            60,
+            61,
+            62,
+            63,
+            64,
+            65,
+            66,
+            67,
+            68,
+            69,
+            70,
+            71,
+            72,
+            73,
+            74,
+            75,
+            76,
+            77,
+            78,
+            79,
+            80,
+            81
+          ],
+          "keywords": [
+            "Lotto 1: Non agibile"
+          ],
+          "sections": [
+            "section_9_legal_killers"
+          ]
+        },
+        "decision_bucket": "REAL_BLOCKER",
+        "decision_score": 100
+      },
+      {
+        "killer": "Lotto 1: Non regolare / difformità",
+        "status": "DA_VERIFICARE",
+        "status_it": "DA VERIFICARE",
+        "reason_it": "Rilevata criticita: Lotto 1: Non regolare / difformità",
+        "evidence": [],
+        "searched_in": {
+          "pages": [
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7,
+            8,
+            9,
+            10,
+            11,
+            12,
+            13,
+            14,
+            15,
+            16,
+            17,
+            18,
+            19,
+            20,
+            21,
+            22,
+            23,
+            24,
+            25,
+            26,
+            27,
+            28,
+            29,
+            30,
+            31,
+            32,
+            33,
+            34,
+            35,
+            36,
+            37,
+            38,
+            39,
+            40,
+            41,
+            42,
+            43,
+            44,
+            45,
+            46,
+            47,
+            48,
+            49,
+            50,
+            51,
+            52,
+            53,
+            54,
+            55,
+            56,
+            57,
+            58,
+            59,
+            60,
+            61,
+            62,
+            63,
+            64,
+            65,
+            66,
+            67,
+            68,
+            69,
+            70,
+            71,
+            72,
+            73,
+            74,
+            75,
+            76,
+            77,
+            78,
+            79,
+            80,
+            81
+          ],
+          "keywords": [
+            "Lotto 1: Non regolare / difformità"
+          ],
+          "sections": [
+            "section_9_legal_killers"
+          ]
+        },
+        "decision_bucket": "REAL_BLOCKER",
+        "decision_score": 100
+      },
+      {
+        "killer": "Lotto 2: Infiltrazioni",
+        "status": "DA_VERIFICARE",
+        "status_it": "DA VERIFICARE",
+        "reason_it": "Rilevata criticita: Lotto 2: Infiltrazioni",
+        "evidence": [],
+        "searched_in": {
+          "pages": [
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7,
+            8,
+            9,
+            10,
+            11,
+            12,
+            13,
+            14,
+            15,
+            16,
+            17,
+            18,
+            19,
+            20,
+            21,
+            22,
+            23,
+            24,
+            25,
+            26,
+            27,
+            28,
+            29,
+            30,
+            31,
+            32,
+            33,
+            34,
+            35,
+            36,
+            37,
+            38,
+            39,
+            40,
+            41,
+            42,
+            43,
+            44,
+            45,
+            46,
+            47,
+            48,
+            49,
+            50,
+            51,
+            52,
+            53,
+            54,
+            55,
+            56,
+            57,
+            58,
+            59,
+            60,
+            61,
+            62,
+            63,
+            64,
+            65,
+            66,
+            67,
+            68,
+            69,
+            70,
+            71,
+            72,
+            73,
+            74,
+            75,
+            76,
+            77,
+            78,
+            79,
+            80,
+            81
+          ],
+          "keywords": [
+            "Lotto 2: Infiltrazioni"
+          ],
+          "sections": [
+            "section_9_legal_killers"
+          ]
+        },
+        "decision_bucket": "REAL_BLOCKER",
+        "decision_score": 100
+      },
+      {
+        "killer": "Lotto 2: Non agibile",
+        "status": "DA_VERIFICARE",
+        "status_it": "DA VERIFICARE",
+        "reason_it": "Rilevata criticita: Lotto 2: Non agibile",
+        "evidence": [],
+        "searched_in": {
+          "pages": [
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7,
+            8,
+            9,
+            10,
+            11,
+            12,
+            13,
+            14,
+            15,
+            16,
+            17,
+            18,
+            19,
+            20,
+            21,
+            22,
+            23,
+            24,
+            25,
+            26,
+            27,
+            28,
+            29,
+            30,
+            31,
+            32,
+            33,
+            34,
+            35,
+            36,
+            37,
+            38,
+            39,
+            40,
+            41,
+            42,
+            43,
+            44,
+            45,
+            46,
+            47,
+            48,
+            49,
+            50,
+            51,
+            52,
+            53,
+            54,
+            55,
+            56,
+            57,
+            58,
+            59,
+            60,
+            61,
+            62,
+            63,
+            64,
+            65,
+            66,
+            67,
+            68,
+            69,
+            70,
+            71,
+            72,
+            73,
+            74,
+            75,
+            76,
+            77,
+            78,
+            79,
+            80,
+            81
+          ],
+          "keywords": [
+            "Lotto 2: Non agibile"
+          ],
+          "sections": [
+            "section_9_legal_killers"
+          ]
+        },
+        "decision_bucket": "REAL_BLOCKER",
+        "decision_score": 100
+      },
+      {
+        "killer": "Lotto 2: Non regolare / difformità",
+        "status": "DA_VERIFICARE",
+        "status_it": "DA VERIFICARE",
+        "reason_it": "Rilevata criticita: Lotto 2: Non regolare / difformità",
+        "evidence": [],
+        "searched_in": {
+          "pages": [
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7,
+            8,
+            9,
+            10,
+            11,
+            12,
+            13,
+            14,
+            15,
+            16,
+            17,
+            18,
+            19,
+            20,
+            21,
+            22,
+            23,
+            24,
+            25,
+            26,
+            27,
+            28,
+            29,
+            30,
+            31,
+            32,
+            33,
+            34,
+            35,
+            36,
+            37,
+            38,
+            39,
+            40,
+            41,
+            42,
+            43,
+            44,
+            45,
+            46,
+            47,
+            48,
+            49,
+            50,
+            51,
+            52,
+            53,
+            54,
+            55,
+            56,
+            57,
+            58,
+            59,
+            60,
+            61,
+            62,
+            63,
+            64,
+            65,
+            66,
+            67,
+            68,
+            69,
+            70,
+            71,
+            72,
+            73,
+            74,
+            75,
+            76,
+            77,
+            78,
+            79,
+            80,
+            81
+          ],
+          "keywords": [
+            "Lotto 2: Non regolare / difformità"
+          ],
+          "sections": [
+            "section_9_legal_killers"
+          ]
+        },
+        "decision_bucket": "REAL_BLOCKER",
+        "decision_score": 100
+      },
+      {
+        "killer": "Lotto 2: Servitù di passaggio/barriera",
+        "status": "GIALLO",
+        "status_it": "ATTENZIONE",
+        "reason_it": "Rilevata criticita: Lotto 2: Servitù di passaggio/barriera",
+        "evidence": [
+          {
+            "page": 18,
+            "quote": "i immobili avviene attraverso stradella di penetrazione che si diparte dalla via della Colonna, in  comproprietà tra la società esecutata (",
+            "start_offset": 833,
+            "end_offset": 842,
+            "bbox": null,
+            "offset_mode": "PAGE_LOCAL",
+            "page_text_hash": "5343528b50fbb094e9ae7ec2f43b7bccd31bc9f8dbd63ec3a956b17e576bb405"
+          },
+          {
+            "page": 19,
+            "quote": "recisa che relativamente alla stradella privata di accesso agli immobili, la stessa viene posta in vendita per i  diritti di comproprietà p",
+            "start_offset": 1611,
+            "end_offset": 1620,
+            "bbox": null,
+            "offset_mode": "PAGE_LOCAL",
+            "page_text_hash": "dd4e8a31bfe2f29dd30ebb3514f7657ba682cc934cebb8a4fddd56d7780f9af0"
+          },
+          {
+            "page": 22,
+            "quote": "....\"; * a carico della detta stradella di penetrazione, contrassegnata con le particelle 1873 e 1874 del foglio 6 nonchè  a carico della d",
+            "start_offset": 1905,
+            "end_offset": 1914,
+            "bbox": null,
+            "offset_mode": "PAGE_LOCAL",
+            "page_text_hash": "fefaf878ccbf31ffee82fa3937ebd2e87d847197d11966fb4aba6ae6005f1a4c"
+          }
+        ],
+        "searched_in": null,
+        "decision_bucket": "REAL_BLOCKER",
+        "decision_score": 100
+      },
+      {
+        "killer": "Lotto 3: Difformità da regolarizzare",
+        "status": "ROSSO",
+        "status_it": "CRITICO",
+        "reason_it": "Rilevata criticita: Lotto 3: Difformità da regolarizzare",
+        "evidence": [
+          {
+            "page": 60,
+            "quote": "vizi, mancanza di qualità e/o difformità della cosa venduta; - ai costi da sostenere per la regolarizzazione dell'immobile dal punto di vista edilizio e catastale del bene. RISERVE E PARTICOLARITÀ DA ",
+            "start_offset": 795,
+            "end_offset": 867,
+            "bbox": null,
+            "offset_mode": "PAGE_LOCAL",
+            "page_text_hash": "2463108357a6849c15fc04686847111310867deedfdd156c11306f600b78fa1d"
+          }
+        ],
+        "searched_in": null,
+        "decision_bucket": "REAL_BLOCKER",
+        "decision_score": 100
+      },
+      {
+        "killer": "Lotto 3: Fabbricato in costruzione / lavori sospesi",
+        "status": "DA_VERIFICARE",
+        "status_it": "DA VERIFICARE",
+        "reason_it": "Rilevata criticita: Lotto 3: Fabbricato in costruzione / lavori sospesi",
+        "evidence": [],
+        "searched_in": {
+          "pages": [
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7,
+            8,
+            9,
+            10,
+            11,
+            12,
+            13,
+            14,
+            15,
+            16,
+            17,
+            18,
+            19,
+            20,
+            21,
+            22,
+            23,
+            24,
+            25,
+            26,
+            27,
+            28,
+            29,
+            30,
+            31,
+            32,
+            33,
+            34,
+            35,
+            36,
+            37,
+            38,
+            39,
+            40,
+            41,
+            42,
+            43,
+            44,
+            45,
+            46,
+            47,
+            48,
+            49,
+            50,
+            51,
+            52,
+            53,
+            54,
+            55,
+            56,
+            57,
+            58,
+            59,
+            60,
+            61,
+            62,
+            63,
+            64,
+            65,
+            66,
+            67,
+            68,
+            69,
+            70,
+            71,
+            72,
+            73,
+            74,
+            75,
+            76,
+            77,
+            78,
+            79,
+            80,
+            81
+          ],
+          "keywords": [
+            "Lotto 3: Fabbricato in costruzione / lavori sospesi"
+          ],
+          "sections": [
+            "section_9_legal_killers"
+          ]
+        },
+        "decision_bucket": "REAL_BLOCKER",
+        "decision_score": 100
+      },
+      {
+        "killer": "Lotto 3: Infiltrazioni",
+        "status": "DA_VERIFICARE",
+        "status_it": "DA VERIFICARE",
+        "reason_it": "Rilevata criticita: Lotto 3: Infiltrazioni",
+        "evidence": [],
+        "searched_in": {
+          "pages": [
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7,
+            8,
+            9,
+            10,
+            11,
+            12,
+            13,
+            14,
+            15,
+            16,
+            17,
+            18,
+            19,
+            20,
+            21,
+            22,
+            23,
+            24,
+            25,
+            26,
+            27,
+            28,
+            29,
+            30,
+            31,
+            32,
+            33,
+            34,
+            35,
+            36,
+            37,
+            38,
+            39,
+            40,
+            41,
+            42,
+            43,
+            44,
+            45,
+            46,
+            47,
+            48,
+            49,
+            50,
+            51,
+            52,
+            53,
+            54,
+            55,
+            56,
+            57,
+            58,
+            59,
+            60,
+            61,
+            62,
+            63,
+            64,
+            65,
+            66,
+            67,
+            68,
+            69,
+            70,
+            71,
+            72,
+            73,
+            74,
+            75,
+            76,
+            77,
+            78,
+            79,
+            80,
+            81
+          ],
+          "keywords": [
+            "Lotto 3: Infiltrazioni"
+          ],
+          "sections": [
+            "section_9_legal_killers"
+          ]
+        },
+        "decision_bucket": "REAL_BLOCKER",
+        "decision_score": 100
+      },
+      {
+        "killer": "Lotto 3: Non agibile",
+        "status": "DA_VERIFICARE",
+        "status_it": "DA VERIFICARE",
+        "reason_it": "Rilevata criticita: Lotto 3: Non agibile",
+        "evidence": [],
+        "searched_in": {
+          "pages": [
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7,
+            8,
+            9,
+            10,
+            11,
+            12,
+            13,
+            14,
+            15,
+            16,
+            17,
+            18,
+            19,
+            20,
+            21,
+            22,
+            23,
+            24,
+            25,
+            26,
+            27,
+            28,
+            29,
+            30,
+            31,
+            32,
+            33,
+            34,
+            35,
+            36,
+            37,
+            38,
+            39,
+            40,
+            41,
+            42,
+            43,
+            44,
+            45,
+            46,
+            47,
+            48,
+            49,
+            50,
+            51,
+            52,
+            53,
+            54,
+            55,
+            56,
+            57,
+            58,
+            59,
+            60,
+            61,
+            62,
+            63,
+            64,
+            65,
+            66,
+            67,
+            68,
+            69,
+            70,
+            71,
+            72,
+            73,
+            74,
+            75,
+            76,
+            77,
+            78,
+            79,
+            80,
+            81
+          ],
+          "keywords": [
+            "Lotto 3: Non agibile"
+          ],
+          "sections": [
+            "section_9_legal_killers"
+          ]
+        },
+        "decision_bucket": "REAL_BLOCKER",
+        "decision_score": 100
+      },
+      {
+        "killer": "Lotto 3: Non regolare / difformità",
+        "status": "DA_VERIFICARE",
+        "status_it": "DA VERIFICARE",
+        "reason_it": "Rilevata criticita: Lotto 3: Non regolare / difformità",
+        "evidence": [],
+        "searched_in": {
+          "pages": [
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7,
+            8,
+            9,
+            10,
+            11,
+            12,
+            13,
+            14,
+            15,
+            16,
+            17,
+            18,
+            19,
+            20,
+            21,
+            22,
+            23,
+            24,
+            25,
+            26,
+            27,
+            28,
+            29,
+            30,
+            31,
+            32,
+            33,
+            34,
+            35,
+            36,
+            37,
+            38,
+            39,
+            40,
+            41,
+            42,
+            43,
+            44,
+            45,
+            46,
+            47,
+            48,
+            49,
+            50,
+            51,
+            52,
+            53,
+            54,
+            55,
+            56,
+            57,
+            58,
+            59,
+            60,
+            61,
+            62,
+            63,
+            64,
+            65,
+            66,
+            67,
+            68,
+            69,
+            70,
+            71,
+            72,
+            73,
+            74,
+            75,
+            76,
+            77,
+            78,
+            79,
+            80,
+            81
+          ],
+          "keywords": [
+            "Lotto 3: Non regolare / difformità"
+          ],
+          "sections": [
+            "section_9_legal_killers"
+          ]
+        },
+        "decision_bucket": "REAL_BLOCKER",
+        "decision_score": 100
+      },
+      {
+        "killer": "Lotto 3: Servitù di passaggio/barriera",
+        "status": "GIALLO",
+        "status_it": "ATTENZIONE",
+        "reason_it": "Rilevata criticita: Lotto 3: Servitù di passaggio/barriera",
+        "evidence": [
+          {
+            "page": 34,
+            "quote": "i immobili avviene attraverso stradella di penetrazione che si diparte dalla via della Colonna, in  comproprietà tra la società esecutata (",
+            "start_offset": 2196,
+            "end_offset": 2205,
+            "bbox": null,
+            "offset_mode": "PAGE_LOCAL",
+            "page_text_hash": "167808f7ed761d2ebf7dbf0a5967122d19136f3cc0839fa226374b39f5994052"
+          },
+          {
+            "page": 35,
+            "quote": "fabbricati collocati lungo la stradella di penetrazione  hanno aperto cancelli pedonali e carrabili, per cui potrebbero avere acquisito dir",
+            "start_offset": 98,
+            "end_offset": 107,
+            "bbox": null,
+            "offset_mode": "PAGE_LOCAL",
+            "page_text_hash": "3aadbb540d48f58061cbf40b72bc2a403a1c7b0fa3bf55012e69be669e3a144f"
+          },
+          {
+            "page": 36,
+            "quote": "recisa che relativamente alla stradella privata di accesso agli immobili, la stessa viene posta in vendita per i  diritti di comproprietà p",
+            "start_offset": 241,
+            "end_offset": 250,
+            "bbox": null,
+            "offset_mode": "PAGE_LOCAL",
+            "page_text_hash": "f74aa799269ac24d0f7fcb5a1adb4ff75cfee4ebf22ea462ee0ed0c1f3a34f3b"
+          },
+          {
+            "page": 38,
+            "quote": "i e le visure catastali della stradella di accesso risultano già allegati  con il n. 22. STATO CONSERVATIVO Il fabbricato in corso di costr",
+            "start_offset": 1207,
+            "end_offset": 1216,
+            "bbox": null,
+            "offset_mode": "PAGE_LOCAL",
+            "page_text_hash": "9a1af25598d68387770db65334f3875a7499ad0cf1cc0241178b4f3ce41e7585"
+          },
+          {
+            "page": 39,
+            "quote": "....\"; * a carico della detta stradella di penetrazione, contrassegnata con le particelle 1873 e 1874 del foglio 6 nonchè  a carico della d",
+            "start_offset": 1276,
+            "end_offset": 1285,
+            "bbox": null,
+            "offset_mode": "PAGE_LOCAL",
+            "page_text_hash": "f1fdb81d07c43a3048572b95944b26a17c3e06a0636dd27ab9076a08e2061a9b"
+          },
+          {
+            "page": 52,
+            "quote": "i immobili avviene attraverso stradella di penetrazione che si  diparte dalla via della Colonna, in comproprietà tra la società esecutata (",
+            "start_offset": 1739,
+            "end_offset": 1748,
+            "bbox": null,
+            "offset_mode": "PAGE_LOCAL",
+            "page_text_hash": "d4d2fd8ad4b774af6109eb5078c2fed41845ac0516ec1b99695b297cb8c90434"
+          },
+          {
+            "page": 53,
+            "quote": "pari ad 1/2 dell'intero sulla stradella di  penetrazione (contraddistinta dai mappali n. 1873 et n. 1874 del foglio di mappa n. 6) per il  ",
+            "start_offset": 611,
+            "end_offset": 620,
+            "bbox": null,
+            "offset_mode": "PAGE_LOCAL",
+            "page_text_hash": "7f595a5ed9e66f5c3178c213b57a29affe78fe7a9e9424bece6e0efe606f82e5"
+          },
+          {
+            "page": 56,
+            "quote": "i immobili avviene attraverso stradella di penetrazione che si diparte dalla via della  Colonna, in comproprietà tra la società esecutata (",
+            "start_offset": 2728,
+            "end_offset": 2737,
+            "bbox": null,
+            "offset_mode": "PAGE_LOCAL",
+            "page_text_hash": "e37f3ac9721b190686971e97df16f44bd2bc3c8daa4b012bb3d97f972008106c"
+          },
+          {
+            "page": 57,
+            "quote": "pari ad 1/2 dell'intero sulla stradella di penetrazione  (contraddistinta dai mappali n. 1873 et n. 1874 del foglio di mappa n. 6) per il c",
+            "start_offset": 291,
+            "end_offset": 300,
+            "bbox": null,
+            "offset_mode": "PAGE_LOCAL",
+            "page_text_hash": "df1e569bfbe072960dddd51b5b9b7df7fdd2f54b336fdc3cc0817913f2a4418a"
+          },
+          {
+            "page": 60,
+            "quote": "ari ad 1/2 dell'intero  sulla stradella privata che consente l'accesso agli immobili da via della Colonna (stradella contraddistinta dai  m",
+            "start_offset": 1691,
+            "end_offset": 1700,
+            "bbox": null,
+            "offset_mode": "PAGE_LOCAL",
+            "page_text_hash": "2463108357a6849c15fc04686847111310867deedfdd156c11306f600b78fa1d"
+          },
+          {
+            "page": 61,
+            "quote": "a mera ricognizione alla sola stradella privata oggetto del  pignoramento in estensione in quanto la ditta incaricata per la effettuazione ",
+            "start_offset": 192,
+            "end_offset": 201,
+            "bbox": null,
+            "offset_mode": "PAGE_LOCAL",
+            "page_text_hash": "99b8f6faf33b7a5366e7d57202b2e6c5bd3ebdf287bb8316c10dc842f6f6206e"
+          },
+          {
+            "page": 65,
+            "quote": "tario in ragione di 1/2 della stradella privata oggetto del pignoramento in estensione  ✓N° 68 Altri allegati - scrittura privata autentica",
+            "start_offset": 1929,
+            "end_offset": 1938,
+            "bbox": null,
+            "offset_mode": "PAGE_LOCAL",
+            "page_text_hash": "e505c869995c13bf1f469e8688fd34534bf3df98850881f29ba8d0dad75e0fc1"
+          },
+          {
+            "page": 67,
+            "quote": "i immobili avviene attraverso stradella di penetrazione che si  diparte dalla via della Colonna, in comproprietà tra la società esecutata (",
+            "start_offset": 960,
+            "end_offset": 969,
+            "bbox": null,
+            "offset_mode": "PAGE_LOCAL",
+            "page_text_hash": "1dd2855dba99040da778964371e7f356317b01234ada11a7c34be6566e0cb615"
+          },
+          {
+            "page": 68,
+            "quote": "i immobili avviene attraverso stradella di penetrazione che si diparte dalla via della  Colonna, in comproprietà tra la società esecutata (",
+            "start_offset": 3727,
+            "end_offset": 3736,
+            "bbox": null,
+            "offset_mode": "PAGE_LOCAL",
+            "page_text_hash": "21ebf3eda10889b93712264f8fe0ac9de9125a66fb423b5372014a420350f76d"
+          },
+          {
+            "page": 69,
+            "quote": "pari ad 1/2 dell'intero sulla stradella di penetrazione  (contraddistinta dai mappali n. 1873 et n. 1874 del foglio di mappa n. 6) per il c",
+            "start_offset": 86,
+            "end_offset": 95,
+            "bbox": null,
+            "offset_mode": "PAGE_LOCAL",
+            "page_text_hash": "57ed364ba408cf86d665b465bc3536be18d8c621f0915f8996d675790e3b7bb3"
+          },
+          {
+            "page": 71,
+            "quote": "i immobili avviene attraverso stradella di penetrazione che si diparte dalla via  della Colonna, in comproprietà tra la società esecutata (",
+            "start_offset": 1340,
+            "end_offset": 1349,
+            "bbox": null,
+            "offset_mode": "PAGE_LOCAL",
+            "page_text_hash": "9de546ef77eae521f7d66f714e2c0da0ae2bae08332b66ff13ad6e5189d3c584"
+          },
+          {
+            "page": 72,
+            "quote": "i immobili avviene attraverso stradella di penetrazione che si  diparte dalla via della Colonna, in comproprietà tra la società esecutata (",
+            "start_offset": 3332,
+            "end_offset": 3341,
+            "bbox": null,
+            "offset_mode": "PAGE_LOCAL",
+            "page_text_hash": "2753608953b482dde70ec674c8f208f087c682cc7f6b607af7bffdc42d527604"
+          }
+        ],
+        "searched_in": null,
+        "decision_bucket": "REAL_BLOCKER",
+        "decision_score": 100
+      },
+      {
+        "killer": "Lotto 1: Condizioni conservative critiche",
+        "status": "DA_VERIFICARE",
+        "status_it": "DA VERIFICARE",
+        "reason_it": "Rilevata criticita: Lotto 1: Condizioni conservative critiche",
+        "evidence": [],
+        "searched_in": {
+          "pages": [
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7,
+            8,
+            9,
+            10,
+            11,
+            12,
+            13,
+            14,
+            15,
+            16,
+            17,
+            18,
+            19,
+            20,
+            21,
+            22,
+            23,
+            24,
+            25,
+            26,
+            27,
+            28,
+            29,
+            30,
+            31,
+            32,
+            33,
+            34,
+            35,
+            36,
+            37,
+            38,
+            39,
+            40,
+            41,
+            42,
+            43,
+            44,
+            45,
+            46,
+            47,
+            48,
+            49,
+            50,
+            51,
+            52,
+            53,
+            54,
+            55,
+            56,
+            57,
+            58,
+            59,
+            60,
+            61,
+            62,
+            63,
+            64,
+            65,
+            66,
+            67,
+            68,
+            69,
+            70,
+            71,
+            72,
+            73,
+            74,
+            75,
+            76,
+            77,
+            78,
+            79,
+            80,
+            81
+          ],
+          "keywords": [
+            "Lotto 1: Condizioni conservative critiche"
+          ],
+          "sections": [
+            "section_9_legal_killers"
+          ]
+        },
+        "decision_bucket": "RELEVANT_SECONDARY",
+        "decision_score": 70
+      },
+      {
+        "killer": "Lotto 2: Accertamento di conformità richiesto",
+        "status": "GIALLO",
+        "status_it": "ATTENZIONE",
+        "reason_it": "Rilevata criticita: Lotto 2: Accertamento di conformità richiesto",
+        "evidence": [
+          {
+            "page": 31,
+            "quote": "e con la presentazione di un  Accertamento di Conformità ai sensi dell'art. 209 della L.R. Toscana n. 65/2014 i cui costi restano a totale ed  esclusivo car",
+            "start_offset": 2445,
+            "end_offset": 2471,
+            "bbox": null,
+            "offset_mode": "PAGE_LOCAL",
+            "page_text_hash": "6203b6d00d6a38f4ea8b21d1b6b00476b60ccb2485366de46cd240ed558e5fcd"
+          }
+        ],
+        "searched_in": null,
+        "decision_bucket": "RELEVANT_SECONDARY",
+        "decision_score": 70
+      },
+      {
+        "killer": "Lotto 2: Condizioni conservative critiche",
+        "status": "DA_VERIFICARE",
+        "status_it": "DA VERIFICARE",
+        "reason_it": "Rilevata criticita: Lotto 2: Condizioni conservative critiche",
+        "evidence": [],
+        "searched_in": {
+          "pages": [
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7,
+            8,
+            9,
+            10,
+            11,
+            12,
+            13,
+            14,
+            15,
+            16,
+            17,
+            18,
+            19,
+            20,
+            21,
+            22,
+            23,
+            24,
+            25,
+            26,
+            27,
+            28,
+            29,
+            30,
+            31,
+            32,
+            33,
+            34,
+            35,
+            36,
+            37,
+            38,
+            39,
+            40,
+            41,
+            42,
+            43,
+            44,
+            45,
+            46,
+            47,
+            48,
+            49,
+            50,
+            51,
+            52,
+            53,
+            54,
+            55,
+            56,
+            57,
+            58,
+            59,
+            60,
+            61,
+            62,
+            63,
+            64,
+            65,
+            66,
+            67,
+            68,
+            69,
+            70,
+            71,
+            72,
+            73,
+            74,
+            75,
+            76,
+            77,
+            78,
+            79,
+            80,
+            81
+          ],
+          "keywords": [
+            "Lotto 2: Condizioni conservative critiche"
+          ],
+          "sections": [
+            "section_9_legal_killers"
+          ]
+        },
+        "decision_bucket": "RELEVANT_SECONDARY",
+        "decision_score": 70
+      },
+      {
+        "killer": "Lotto 2: Servitù rilevata",
+        "status": "GIALLO",
+        "status_it": "ATTENZIONE",
+        "reason_it": "Rilevata criticita: Lotto 2: Servitù rilevata",
+        "evidence": [
+          {
+            "page": 18,
+            "quote": "netrazione risulta gravata da servitù di passo pedonale e carrabile,  nonchè da servitù di attraversamento condutture utenze e di allacciamento alla fognatura bianca e nera ed ai  servizi a favore di ",
+            "start_offset": 1133,
+            "end_offset": 1562,
+            "bbox": null,
+            "offset_mode": "PAGE_LOCAL",
+            "page_text_hash": "5343528b50fbb094e9ae7ec2f43b7bccd31bc9f8dbd63ec3a956b17e576bb405"
+          },
+          {
+            "page": 22,
+            "quote": " erano gravati dalle seguenti servitù passive: * a carico dell'area cortilizia contrassegnata con la particella 94 subalterno 4 del foglio di mappa n. 6 (oggi  contraddistinta dal mappale n. 94 sub. 5",
+            "start_offset": 942,
+            "end_offset": 1061,
+            "bbox": null,
+            "offset_mode": "PAGE_LOCAL",
+            "page_text_hash": "fefaf878ccbf31ffee82fa3937ebd2e87d847197d11966fb4aba6ae6005f1a4c"
+          }
+        ],
+        "searched_in": null,
+        "decision_bucket": "RELEVANT_SECONDARY",
+        "decision_score": 70
+      },
+      {
+        "killer": "Lotto 3: Accertamento di conformità richiesto",
+        "status": "GIALLO",
+        "status_it": "ATTENZIONE",
+        "reason_it": "Rilevata criticita: Lotto 3: Accertamento di conformità richiesto",
+        "evidence": [
+          {
+            "page": 48,
+            "quote": "te con la presentazione di un Accertamento di  Conformità ai sensi dell'art. 209 della L.R. Toscana n. 65/2014 i cui costi restano a totale ed esclusivo cari",
+            "start_offset": 939,
+            "end_offset": 966,
+            "bbox": null,
+            "offset_mode": "PAGE_LOCAL",
+            "page_text_hash": "69c0f9a9a47003046237735f3af8c8b3b237e7110b1fdb03a8a420fa50c519ab"
+          }
+        ],
+        "searched_in": null,
+        "decision_bucket": "RELEVANT_SECONDARY",
+        "decision_score": 70
+      },
+      {
+        "killer": "Lotto 3: Condizioni conservative critiche",
+        "status": "DA_VERIFICARE",
+        "status_it": "DA VERIFICARE",
+        "reason_it": "Rilevata criticita: Lotto 3: Condizioni conservative critiche",
+        "evidence": [],
+        "searched_in": {
+          "pages": [
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7,
+            8,
+            9,
+            10,
+            11,
+            12,
+            13,
+            14,
+            15,
+            16,
+            17,
+            18,
+            19,
+            20,
+            21,
+            22,
+            23,
+            24,
+            25,
+            26,
+            27,
+            28,
+            29,
+            30,
+            31,
+            32,
+            33,
+            34,
+            35,
+            36,
+            37,
+            38,
+            39,
+            40,
+            41,
+            42,
+            43,
+            44,
+            45,
+            46,
+            47,
+            48,
+            49,
+            50,
+            51,
+            52,
+            53,
+            54,
+            55,
+            56,
+            57,
+            58,
+            59,
+            60,
+            61,
+            62,
+            63,
+            64,
+            65,
+            66,
+            67,
+            68,
+            69,
+            70,
+            71,
+            72,
+            73,
+            74,
+            75,
+            76,
+            77,
+            78,
+            79,
+            80,
+            81
+          ],
+          "keywords": [
+            "Lotto 3: Condizioni conservative critiche"
+          ],
+          "sections": [
+            "section_9_legal_killers"
+          ]
+        },
+        "decision_bucket": "RELEVANT_SECONDARY",
+        "decision_score": 70
+      },
+      {
+        "killer": "Lotto 3: Servitù rilevata",
+        "status": "GIALLO",
+        "status_it": "ATTENZIONE",
+        "reason_it": "Rilevata criticita: Lotto 3: Servitù rilevata",
+        "evidence": [
+          {
+            "page": 34,
+            "quote": "netrazione risulta gravata da servitù di passo pedonale e carrabile,  nonchè da servitù di attraversamento condutture utenze e di allacciamento alla fognatura bianca e nera ed ai  servizi a favore di ",
+            "start_offset": 2496,
+            "end_offset": 2926,
+            "bbox": null,
+            "offset_mode": "PAGE_LOCAL",
+            "page_text_hash": "167808f7ed761d2ebf7dbf0a5967122d19136f3cc0839fa226374b39f5994052"
+          },
+          {
+            "page": 35,
+            "quote": "ro avere acquisito diritti di servitù di passaggio,  transito, apertura di cancelli, etc. Gli stessi soggetti hanno provveduto ad installare all'inizio della stradella privata, in posizion",
+            "start_offset": 215,
+            "end_offset": 273,
+            "bbox": null,
+            "offset_mode": "PAGE_LOCAL",
+            "page_text_hash": "3aadbb540d48f58061cbf40b72bc2a403a1c7b0fa3bf55012e69be669e3a144f"
+          },
+          {
+            "page": 39,
+            "quote": " erano gravati dalle seguenti servitù passive: * a carico dell'area cortilizia contrassegnata con la particella 94 subalterno 4 del foglio di mappa n. 6 (oggi  contraddistinta dal mappale n. 94 sub. 5",
+            "start_offset": 313,
+            "end_offset": 432,
+            "bbox": null,
+            "offset_mode": "PAGE_LOCAL",
+            "page_text_hash": "f1fdb81d07c43a3048572b95944b26a17c3e06a0636dd27ab9076a08e2061a9b"
+          },
+          {
+            "page": 52,
+            "quote": "netrazione risulta gravata da servitù di passo pedonale e carrabile, nonchè da  servitù di attraversamento condutture utenze e di allacciamento alla fognatura bianca e nera ed ai  servizi a favore di ",
+            "start_offset": 2040,
+            "end_offset": 2340,
+            "bbox": null,
+            "offset_mode": "PAGE_LOCAL",
+            "page_text_hash": "d4d2fd8ad4b774af6109eb5078c2fed41845ac0516ec1b99695b297cb8c90434"
+          },
+          {
+            "page": 53,
+            "quote": "ro avere acquisito diritti di servitù di passaggio, transito,  apertura di cancelli, etc. Gli stessi soggetti hanno provveduto ad installare all'inizio della stradella  privata, in posizio",
+            "start_offset": 1434,
+            "end_offset": 1492,
+            "bbox": null,
+            "offset_mode": "PAGE_LOCAL",
+            "page_text_hash": "7f595a5ed9e66f5c3178c213b57a29affe78fe7a9e9424bece6e0efe606f82e5"
+          },
+          {
+            "page": 56,
+            "quote": "netrazione risulta gravata da servitù di passo pedonale e carrabile, nonchè da servitù di  attraversamento condutture utenze e di allacciamento alla fognatura bianca e nera ed ai servizi a favore  di ",
+            "start_offset": 3029,
+            "end_offset": 3459,
+            "bbox": null,
+            "offset_mode": "PAGE_LOCAL",
+            "page_text_hash": "e37f3ac9721b190686971e97df16f44bd2bc3c8daa4b012bb3d97f972008106c"
+          },
+          {
+            "page": 57,
+            "quote": "ro avere acquisito diritti di servitù di passaggio, transito,  apertura di cancelli, etc. Gli stessi soggetti hanno provveduto ad installare all'inizio della stradella  privata, in posizio",
+            "start_offset": 1114,
+            "end_offset": 1172,
+            "bbox": null,
+            "offset_mode": "PAGE_LOCAL",
+            "page_text_hash": "df1e569bfbe072960dddd51b5b9b7df7fdd2f54b336fdc3cc0817913f2a4418a"
+          },
+          {
+            "page": 63,
+            "quote": "one per la costituzione della servitù e l'elenco sintetico delle  formalità rilevate a carico del mappale n. 1873 del foglio di mappa n. 6 che identifica il tratto iniziale  della stradella a partire ",
+            "start_offset": 80,
+            "end_offset": 157,
+            "bbox": null,
+            "offset_mode": "PAGE_LOCAL",
+            "page_text_hash": "44488fb7470b81857a68b6bd26cd4ebf44ec11bce284a033b58eb18c2080cfd4"
+          },
+          {
+            "page": 67,
+            "quote": "netrazione risulta gravata da servitù di passo pedonale e carrabile, nonchè da  servitù di attraversamento condutture utenze e di allacciamento alla fognatura bianca e nera ed ai  servizi a favore di ",
+            "start_offset": 1261,
+            "end_offset": 1690,
+            "bbox": null,
+            "offset_mode": "PAGE_LOCAL",
+            "page_text_hash": "1dd2855dba99040da778964371e7f356317b01234ada11a7c34be6566e0cb615"
+          },
+          {
+            "page": 68,
+            "quote": "netrazione risulta gravata da servitù di passo pedonale e carrabile, nonchè da servitù di  attraversamento condutture utenze e di allacciamento alla fognatura bianca e nera ed ai servizi a favore  di ",
+            "start_offset": 4028,
+            "end_offset": 4458,
+            "bbox": null,
+            "offset_mode": "PAGE_LOCAL",
+            "page_text_hash": "21ebf3eda10889b93712264f8fe0ac9de9125a66fb423b5372014a420350f76d"
+          },
+          {
+            "page": 69,
+            "quote": "ro avere acquisito diritti di servitù di passaggio, transito,  apertura di cancelli, etc. Gli stessi soggetti hanno provveduto ad installare all'inizio della stradella  privata, in posizio",
+            "start_offset": 909,
+            "end_offset": 967,
+            "bbox": null,
+            "offset_mode": "PAGE_LOCAL",
+            "page_text_hash": "57ed364ba408cf86d665b465bc3536be18d8c621f0915f8996d675790e3b7bb3"
+          },
+          {
+            "page": 71,
+            "quote": "netrazione risulta gravata da servitù di passo pedonale e carrabile, nonchè da servitù di  attraversamento condutture utenze e di allacciamento alla fognatura bianca e nera ed ai servizi a favore di  ",
+            "start_offset": 1641,
+            "end_offset": 2070,
+            "bbox": null,
+            "offset_mode": "PAGE_LOCAL",
+            "page_text_hash": "9de546ef77eae521f7d66f714e2c0da0ae2bae08332b66ff13ad6e5189d3c584"
+          },
+          {
+            "page": 72,
+            "quote": "netrazione risulta gravata da servitù di passo pedonale e carrabile, nonchè da  servitù di attraversamento condutture utenze e di allacciamento alla fognatura bianca e nera ed ai servizi a  favore di ",
+            "start_offset": 3633,
+            "end_offset": 4063,
+            "bbox": null,
+            "offset_mode": "PAGE_LOCAL",
+            "page_text_hash": "2753608953b482dde70ec674c8f208f087c682cc7f6b607af7bffdc42d527604"
+          }
+        ],
+        "searched_in": null,
+        "decision_bucket": "RELEVANT_SECONDARY",
+        "decision_score": 70
+      },
+      {
+        "killer": "Lotto 1: Oneri di cancellazione",
+        "status": "GIALLO",
+        "status_it": "ATTENZIONE",
+        "reason_it": "Rilevata criticita: Lotto 1: Oneri di cancellazione",
+        "evidence": [
+          {
+            "page": 14,
+            "quote": "eg. Part. 2064 del 30/05/2024 Oneri di cancellazione Da liquidare da parte dell'Agenzia delle Entrate - Direzione Provinciale di Pistoia - Territorio - Servizio di  Pubblicità immobiliare di Pescia, s",
+            "start_offset": 974,
+            "end_offset": 1108,
+            "bbox": null,
+            "offset_mode": "PAGE_LOCAL",
+            "page_text_hash": "e511e33f9522771858c27321637e37e0c5838e724baa926a2463e032909e1143"
+          }
+        ],
+        "searched_in": null,
+        "decision_bucket": "BACKGROUND_NOTE",
+        "decision_score": 20
+      },
+      {
+        "killer": "Lotto 2: Oneri di cancellazione",
+        "status": "GIALLO",
+        "status_it": "ATTENZIONE",
+        "reason_it": "Rilevata criticita: Lotto 2: Oneri di cancellazione",
+        "evidence": [
+          {
+            "page": 28,
+            "quote": "g. Part. 4948 del 18/12/2024. Oneri di cancellazione Da liquidare da parte dell'Agenzia delle Entrate - Direzione Provinciale di Pistoia - Territorio - Servizio di  Pubblicità immobiliare di Pescia, s",
+            "start_offset": 1404,
+            "end_offset": 1538,
+            "bbox": null,
+            "offset_mode": "PAGE_LOCAL",
+            "page_text_hash": "328f5701b946da88c76c86b7a9118f4fa55a4caae99300a2324905b975c1a776"
+          }
+        ],
+        "searched_in": null,
+        "decision_bucket": "BACKGROUND_NOTE",
+        "decision_score": 20
+      },
+      {
+        "killer": "Lotto 2: Riferimento D.L. 69/2024 Salva Casa",
+        "status": "GIALLO",
+        "status_it": "ATTENZIONE",
+        "reason_it": "Rilevata criticita: Lotto 2: Riferimento D.L. 69/2024 Salva Casa",
+        "evidence": [
+          {
+            "page": 31,
+            "quote": ". 69/2024 denominato \"Decreto salva casa\" modificato con la legge n.  105/2024 trattandosi di interventi realizzati entro il 21/05/2024. Alt",
+            "start_offset": 2233,
+            "end_offset": 2243,
+            "bbox": null,
+            "offset_mode": "PAGE_LOCAL",
+            "page_text_hash": "6203b6d00d6a38f4ea8b21d1b6b00476b60ccb2485366de46cd240ed558e5fcd"
+          }
+        ],
+        "searched_in": null,
+        "decision_bucket": "BACKGROUND_NOTE",
+        "decision_score": 20
+      },
+      {
+        "killer": "Lotto 3: Oneri di cancellazione",
+        "status": "GIALLO",
+        "status_it": "ATTENZIONE",
+        "reason_it": "Rilevata criticita: Lotto 3: Oneri di cancellazione",
+        "evidence": [
+          {
+            "page": 45,
+            "quote": "g. Part. 4948 del 18/12/2024. Oneri di cancellazione Da liquidare da parte dell'Agenzia delle Entrate - Direzione Provinciale di Pistoia - Territorio - Servizio di  Pubblicità immobiliare di Pescia, s",
+            "start_offset": 831,
+            "end_offset": 965,
+            "bbox": null,
+            "offset_mode": "PAGE_LOCAL",
+            "page_text_hash": "b96c830430a430c0863cb98a06320ada5b009fe336f850215e1a8d46d78b6b9e"
+          }
+        ],
+        "searched_in": null,
+        "decision_bucket": "BACKGROUND_NOTE",
+        "decision_score": 20
+      },
+      {
+        "killer": "Lotto 3: Riferimento D.L. 69/2024 Salva Casa",
+        "status": "GIALLO",
+        "status_it": "ATTENZIONE",
+        "reason_it": "Rilevata criticita: Lotto 3: Riferimento D.L. 69/2024 Salva Casa",
+        "evidence": [
+          {
+            "page": 48,
+            "quote": ". 69/2024 denominato \"Decreto salva casa\" modificato con la legge n.  105/2024 trattandosi di interventi realizzati entro il 21/05/2024. Alt",
+            "start_offset": 738,
+            "end_offset": 748,
+            "bbox": null,
+            "offset_mode": "PAGE_LOCAL",
+            "page_text_hash": "69c0f9a9a47003046237735f3af8c8b3b237e7110b1fdb03a8a420fa50c519ab"
+          }
+        ],
+        "searched_in": null,
+        "decision_bucket": "BACKGROUND_NOTE",
+        "decision_score": 20
+      }
+    ],
+    "top_items": [
+      {
+        "killer": "Lotto 1: Non agibile",
+        "status": "ROSSO",
+        "status_it": "CRITICO",
+        "reason_it": "Blocco prioritario per Lotto 1: Non agibile",
+        "evidence": [
+          {
+            "page": 15,
+            "quote": "non risulta agibile. Le ricerche effettuate presso l'Archivio del Comune di Montecatini Terme hanno permesso di rilevare che unica",
+            "search_hint": "non risulta agibile",
+            "start_offset": 0,
+            "end_offset": 130,
+            "offset_mode": "PAGE_LOCAL",
+            "page_text_hash": "90f239a054389b501fdb84288a7117e41c080df743abc81baebb8c7770dc9330",
+            "bbox": null
+          }
+        ],
+        "decision_bucket": "REAL_BLOCKER",
+        "decision_score": 100
+      },
+      {
+        "killer": "Lotto 2: Non agibile",
+        "status": "ROSSO",
+        "status_it": "CRITICO",
+        "reason_it": "Blocco prioritario per Lotto 2: Non agibile",
+        "evidence": [
+          {
+            "page": 29,
+            "quote": "non risulta agibile. Sulla base degli accertamenti effettuati presso il Comune di Pieve a Nievole (PT) è stato possibile rilevare la",
+            "search_hint": "non risulta agibile",
+            "start_offset": 0,
+            "end_offset": 132,
+            "offset_mode": "PAGE_LOCAL",
+            "page_text_hash": "d52c62c6990c8c108113981d3df46789ec8b4c4276e81d94049abc3f1632397a",
+            "bbox": null
+          }
+        ],
+        "decision_bucket": "REAL_BLOCKER",
+        "decision_score": 100
+      },
+      {
+        "killer": "Lotto 3: In costruzione / lavori sospesi",
+        "status": "ROSSO",
+        "status_it": "CRITICO",
+        "reason_it": "Blocco prioritario per Lotto 3: In costruzione / lavori sospesi",
+        "evidence": [
+          {
+            "page": 3,
+            "quote": "Bene N° 3 - Porzione di fabbricato in costruzione ubicato a Pieve a Nievole (PT) - via Colonna senza",
+            "search_hint": "Bene N° 3 - Porzione di fabbricato in costruzione ubicato a Pieve a Nievole (PT)",
+            "start_offset": 6615,
+            "end_offset": 6715,
+            "offset_mode": "PAGE_LOCAL",
+            "page_text_hash": "61735bd4532d3d1bbbb41ce7b3ef645d71fb4e84876f8a444bc96524140a0906",
+            "bbox": null
+          }
+        ],
+        "decision_bucket": "REAL_BLOCKER",
+        "decision_score": 100
+      },
+      {
+        "killer": "Lotto 3: Non agibile",
+        "status": "ROSSO",
+        "status_it": "CRITICO",
+        "reason_it": "Blocco prioritario per Lotto 3: Non agibile",
+        "evidence": [
+          {
+            "page": 46,
+            "quote": "non risulta agibile. Sulla base degli accertamenti effettuati presso il Comune di Pieve a Nievole (PT) è stato possibile rilevare la",
+            "search_hint": "non risulta agibile",
+            "start_offset": 0,
+            "end_offset": 132,
+            "offset_mode": "PAGE_LOCAL",
+            "page_text_hash": "186e1e44a9b1b46fa64ff9aa1f06ed5888bb6bf0447a02fef9705696d44b2c4f",
+            "bbox": null
+          }
+        ],
+        "decision_bucket": "REAL_BLOCKER",
+        "decision_score": 100
+      },
+      {
+        "killer": "Lotto 2: Servitù / accesso privato / stradella",
+        "status": "ROSSO",
+        "status_it": "CRITICO",
+        "reason_it": "Blocco prioritario per Lotto 2: Servitù / accesso privato / stradella",
+        "evidence": [
+          {
+            "page": 18,
+            "quote": "piena proprietà per la quota di 1/1 (un primo) sopra po",
+            "search_hint": "piena proprietà per la quota di 1/1 (un p",
+            "start_offset": 158,
+            "end_offset": 213,
+            "offset_mode": "PAGE_LOCAL",
+            "page_text_hash": "5343528b50fbb094e9ae7ec2f43b7bccd31bc9f8dbd63ec3a956b17e576bb405",
+            "bbox": null
+          }
+        ],
+        "decision_bucket": "REAL_BLOCKER",
+        "decision_score": 99
+      },
+      {
+        "killer": "Lotto 3: Servitù / accesso privato / stradella",
+        "status": "ROSSO",
+        "status_it": "CRITICO",
+        "reason_it": "Blocco prioritario per Lotto 3: Servitù / accesso privato / stradella",
+        "evidence": [
+          {
+            "page": 34,
+            "quote": "piena proprietà per la quota di 1/1 (un primo) sopra po",
+            "search_hint": "piena proprietà per la quota di 1/1 (un p",
+            "start_offset": 187,
+            "end_offset": 242,
+            "offset_mode": "PAGE_LOCAL",
+            "page_text_hash": "167808f7ed761d2ebf7dbf0a5967122d19136f3cc0839fa226374b39f5994052",
+            "bbox": null
+          }
+        ],
+        "decision_bucket": "REAL_BLOCKER",
+        "decision_score": 99
+      },
+      {
+        "killer": "Lotto 1: Non conformità / catastale-edilizia",
+        "status": "ROSSO",
+        "status_it": "CRITICO",
+        "reason_it": "Blocco prioritario per Lotto 1: Non conformità / catastale-edilizia",
+        "evidence": [
+          {
+            "page": 9,
+            "quote": "difformità rilevanti tali da influire sul calcolo della rendita catastale e da dar luogo all'obbligo di presentazione",
+            "search_hint": "difformit",
+            "start_offset": 234,
+            "end_offset": 351,
+            "offset_mode": "PAGE_LOCAL",
+            "page_text_hash": "a54a90a39246e6284bc9844103eb1e5346ca485b606c1f75344203380a921a68",
+            "bbox": null
+          }
+        ],
+        "decision_bucket": "REAL_BLOCKER",
+        "decision_score": 98
+      },
+      {
+        "killer": "Lotto 2: Non conformità / catastale-edilizia",
+        "status": "ROSSO",
+        "status_it": "CRITICO",
+        "reason_it": "Blocco prioritario per Lotto 2: Non conformità / catastale-edilizia",
+        "evidence": [
+          {
+            "page": 21,
+            "quote": "difformità rilevanti, tali da influire sul calcolo della rendita catastale e da dar luogo all'obbligo di presentazione",
+            "search_hint": "difformit",
+            "start_offset": 741,
+            "end_offset": 859,
+            "offset_mode": "PAGE_LOCAL",
+            "page_text_hash": "d3c6ffe97ae5173e783e7b13d041e427bd7bfc06fd3ad15bfd716a40242a33a4",
+            "bbox": null
+          }
+        ],
+        "decision_bucket": "REAL_BLOCKER",
+        "decision_score": 98
+      },
+      {
+        "killer": "Lotto 3: Non conformità / catastale-edilizia",
+        "status": "ROSSO",
+        "status_it": "CRITICO",
+        "reason_it": "Blocco prioritario per Lotto 3: Non conformità / catastale-edilizia",
+        "evidence": [
+          {
+            "page": 38,
+            "quote": "Sussistono tuttavia difformità tra ingombro planimetrico degli edifici risultante dall'elaborato planimetrico",
+            "search_hint": "difformit",
+            "start_offset": 371,
+            "end_offset": 480,
+            "offset_mode": "PAGE_LOCAL",
+            "page_text_hash": "9a1af25598d68387770db65334f3875a7499ad0cf1cc0241178b4f3ce41e7585",
+            "bbox": null
+          }
+        ],
+        "decision_bucket": "REAL_BLOCKER",
+        "decision_score": 98
+      },
+      {
+        "killer": "Lotto 1: Fibro-cemento / bonifica burden",
+        "status": "ROSSO",
+        "status_it": "CRITICO",
+        "reason_it": "Blocco prioritario per Lotto 1: Fibro-cemento / bonifica burden",
+        "evidence": [
+          {
+            "page": 9,
+            "quote": "scempiato in mezzane di laterizio; all'interno della soffitta sono presenti manufatti in fibro-cemento",
+            "search_hint": "fibro-cemento",
+            "start_offset": 2736,
+            "end_offset": 2838,
+            "offset_mode": "PAGE_LOCAL",
+            "page_text_hash": "a54a90a39246e6284bc9844103eb1e5346ca485b606c1f75344203380a921a68",
+            "bbox": null
+          }
+        ],
+        "decision_bucket": "REAL_BLOCKER",
+        "decision_score": 97
+      },
+      {
+        "killer": "Lotto 2: Infiltrazioni",
+        "status": "ROSSO",
+        "status_it": "CRITICO",
+        "reason_it": "Blocco prioritario per Lotto 2: Infiltrazioni",
+        "evidence": [
+          {
+            "page": 21,
+            "quote": "vetustà che delle infiltrazioni di acqua provenienti dal sovrastante lastrico solare di copertura (mappale n.",
+            "search_hint": "infiltraz",
+            "start_offset": 1950,
+            "end_offset": 2059,
+            "offset_mode": "PAGE_LOCAL",
+            "page_text_hash": "d3c6ffe97ae5173e783e7b13d041e427bd7bfc06fd3ad15bfd716a40242a33a4",
+            "bbox": null
+          }
+        ],
+        "decision_bucket": "REAL_BLOCKER",
+        "decision_score": 96
+      },
+      {
+        "killer": "Lotto 3: Infiltrazioni",
+        "status": "ROSSO",
+        "status_it": "CRITICO",
+        "reason_it": "Blocco prioritario per Lotto 3: Infiltrazioni",
+        "evidence": [
+          {
+            "page": 38,
+            "quote": "l'incompletezza dei lavori, sospesi da numerosi anni, che hanno causato infiltrazioni di acqua ai vari piani.",
+            "search_hint": "infiltraz",
+            "start_offset": 1384,
+            "end_offset": 1493,
+            "offset_mode": "PAGE_LOCAL",
+            "page_text_hash": "9a1af25598d68387770db65334f3875a7499ad0cf1cc0241178b4f3ce41e7585",
+            "bbox": null
+          }
+        ],
+        "decision_bucket": "REAL_BLOCKER",
+        "decision_score": 96
+      }
+    ]
+  },
+  "field_states": {
+    "tribunale": {
+      "value": "TRIBUNALE DI PISTOIA",
+      "status": "FOUND",
+      "confidence": 0.9,
+      "evidence": [
+        {
+          "page": 1,
+          "quote": "TRIBUNALE DI PISTOIASEZIONEEE",
+          "start_offset": 8,
+          "end_offset": 102,
+          "bbox": null,
+          "offset_mode": "PAGE_LOCAL",
+          "page_text_hash": "dee06f4cdf40478b764c68dc616a5723677772559ad90df9a6cc860fe46ff22b",
+          "search_hint": "TRIBUNALE DI PISTOIASEZIONEEE"
+        }
+      ],
+      "searched_in": [],
+      "user_prompt_it": null
+    },
+    "procedura": {
+      "value": "Esecuzione Immobiliare 69/2024 R.G.E.",
+      "status": "FOUND",
+      "confidence": 0.9,
+      "evidence": [
+        {
+          "page": 1,
+          "quote": "Esecuzione Immobiliare 69/2024 del R.G.E",
+          "start_offset": 140,
+          "end_offset": 182,
+          "bbox": null,
+          "offset_mode": "PAGE_LOCAL",
+          "page_text_hash": "dee06f4cdf40478b764c68dc616a5723677772559ad90df9a6cc860fe46ff22b",
+          "search_hint": "Esecuzione Immobiliare 69/2024 del R.G.E"
+        }
+      ],
+      "searched_in": [],
+      "user_prompt_it": null
+    },
+    "lotto": {
+      "value": "Lotti 1–3",
+      "status": "LOW_CONFIDENCE",
+      "confidence": 0.45,
+      "evidence": [],
+      "searched_in": [
+        {
+          "page": 2,
+          "quote": "......................................4\nLotto 1.........................................................................",
+          "start_offset": 411,
+          "end_offset": 531,
+          "bbox": null,
+          "offset_mode": "PAGE_LOCAL",
+          "page_text_hash": "657dc79faf81804f554586543e4007d111fa5249544edae6eee912206e7a77fc"
+        },
+        {
+          "page": 3,
+          "quote": "Lotto 3.........................................................................",
+          "start_offset": 0,
+          "end_offset": 80,
+          "bbox": null,
+          "offset_mode": "PAGE_LOCAL",
+          "page_text_hash": "61735bd4532d3d1bbbb41ce7b3ef645d71fb4e84876f8a444bc96524140a0906"
+        },
+        {
+          "page": 5,
+          "quote": "5 di 81 LOTTO 1\nFirmato Da: BISOGNI FELICE Emesso Da: ARUBAPEC S.P.A. NG CA 3 Serial#: 4",
+          "start_offset": 0,
+          "end_offset": 88,
+          "bbox": null,
+          "offset_mode": "PAGE_LOCAL",
+          "page_text_hash": "bebef4bdea7c9fb74707016780c2364b23a05c7a1ae08ba3eba96fa4493d956e"
+        }
+      ],
+      "user_prompt_it": "Verifica il lotto indicato nella perizia (schema riassuntivo)."
+    },
+    "address": {
+      "value": "Montecatini-Terme (PT)-via Giuseppe Garibaldi n.c. 23",
+      "status": "FOUND",
+      "confidence": 0.9,
+      "evidence": [
+        {
+          "page": 3,
+          "quote": "Bene N° 1 - Fabbricato civile ubicato a Montecatini-Terme (PT) - via Giuseppe Garibaldi n.c. 23 .............74",
+          "start_offset": 6386,
+          "end_offset": 6497,
+          "bbox": null,
+          "offset_mode": "PAGE_LOCAL",
+          "page_text_hash": "61735bd4532d3d1bbbb41ce7b3ef645d71fb4e84876f8a444bc96524140a0906",
+          "search_hint": "Bene N° 1 - Fabbricato civile ubicato a Montecatini-Terme (PT) - via Giuseppe"
+        }
+      ],
+      "searched_in": [],
+      "user_prompt_it": null
+    },
+    "prezzo_base_asta": {
+      "value": 64198.0,
+      "status": "FOUND",
+      "confidence": 0.9,
+      "evidence": [
+        {
+          "page": 70,
+          "quote": "Prezzo base d'asta: € 64.198,00",
+          "start_offset": 70,
+          "end_offset": 111,
+          "bbox": null,
+          "offset_mode": "PAGE_LOCAL",
+          "page_text_hash": "2529e1768dabcc66af197185f250074b14714d86778fd7da39e258ee2e47cbbe",
+          "search_hint": "Prezzo base d'asta: € 64.198,00"
+        }
+      ],
+      "searched_in": [],
+      "user_prompt_it": null
+    },
+    "superficie": {
+      "value": 169.3,
+      "status": "FOUND",
+      "confidence": 0.9,
+      "evidence": [
+        {
+          "page": 8,
+          "quote": "8 di 81 Totale superficie convenzionale: 169,30 mq",
+          "search_hint": "8 di 81 Totale superficie convenzionale: 169,30 mq",
+          "start_offset": 0,
+          "end_offset": 50,
+          "offset_mode": "PAGE_LOCAL",
+          "page_text_hash": "a3e45fe9af9e378db2fe417bd2c4228c4db420857fd630b4ac52a4fc653b79b4",
+          "bbox": null
+        }
+      ],
+      "searched_in": [],
+      "user_prompt_it": null
+    },
+    "diritto_reale": {
+      "value": "Proprietà Quota 1/1",
+      "status": "FOUND",
+      "confidence": 0.9,
+      "evidence": [
+        {
+          "page": 70,
+          "quote": "Diritto reale: Proprietà Quota 1/1",
+          "start_offset": 225,
+          "end_offset": 244,
+          "bbox": null,
+          "offset_mode": "PAGE_LOCAL",
+          "page_text_hash": "2529e1768dabcc66af197185f250074b14714d86778fd7da39e258ee2e47cbbe",
+          "search_hint": "Diritto reale: Proprietà Quota 1/1"
+        }
+      ],
+      "searched_in": [],
+      "user_prompt_it": null
+    },
+    "stato_occupativo": {
+      "value": "OCCUPATO",
+      "status": "LOW_CONFIDENCE",
+      "confidence": 0.45,
+      "evidence": [
+        {
+          "page": 10,
+          "quote": "Territoriale di Pescia hanno permesso di confermare che \"non risultano registrati atti di locazione e/o",
+          "start_offset": 526,
+          "end_offset": 630,
+          "bbox": null,
+          "offset_mode": "PAGE_LOCAL",
+          "page_text_hash": "49d596f0704269ae9e6c77c74ec4a50862f437da47705438c49300e1435c4604",
+          "search_hint": "locazione"
+        }
+      ],
+      "searched_in": [
+        {
+          "page": 10,
+          "quote": "STATO DI OCCUPAZIONE\nL'immobile risulta libero\nIl fabbricato, come già detto, risulta inutilizzato da numerosi anni ed in stato di rovina (per quanto attiene i",
+          "start_offset": 56,
+          "end_offset": 176,
+          "bbox": null,
+          "offset_mode": "PAGE_LOCAL",
+          "page_text_hash": "49d596f0704269ae9e6c77c74ec4a50862f437da47705438c49300e1435c4604"
+        },
+        {
+          "page": 23,
+          "quote": "STATO DI OCCUPAZIONE\nL'immobile risulta libero\nIn occasione dell'accertamento sopralluogo del giorno 06/09/2024 il signor **** Omissis ****, socio della",
+          "start_offset": 2011,
+          "end_offset": 2131,
+          "bbox": null,
+          "offset_mode": "PAGE_LOCAL",
+          "page_text_hash": "6b46549f605baa534646ecbe99cf2a87c094e0ee5ec06a45ff1de60716ff0e22"
+        },
+        {
+          "page": 40,
+          "quote": "STATO DI OCCUPAZIONE\nL'immobile risulta libero\nAnche le ricerche effettuate in Anagrafe Tributaria dall'Agenzia delle Entrate - Direzione di Pistoia - Ufficio",
+          "start_offset": 1058,
+          "end_offset": 1178,
+          "bbox": null,
+          "offset_mode": "PAGE_LOCAL",
+          "page_text_hash": "f028143069790a7ee79df285682e4f6f28201065b8d5a974101444d61f0b1867"
+        }
+      ],
+      "user_prompt_it": null
+    },
+    "regolarita_urbanistica": {
+      "value": "PRESENTI DIFFORMITÀ",
+      "status": "FOUND",
+      "confidence": 0.9,
+      "evidence": [
+        {
+          "page": 9,
+          "quote": "difformità rilevanti tali da influire sul calcolo della rendita catastale e da dar luogo all'obbligo di presentazione",
+          "start_offset": 234,
+          "end_offset": 352,
+          "bbox": null,
+          "offset_mode": "PAGE_LOCAL",
+          "page_text_hash": "a54a90a39246e6284bc9844103eb1e5346ca485b606c1f75344203380a921a68",
+          "search_hint": "difformità"
+        }
+      ],
+      "searched_in": [],
+      "user_prompt_it": null
+    },
+    "conformita_catastale": {
+      "value": "DA VERIFICARE",
+      "status": "LOW_CONFIDENCE",
+      "confidence": 0.45,
+      "evidence": [
+        {
+          "page": 21,
+          "quote": "proprietà della **** Omissis **** e ciò presumibilmente per mancata corrispondenza delle mappe catastali.",
+          "start_offset": 1509,
+          "end_offset": 1531,
+          "bbox": null,
+          "offset_mode": "PAGE_LOCAL",
+          "page_text_hash": "d3c6ffe97ae5173e783e7b13d041e427bd7bfc06fd3ad15bfd716a40242a33a4",
+          "search_hint": "mancata corrispondenza"
+        }
+      ],
+      "searched_in": [
+        {
+          "page": 8,
+          "quote": "Dal 01/01/1967 al 28/03/2000 **** Omissis **** Catasto Fabbricati\nFg. 18, Part. 465 e 488 uniti\nCategoria D2\nDal 29/03/2000 al 11/03/2003 **** Omissis **** Catasto Fabbricati",
+          "start_offset": 249,
+          "end_offset": 369,
+          "bbox": null,
+          "offset_mode": "PAGE_LOCAL",
+          "page_text_hash": "a3e45fe9af9e378db2fe417bd2c4228c4db420857fd630b4ac52a4fc653b79b4"
+        },
+        {
+          "page": 9,
+          "quote": "Viceversa, la planimetria catastale non risulta conforme allo stato di fatto ed in particolare sussistono\ndifformità rilevanti tali da influire sul calcolo della rendita catastale e da dar luogo all'obbligo di presentazione",
+          "start_offset": 194,
+          "end_offset": 314,
+          "bbox": null,
+          "offset_mode": "PAGE_LOCAL",
+          "page_text_hash": "a54a90a39246e6284bc9844103eb1e5346ca485b606c1f75344203380a921a68"
+        },
+        {
+          "page": 15,
+          "quote": "Unico elemento per stabilire l'esistenza di eventuali opere abusive è rappresentato pertanto dalla planimetria\ncatastale scheda n. 14171455 presentata l'8/12/1939 registrata al n. 2365.",
+          "start_offset": 2256,
+          "end_offset": 2376,
+          "bbox": null,
+          "offset_mode": "PAGE_LOCAL",
+          "page_text_hash": "90f239a054389b501fdb84288a7117e41c080df743abc81baebb8c7770dc9330"
+        }
+      ],
+      "user_prompt_it": null
+    },
+    "spese_condominiali_arretrate": {
+      "value": null,
+      "status": "NOT_FOUND",
+      "confidence": 0.0,
+      "evidence": [],
+      "searched_in": [
+        {
+          "page": 2,
+          "quote": "..........................15\nVincoli od oneri condominiali..............................................................",
+          "start_offset": 3490,
+          "end_offset": 3610,
+          "bbox": null,
+          "offset_mode": "PAGE_LOCAL",
+          "page_text_hash": "657dc79faf81804f554586543e4007d111fa5249544edae6eee912206e7a77fc"
+        },
+        {
+          "page": 3,
+          "quote": "..........................46\nVincoli od oneri condominiali..............................................................",
+          "start_offset": 3425,
+          "end_offset": 3545,
+          "bbox": null,
+          "offset_mode": "PAGE_LOCAL",
+          "page_text_hash": "61735bd4532d3d1bbbb41ce7b3ef645d71fb4e84876f8a444bc96524140a0906"
+        },
+        {
+          "page": 16,
+          "quote": "nella valutazione dei beni\".\nVINCOLI OD ONERI CONDOMINIALI\nNon sono presenti vincoli od oneri condominiali.\nFirmato Da:",
+          "start_offset": 950,
+          "end_offset": 1070,
+          "bbox": null,
+          "offset_mode": "PAGE_LOCAL",
+          "page_text_hash": "46f19669c77eff9a5ee9e592a373770da932e4c2429d1afb856bd216202ed9fd"
+        }
+      ],
+      "user_prompt_it": "Verifica le spese condominiali arretrate nella perizia o presso l'amministratore."
+    },
+    "ape": {
+      "value": "ASSENTE",
+      "status": "FOUND",
+      "confidence": 0.9,
+      "evidence": [
+        {
+          "page": 15,
+          "quote": "Non esiste il certificato energetico dell'immobile / APE.",
+          "start_offset": 1939,
+          "end_offset": 1997,
+          "bbox": null,
+          "offset_mode": "PAGE_LOCAL",
+          "page_text_hash": "90f239a054389b501fdb84288a7117e41c080df743abc81baebb8c7770dc9330",
+          "search_hint": "Non esiste il certificato energetico dell'immobile / APE"
+        }
+      ],
+      "searched_in": [],
+      "user_prompt_it": null
+    },
+    "agibilita": {
+      "value": "ASSENTE",
+      "status": "FOUND",
+      "confidence": 0.9,
+      "evidence": [
+        {
+          "page": 15,
+          "quote": "non risulta agibile.",
+          "start_offset": 1510,
+          "end_offset": 1531,
+          "bbox": null,
+          "offset_mode": "PAGE_LOCAL",
+          "page_text_hash": "90f239a054389b501fdb84288a7117e41c080df743abc81baebb8c7770dc9330",
+          "search_hint": "non risulta agibile."
+        }
+      ],
+      "searched_in": [],
+      "user_prompt_it": null
+    },
+    "dati_asta": {
+      "value": null,
+      "status": "NOT_FOUND",
+      "confidence": 0.0,
+      "evidence": [],
+      "searched_in": [
+        {
+          "page": 6,
+          "quote": "abitazione/pensione padronale all'insegna \"Pensione Rizieri\".\nIl fabbricato dovrà essere posto in vendita e quindi trasferito, nello stato di fatto e di diritto in cui attualmente",
+          "start_offset": 1675,
+          "end_offset": 1795,
+          "bbox": null,
+          "offset_mode": "PAGE_LOCAL",
+          "page_text_hash": "7254712c88cd4423dda4128c7c6daf72cec22cd7e8e4d91be2059e2994840e1a"
+        },
+        {
+          "page": 7,
+          "quote": "**** Omissis **** (Proprietà 1/1)\nL'immobile viene posto in vendita per i seguenti diritti:\n**** Omissis **** (Proprietà 1/1)\nCon il n. 3 lo scrivente unisce la visura camerale della società esecutata **** Omissis ****",
+          "start_offset": 745,
+          "end_offset": 865,
+          "bbox": null,
+          "offset_mode": "PAGE_LOCAL",
+          "page_text_hash": "03f00b3da9306af06c163151be00cd9e8751136afad72cb135c0f0de2827398b"
+        },
+        {
+          "page": 9,
+          "quote": "la campitura propria dei fabbricati e ciò per errore commesso dal Catasto sin dall'impianto del Nuovo Catasto\nTerreni in quanto il corpo di fabbrica accessorio tergale figura regolarmente rappresentato nella planimetria",
+          "start_offset": 1119,
+          "end_offset": 1239,
+          "bbox": null,
+          "offset_mode": "PAGE_LOCAL",
+          "page_text_hash": "a54a90a39246e6284bc9844103eb1e5346ca485b606c1f75344203380a921a68"
+        }
+      ],
+      "user_prompt_it": null
+    },
+    "formalita_pregiudizievoli": {
+      "value": "PRESENTI FORMALITÀ",
+      "status": "FOUND",
+      "confidence": 0.9,
+      "evidence": [
+        {
+          "page": 2,
+          "quote": "Servitù, censo, livello, usi civici .............................................................................................................................................................22",
+          "start_offset": 5783,
+          "end_offset": 5978,
+          "bbox": null,
+          "offset_mode": "PAGE_LOCAL",
+          "page_text_hash": "657dc79faf81804f554586543e4007d111fa5249544edae6eee912206e7a77fc",
+          "search_hint": "Servitù, censo, livello, usi civici ............................................"
+        }
+      ],
+      "searched_in": [],
+      "user_prompt_it": null
+    }
+  },
+  "dati_certi_del_lotto": {
+    "prezzo_base_asta": {
+      "value": 64198.0,
+      "formatted": "€64,198",
+      "evidence": [
+        {
+          "page": 70,
+          "quote": "Prezzo base d'asta: € 64.198,00",
+          "start_offset": 70,
+          "end_offset": 111,
+          "bbox": null,
+          "offset_mode": "PAGE_LOCAL",
+          "page_text_hash": "2529e1768dabcc66af197185f250074b14714d86778fd7da39e258ee2e47cbbe",
+          "search_hint": "Prezzo base d'asta: € 64.198,00"
+        }
+      ]
+    },
+    "superficie_catastale": {
+      "value": "169.3",
+      "evidence": [
+        {
+          "page": 8,
+          "quote": "8 di 81 Totale superficie convenzionale: 169,30 mq",
+          "search_hint": "8 di 81 Totale superficie convenzionale: 169,30 mq",
+          "start_offset": 0,
+          "end_offset": 50,
+          "offset_mode": "PAGE_LOCAL",
+          "page_text_hash": "a3e45fe9af9e378db2fe417bd2c4228c4db420857fd630b4ac52a4fc653b79b4",
+          "bbox": null
+        }
+      ]
+    },
+    "catasto": {
+      "categoria": "NON SPECIFICATO IN PERIZIA",
+      "classe": "NON SPECIFICATO IN PERIZIA",
+      "vani": "NON SPECIFICATO IN PERIZIA"
+    },
+    "diritto_reale": {
+      "value": "Proprietà Quota 1/1",
+      "evidence": [
+        {
+          "page": 70,
+          "quote": "Diritto reale: Proprietà Quota 1/1",
+          "start_offset": 225,
+          "end_offset": 244,
+          "bbox": null,
+          "offset_mode": "PAGE_LOCAL",
+          "page_text_hash": "2529e1768dabcc66af197185f250074b14714d86778fd7da39e258ee2e47cbbe",
+          "search_hint": "Diritto reale: Proprietà Quota 1/1"
+        }
+      ]
+    }
+  },
+  "document_quality": {
+    "status": "TEXT_OK",
+    "reason": "Embedded text quality appears sufficient for deterministic extraction.",
+    "pages_total": 81,
+    "pages_needing_ocr": [
+      2,
+      3
+    ],
+    "thresholds": {
+      "page_needs_ocr": {
+        "word_count_lt": 30,
+        "chars_non_ws_lt": 200,
+        "alpha_ratio_lt": 0.3,
+        "garbage_ratio_gt": 0.25,
+        "fail_flags": [
+          "word_extract_failed",
+          "text_extract_failed"
+        ]
+      },
+      "document_status": {
+        "needs_ocr_ratio_gte": 0.35,
+        "needs_ocr_ratio_gte_with_images": 0.2,
+        "avg_image_count_per_page_gte": 1.0,
+        "unreadable_ratio_gte": 0.75,
+        "unreadable_median_word_count_lt": 10,
+        "unreadable_avg_alpha_ratio_lt": 0.15
+      }
+    },
+    "metrics_summary": {
+      "needs_ocr_pages_ratio": 0.024691,
+      "avg_image_count_per_page": 2.0,
+      "median_word_count": 356,
+      "avg_alpha_ratio": 0.832919
+    },
+    "customer_message_it": "Documento leggibile in modo automatico con qualità accettabile.",
+    "customer_message_en": "Document appears machine-readable with acceptable quality."
+  },
+  "semaforo_generale": {
+    "status": "AMBER",
+    "status_it": "ATTENZIONE",
+    "status_en": "CAUTION",
+    "reason_it": "Analisi automatica parziale - revisione manuale raccomandata",
+    "reason_en": "Partial automatic analysis - manual review recommended",
+    "evidence": [],
+    "top_blockers": [
+      {
+        "key": "stato_occupativo",
+        "label_it": "Stato occupativo",
+        "status": "LOW_CONFIDENCE",
+        "value": "DA VERIFICARE",
+        "evidence": [
+          {
+            "page": 10,
+            "quote": "Territoriale di Pescia hanno permesso di confermare che \"non risultano registrati atti di locazione e/o",
+            "start_offset": 526,
+            "end_offset": 630,
+            "bbox": null,
+            "offset_mode": "PAGE_LOCAL",
+            "page_text_hash": "49d596f0704269ae9e6c77c74ec4a50862f437da47705438c49300e1435c4604",
+            "search_hint": "locazione"
+          }
+        ],
+        "searched_in": [
+          {
+            "page": 10,
+            "quote": "STATO DI OCCUPAZIONE\nL'immobile risulta libero\nIl fabbricato, come già detto, risulta inutilizzato da numerosi anni ed in stato di rovina (per quanto attiene i",
+            "start_offset": 56,
+            "end_offset": 176,
+            "bbox": null,
+            "offset_mode": "PAGE_LOCAL",
+            "page_text_hash": "49d596f0704269ae9e6c77c74ec4a50862f437da47705438c49300e1435c4604"
+          },
+          {
+            "page": 23,
+            "quote": "STATO DI OCCUPAZIONE\nL'immobile risulta libero\nIn occasione dell'accertamento sopralluogo del giorno 06/09/2024 il signor **** Omissis ****, socio della",
+            "start_offset": 2011,
+            "end_offset": 2131,
+            "bbox": null,
+            "offset_mode": "PAGE_LOCAL",
+            "page_text_hash": "6b46549f605baa534646ecbe99cf2a87c094e0ee5ec06a45ff1de60716ff0e22"
+          },
+          {
+            "page": 40,
+            "quote": "STATO DI OCCUPAZIONE\nL'immobile risulta libero\nAnche le ricerche effettuate in Anagrafe Tributaria dall'Agenzia delle Entrate - Direzione di Pistoia - Ufficio",
+            "start_offset": 1058,
+            "end_offset": 1178,
+            "bbox": null,
+            "offset_mode": "PAGE_LOCAL",
+            "page_text_hash": "f028143069790a7ee79df285682e4f6f28201065b8d5a974101444d61f0b1867"
+          }
+        ]
+      },
+      {
+        "key": "conformita_catastale",
+        "label_it": "Conformità catastale",
+        "status": "LOW_CONFIDENCE",
+        "value": "DA VERIFICARE",
+        "evidence": [
+          {
+            "page": 21,
+            "quote": "proprietà della **** Omissis **** e ciò presumibilmente per mancata corrispondenza delle mappe catastali.",
+            "start_offset": 1509,
+            "end_offset": 1531,
+            "bbox": null,
+            "offset_mode": "PAGE_LOCAL",
+            "page_text_hash": "d3c6ffe97ae5173e783e7b13d041e427bd7bfc06fd3ad15bfd716a40242a33a4",
+            "search_hint": "mancata corrispondenza"
+          }
+        ],
+        "searched_in": [
+          {
+            "page": 8,
+            "quote": "Dal 01/01/1967 al 28/03/2000 **** Omissis **** Catasto Fabbricati\nFg. 18, Part. 465 e 488 uniti\nCategoria D2\nDal 29/03/2000 al 11/03/2003 **** Omissis **** Catasto Fabbricati",
+            "start_offset": 249,
+            "end_offset": 369,
+            "bbox": null,
+            "offset_mode": "PAGE_LOCAL",
+            "page_text_hash": "a3e45fe9af9e378db2fe417bd2c4228c4db420857fd630b4ac52a4fc653b79b4"
+          },
+          {
+            "page": 9,
+            "quote": "Viceversa, la planimetria catastale non risulta conforme allo stato di fatto ed in particolare sussistono\ndifformità rilevanti tali da influire sul calcolo della rendita catastale e da dar luogo all'obbligo di presentazione",
+            "start_offset": 194,
+            "end_offset": 314,
+            "bbox": null,
+            "offset_mode": "PAGE_LOCAL",
+            "page_text_hash": "a54a90a39246e6284bc9844103eb1e5346ca485b606c1f75344203380a921a68"
+          },
+          {
+            "page": 15,
+            "quote": "Unico elemento per stabilire l'esistenza di eventuali opere abusive è rappresentato pertanto dalla planimetria\ncatastale scheda n. 14171455 presentata l'8/12/1939 registrata al n. 2365.",
+            "start_offset": 2256,
+            "end_offset": 2376,
+            "bbox": null,
+            "offset_mode": "PAGE_LOCAL",
+            "page_text_hash": "90f239a054389b501fdb84288a7117e41c080df743abc81baebb8c7770dc9330"
+          }
+        ]
+      },
+      {
+        "key": "dati_asta",
+        "label_it": "Dati asta",
+        "status": "NOT_FOUND",
+        "value": "NON SPECIFICATO IN PERIZIA",
+        "evidence": [],
+        "searched_in": [
+          {
+            "page": 6,
+            "quote": "abitazione/pensione padronale all'insegna \"Pensione Rizieri\".\nIl fabbricato dovrà essere posto in vendita e quindi trasferito, nello stato di fatto e di diritto in cui attualmente",
+            "start_offset": 1675,
+            "end_offset": 1795,
+            "bbox": null,
+            "offset_mode": "PAGE_LOCAL",
+            "page_text_hash": "7254712c88cd4423dda4128c7c6daf72cec22cd7e8e4d91be2059e2994840e1a"
+          },
+          {
+            "page": 7,
+            "quote": "**** Omissis **** (Proprietà 1/1)\nL'immobile viene posto in vendita per i seguenti diritti:\n**** Omissis **** (Proprietà 1/1)\nCon il n. 3 lo scrivente unisce la visura camerale della società esecutata **** Omissis ****",
+            "start_offset": 745,
+            "end_offset": 865,
+            "bbox": null,
+            "offset_mode": "PAGE_LOCAL",
+            "page_text_hash": "03f00b3da9306af06c163151be00cd9e8751136afad72cb135c0f0de2827398b"
+          },
+          {
+            "page": 9,
+            "quote": "la campitura propria dei fabbricati e ciò per errore commesso dal Catasto sin dall'impianto del Nuovo Catasto\nTerreni in quanto il corpo di fabbrica accessorio tergale figura regolarmente rappresentato nella planimetria",
+            "start_offset": 1119,
+            "end_offset": 1239,
+            "bbox": null,
+            "offset_mode": "PAGE_LOCAL",
+            "page_text_hash": "a54a90a39246e6284bc9844103eb1e5346ca485b606c1f75344203380a921a68"
+          }
+        ]
+      }
+    ]
+  },
+  "summary_for_client": {
+    "summary_it": "La perizia del Geom. Bisogni Felice per l'esecuzione immobiliare 69/2024 presso il Tribunale di Pistoia valuta tre lotti di proprietà, descrivendo dettagli come titolarità, consistenza e stato conservativo. Ogni lotto viene analizzato per documentazione, confini, formalità pregiudizievoli e regolarità edilizia. La relazione offre una base informativa importante per completare le operazioni giudiziarie previste.",
+    "summary_en": "The expert report by Geom. Bisogni Felice for foreclosure 69/2024 at the Pistoia Court evaluates three property lots, providing details like ownership, size, and condition. Each lot is analyzed for documentation, boundaries, encumbrances, and building compliance. The report provides crucial information to support the judicial proceedings involved.",
+    "disclaimer_it": "Documento informativo. Non costituisce consulenza legale. Consultare un professionista qualificato.",
+    "disclaimer_en": "Informational document. Not legal advice. Consult a qualified professional."
+  },
+  "lots": [
+    {
+      "lot_number": 1,
+      "prezzo_base_eur": "€ 64.198,00",
+      "prezzo_base_value": 64198.0,
+      "ubicazione": "Montecatini-Terme (PT) - via Giuseppe Garibaldi n.c. 23",
+      "superficie_mq": 169.3,
+      "diritto_reale": "Proprietà 1/1",
+      "shared_rights_note": null,
+      "detail_scope": "LOT",
+      "evidence": {
+        "lotto": [
+          {
+            "page": 5,
+            "quote": "5 di 81 LOTTO 1",
+            "start_offset": 0,
+            "end_offset": 15,
+            "bbox": null,
+            "offset_mode": "PAGE_LOCAL",
+            "page_text_hash": "bebef4bdea7c9fb74707016780c2364b23a05c7a1ae08ba3eba96fa4493d956e",
+            "search_hint": "LOTTO 1"
+          }
+        ],
+        "prezzo_base": [
+          {
+            "page": 70,
+            "quote": "Prezzo base d'asta: € 64.198,00",
+            "start_offset": 70,
+            "end_offset": 111,
+            "bbox": null,
+            "offset_mode": "PAGE_LOCAL",
+            "page_text_hash": "2529e1768dabcc66af197185f250074b14714d86778fd7da39e258ee2e47cbbe",
+            "search_hint": "Prezzo base d'asta: € 64.198,00"
+          }
+        ],
+        "ubicazione": [
+          {
+            "page": 3,
+            "quote": "Bene N° 1 - Fabbricato civile ubicato a Montecatini-Terme (PT) - via Giuseppe Garibaldi n.c. 23 .............74",
+            "start_offset": 6386,
+            "end_offset": 6497,
+            "bbox": null,
+            "offset_mode": "PAGE_LOCAL",
+            "page_text_hash": "61735bd4532d3d1bbbb41ce7b3ef645d71fb4e84876f8a444bc96524140a0906",
+            "search_hint": "Bene N° 1 - Fabbricato civile ubicato a Montecatini-Terme (PT) - via Giuseppe"
+          }
+        ],
+        "superficie": [
+          {
+            "page": 8,
+            "quote": "8 di 81 Totale superficie convenzionale: 169,30 mq",
+            "start_offset": 0,
+            "end_offset": 50,
+            "bbox": null,
+            "offset_mode": "PAGE_LOCAL",
+            "page_text_hash": "a3e45fe9af9e378db2fe417bd2c4228c4db420857fd630b4ac52a4fc653b79b4",
+            "search_hint": "superficie convenzionale: 169,30 mq"
+          }
+        ],
+        "diritto_reale": [
+          {
+            "page": 6,
+            "quote": "piena proprietà per la quota di 1/1 (un primo) sopra fa",
+            "start_offset": 155,
+            "end_offset": 269,
+            "bbox": null,
+            "offset_mode": "PAGE_LOCAL",
+            "page_text_hash": "7254712c88cd4423dda4128c7c6daf72cec22cd7e8e4d91be2059e2994840e1a",
+            "search_hint": "piena proprietà per la quota di 1/1 (un p"
+          }
+        ],
+        "shared_rights_note": [],
+        "tipologia": [
+          {
+            "page": 3,
+            "quote": "Bene N° 1 - Fabbricato civile ubicato a Montecatini-Terme (PT) - via Giuseppe Garibaldi n.c. 23 .............74",
+            "start_offset": 6386,
+            "end_offset": 6497,
+            "bbox": null,
+            "offset_mode": "PAGE_LOCAL",
+            "page_text_hash": "61735bd4532d3d1bbbb41ce7b3ef645d71fb4e84876f8a444bc96524140a0906",
+            "search_hint": "Bene N° 1 - Fabbricato civile ubicato a Montecatini-Terme (PT) - via Giuseppe"
+          }
+        ],
+        "valore_stima": [],
+        "deprezzamento": []
+      },
+      "risk_notes": [
+        "non agibile / abitabilità assente",
+        "non conformità / difformità catastali-edilizie",
+        "presenza fibro-cemento / amianto",
+        "condizioni conservative critiche"
+      ],
+      "tipologia": "immobile: Fabbricato civile",
+      "valore_stima_eur": 80248,
+      "catasto": {
+        "foglio": "18",
+        "particella": "465",
+        "categoria": "A3"
+      },
+      "deprezzamento_percentuale": "20.00",
+      "beni": [
+        {
+          "bene_number": 1,
+          "tipologia": "Fabbricato civile",
+          "short_location": "Montecatini-Terme (PT) - via Giuseppe Garibaldi n.c. 23",
+          "piano": null,
+          "superficie_mq": null,
+          "valore_stima_eur": 80248,
+          "catasto": {
+            "foglio": "18",
+            "particella": "465",
+            "categoria": "A3"
+          },
+          "note": [
+            "non risulta agibile."
+          ],
+          "ape": "Non esiste",
+          "dichiarazioni_impianti": {
+            "elettrico": "Non esiste",
+            "termico": "Non esiste",
+            "idrico": "Non esiste"
+          },
+          "dichiarazioni": {
+            "dichiarazione_impianto_elettrico": "Non esiste",
+            "dichiarazione_impianto_termico": "Non esiste",
+            "dichiarazione_impianto_idrico": "Non esiste"
+          },
+          "stato_conservativo": {
+            "status_it": null,
+            "status_en": null,
+            "notes_it": null,
+            "evidence": []
+          },
+          "impianti": {
+            "elettrico": {
+              "status_it": null,
+              "status_en": null,
+              "notes_it": null,
+              "evidence": []
+            },
+            "idrico": {
+              "status_it": null,
+              "status_en": null,
+              "notes_it": null,
+              "evidence": []
+            },
+            "termico": {
+              "status_it": null,
+              "status_en": null,
+              "notes_it": null,
+              "evidence": []
+            }
+          },
+          "evidence": {
+            "tipologia": [
+              {
+                "page": 3,
+                "quote": "Bene N° 1 - Fabbricato civile ubicato a Montecatini-Terme (PT) - via Giuseppe Garibaldi n.c. 23 .............74",
+                "start_offset": 6386,
+                "end_offset": 6497,
+                "bbox": null,
+                "offset_mode": "PAGE_LOCAL",
+                "page_text_hash": "61735bd4532d3d1bbbb41ce7b3ef645d71fb4e84876f8a444bc96524140a0906",
+                "search_hint": "Bene N° 1 - Fabbricato civile ubicato a Montecatini-Terme (PT) - via Giuseppe"
+              }
+            ],
+            "location_piano": [
+              {
+                "page": 3,
+                "quote": "Bene N° 1 - Fabbricato civile ubicato a Montecatini-Terme (PT) - via Giuseppe Garibaldi n.c. 23 .............74",
+                "start_offset": 6386,
+                "end_offset": 6497,
+                "bbox": null,
+                "offset_mode": "PAGE_LOCAL",
+                "page_text_hash": "61735bd4532d3d1bbbb41ce7b3ef645d71fb4e84876f8a444bc96524140a0906",
+                "search_hint": "Bene N° 1 - Fabbricato civile ubicato a Montecatini-Terme (PT) - via Giuseppe"
+              }
+            ],
+            "superficie": [],
+            "valore_stima": [
+              {
+                "page": 49,
+                "quote": "Valore di stima del bene: € 80.248,00",
+                "start_offset": 2891,
+                "end_offset": 2928,
+                "bbox": null,
+                "offset_mode": "PAGE_LOCAL",
+                "page_text_hash": "a8cf7f7a4383742634cdeda99c150729875392b9f376667df5e6c699670fb6f2",
+                "search_hint": "Valore di stima del bene: € 80.248,00"
+              }
+            ],
+            "catasto": [
+              {
+                "page": 66,
+                "quote": "Identificato al catasto Fabbricati - Fg. 18, Part. 465 , Zc. 1, Categoria A3, Graffato 488",
+                "start_offset": 2649,
+                "end_offset": 2739,
+                "bbox": null,
+                "offset_mode": "PAGE_LOCAL",
+                "page_text_hash": "df7f16a11ee64a249ac06a60c4a10d8718e8fcf658f52d9ce0f9c33479a5db59",
+                "search_hint": "Identificato al catasto Fabbricati - Fg. 18, Part. 465 , Zc. 1, Categoria A3,"
+              }
+            ],
+            "note": [
+              {
+                "page": 15,
+                "quote": "non risulta agibile.\nLe ricerche effettuate presso l'Archivio del Comune di Montecatini Terme hanno permesso di rilevare che unica",
+                "start_offset": 1510,
+                "end_offset": 1531,
+                "bbox": null,
+                "offset_mode": "PAGE_LOCAL",
+                "page_text_hash": "90f239a054389b501fdb84288a7117e41c080df743abc81baebb8c7770dc9330",
+                "search_hint": "non risulta agibile. Le ricerche effettuate presso l'Archivio del Comune di"
+              }
+            ],
+            "ape": [
+              {
+                "page": 15,
+                "quote": "Non esiste il certificato energetico dell'immobile / APE.",
+                "start_offset": 1939,
+                "end_offset": 1998,
+                "bbox": null,
+                "offset_mode": "PAGE_LOCAL",
+                "page_text_hash": "90f239a054389b501fdb84288a7117e41c080df743abc81baebb8c7770dc9330",
+                "search_hint": "Non esiste il certificato energetico dell'immobile / APE."
+              }
+            ],
+            "dichiarazioni_impianti": {
+              "elettrico": [
+                {
+                  "page": 15,
+                  "quote": "Non esiste la dichiarazione di conformità dell'impianto elettrico.",
+                  "start_offset": 1998,
+                  "end_offset": 2066,
+                  "bbox": null,
+                  "offset_mode": "PAGE_LOCAL",
+                  "page_text_hash": "90f239a054389b501fdb84288a7117e41c080df743abc81baebb8c7770dc9330",
+                  "search_hint": "Non esiste la dichiarazione di conformità dell'impianto elettrico."
+                }
+              ],
+              "termico": [
+                {
+                  "page": 15,
+                  "quote": "Non esiste la dichiarazione di conformità dell'impianto termico.",
+                  "start_offset": 2066,
+                  "end_offset": 2132,
+                  "bbox": null,
+                  "offset_mode": "PAGE_LOCAL",
+                  "page_text_hash": "90f239a054389b501fdb84288a7117e41c080df743abc81baebb8c7770dc9330",
+                  "search_hint": "Non esiste la dichiarazione di conformità dell'impianto termico."
+                }
+              ],
+              "idrico": [
+                {
+                  "page": 15,
+                  "quote": "Non esiste la dichiarazione di conformità dell'impianto idrico.",
+                  "start_offset": 2132,
+                  "end_offset": 2197,
+                  "bbox": null,
+                  "offset_mode": "PAGE_LOCAL",
+                  "page_text_hash": "90f239a054389b501fdb84288a7117e41c080df743abc81baebb8c7770dc9330",
+                  "search_hint": "Non esiste la dichiarazione di conformità dell'impianto idrico."
+                }
+              ]
+            },
+            "dichiarazioni": {
+              "dichiarazione_impianto_elettrico": [
+                {
+                  "page": 15,
+                  "quote": "Non esiste la dichiarazione di conformità dell'impianto elettrico.",
+                  "start_offset": 1998,
+                  "end_offset": 2066,
+                  "bbox": null,
+                  "offset_mode": "PAGE_LOCAL",
+                  "page_text_hash": "90f239a054389b501fdb84288a7117e41c080df743abc81baebb8c7770dc9330",
+                  "search_hint": "Non esiste la dichiarazione di conformità dell'impianto elettrico."
+                }
+              ],
+              "dichiarazione_impianto_termico": [
+                {
+                  "page": 15,
+                  "quote": "Non esiste la dichiarazione di conformità dell'impianto termico.",
+                  "start_offset": 2066,
+                  "end_offset": 2132,
+                  "bbox": null,
+                  "offset_mode": "PAGE_LOCAL",
+                  "page_text_hash": "90f239a054389b501fdb84288a7117e41c080df743abc81baebb8c7770dc9330",
+                  "search_hint": "Non esiste la dichiarazione di conformità dell'impianto termico."
+                }
+              ],
+              "dichiarazione_impianto_idrico": [
+                {
+                  "page": 15,
+                  "quote": "Non esiste la dichiarazione di conformità dell'impianto idrico.",
+                  "start_offset": 2132,
+                  "end_offset": 2197,
+                  "bbox": null,
+                  "offset_mode": "PAGE_LOCAL",
+                  "page_text_hash": "90f239a054389b501fdb84288a7117e41c080df743abc81baebb8c7770dc9330",
+                  "search_hint": "Non esiste la dichiarazione di conformità dell'impianto idrico."
+                }
+              ]
+            },
+            "stato_conservativo": [],
+            "impianti": {
+              "elettrico": [],
+              "idrico": [],
+              "termico": []
+            }
+          }
+        }
+      ]
+    },
+    {
+      "lot_number": 2,
+      "prezzo_base_eur": "€ 84.000,00",
+      "prezzo_base_value": 84000.0,
+      "ubicazione": "Pieve a Nievole (PT) - via Colonna senza numero civico",
+      "superficie_mq": 258.5,
+      "diritto_reale": "Proprietà 1/1 + Quota 1/4 della stradella privata di accesso",
+      "shared_rights_note": "Quota 1/4 della stradella privata di accesso",
+      "detail_scope": "LOT",
+      "evidence": {
+        "lotto": [
+          {
+            "page": 17,
+            "quote": "17 di 81 LOTTO 2",
+            "start_offset": 0,
+            "end_offset": 16,
+            "bbox": null,
+            "offset_mode": "PAGE_LOCAL",
+            "page_text_hash": "6fb7f2e9b034f2194c63b351b9b28d53e0cdba5e6f8b4609316d6bb2255daa1f",
+            "search_hint": "LOTTO 2"
+          }
+        ],
+        "prezzo_base": [
+          {
+            "page": 70,
+            "quote": "Prezzo base d'asta: € 84.000,00",
+            "start_offset": 3403,
+            "end_offset": 3444,
+            "bbox": null,
+            "offset_mode": "PAGE_LOCAL",
+            "page_text_hash": "2529e1768dabcc66af197185f250074b14714d86778fd7da39e258ee2e47cbbe",
+            "search_hint": "Prezzo base d'asta: € 84.000,00"
+          }
+        ],
+        "ubicazione": [
+          {
+            "page": 3,
+            "quote": "Bene N° 2 - Magazzino ubicato a Pieve a Nievole (PT) - via Colonna senza numero civico............................76",
+            "start_offset": 6498,
+            "end_offset": 6614,
+            "bbox": null,
+            "offset_mode": "PAGE_LOCAL",
+            "page_text_hash": "61735bd4532d3d1bbbb41ce7b3ef645d71fb4e84876f8a444bc96524140a0906",
+            "search_hint": "Bene N° 2 - Magazzino ubicato a Pieve a Nievole (PT) - via Colonna senza numero"
+          }
+        ],
+        "superficie": [
+          {
+            "page": 20,
+            "quote": "Totale superficie convenzionale: 258,50 mq",
+            "start_offset": 299,
+            "end_offset": 341,
+            "bbox": null,
+            "offset_mode": "PAGE_LOCAL",
+            "page_text_hash": "bc8de555b95ea4a9788d3090b68dae4c2a23b99688495d1487f24185b45e6172",
+            "search_hint": "superficie convenzionale: 258,50 mq"
+          }
+        ],
+        "diritto_reale": [
+          {
+            "page": 18,
+            "quote": "piena proprietà per la quota di 1/1 (un primo) sopra po",
+            "start_offset": 147,
+            "end_offset": 260,
+            "bbox": null,
+            "offset_mode": "PAGE_LOCAL",
+            "page_text_hash": "5343528b50fbb094e9ae7ec2f43b7bccd31bc9f8dbd63ec3a956b17e576bb405",
+            "search_hint": "piena proprietà per la quota di 1/1 (un p"
+          }
+        ],
+        "shared_rights_note": [
+          {
+            "page": 19,
+            "quote": "diritti di comproprietà pari ad 1/4 dell'intero.",
+            "start_offset": 1695,
+            "end_offset": 1743,
+            "bbox": null,
+            "offset_mode": "PAGE_LOCAL",
+            "page_text_hash": "dd4e8a31bfe2f29dd30ebb3514f7657ba682cc934cebb8a4fddd56d7780f9af0",
+            "search_hint": "diritti di comproprietà pari ad 1/4 dell'intero."
+          }
+        ],
+        "tipologia": [
+          {
+            "page": 3,
+            "quote": "Bene N° 2 - Magazzino ubicato a Pieve a Nievole (PT) - via Colonna senza numero civico............................76",
+            "start_offset": 6498,
+            "end_offset": 6614,
+            "bbox": null,
+            "offset_mode": "PAGE_LOCAL",
+            "page_text_hash": "61735bd4532d3d1bbbb41ce7b3ef645d71fb4e84876f8a444bc96524140a0906",
+            "search_hint": "Bene N° 2 - Magazzino ubicato a Pieve a Nievole (PT) - via Colonna senza numero"
+          }
+        ],
+        "valore_stima": [],
+        "deprezzamento": []
+      },
+      "risk_notes": [
+        "non agibile / abitabilità assente",
+        "non conformità / difformità catastali-edilizie",
+        "servitù e accesso su stradella privata",
+        "infiltrazioni / umidità",
+        "condizioni conservative critiche"
+      ],
+      "tipologia": "immobile: Magazzino",
+      "valore_stima_eur": 105000,
+      "catasto": {
+        "consistenza": "ai sensi di legge",
+        "foglio": "6",
+        "particella": "1700",
+        "sub": "5",
+        "categoria": "C2"
+      },
+      "deprezzamento_percentuale": "20.00",
+      "beni": [
+        {
+          "bene_number": 2,
+          "tipologia": "Magazzino",
+          "short_location": "Pieve a Nievole (PT) - via Colonna senza numero civico",
+          "piano": null,
+          "superficie_mq": null,
+          "valore_stima_eur": 105000,
+          "catasto": {
+            "consistenza": "ai sensi di legge",
+            "foglio": "6",
+            "particella": "1700",
+            "sub": "5",
+            "categoria": "C2"
+          },
+          "note": [
+            "non risulta agibile."
+          ],
+          "ape": "Non esiste",
+          "dichiarazioni_impianti": {
+            "elettrico": "Non esiste",
+            "termico": "Non esiste",
+            "idrico": "Non esiste"
+          },
+          "dichiarazioni": {
+            "dichiarazione_impianto_elettrico": "Non esiste",
+            "dichiarazione_impianto_termico": "Non esiste",
+            "dichiarazione_impianto_idrico": "Non esiste"
+          },
+          "stato_conservativo": {
+            "status_it": null,
+            "status_en": null,
+            "notes_it": null,
+            "evidence": []
+          },
+          "impianti": {
+            "elettrico": {
+              "status_it": null,
+              "status_en": null,
+              "notes_it": null,
+              "evidence": []
+            },
+            "idrico": {
+              "status_it": null,
+              "status_en": null,
+              "notes_it": null,
+              "evidence": []
+            },
+            "termico": {
+              "status_it": null,
+              "status_en": null,
+              "notes_it": null,
+              "evidence": []
+            }
+          },
+          "evidence": {
+            "tipologia": [
+              {
+                "page": 3,
+                "quote": "Bene N° 2 - Magazzino ubicato a Pieve a Nievole (PT) - via Colonna senza numero civico............................76",
+                "start_offset": 6498,
+                "end_offset": 6614,
+                "bbox": null,
+                "offset_mode": "PAGE_LOCAL",
+                "page_text_hash": "61735bd4532d3d1bbbb41ce7b3ef645d71fb4e84876f8a444bc96524140a0906",
+                "search_hint": "Bene N° 2 - Magazzino ubicato a Pieve a Nievole (PT) - via Colonna senza numero"
+              }
+            ],
+            "location_piano": [
+              {
+                "page": 3,
+                "quote": "Bene N° 2 - Magazzino ubicato a Pieve a Nievole (PT) - via Colonna senza numero civico............................76",
+                "start_offset": 6498,
+                "end_offset": 6614,
+                "bbox": null,
+                "offset_mode": "PAGE_LOCAL",
+                "page_text_hash": "61735bd4532d3d1bbbb41ce7b3ef645d71fb4e84876f8a444bc96524140a0906",
+                "search_hint": "Bene N° 2 - Magazzino ubicato a Pieve a Nievole (PT) - via Colonna senza numero"
+              }
+            ],
+            "superficie": [],
+            "valore_stima": [
+              {
+                "page": 53,
+                "quote": "Valore di stima del bene: € 105.000,00",
+                "start_offset": 3034,
+                "end_offset": 3072,
+                "bbox": null,
+                "offset_mode": "PAGE_LOCAL",
+                "page_text_hash": "7f595a5ed9e66f5c3178c213b57a29affe78fe7a9e9424bece6e0efe606f82e5",
+                "search_hint": "Valore di stima del bene: € 105.000,00"
+              }
+            ],
+            "catasto": [
+              {
+                "page": 70,
+                "quote": "Identificato al catasto Fabbricati",
+                "start_offset": 283,
+                "end_offset": 318,
+                "bbox": null,
+                "offset_mode": "PAGE_LOCAL",
+                "page_text_hash": "2529e1768dabcc66af197185f250074b14714d86778fd7da39e258ee2e47cbbe",
+                "search_hint": "Identificato al catasto Fabbricati"
+              }
+            ],
+            "note": [
+              {
+                "page": 29,
+                "quote": "non risulta agibile.\nSulla base degli accertamenti effettuati presso il Comune di Pieve a Nievole (PT) è stato possibile rilevare la",
+                "start_offset": 2052,
+                "end_offset": 2073,
+                "bbox": null,
+                "offset_mode": "PAGE_LOCAL",
+                "page_text_hash": "d52c62c6990c8c108113981d3df46789ec8b4c4276e81d94049abc3f1632397a",
+                "search_hint": "non risulta agibile. Sulla base degli accertamenti effettuati presso il Comune"
+              }
+            ],
+            "ape": [
+              {
+                "page": 31,
+                "quote": "Non esiste il certificato energetico dell'immobile / APE.",
+                "start_offset": 1561,
+                "end_offset": 1620,
+                "bbox": null,
+                "offset_mode": "PAGE_LOCAL",
+                "page_text_hash": "6203b6d00d6a38f4ea8b21d1b6b00476b60ccb2485366de46cd240ed558e5fcd",
+                "search_hint": "Non esiste il certificato energetico dell'immobile / APE."
+              }
+            ],
+            "dichiarazioni_impianti": {
+              "elettrico": [
+                {
+                  "page": 31,
+                  "quote": "Non esiste la dichiarazione di conformità dell'impianto elettrico.",
+                  "start_offset": 1620,
+                  "end_offset": 1688,
+                  "bbox": null,
+                  "offset_mode": "PAGE_LOCAL",
+                  "page_text_hash": "6203b6d00d6a38f4ea8b21d1b6b00476b60ccb2485366de46cd240ed558e5fcd",
+                  "search_hint": "Non esiste la dichiarazione di conformità dell'impianto elettrico."
+                }
+              ],
+              "termico": [
+                {
+                  "page": 31,
+                  "quote": "Non esiste la dichiarazione di conformità dell'impianto termico.",
+                  "start_offset": 1688,
+                  "end_offset": 1754,
+                  "bbox": null,
+                  "offset_mode": "PAGE_LOCAL",
+                  "page_text_hash": "6203b6d00d6a38f4ea8b21d1b6b00476b60ccb2485366de46cd240ed558e5fcd",
+                  "search_hint": "Non esiste la dichiarazione di conformità dell'impianto termico."
+                }
+              ],
+              "idrico": [
+                {
+                  "page": 31,
+                  "quote": "Non esiste la dichiarazione di conformità dell'impianto idrico.",
+                  "start_offset": 1754,
+                  "end_offset": 1819,
+                  "bbox": null,
+                  "offset_mode": "PAGE_LOCAL",
+                  "page_text_hash": "6203b6d00d6a38f4ea8b21d1b6b00476b60ccb2485366de46cd240ed558e5fcd",
+                  "search_hint": "Non esiste la dichiarazione di conformità dell'impianto idrico."
+                }
+              ]
+            },
+            "dichiarazioni": {
+              "dichiarazione_impianto_elettrico": [
+                {
+                  "page": 31,
+                  "quote": "Non esiste la dichiarazione di conformità dell'impianto elettrico.",
+                  "start_offset": 1620,
+                  "end_offset": 1688,
+                  "bbox": null,
+                  "offset_mode": "PAGE_LOCAL",
+                  "page_text_hash": "6203b6d00d6a38f4ea8b21d1b6b00476b60ccb2485366de46cd240ed558e5fcd",
+                  "search_hint": "Non esiste la dichiarazione di conformità dell'impianto elettrico."
+                }
+              ],
+              "dichiarazione_impianto_termico": [
+                {
+                  "page": 31,
+                  "quote": "Non esiste la dichiarazione di conformità dell'impianto termico.",
+                  "start_offset": 1688,
+                  "end_offset": 1754,
+                  "bbox": null,
+                  "offset_mode": "PAGE_LOCAL",
+                  "page_text_hash": "6203b6d00d6a38f4ea8b21d1b6b00476b60ccb2485366de46cd240ed558e5fcd",
+                  "search_hint": "Non esiste la dichiarazione di conformità dell'impianto termico."
+                }
+              ],
+              "dichiarazione_impianto_idrico": [
+                {
+                  "page": 31,
+                  "quote": "Non esiste la dichiarazione di conformità dell'impianto idrico.",
+                  "start_offset": 1754,
+                  "end_offset": 1819,
+                  "bbox": null,
+                  "offset_mode": "PAGE_LOCAL",
+                  "page_text_hash": "6203b6d00d6a38f4ea8b21d1b6b00476b60ccb2485366de46cd240ed558e5fcd",
+                  "search_hint": "Non esiste la dichiarazione di conformità dell'impianto idrico."
+                }
+              ]
+            },
+            "stato_conservativo": [],
+            "impianti": {
+              "elettrico": [],
+              "idrico": [],
+              "termico": []
+            }
+          }
+        }
+      ]
+    },
+    {
+      "lot_number": 3,
+      "prezzo_base_eur": "€ 224.268,00",
+      "prezzo_base_value": 224268.0,
+      "ubicazione": "Pieve a Nievole (PT) - via Colonna senza numero civico",
+      "superficie_mq": 411.85,
+      "diritto_reale": "Proprietà 1/1 + Quota 1/4 della stradella privata di accesso",
+      "shared_rights_note": "Quota 1/4 della stradella privata di accesso",
+      "detail_scope": "LOT",
+      "evidence": {
+        "lotto": [
+          {
+            "page": 33,
+            "quote": "33 di 81 LOTTO 3",
+            "start_offset": 0,
+            "end_offset": 16,
+            "bbox": null,
+            "offset_mode": "PAGE_LOCAL",
+            "page_text_hash": "3df15586ad8b62adfd7333e53ac88bfc96193ae03bc7cca98c835557b505b735",
+            "search_hint": "LOTTO 3"
+          }
+        ],
+        "prezzo_base": [
+          {
+            "page": 71,
+            "quote": "Prezzo base d'asta: € 224.268,00",
+            "start_offset": 4764,
+            "end_offset": 4806,
+            "bbox": null,
+            "offset_mode": "PAGE_LOCAL",
+            "page_text_hash": "9de546ef77eae521f7d66f714e2c0da0ae2bae08332b66ff13ad6e5189d3c584",
+            "search_hint": "Prezzo base d'asta: € 224.268,00"
+          }
+        ],
+        "ubicazione": [
+          {
+            "page": 34,
+            "quote": "costruzione, ristrutturazione e finitura, posto in Comune di Pieve a Nievole (PT) via della Colonna snc,",
+            "start_offset": 290,
+            "end_offset": 395,
+            "bbox": null,
+            "offset_mode": "PAGE_LOCAL",
+            "page_text_hash": "167808f7ed761d2ebf7dbf0a5967122d19136f3cc0839fa226374b39f5994052",
+            "search_hint": "posto in Comune di Pieve a Nievole (PT) via della Colonna snc"
+          }
+        ],
+        "superficie": [
+          {
+            "page": 36,
+            "quote": "Totale superficie convenzionale: 411,85 mq",
+            "start_offset": 1121,
+            "end_offset": 1163,
+            "bbox": null,
+            "offset_mode": "PAGE_LOCAL",
+            "page_text_hash": "f74aa799269ac24d0f7fcb5a1adb4ff75cfee4ebf22ea462ee0ed0c1f3a34f3b",
+            "search_hint": "superficie convenzionale: 411,85 mq"
+          }
+        ],
+        "diritto_reale": [
+          {
+            "page": 34,
+            "quote": "piena proprietà per la quota di 1/1 (un primo) sopra po",
+            "start_offset": 176,
+            "end_offset": 289,
+            "bbox": null,
+            "offset_mode": "PAGE_LOCAL",
+            "page_text_hash": "167808f7ed761d2ebf7dbf0a5967122d19136f3cc0839fa226374b39f5994052",
+            "search_hint": "piena proprietà per la quota di 1/1 (un p"
+          }
+        ],
+        "shared_rights_note": [
+          {
+            "page": 36,
+            "quote": "diritti di comproprietà pari ad 1/4 dell'intero.",
+            "start_offset": 325,
+            "end_offset": 373,
+            "bbox": null,
+            "offset_mode": "PAGE_LOCAL",
+            "page_text_hash": "f74aa799269ac24d0f7fcb5a1adb4ff75cfee4ebf22ea462ee0ed0c1f3a34f3b",
+            "search_hint": "diritti di comproprietà pari ad 1/4 dell'intero."
+          }
+        ],
+        "tipologia": [
+          {
+            "page": 3,
+            "quote": "Bene N° 3 - Porzione di fabbricato in costruzione ubicato a Pieve a Nievole (PT) - via Colonna senza",
+            "start_offset": 6615,
+            "end_offset": 6715,
+            "bbox": null,
+            "offset_mode": "PAGE_LOCAL",
+            "page_text_hash": "61735bd4532d3d1bbbb41ce7b3ef645d71fb4e84876f8a444bc96524140a0906",
+            "search_hint": "Bene N° 3 - Porzione di fabbricato in costruzione ubicato a Pieve a Nievole (PT)"
+          }
+        ],
+        "valore_stima": [],
+        "deprezzamento": [
+          {
+            "page": 52,
+            "quote": "Deprezzamenti\nTipologia deprezzamento Valore Tipo\nAltro 20,00 %",
+            "start_offset": 311,
+            "end_offset": 374,
+            "bbox": null,
+            "offset_mode": "PAGE_LOCAL",
+            "page_text_hash": "d4d2fd8ad4b774af6109eb5078c2fed41845ac0516ec1b99695b297cb8c90434",
+            "search_hint": "Deprezzamenti Tipologia deprezzamento Valore Tipo Altro 20,00 %"
+          }
+        ]
+      },
+      "deprezzamento_percentuale": "20.00",
+      "risk_notes": [
+        "non agibile / abitabilità assente",
+        "non conformità / difformità catastali-edilizie",
+        "servitù e accesso su stradella privata",
+        "infiltrazioni / umidità",
+        "fabbricato in costruzione / lavori sospesi",
+        "condizioni conservative critiche"
+      ],
+      "tipologia": "immobile: Porzione di fabbricato in costruzione",
+      "valore_stima_eur": 280336,
+      "catasto": {
+        "consistenza": "....................................................................................................................................................................................................36",
+        "foglio": "6",
+        "particella": "94",
+        "sub": "8",
+        "categoria": "F3"
+      },
+      "beni": [
+        {
+          "bene_number": 3,
+          "tipologia": "Porzione di fabbricato in costruzione",
+          "short_location": "Pieve a Nievole (PT) - via Colonna senza",
+          "piano": null,
+          "superficie_mq": 258.5,
+          "valore_stima_eur": 280336,
+          "catasto": {
+            "consistenza": "....................................................................................................................................................................................................36",
+            "foglio": "6",
+            "particella": "94",
+            "sub": "8",
+            "categoria": "F3"
+          },
+          "note": [
+            "non risulta agibile."
+          ],
+          "ape": "Non esiste",
+          "dichiarazioni_impianti": {
+            "elettrico": "Non esiste",
+            "termico": "Non esiste",
+            "idrico": "Non esiste"
+          },
+          "dichiarazioni": {
+            "dichiarazione_impianto_elettrico": "Non esiste",
+            "dichiarazione_impianto_termico": "Non esiste",
+            "dichiarazione_impianto_idrico": "Non esiste"
+          },
+          "stato_conservativo": {
+            "status_it": null,
+            "status_en": null,
+            "notes_it": null,
+            "evidence": []
+          },
+          "impianti": {
+            "elettrico": {
+              "status_it": null,
+              "status_en": null,
+              "notes_it": null,
+              "evidence": []
+            },
+            "idrico": {
+              "status_it": null,
+              "status_en": null,
+              "notes_it": null,
+              "evidence": []
+            },
+            "termico": {
+              "status_it": null,
+              "status_en": null,
+              "notes_it": null,
+              "evidence": []
+            }
+          },
+          "evidence": {
+            "tipologia": [
+              {
+                "page": 3,
+                "quote": "Bene N° 3 - Porzione di fabbricato in costruzione ubicato a Pieve a Nievole (PT) - via Colonna senza",
+                "start_offset": 6615,
+                "end_offset": 6715,
+                "bbox": null,
+                "offset_mode": "PAGE_LOCAL",
+                "page_text_hash": "61735bd4532d3d1bbbb41ce7b3ef645d71fb4e84876f8a444bc96524140a0906",
+                "search_hint": "Bene N° 3 - Porzione di fabbricato in costruzione ubicato a Pieve a Nievole (PT)"
+              }
+            ],
+            "location_piano": [
+              {
+                "page": 3,
+                "quote": "Bene N° 3 - Porzione di fabbricato in costruzione ubicato a Pieve a Nievole (PT) - via Colonna senza",
+                "start_offset": 6615,
+                "end_offset": 6715,
+                "bbox": null,
+                "offset_mode": "PAGE_LOCAL",
+                "page_text_hash": "61735bd4532d3d1bbbb41ce7b3ef645d71fb4e84876f8a444bc96524140a0906",
+                "search_hint": "Bene N° 3 - Porzione di fabbricato in costruzione ubicato a Pieve a Nievole (PT)"
+              }
+            ],
+            "superficie": [
+              {
+                "page": 71,
+                "quote": "Categoria F1Superficie 258,50 mq",
+                "start_offset": 216,
+                "end_offset": 248,
+                "bbox": null,
+                "offset_mode": "PAGE_LOCAL",
+                "page_text_hash": "9de546ef77eae521f7d66f714e2c0da0ae2bae08332b66ff13ad6e5189d3c584",
+                "search_hint": "Categoria F1Superficie 258,50 mq"
+              }
+            ],
+            "valore_stima": [
+              {
+                "page": 57,
+                "quote": "Valore di stima del bene: € 280.336,00",
+                "start_offset": 2741,
+                "end_offset": 2779,
+                "bbox": null,
+                "offset_mode": "PAGE_LOCAL",
+                "page_text_hash": "df1e569bfbe072960dddd51b5b9b7df7fdd2f54b336fdc3cc0817913f2a4418a",
+                "search_hint": "Valore di stima del bene: € 280.336,00"
+              }
+            ],
+            "catasto": [
+              {
+                "page": 72,
+                "quote": "sulle parti ed impianti comuni del fabbricato di maggiore consistenza ai sensi di legge, consuetudine e",
+                "start_offset": 5754,
+                "end_offset": 5858,
+                "bbox": null,
+                "offset_mode": "PAGE_LOCAL",
+                "page_text_hash": "2753608953b482dde70ec674c8f208f087c682cc7f6b607af7bffdc42d527604",
+                "search_hint": "sulle parti ed impianti comuni del fabbricato di maggiore consistenza ai sensi"
+              }
+            ],
+            "note": [
+              {
+                "page": 46,
+                "quote": "non risulta agibile.\nSulla base degli accertamenti effettuati presso il Comune di Pieve a Nievole (PT) è stato possibile rilevare la",
+                "start_offset": 1230,
+                "end_offset": 1251,
+                "bbox": null,
+                "offset_mode": "PAGE_LOCAL",
+                "page_text_hash": "186e1e44a9b1b46fa64ff9aa1f06ed5888bb6bf0447a02fef9705696d44b2c4f",
+                "search_hint": "non risulta agibile. Sulla base degli accertamenti effettuati presso il Comune"
+              }
+            ],
+            "ape": [
+              {
+                "page": 48,
+                "quote": "Non esiste il certificato energetico dell'immobile / APE.",
+                "start_offset": 66,
+                "end_offset": 125,
+                "bbox": null,
+                "offset_mode": "PAGE_LOCAL",
+                "page_text_hash": "69c0f9a9a47003046237735f3af8c8b3b237e7110b1fdb03a8a420fa50c519ab",
+                "search_hint": "Non esiste il certificato energetico dell'immobile / APE."
+              }
+            ],
+            "dichiarazioni_impianti": {
+              "elettrico": [
+                {
+                  "page": 48,
+                  "quote": "Non esiste la dichiarazione di conformità dell'impianto elettrico.",
+                  "start_offset": 125,
+                  "end_offset": 193,
+                  "bbox": null,
+                  "offset_mode": "PAGE_LOCAL",
+                  "page_text_hash": "69c0f9a9a47003046237735f3af8c8b3b237e7110b1fdb03a8a420fa50c519ab",
+                  "search_hint": "Non esiste la dichiarazione di conformità dell'impianto elettrico."
+                }
+              ],
+              "termico": [
+                {
+                  "page": 48,
+                  "quote": "Non esiste la dichiarazione di conformità dell'impianto termico.",
+                  "start_offset": 193,
+                  "end_offset": 259,
+                  "bbox": null,
+                  "offset_mode": "PAGE_LOCAL",
+                  "page_text_hash": "69c0f9a9a47003046237735f3af8c8b3b237e7110b1fdb03a8a420fa50c519ab",
+                  "search_hint": "Non esiste la dichiarazione di conformità dell'impianto termico."
+                }
+              ],
+              "idrico": [
+                {
+                  "page": 48,
+                  "quote": "Non esiste la dichiarazione di conformità dell'impianto idrico.",
+                  "start_offset": 259,
+                  "end_offset": 324,
+                  "bbox": null,
+                  "offset_mode": "PAGE_LOCAL",
+                  "page_text_hash": "69c0f9a9a47003046237735f3af8c8b3b237e7110b1fdb03a8a420fa50c519ab",
+                  "search_hint": "Non esiste la dichiarazione di conformità dell'impianto idrico."
+                }
+              ]
+            },
+            "dichiarazioni": {
+              "dichiarazione_impianto_elettrico": [
+                {
+                  "page": 48,
+                  "quote": "Non esiste la dichiarazione di conformità dell'impianto elettrico.",
+                  "start_offset": 125,
+                  "end_offset": 193,
+                  "bbox": null,
+                  "offset_mode": "PAGE_LOCAL",
+                  "page_text_hash": "69c0f9a9a47003046237735f3af8c8b3b237e7110b1fdb03a8a420fa50c519ab",
+                  "search_hint": "Non esiste la dichiarazione di conformità dell'impianto elettrico."
+                }
+              ],
+              "dichiarazione_impianto_termico": [
+                {
+                  "page": 48,
+                  "quote": "Non esiste la dichiarazione di conformità dell'impianto termico.",
+                  "start_offset": 193,
+                  "end_offset": 259,
+                  "bbox": null,
+                  "offset_mode": "PAGE_LOCAL",
+                  "page_text_hash": "69c0f9a9a47003046237735f3af8c8b3b237e7110b1fdb03a8a420fa50c519ab",
+                  "search_hint": "Non esiste la dichiarazione di conformità dell'impianto termico."
+                }
+              ],
+              "dichiarazione_impianto_idrico": [
+                {
+                  "page": 48,
+                  "quote": "Non esiste la dichiarazione di conformità dell'impianto idrico.",
+                  "start_offset": 259,
+                  "end_offset": 324,
+                  "bbox": null,
+                  "offset_mode": "PAGE_LOCAL",
+                  "page_text_hash": "69c0f9a9a47003046237735f3af8c8b3b237e7110b1fdb03a8a420fa50c519ab",
+                  "search_hint": "Non esiste la dichiarazione di conformità dell'impianto idrico."
+                }
+              ]
+            },
+            "stato_conservativo": [],
+            "impianti": {
+              "elettrico": [],
+              "idrico": [],
+              "termico": []
+            }
+          }
+        }
+      ]
+    }
+  ],
+  "beni": [
+    {
+      "bene_number": 1,
+      "tipologia": "Fabbricato civile",
+      "short_location": "Montecatini-Terme (PT) - via Giuseppe Garibaldi n.c. 23",
+      "piano": null,
+      "superficie_mq": null,
+      "valore_stima_eur": 80248,
+      "catasto": {
+        "foglio": "18",
+        "particella": "465",
+        "categoria": "A3"
+      },
+      "note": [
+        "non risulta agibile."
+      ],
+      "ape": "Non esiste",
+      "dichiarazioni_impianti": {
+        "elettrico": "Non esiste",
+        "termico": "Non esiste",
+        "idrico": "Non esiste"
+      },
+      "dichiarazioni": {
+        "dichiarazione_impianto_elettrico": "Non esiste",
+        "dichiarazione_impianto_termico": "Non esiste",
+        "dichiarazione_impianto_idrico": "Non esiste"
+      },
+      "stato_conservativo": {
+        "status_it": null,
+        "status_en": null,
+        "notes_it": null,
+        "evidence": []
+      },
+      "impianti": {
+        "elettrico": {
+          "status_it": null,
+          "status_en": null,
+          "notes_it": null,
+          "evidence": []
+        },
+        "idrico": {
+          "status_it": null,
+          "status_en": null,
+          "notes_it": null,
+          "evidence": []
+        },
+        "termico": {
+          "status_it": null,
+          "status_en": null,
+          "notes_it": null,
+          "evidence": []
+        }
+      },
+      "evidence": {
+        "tipologia": [
+          {
+            "page": 3,
+            "quote": "Bene N° 1 - Fabbricato civile ubicato a Montecatini-Terme (PT) - via Giuseppe Garibaldi n.c. 23 .............74",
+            "start_offset": 6386,
+            "end_offset": 6497,
+            "bbox": null,
+            "offset_mode": "PAGE_LOCAL",
+            "page_text_hash": "61735bd4532d3d1bbbb41ce7b3ef645d71fb4e84876f8a444bc96524140a0906",
+            "search_hint": "Bene N° 1 - Fabbricato civile ubicato a Montecatini-Terme (PT) - via Giuseppe"
+          }
+        ],
+        "location_piano": [
+          {
+            "page": 3,
+            "quote": "Bene N° 1 - Fabbricato civile ubicato a Montecatini-Terme (PT) - via Giuseppe Garibaldi n.c. 23 .............74",
+            "start_offset": 6386,
+            "end_offset": 6497,
+            "bbox": null,
+            "offset_mode": "PAGE_LOCAL",
+            "page_text_hash": "61735bd4532d3d1bbbb41ce7b3ef645d71fb4e84876f8a444bc96524140a0906",
+            "search_hint": "Bene N° 1 - Fabbricato civile ubicato a Montecatini-Terme (PT) - via Giuseppe"
+          }
+        ],
+        "superficie": [],
+        "valore_stima": [
+          {
+            "page": 49,
+            "quote": "Valore di stima del bene: € 80.248,00",
+            "start_offset": 2891,
+            "end_offset": 2928,
+            "bbox": null,
+            "offset_mode": "PAGE_LOCAL",
+            "page_text_hash": "a8cf7f7a4383742634cdeda99c150729875392b9f376667df5e6c699670fb6f2",
+            "search_hint": "Valore di stima del bene: € 80.248,00"
+          }
+        ],
+        "catasto": [
+          {
+            "page": 66,
+            "quote": "Identificato al catasto Fabbricati - Fg. 18, Part. 465 , Zc. 1, Categoria A3, Graffato 488",
+            "start_offset": 2649,
+            "end_offset": 2739,
+            "bbox": null,
+            "offset_mode": "PAGE_LOCAL",
+            "page_text_hash": "df7f16a11ee64a249ac06a60c4a10d8718e8fcf658f52d9ce0f9c33479a5db59",
+            "search_hint": "Identificato al catasto Fabbricati - Fg. 18, Part. 465 , Zc. 1, Categoria A3,"
+          }
+        ],
+        "note": [
+          {
+            "page": 15,
+            "quote": "non risulta agibile.\nLe ricerche effettuate presso l'Archivio del Comune di Montecatini Terme hanno permesso di rilevare che unica",
+            "start_offset": 1510,
+            "end_offset": 1531,
+            "bbox": null,
+            "offset_mode": "PAGE_LOCAL",
+            "page_text_hash": "90f239a054389b501fdb84288a7117e41c080df743abc81baebb8c7770dc9330",
+            "search_hint": "non risulta agibile. Le ricerche effettuate presso l'Archivio del Comune di"
+          }
+        ],
+        "ape": [
+          {
+            "page": 15,
+            "quote": "Non esiste il certificato energetico dell'immobile / APE.",
+            "start_offset": 1939,
+            "end_offset": 1998,
+            "bbox": null,
+            "offset_mode": "PAGE_LOCAL",
+            "page_text_hash": "90f239a054389b501fdb84288a7117e41c080df743abc81baebb8c7770dc9330",
+            "search_hint": "Non esiste il certificato energetico dell'immobile / APE."
+          }
+        ],
+        "dichiarazioni_impianti": {
+          "elettrico": [
+            {
+              "page": 15,
+              "quote": "Non esiste la dichiarazione di conformità dell'impianto elettrico.",
+              "start_offset": 1998,
+              "end_offset": 2066,
+              "bbox": null,
+              "offset_mode": "PAGE_LOCAL",
+              "page_text_hash": "90f239a054389b501fdb84288a7117e41c080df743abc81baebb8c7770dc9330",
+              "search_hint": "Non esiste la dichiarazione di conformità dell'impianto elettrico."
+            }
+          ],
+          "termico": [
+            {
+              "page": 15,
+              "quote": "Non esiste la dichiarazione di conformità dell'impianto termico.",
+              "start_offset": 2066,
+              "end_offset": 2132,
+              "bbox": null,
+              "offset_mode": "PAGE_LOCAL",
+              "page_text_hash": "90f239a054389b501fdb84288a7117e41c080df743abc81baebb8c7770dc9330",
+              "search_hint": "Non esiste la dichiarazione di conformità dell'impianto termico."
+            }
+          ],
+          "idrico": [
+            {
+              "page": 15,
+              "quote": "Non esiste la dichiarazione di conformità dell'impianto idrico.",
+              "start_offset": 2132,
+              "end_offset": 2197,
+              "bbox": null,
+              "offset_mode": "PAGE_LOCAL",
+              "page_text_hash": "90f239a054389b501fdb84288a7117e41c080df743abc81baebb8c7770dc9330",
+              "search_hint": "Non esiste la dichiarazione di conformità dell'impianto idrico."
+            }
+          ]
+        },
+        "dichiarazioni": {
+          "dichiarazione_impianto_elettrico": [
+            {
+              "page": 15,
+              "quote": "Non esiste la dichiarazione di conformità dell'impianto elettrico.",
+              "start_offset": 1998,
+              "end_offset": 2066,
+              "bbox": null,
+              "offset_mode": "PAGE_LOCAL",
+              "page_text_hash": "90f239a054389b501fdb84288a7117e41c080df743abc81baebb8c7770dc9330",
+              "search_hint": "Non esiste la dichiarazione di conformità dell'impianto elettrico."
+            }
+          ],
+          "dichiarazione_impianto_termico": [
+            {
+              "page": 15,
+              "quote": "Non esiste la dichiarazione di conformità dell'impianto termico.",
+              "start_offset": 2066,
+              "end_offset": 2132,
+              "bbox": null,
+              "offset_mode": "PAGE_LOCAL",
+              "page_text_hash": "90f239a054389b501fdb84288a7117e41c080df743abc81baebb8c7770dc9330",
+              "search_hint": "Non esiste la dichiarazione di conformità dell'impianto termico."
+            }
+          ],
+          "dichiarazione_impianto_idrico": [
+            {
+              "page": 15,
+              "quote": "Non esiste la dichiarazione di conformità dell'impianto idrico.",
+              "start_offset": 2132,
+              "end_offset": 2197,
+              "bbox": null,
+              "offset_mode": "PAGE_LOCAL",
+              "page_text_hash": "90f239a054389b501fdb84288a7117e41c080df743abc81baebb8c7770dc9330",
+              "search_hint": "Non esiste la dichiarazione di conformità dell'impianto idrico."
+            }
+          ]
+        },
+        "stato_conservativo": [],
+        "impianti": {
+          "elettrico": [],
+          "idrico": [],
+          "termico": []
+        }
+      }
+    },
+    {
+      "bene_number": 2,
+      "tipologia": "Magazzino",
+      "short_location": "Pieve a Nievole (PT) - via Colonna senza numero civico",
+      "piano": null,
+      "superficie_mq": null,
+      "valore_stima_eur": 105000,
+      "catasto": {
+        "consistenza": "ai sensi di legge",
+        "foglio": "6",
+        "particella": "1700",
+        "sub": "5",
+        "categoria": "C2"
+      },
+      "note": [
+        "non risulta agibile."
+      ],
+      "ape": "Non esiste",
+      "dichiarazioni_impianti": {
+        "elettrico": "Non esiste",
+        "termico": "Non esiste",
+        "idrico": "Non esiste"
+      },
+      "dichiarazioni": {
+        "dichiarazione_impianto_elettrico": "Non esiste",
+        "dichiarazione_impianto_termico": "Non esiste",
+        "dichiarazione_impianto_idrico": "Non esiste"
+      },
+      "stato_conservativo": {
+        "status_it": null,
+        "status_en": null,
+        "notes_it": null,
+        "evidence": []
+      },
+      "impianti": {
+        "elettrico": {
+          "status_it": null,
+          "status_en": null,
+          "notes_it": null,
+          "evidence": []
+        },
+        "idrico": {
+          "status_it": null,
+          "status_en": null,
+          "notes_it": null,
+          "evidence": []
+        },
+        "termico": {
+          "status_it": null,
+          "status_en": null,
+          "notes_it": null,
+          "evidence": []
+        }
+      },
+      "evidence": {
+        "tipologia": [
+          {
+            "page": 3,
+            "quote": "Bene N° 2 - Magazzino ubicato a Pieve a Nievole (PT) - via Colonna senza numero civico............................76",
+            "start_offset": 6498,
+            "end_offset": 6614,
+            "bbox": null,
+            "offset_mode": "PAGE_LOCAL",
+            "page_text_hash": "61735bd4532d3d1bbbb41ce7b3ef645d71fb4e84876f8a444bc96524140a0906",
+            "search_hint": "Bene N° 2 - Magazzino ubicato a Pieve a Nievole (PT) - via Colonna senza numero"
+          }
+        ],
+        "location_piano": [
+          {
+            "page": 3,
+            "quote": "Bene N° 2 - Magazzino ubicato a Pieve a Nievole (PT) - via Colonna senza numero civico............................76",
+            "start_offset": 6498,
+            "end_offset": 6614,
+            "bbox": null,
+            "offset_mode": "PAGE_LOCAL",
+            "page_text_hash": "61735bd4532d3d1bbbb41ce7b3ef645d71fb4e84876f8a444bc96524140a0906",
+            "search_hint": "Bene N° 2 - Magazzino ubicato a Pieve a Nievole (PT) - via Colonna senza numero"
+          }
+        ],
+        "superficie": [],
+        "valore_stima": [
+          {
+            "page": 53,
+            "quote": "Valore di stima del bene: € 105.000,00",
+            "start_offset": 3034,
+            "end_offset": 3072,
+            "bbox": null,
+            "offset_mode": "PAGE_LOCAL",
+            "page_text_hash": "7f595a5ed9e66f5c3178c213b57a29affe78fe7a9e9424bece6e0efe606f82e5",
+            "search_hint": "Valore di stima del bene: € 105.000,00"
+          }
+        ],
+        "catasto": [
+          {
+            "page": 70,
+            "quote": "Identificato al catasto Fabbricati",
+            "start_offset": 283,
+            "end_offset": 318,
+            "bbox": null,
+            "offset_mode": "PAGE_LOCAL",
+            "page_text_hash": "2529e1768dabcc66af197185f250074b14714d86778fd7da39e258ee2e47cbbe",
+            "search_hint": "Identificato al catasto Fabbricati"
+          }
+        ],
+        "note": [
+          {
+            "page": 29,
+            "quote": "non risulta agibile.\nSulla base degli accertamenti effettuati presso il Comune di Pieve a Nievole (PT) è stato possibile rilevare la",
+            "start_offset": 2052,
+            "end_offset": 2073,
+            "bbox": null,
+            "offset_mode": "PAGE_LOCAL",
+            "page_text_hash": "d52c62c6990c8c108113981d3df46789ec8b4c4276e81d94049abc3f1632397a",
+            "search_hint": "non risulta agibile. Sulla base degli accertamenti effettuati presso il Comune"
+          }
+        ],
+        "ape": [
+          {
+            "page": 31,
+            "quote": "Non esiste il certificato energetico dell'immobile / APE.",
+            "start_offset": 1561,
+            "end_offset": 1620,
+            "bbox": null,
+            "offset_mode": "PAGE_LOCAL",
+            "page_text_hash": "6203b6d00d6a38f4ea8b21d1b6b00476b60ccb2485366de46cd240ed558e5fcd",
+            "search_hint": "Non esiste il certificato energetico dell'immobile / APE."
+          }
+        ],
+        "dichiarazioni_impianti": {
+          "elettrico": [
+            {
+              "page": 31,
+              "quote": "Non esiste la dichiarazione di conformità dell'impianto elettrico.",
+              "start_offset": 1620,
+              "end_offset": 1688,
+              "bbox": null,
+              "offset_mode": "PAGE_LOCAL",
+              "page_text_hash": "6203b6d00d6a38f4ea8b21d1b6b00476b60ccb2485366de46cd240ed558e5fcd",
+              "search_hint": "Non esiste la dichiarazione di conformità dell'impianto elettrico."
+            }
+          ],
+          "termico": [
+            {
+              "page": 31,
+              "quote": "Non esiste la dichiarazione di conformità dell'impianto termico.",
+              "start_offset": 1688,
+              "end_offset": 1754,
+              "bbox": null,
+              "offset_mode": "PAGE_LOCAL",
+              "page_text_hash": "6203b6d00d6a38f4ea8b21d1b6b00476b60ccb2485366de46cd240ed558e5fcd",
+              "search_hint": "Non esiste la dichiarazione di conformità dell'impianto termico."
+            }
+          ],
+          "idrico": [
+            {
+              "page": 31,
+              "quote": "Non esiste la dichiarazione di conformità dell'impianto idrico.",
+              "start_offset": 1754,
+              "end_offset": 1819,
+              "bbox": null,
+              "offset_mode": "PAGE_LOCAL",
+              "page_text_hash": "6203b6d00d6a38f4ea8b21d1b6b00476b60ccb2485366de46cd240ed558e5fcd",
+              "search_hint": "Non esiste la dichiarazione di conformità dell'impianto idrico."
+            }
+          ]
+        },
+        "dichiarazioni": {
+          "dichiarazione_impianto_elettrico": [
+            {
+              "page": 31,
+              "quote": "Non esiste la dichiarazione di conformità dell'impianto elettrico.",
+              "start_offset": 1620,
+              "end_offset": 1688,
+              "bbox": null,
+              "offset_mode": "PAGE_LOCAL",
+              "page_text_hash": "6203b6d00d6a38f4ea8b21d1b6b00476b60ccb2485366de46cd240ed558e5fcd",
+              "search_hint": "Non esiste la dichiarazione di conformità dell'impianto elettrico."
+            }
+          ],
+          "dichiarazione_impianto_termico": [
+            {
+              "page": 31,
+              "quote": "Non esiste la dichiarazione di conformità dell'impianto termico.",
+              "start_offset": 1688,
+              "end_offset": 1754,
+              "bbox": null,
+              "offset_mode": "PAGE_LOCAL",
+              "page_text_hash": "6203b6d00d6a38f4ea8b21d1b6b00476b60ccb2485366de46cd240ed558e5fcd",
+              "search_hint": "Non esiste la dichiarazione di conformità dell'impianto termico."
+            }
+          ],
+          "dichiarazione_impianto_idrico": [
+            {
+              "page": 31,
+              "quote": "Non esiste la dichiarazione di conformità dell'impianto idrico.",
+              "start_offset": 1754,
+              "end_offset": 1819,
+              "bbox": null,
+              "offset_mode": "PAGE_LOCAL",
+              "page_text_hash": "6203b6d00d6a38f4ea8b21d1b6b00476b60ccb2485366de46cd240ed558e5fcd",
+              "search_hint": "Non esiste la dichiarazione di conformità dell'impianto idrico."
+            }
+          ]
+        },
+        "stato_conservativo": [],
+        "impianti": {
+          "elettrico": [],
+          "idrico": [],
+          "termico": []
+        }
+      }
+    },
+    {
+      "bene_number": 3,
+      "tipologia": "Porzione di fabbricato in costruzione",
+      "short_location": "Pieve a Nievole (PT) - via Colonna senza",
+      "piano": null,
+      "superficie_mq": 258.5,
+      "valore_stima_eur": 280336,
+      "catasto": {
+        "consistenza": "....................................................................................................................................................................................................36",
+        "foglio": "6",
+        "particella": "94",
+        "sub": "8",
+        "categoria": "F3"
+      },
+      "note": [
+        "non risulta agibile."
+      ],
+      "ape": "Non esiste",
+      "dichiarazioni_impianti": {
+        "elettrico": "Non esiste",
+        "termico": "Non esiste",
+        "idrico": "Non esiste"
+      },
+      "dichiarazioni": {
+        "dichiarazione_impianto_elettrico": "Non esiste",
+        "dichiarazione_impianto_termico": "Non esiste",
+        "dichiarazione_impianto_idrico": "Non esiste"
+      },
+      "stato_conservativo": {
+        "status_it": null,
+        "status_en": null,
+        "notes_it": null,
+        "evidence": []
+      },
+      "impianti": {
+        "elettrico": {
+          "status_it": null,
+          "status_en": null,
+          "notes_it": null,
+          "evidence": []
+        },
+        "idrico": {
+          "status_it": null,
+          "status_en": null,
+          "notes_it": null,
+          "evidence": []
+        },
+        "termico": {
+          "status_it": null,
+          "status_en": null,
+          "notes_it": null,
+          "evidence": []
+        }
+      },
+      "evidence": {
+        "tipologia": [
+          {
+            "page": 3,
+            "quote": "Bene N° 3 - Porzione di fabbricato in costruzione ubicato a Pieve a Nievole (PT) - via Colonna senza",
+            "start_offset": 6615,
+            "end_offset": 6715,
+            "bbox": null,
+            "offset_mode": "PAGE_LOCAL",
+            "page_text_hash": "61735bd4532d3d1bbbb41ce7b3ef645d71fb4e84876f8a444bc96524140a0906",
+            "search_hint": "Bene N° 3 - Porzione di fabbricato in costruzione ubicato a Pieve a Nievole (PT)"
+          }
+        ],
+        "location_piano": [
+          {
+            "page": 3,
+            "quote": "Bene N° 3 - Porzione di fabbricato in costruzione ubicato a Pieve a Nievole (PT) - via Colonna senza",
+            "start_offset": 6615,
+            "end_offset": 6715,
+            "bbox": null,
+            "offset_mode": "PAGE_LOCAL",
+            "page_text_hash": "61735bd4532d3d1bbbb41ce7b3ef645d71fb4e84876f8a444bc96524140a0906",
+            "search_hint": "Bene N° 3 - Porzione di fabbricato in costruzione ubicato a Pieve a Nievole (PT)"
+          }
+        ],
+        "superficie": [
+          {
+            "page": 71,
+            "quote": "Categoria F1Superficie 258,50 mq",
+            "start_offset": 216,
+            "end_offset": 248,
+            "bbox": null,
+            "offset_mode": "PAGE_LOCAL",
+            "page_text_hash": "9de546ef77eae521f7d66f714e2c0da0ae2bae08332b66ff13ad6e5189d3c584",
+            "search_hint": "Categoria F1Superficie 258,50 mq"
+          }
+        ],
+        "valore_stima": [
+          {
+            "page": 57,
+            "quote": "Valore di stima del bene: € 280.336,00",
+            "start_offset": 2741,
+            "end_offset": 2779,
+            "bbox": null,
+            "offset_mode": "PAGE_LOCAL",
+            "page_text_hash": "df1e569bfbe072960dddd51b5b9b7df7fdd2f54b336fdc3cc0817913f2a4418a",
+            "search_hint": "Valore di stima del bene: € 280.336,00"
+          }
+        ],
+        "catasto": [
+          {
+            "page": 72,
+            "quote": "sulle parti ed impianti comuni del fabbricato di maggiore consistenza ai sensi di legge, consuetudine e",
+            "start_offset": 5754,
+            "end_offset": 5858,
+            "bbox": null,
+            "offset_mode": "PAGE_LOCAL",
+            "page_text_hash": "2753608953b482dde70ec674c8f208f087c682cc7f6b607af7bffdc42d527604",
+            "search_hint": "sulle parti ed impianti comuni del fabbricato di maggiore consistenza ai sensi"
+          }
+        ],
+        "note": [
+          {
+            "page": 46,
+            "quote": "non risulta agibile.\nSulla base degli accertamenti effettuati presso il Comune di Pieve a Nievole (PT) è stato possibile rilevare la",
+            "start_offset": 1230,
+            "end_offset": 1251,
+            "bbox": null,
+            "offset_mode": "PAGE_LOCAL",
+            "page_text_hash": "186e1e44a9b1b46fa64ff9aa1f06ed5888bb6bf0447a02fef9705696d44b2c4f",
+            "search_hint": "non risulta agibile. Sulla base degli accertamenti effettuati presso il Comune"
+          }
+        ],
+        "ape": [
+          {
+            "page": 48,
+            "quote": "Non esiste il certificato energetico dell'immobile / APE.",
+            "start_offset": 66,
+            "end_offset": 125,
+            "bbox": null,
+            "offset_mode": "PAGE_LOCAL",
+            "page_text_hash": "69c0f9a9a47003046237735f3af8c8b3b237e7110b1fdb03a8a420fa50c519ab",
+            "search_hint": "Non esiste il certificato energetico dell'immobile / APE."
+          }
+        ],
+        "dichiarazioni_impianti": {
+          "elettrico": [
+            {
+              "page": 48,
+              "quote": "Non esiste la dichiarazione di conformità dell'impianto elettrico.",
+              "start_offset": 125,
+              "end_offset": 193,
+              "bbox": null,
+              "offset_mode": "PAGE_LOCAL",
+              "page_text_hash": "69c0f9a9a47003046237735f3af8c8b3b237e7110b1fdb03a8a420fa50c519ab",
+              "search_hint": "Non esiste la dichiarazione di conformità dell'impianto elettrico."
+            }
+          ],
+          "termico": [
+            {
+              "page": 48,
+              "quote": "Non esiste la dichiarazione di conformità dell'impianto termico.",
+              "start_offset": 193,
+              "end_offset": 259,
+              "bbox": null,
+              "offset_mode": "PAGE_LOCAL",
+              "page_text_hash": "69c0f9a9a47003046237735f3af8c8b3b237e7110b1fdb03a8a420fa50c519ab",
+              "search_hint": "Non esiste la dichiarazione di conformità dell'impianto termico."
+            }
+          ],
+          "idrico": [
+            {
+              "page": 48,
+              "quote": "Non esiste la dichiarazione di conformità dell'impianto idrico.",
+              "start_offset": 259,
+              "end_offset": 324,
+              "bbox": null,
+              "offset_mode": "PAGE_LOCAL",
+              "page_text_hash": "69c0f9a9a47003046237735f3af8c8b3b237e7110b1fdb03a8a420fa50c519ab",
+              "search_hint": "Non esiste la dichiarazione di conformità dell'impianto idrico."
+            }
+          ]
+        },
+        "dichiarazioni": {
+          "dichiarazione_impianto_elettrico": [
+            {
+              "page": 48,
+              "quote": "Non esiste la dichiarazione di conformità dell'impianto elettrico.",
+              "start_offset": 125,
+              "end_offset": 193,
+              "bbox": null,
+              "offset_mode": "PAGE_LOCAL",
+              "page_text_hash": "69c0f9a9a47003046237735f3af8c8b3b237e7110b1fdb03a8a420fa50c519ab",
+              "search_hint": "Non esiste la dichiarazione di conformità dell'impianto elettrico."
+            }
+          ],
+          "dichiarazione_impianto_termico": [
+            {
+              "page": 48,
+              "quote": "Non esiste la dichiarazione di conformità dell'impianto termico.",
+              "start_offset": 193,
+              "end_offset": 259,
+              "bbox": null,
+              "offset_mode": "PAGE_LOCAL",
+              "page_text_hash": "69c0f9a9a47003046237735f3af8c8b3b237e7110b1fdb03a8a420fa50c519ab",
+              "search_hint": "Non esiste la dichiarazione di conformità dell'impianto termico."
+            }
+          ],
+          "dichiarazione_impianto_idrico": [
+            {
+              "page": 48,
+              "quote": "Non esiste la dichiarazione di conformità dell'impianto idrico.",
+              "start_offset": 259,
+              "end_offset": 324,
+              "bbox": null,
+              "offset_mode": "PAGE_LOCAL",
+              "page_text_hash": "69c0f9a9a47003046237735f3af8c8b3b237e7110b1fdb03a8a420fa50c519ab",
+              "search_hint": "Non esiste la dichiarazione di conformità dell'impianto idrico."
+            }
+          ]
+        },
+        "stato_conservativo": [],
+        "impianti": {
+          "elettrico": [],
+          "idrico": [],
+          "termico": []
+        }
+      }
+    }
+  ],
+  "lots_count": 3,
+  "is_multi_lot": true,
+  "money_box": {
+    "policy": "LOT_CONSERVATIVE",
+    "lots": [
+      {
+        "lot_number": 1,
+        "lotto_label": "Lotto 1",
+        "valore_stima_eur": 80248,
+        "deprezzamento_percent": 20.0,
+        "prezzo_base_eur": 64198
+      },
+      {
+        "lot_number": 2,
+        "lotto_label": "Lotto 2",
+        "valore_stima_eur": 105000,
+        "deprezzamento_percent": 20.0,
+        "prezzo_base_eur": 84000
+      },
+      {
+        "lot_number": 3,
+        "lotto_label": "Lotto 3",
+        "valore_stima_eur": 280336,
+        "deprezzamento_percent": 20.0,
+        "prezzo_base_eur": 224268
+      }
+    ],
+    "items": [
+      {
+        "code": "LOT_1_BURDEN",
+        "lot_number": 1,
+        "label_it": "Bonifica / smaltimento fibro-cemento a carico acquirente",
+        "label_en": "Bonifica / smaltimento fibro-cemento a carico acquirente",
+        "type": "QUALITATIVE",
+        "stima_euro": "NON_QUANTIFICATO",
+        "stima_nota": "Onere non quantificato in perizia; verifica tecnica/legale obbligatoria",
+        "source": "PERIZIA_QUALITATIVE"
+      },
+      {
+        "code": "LOT_1_BURDEN",
+        "lot_number": 1,
+        "label_it": "Regolarizzazione edilizia e catastale da verificare lotto per lotto",
+        "label_en": "Regolarizzazione edilizia e catastale da verificare lotto per lotto",
+        "type": "QUALITATIVE",
+        "stima_euro": "NON_QUANTIFICATO",
+        "stima_nota": "Onere non quantificato in perizia; verifica tecnica/legale obbligatoria",
+        "source": "PERIZIA_QUALITATIVE"
+      },
+      {
+        "code": "LOT_2_BURDEN",
+        "lot_number": 2,
+        "label_it": "Regolarizzazioni edilizie / accertamento di conformità da verificare",
+        "label_en": "Regolarizzazioni edilizie / accertamento di conformità da verificare",
+        "type": "QUALITATIVE",
+        "stima_euro": "NON_QUANTIFICATO",
+        "stima_nota": "Onere non quantificato in perizia; verifica tecnica/legale obbligatoria",
+        "source": "PERIZIA_QUALITATIVE"
+      },
+      {
+        "code": "LOT_2_BURDEN",
+        "lot_number": 2,
+        "label_it": "Gestione servitù, accesso privato e corte comune",
+        "label_en": "Gestione servitù, accesso privato e corte comune",
+        "type": "QUALITATIVE",
+        "stima_euro": "NON_QUANTIFICATO",
+        "stima_nota": "Onere non quantificato in perizia; verifica tecnica/legale obbligatoria",
+        "source": "PERIZIA_QUALITATIVE"
+      },
+      {
+        "code": "LOT_2_BURDEN",
+        "lot_number": 2,
+        "label_it": "Pratiche strutturali incomplete a carico acquirente",
+        "label_en": "Pratiche strutturali incomplete a carico acquirente",
+        "type": "QUALITATIVE",
+        "stima_euro": "NON_QUANTIFICATO",
+        "stima_nota": "Onere non quantificato in perizia; verifica tecnica/legale obbligatoria",
+        "source": "PERIZIA_QUALITATIVE"
+      },
+      {
+        "code": "LOT_3_BURDEN",
+        "lot_number": 3,
+        "label_it": "Costi di completamento lavori e messa in sicurezza",
+        "label_en": "Costi di completamento lavori e messa in sicurezza",
+        "type": "QUALITATIVE",
+        "stima_euro": "NON_QUANTIFICATO",
+        "stima_nota": "Onere non quantificato in perizia; verifica tecnica/legale obbligatoria",
+        "source": "PERIZIA_QUALITATIVE"
+      },
+      {
+        "code": "LOT_3_BURDEN",
+        "lot_number": 3,
+        "label_it": "Impermeabilizzazione / ripristini e lattonerie",
+        "label_en": "Impermeabilizzazione / ripristini e lattonerie",
+        "type": "QUALITATIVE",
+        "stima_euro": "NON_QUANTIFICATO",
+        "stima_nota": "Onere non quantificato in perizia; verifica tecnica/legale obbligatoria",
+        "source": "PERIZIA_QUALITATIVE"
+      },
+      {
+        "code": "LOT_3_BURDEN",
+        "lot_number": 3,
+        "label_it": "Regolarizzazione edilizia e strutturale da verificare",
+        "label_en": "Regolarizzazione edilizia e strutturale da verificare",
+        "type": "QUALITATIVE",
+        "stima_euro": "NON_QUANTIFICATO",
+        "stima_nota": "Onere non quantificato in perizia; verifica tecnica/legale obbligatoria",
+        "source": "PERIZIA_QUALITATIVE"
+      }
+    ],
+    "total_extra_costs": {
+      "min": "TBD",
+      "max": "TBD",
+      "nota": "Costi extra non quantificati in perizia; mantenuti solo oneri qualitativi buyer-borne"
+    }
+  },
+  "formalita": {
+    "ipoteca": {
+      "status": "UNKNOWN",
+      "evidence": []
+    },
+    "pignoramento": {
+      "status": "UNKNOWN",
+      "evidence": []
+    },
+    "cancellazione_decreto": {
+      "status": "UNKNOWN",
+      "evidence": []
+    },
+    "summary_it": "PRESENTI FORMALITÀ",
+    "summary_evidence": [
+      {
+        "page": 2,
+        "quote": "Servitù, censo, livello, usi civici .............................................................................................................................................................22",
+        "start_offset": 5783,
+        "end_offset": 5978,
+        "bbox": null,
+        "offset_mode": "PAGE_LOCAL",
+        "page_text_hash": "657dc79faf81804f554586543e4007d111fa5249544edae6eee912206e7a77fc",
+        "search_hint": "Servitù, censo, livello, usi civici ............................................"
+      }
+    ]
+  }
+}

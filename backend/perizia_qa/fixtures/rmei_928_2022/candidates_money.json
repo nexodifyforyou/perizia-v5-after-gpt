@@ -1,0 +1,278 @@
+[
+  {
+    "page": 2,
+    "amount_raw": "€ 172.000,00",
+    "amount_eur": 172000.0,
+    "quote": ".................................14\nLotto Unico - Prezzo base d'asta: € 172.000,00 .....................................................................",
+    "context": "...........................13\nSchema riassuntivo Esecuzione Immobiliare 928/2022 del R.G.E.........................................................................14\nLotto Unico - Prezzo base d'asta: € 172.000,00 ..................................................................................................14\nFormalità da cancellare con il decreto di trasferimento...........................................",
+    "low_quality_page": true,
+    "source": "pages_raw",
+    "occurrences": [
+      {
+        "page": 2,
+        "quote": ".................................14\nLotto Unico - Prezzo base d'asta: € 172.000,00 ....................................................................."
+      }
+    ],
+    "id": "m_000001"
+  },
+  {
+    "page": 4,
+    "amount_raw": "€ 1.832,13",
+    "amount_eur": 1832.13,
+    "quote": "oria A2  \nCl.5, Cons. 5,5 vani  \nSuperficie catastale 83 mq  \nRendita € 1.832,13  \nPiano P1 -2 \nDal 09/03/2020  al \n12/02/2024  **OMISSIS** (CF **Omis",
+    "context": "MISSIS** ) \nnato a ) il \ndal al \nDiritto di: \nProprieta' per 1/1  Catasto Fabbricati  \nFg. 242, Part. 301, Sub. 516, Zc. 4  \nCategoria A2  \nCl.5, Cons. 5,5 vani  \nSuperficie catastale 83 mq  \nRendita € 1.832,13  \nPiano P1 -2 \nDal 09/03/2020  al \n12/02/2024  **OMISSIS** (CF **Omissis** ) \nsede in , dal \n0 Diritto di: \nProprieta' per 1/1  Catasto Fabbricati  \nFg. 242, Part. 301, Sub. 516, Zc. 4  \nCategoria A2",
+    "low_quality_page": false,
+    "source": "pages_raw",
+    "occurrences": [
+      {
+        "page": 4,
+        "quote": "oria A2  \nCl.5, Cons. 5,5 vani  \nSuperficie catastale 83 mq  \nRendita € 1.832,13  \nPiano P1 -2 \nDal 09/03/2020  al \n12/02/2024  **OMISSIS** (CF **Omis"
+      }
+    ],
+    "id": "m_000002"
+  },
+  {
+    "page": 4,
+    "amount_raw": "€ 1.832,13",
+    "amount_eur": 1832.13,
+    "quote": "oria A2  \nCl.5, Cons. 5.5 vani  \nSuperficie catastale 83 mq  \nRendita € 1.832,13  \nPiano P1 -2 \nPubblicazione ufficiale ad uso esclusivo personale - è",
+    "context": "**Omissis** ) \nsede in , dal \n0 Diritto di: \nProprieta' per 1/1  Catasto Fabbricati  \nFg. 242, Part. 301, Sub. 516, Zc. 4  \nCategoria A2  \nCl.5, Cons. 5.5 vani  \nSuperficie catastale 83 mq  \nRendita € 1.832,13  \nPiano P1 -2 \nPubblicazione ufficiale ad uso esclusivo personale - è vietata ogni \n\nripubblicazione o riproduzione a scopo commerciale - Aut. Min. Giustizia PDG 21/07/2009",
+    "low_quality_page": false,
+    "source": "pages_raw",
+    "occurrences": [
+      {
+        "page": 4,
+        "quote": "oria A2  \nCl.5, Cons. 5.5 vani  \nSuperficie catastale 83 mq  \nRendita € 1.832,13  \nPiano P1 -2 \nPubblicazione ufficiale ad uso esclusivo personale - è"
+      }
+    ],
+    "id": "m_000003"
+  },
+  {
+    "page": 5,
+    "amount_raw": "€ P1",
+    "amount_eur": 1.0,
+    "quote": "a  Piano  Graffato  \n 242  301  516  4 A2 5 5.5 vani  83 mq  1832,13 \n€ P1-2  \nCorrispondenza catastale  \n \nEsiste corrispondenza tra lo stato d",
+    "context": "Dati di classamento    \nSezione  Foglio  Part.  Sub. Zona  \nCens.  Categoria  Classe  Consistenza  Superficie  \ncatastale  Rendita  Piano  Graffato  \n 242  301  516  4 A2 5 5.5 vani  83 mq  1832,13 \n€ P1-2  \nCorrispondenza catastale  \n \nEsiste corrispondenza tra lo stato dei luoghi rilevato e la planimetria catastale (All.04_Planimetria Fg \n242 Mapp. 301 Sub. 516)  \nSTATO CONSERVATIVO  \nL'edificio no",
+    "low_quality_page": false,
+    "source": "pages_raw",
+    "occurrences": [
+      {
+        "page": 5,
+        "quote": "a  Piano  Graffato  \n 242  301  516  4 A2 5 5.5 vani  83 mq  1832,13 \n€ P1-2  \nCorrispondenza catastale  \n \nEsiste corrispondenza tra lo stato d"
+      }
+    ],
+    "id": "m_000004"
+  },
+  {
+    "page": 6,
+    "amount_raw": "€ 300.000,00",
+    "amount_eur": 300000.0,
+    "quote": "a Roma il 03/09/2018  \nReg. gen. 102234 - Reg. part. 18525  \nImporto: € 300.000,00  \nA favore di UNIPOL BANCA S.p.a.  \nContro **Omissis**  \nFormalità a",
+    "context": "ltate le seguenti formalità pregiudizievoli:  \nIscrizioni  \n• Ipoteca volontaria  derivante da Atto di mutuo fondiario  \nIscritto a Roma il 03/09/2018  \nReg. gen. 102234 - Reg. part. 18525  \nImporto: € 300.000,00  \nA favore di UNIPOL BANCA S.p.a.  \nContro **Omissis**  \nFormalità a carico della procedura  \nTrascrizioni  \n• Conferimento in Società  \nTrascritto a Roma il 11/03/2020  \nReg. gen. 28830 - Reg. part.",
+    "low_quality_page": false,
+    "source": "pages_raw",
+    "occurrences": [
+      {
+        "page": 6,
+        "quote": "a Roma il 03/09/2018  \nReg. gen. 102234 - Reg. part. 18525  \nImporto: € 300.000,00  \nA favore di UNIPOL BANCA S.p.a.  \nContro **Omissis**  \nFormalità a"
+      },
+      {
+        "page": 15,
+        "quote": "a Roma il 03/09/2018  \nReg. gen. 102234 - Reg. part. 18525  \nImporto: € 300.000,00  \nA favore di UNIPOL BANCA S.p.a.  \nContro **Omissis**  \nFormalità a"
+      }
+    ],
+    "id": "m_000005"
+  },
+  {
+    "page": 9,
+    "amount_raw": "€ 312.708,00",
+    "amount_eur": 312708.0,
+    "quote": "vendita per il diritto di Proprietà (1/1)  \nValore di stima del bene: € 312.708,00  da cui vanno decurtati gli importi indicati nella tabella \nfinale re",
+    "context": "ommerciali.   \nIdentificato al catasto Fabbricati - Fg. 242, Part. 301, Sub. 516, Zc. 4, Categoria A2  \nL'immobile viene posto in vendita per il diritto di Proprietà (1/1)  \nValore di stima del bene: € 312.708,00  da cui vanno decurtati gli importi indicati nella tabella \nfinale relativa ai deprezzamenti  \nPubblicazione ufficiale ad uso esclusivo personale - è vietata ogni \n\nripubblicazione o riproduzione a s",
+    "low_quality_page": false,
+    "source": "pages_raw",
+    "occurrences": [
+      {
+        "page": 9,
+        "quote": "vendita per il diritto di Proprietà (1/1)  \nValore di stima del bene: € 312.708,00  da cui vanno decurtati gli importi indicati nella tabella \nfinale re"
+      }
+    ],
+    "id": "m_000006"
+  },
+  {
+    "page": 10,
+    "amount_raw": "€/Mq) 2.950 4.300",
+    "amount_eur": 2950.0,
+    "quote": "DI TIPO CIVILE  \n (destinazione residenziale)    MIN  MAX   \nPREZZI (€/Mq)  2.950  4.300   \nCANONI (€/Mq/Mese)  10.5  15.50   \n \n3.  In riferimento all’indagi",
+    "context": "tipologia residenziale di “Abitazioni civili”:  \n \n  COMUNE: ROMA – Zona Semicentrale/COLLINA FLEMING (VIA BEVAGNA)  \n \nABITAZIONI DI TIPO CIVILE  \n (destinazione residenziale)    MIN  MAX   \nPREZZI (€/Mq)  2.950  4.300   \nCANONI (€/Mq/Mese)  10.5  15.50   \n \n3.  In riferimento all’indagine di mercato condotta sulle recenti transazioni relative ad \nimmobili con caratteristiche analoghe nella zona, in particolare rif",
+    "low_quality_page": false,
+    "source": "pages_raw",
+    "occurrences": [
+      {
+        "page": 10,
+        "quote": "DI TIPO CIVILE  \n (destinazione residenziale)    MIN  MAX   \nPREZZI (€/Mq)  2.950  4.300   \nCANONI (€/Mq/Mese)  10.5  15.50   \n \n3.  In riferimento all’indagi"
+      }
+    ],
+    "id": "m_000007"
+  },
+  {
+    "page": 10,
+    "amount_raw": "€/Mq 3.900,00 4",
+    "amount_eur": 3900.0,
+    "quote": "vendita, si è evidenziato un valore medio che si attesta intorno ad \n€/Mq 3.900,00   \n \n4. In riferimento alle banche dati di Borsinoimmobiliare.it, si è evide",
+    "context": "al comprensorio \nimmobiliare in cui l’unità immobiliare pignorata è inserita e per il quale sono disponibili \nnumerosi annunci di vendita, si è evidenziato un valore medio che si attesta intorno ad \n€/Mq 3.900,00   \n \n4. In riferimento alle banche dati di Borsinoimmobiliare.it, si è evidenziato un intervallo di \nvalori di mercato compreso tra €/Mq 3.156,00  ed €/Mq 4.663,00 .  \nPubblicazione ufficiale ad uso esclusi",
+    "low_quality_page": false,
+    "source": "pages_raw",
+    "occurrences": [
+      {
+        "page": 10,
+        "quote": "vendita, si è evidenziato un valore medio che si attesta intorno ad \n€/Mq 3.900,00   \n \n4. In riferimento alle banche dati di Borsinoimmobiliare.it, si è evide"
+      }
+    ],
+    "id": "m_000008"
+  },
+  {
+    "page": 10,
+    "amount_raw": "4.300 CANONI (€",
+    "amount_eur": 4300.0,
+    "quote": "E  \n (destinazione residenziale)    MIN  MAX   \nPREZZI (€/Mq)  2.950  4.300   \nCANONI (€/Mq/Mese)  10.5  15.50   \n \n3.  In riferimento all’indagine di mercato",
+    "context": "denziale di “Abitazioni civili”:  \n \n  COMUNE: ROMA – Zona Semicentrale/COLLINA FLEMING (VIA BEVAGNA)  \n \nABITAZIONI DI TIPO CIVILE  \n (destinazione residenziale)    MIN  MAX   \nPREZZI (€/Mq)  2.950  4.300   \nCANONI (€/Mq/Mese)  10.5  15.50   \n \n3.  In riferimento all’indagine di mercato condotta sulle recenti transazioni relative ad \nimmobili con caratteristiche analoghe nella zona, in particolare riferite al comp",
+    "low_quality_page": false,
+    "source": "pages_raw",
+    "occurrences": [
+      {
+        "page": 10,
+        "quote": "E  \n (destinazione residenziale)    MIN  MAX   \nPREZZI (€/Mq)  2.950  4.300   \nCANONI (€/Mq/Mese)  10.5  15.50   \n \n3.  In riferimento all’indagine di mercato"
+      }
+    ],
+    "id": "m_000009"
+  },
+  {
+    "page": 11,
+    "amount_raw": "100,00% €",
+    "amount_eur": 100.0,
+    "quote": "ala B, interno \n5B, piano 1 -2 94,76 mq  3.300,00 €/mq  € 312.708,00  100,00%  € 312.708,00  \nValore di stima:  € 312.708,00  \nValore di stima: € 312.",
+    "context": "rio  Valore  \ncomplessivo  Quota in  \nvendita  Totale  \nBene N° 1  - \nAppartamento  \nRoma (RM) - \nViaAngelo \nMessedaglia n. 6, \nscala B, interno \n5B, piano 1 -2 94,76 mq  3.300,00 €/mq  € 312.708,00  100,00%  € 312.708,00  \nValore di stima:  € 312.708,00  \nValore di stima: € 312.708,00  \nDeprezzamenti  \nTipologia deprezzamento  Valore  Tipo  \nRischio assunto per mancata garanzia vizi occulti  10,00  % \nOner",
+    "low_quality_page": false,
+    "source": "pages_raw",
+    "occurrences": [
+      {
+        "page": 11,
+        "quote": "ala B, interno \n5B, piano 1 -2 94,76 mq  3.300,00 €/mq  € 312.708,00  100,00%  € 312.708,00  \nValore di stima:  € 312.708,00  \nValore di stima: € 312."
+      }
+    ],
+    "id": "m_000010"
+  },
+  {
+    "page": 11,
+    "amount_raw": "€ 172.000,00",
+    "amount_eur": 172000.0,
+    "quote": "rsa destinazione d'uso legittimata  30,00  % \nValore finale di stima: € 172.000,00 (arrotondato)  \nAssolto il proprio mandato, il sottoscritto Esperto e",
+    "context": "o per mancata garanzia vizi occulti  10,00  % \nOneri di regolarizzazione urbanistica e ripristini  5,00  % \nDeprezzamento per diversa destinazione d'uso legittimata  30,00  % \nValore finale di stima: € 172.000,00 (arrotondato)  \nAssolto il proprio mandato, il sottoscritto Esperto ex art. 568 c.p.c. deposita la relazione di stima \npresso questo Spettabile Tribunale, tanto in assolvimento dell'incarico conferit",
+    "low_quality_page": false,
+    "source": "pages_raw",
+    "occurrences": [
+      {
+        "page": 11,
+        "quote": "rsa destinazione d'uso legittimata  30,00  % \nValore finale di stima: € 172.000,00 (arrotondato)  \nAssolto il proprio mandato, il sottoscritto Esperto e"
+      }
+    ],
+    "id": "m_000011"
+  },
+  {
+    "page": 11,
+    "amount_raw": "€ 312.708,00",
+    "amount_eur": 312708.0,
+    "quote": ".300,00 €/mq  € 312.708,00  100,00%  € 312.708,00  \nValore di stima:  € 312.708,00  \nValore di stima: € 312.708,00  \nDeprezzamenti  \nTipologia deprezzam",
+    "context": "ita  Totale  \nBene N° 1  - \nAppartamento  \nRoma (RM) - \nViaAngelo \nMessedaglia n. 6, \nscala B, interno \n5B, piano 1 -2 94,76 mq  3.300,00 €/mq  € 312.708,00  100,00%  € 312.708,00  \nValore di stima:  € 312.708,00  \nValore di stima: € 312.708,00  \nDeprezzamenti  \nTipologia deprezzamento  Valore  Tipo  \nRischio assunto per mancata garanzia vizi occulti  10,00  % \nOneri di regolarizzazione urbanistica e ripristi",
+    "low_quality_page": false,
+    "source": "pages_raw",
+    "occurrences": [
+      {
+        "page": 11,
+        "quote": ".300,00 €/mq  € 312.708,00  100,00%  € 312.708,00  \nValore di stima:  € 312.708,00  \nValore di stima: € 312.708,00  \nDeprezzamenti  \nTipologia deprezzam"
+      }
+    ],
+    "id": "m_000012"
+  },
+  {
+    "page": 11,
+    "amount_raw": "€ 312.708,00",
+    "amount_eur": 312708.0,
+    "quote": "00%  € 312.708,00  \nValore di stima:  € 312.708,00  \nValore di stima: € 312.708,00  \nDeprezzamenti  \nTipologia deprezzamento  Valore  Tipo  \nRischio ass",
+    "context": "rtamento  \nRoma (RM) - \nViaAngelo \nMessedaglia n. 6, \nscala B, interno \n5B, piano 1 -2 94,76 mq  3.300,00 €/mq  € 312.708,00  100,00%  € 312.708,00  \nValore di stima:  € 312.708,00  \nValore di stima: € 312.708,00  \nDeprezzamenti  \nTipologia deprezzamento  Valore  Tipo  \nRischio assunto per mancata garanzia vizi occulti  10,00  % \nOneri di regolarizzazione urbanistica e ripristini  5,00  % \nDeprezzamento per d",
+    "low_quality_page": false,
+    "source": "pages_raw",
+    "occurrences": [
+      {
+        "page": 11,
+        "quote": "00%  € 312.708,00  \nValore di stima:  € 312.708,00  \nValore di stima: € 312.708,00  \nDeprezzamenti  \nTipologia deprezzamento  Valore  Tipo  \nRischio ass"
+      }
+    ],
+    "id": "m_000013"
+  },
+  {
+    "page": 11,
+    "amount_raw": "€/mq € 312.708,00 100,00",
+    "amount_eur": 312708.0,
+    "quote": "essedaglia n. 6, \nscala B, interno \n5B, piano 1 -2 94,76 mq  3.300,00 €/mq  € 312.708,00  100,00%  € 312.708,00  \nValore di stima:  € 312.708,00  \nValore di stima: €",
+    "context": "onale  Valore \nunitario  Valore  \ncomplessivo  Quota in  \nvendita  Totale  \nBene N° 1  - \nAppartamento  \nRoma (RM) - \nViaAngelo \nMessedaglia n. 6, \nscala B, interno \n5B, piano 1 -2 94,76 mq  3.300,00 €/mq  € 312.708,00  100,00%  € 312.708,00  \nValore di stima:  € 312.708,00  \nValore di stima: € 312.708,00  \nDeprezzamenti  \nTipologia deprezzamento  Valore  Tipo  \nRischio assunto per mancata garanzia vizi occulti  10,00  %",
+    "low_quality_page": false,
+    "source": "pages_raw",
+    "occurrences": [
+      {
+        "page": 11,
+        "quote": "essedaglia n. 6, \nscala B, interno \n5B, piano 1 -2 94,76 mq  3.300,00 €/mq  € 312.708,00  100,00%  € 312.708,00  \nValore di stima:  € 312.708,00  \nValore di stima: €"
+      }
+    ],
+    "id": "m_000014"
+  },
+  {
+    "page": 11,
+    "amount_raw": "€ 312.708,00 100,00",
+    "amount_eur": 312708.0,
+    "quote": "glia n. 6, \nscala B, interno \n5B, piano 1 -2 94,76 mq  3.300,00 €/mq  € 312.708,00  100,00%  € 312.708,00  \nValore di stima:  € 312.708,00  \nValore di stima: €",
+    "context": "Valore \nunitario  Valore  \ncomplessivo  Quota in  \nvendita  Totale  \nBene N° 1  - \nAppartamento  \nRoma (RM) - \nViaAngelo \nMessedaglia n. 6, \nscala B, interno \n5B, piano 1 -2 94,76 mq  3.300,00 €/mq  € 312.708,00  100,00%  € 312.708,00  \nValore di stima:  € 312.708,00  \nValore di stima: € 312.708,00  \nDeprezzamenti  \nTipologia deprezzamento  Valore  Tipo  \nRischio assunto per mancata garanzia vizi occulti  10,00  %",
+    "low_quality_page": false,
+    "source": "pages_raw",
+    "occurrences": [
+      {
+        "page": 11,
+        "quote": "glia n. 6, \nscala B, interno \n5B, piano 1 -2 94,76 mq  3.300,00 €/mq  € 312.708,00  100,00%  € 312.708,00  \nValore di stima:  € 312.708,00  \nValore di stima: €"
+      }
+    ],
+    "id": "m_000015"
+  },
+  {
+    "page": 13,
+    "amount_raw": "€ 172.000,00",
+    "amount_eur": 172000.0,
+    "quote": "ia densità abitativa - T1 (Art. 44, 45, 46 NTA)  \nPrezzo base d'asta: € 172.000,00  \nPubblicazione ufficiale ad uso esclusivo personale - è vietata ogni",
+    "context": "l?interno del Sistema insediativo - Città consolidata - Tessuto di espansione novecentesca a \ntipologia edilizia definita  e a media densità abitativa - T1 (Art. 44, 45, 46 NTA)  \nPrezzo base d'asta: € 172.000,00  \nPubblicazione ufficiale ad uso esclusivo personale - è vietata ogni \n\nripubblicazione o riproduzione a scopo commerciale - Aut. Min. Giustizia PDG 21/07/2009",
+    "low_quality_page": false,
+    "source": "pages_raw",
+    "occurrences": [
+      {
+        "page": 13,
+        "quote": "ia densità abitativa - T1 (Art. 44, 45, 46 NTA)  \nPrezzo base d'asta: € 172.000,00  \nPubblicazione ufficiale ad uso esclusivo personale - è vietata ogni"
+      }
+    ],
+    "id": "m_000016"
+  },
+  {
+    "page": 14,
+    "amount_raw": "€ 172.000,00",
+    "amount_eur": 172000.0,
+    "quote": "E IMMOBILIARE 928/2022 DEL R.G.E.  \nLOTTO UNICO - PREZZO BASE D'ASTA: € 172.000,00  \nBene N° 1 - Appartamento  \nUbicazione:  Roma (RM) - ViaAngelo Messe",
+    "context": "14 di 15  \n SCHEMA RIASSUNTIVO  \nESECUZIONE IMMOBILIARE 928/2022 DEL R.G.E.  \nLOTTO UNICO - PREZZO BASE D'ASTA: € 172.000,00  \nBene N° 1 - Appartamento  \nUbicazione:  Roma (RM) - ViaAngelo Messedaglia n. 6, scala B, interno 5B, piano 1 -2 \nDiritto reale:  Proprietà  \n Quota  1/1 \n \nTipologia \nimmobile:  Appartamento  \nIden",
+    "low_quality_page": false,
+    "source": "pages_raw",
+    "occurrences": [
+      {
+        "page": 14,
+        "quote": "E IMMOBILIARE 928/2022 DEL R.G.E.  \nLOTTO UNICO - PREZZO BASE D'ASTA: € 172.000,00  \nBene N° 1 - Appartamento  \nUbicazione:  Roma (RM) - ViaAngelo Messe"
+      }
+    ],
+    "id": "m_000017"
+  }
+]

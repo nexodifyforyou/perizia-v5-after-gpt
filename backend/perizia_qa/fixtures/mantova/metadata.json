@@ -1,0 +1,14 @@
+{
+  "fixture_name": "mantova",
+  "analysis_id": "mantova",
+  "source_analysis_id": "analysis_e449a53bb163",
+  "file_name": "Mantova Borgo FOrte.pdf",
+  "source_kind": "mongo_analysis",
+  "pages_count": 14,
+  "tags": [
+    "single_lot",
+    "legal_cancellable_formalities",
+    "agibilita_present"
+  ],
+  "notes": "Committed replacement for temp-only Mantova fixture."
+}

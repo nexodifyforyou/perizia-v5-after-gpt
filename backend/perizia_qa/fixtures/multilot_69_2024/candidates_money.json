@@ -1,0 +1,1562 @@
+[
+  {
+    "page": 3,
+    "amount_raw": "€ 64.198,00",
+    "amount_eur": 64198.0,
+    "quote": ".....................................70\nLotto 1 - Prezzo base d'asta: € 64.198,00......................................................................",
+    "context": "..........68\nSchema riassuntivo Esecuzione Immobiliare 69/2024 del R.G.E...............................................................................................70\nLotto 1 - Prezzo base d'asta: € 64.198,00...................................................................................................................................70\nLotto 2 - Prezzo base d'asta: € 84.000,00.........................",
+    "low_quality_page": true,
+    "source": "pages_raw",
+    "occurrences": [
+      {
+        "page": 3,
+        "quote": ".....................................70\nLotto 1 - Prezzo base d'asta: € 64.198,00......................................................................"
+      }
+    ],
+    "id": "m_000001"
+  },
+  {
+    "page": 3,
+    "amount_raw": "€ 84.000,00",
+    "amount_eur": 84000.0,
+    "quote": ".....................................70\nLotto 2 - Prezzo base d'asta: € 84.000,00......................................................................",
+    "context": "1 - Prezzo base d'asta: € 64.198,00...................................................................................................................................70\nLotto 2 - Prezzo base d'asta: € 84.000,00...................................................................................................................................70\nLotto 3 - Prezzo base d'asta: € 224.268,00 .......................",
+    "low_quality_page": true,
+    "source": "pages_raw",
+    "occurrences": [
+      {
+        "page": 3,
+        "quote": ".....................................70\nLotto 2 - Prezzo base d'asta: € 84.000,00......................................................................"
+      }
+    ],
+    "id": "m_000002"
+  },
+  {
+    "page": 3,
+    "amount_raw": "€ 224.268,00",
+    "amount_eur": 224268.0,
+    "quote": ".....................................70\nLotto 3 - Prezzo base d'asta: € 224.268,00 .....................................................................",
+    "context": "2 - Prezzo base d'asta: € 84.000,00...................................................................................................................................70\nLotto 3 - Prezzo base d'asta: € 224.268,00 ................................................................................................................................71\nFormalità da cancellare con il decreto di trasferimento.............",
+    "low_quality_page": true,
+    "source": "pages_raw",
+    "occurrences": [
+      {
+        "page": 3,
+        "quote": ".....................................70\nLotto 3 - Prezzo base d'asta: € 224.268,00 ....................................................................."
+      }
+    ],
+    "id": "m_000003"
+  },
+  {
+    "page": 8,
+    "amount_raw": "€ T-1",
+    "amount_eur": 1.0,
+    "quote": "catastal\neRendita Piano Graffato\n18 465 1 A3 4º 10 vani 213 mq 877,98 € T-1 488\nCorrispondenza catastale\nNon sussiste corrispondenza catastale.\nF",
+    "context": "ricati (CF)\nDati identificativi Dati di classamento \nSezione Foglio Part. Sub. Zona\nCens.Categori\naClasse Consiste\nnzaSuperfic\nie\ncatastal\neRendita Piano Graffato\n18 465 1 A3 4º 10 vani 213 mq 877,98 € T-1 488\nCorrispondenza catastale\nNon sussiste corrispondenza catastale.\nFirmato Da: BISOGNI FELICE Emesso Da: ARUBAPEC S.P.A. NG CA 3 Serial#: 44cad88de49cb7a5d7e960d8990c605f\nPubblicazione ufficiale ad",
+    "low_quality_page": false,
+    "source": "pages_raw",
+    "occurrences": [
+      {
+        "page": 8,
+        "quote": "catastal\neRendita Piano Graffato\n18 465 1 A3 4º 10 vani 213 mq 877,98 € T-1 488\nCorrispondenza catastale\nNon sussiste corrispondenza catastale.\nF"
+      }
+    ],
+    "id": "m_000004"
+  },
+  {
+    "page": 12,
+    "amount_raw": "€ 180.000,00",
+    "amount_eur": 180000.0,
+    "quote": "****\nFormalità a carico della procedura\nCapitale: € 180.000,00\nSpese: € 180.000,00\nPercentuale interessi: 6,50 %\nRogante: notaio Russo Francesco di Mont",
+    "context": "il 16/05/2008\nReg. gen. 2637 - Reg. part. 699\nQuota: 1/1\nImporto: € 360.000,00\nA favore di **** Omissis ****\nContro **** Omissis ****\nFormalità a carico della procedura\nCapitale: € 180.000,00\nSpese: € 180.000,00\nPercentuale interessi: 6,50 %\nRogante: notaio Russo Francesco di Montecatini Terme\nData: 08/05/2008\nN° repertorio: 2424\nN° raccolta: 1564\nNote: Con il n.9 unisce la nota di Iscrizione Reg. Part. 699",
+    "low_quality_page": false,
+    "source": "pages_raw",
+    "occurrences": [
+      {
+        "page": 12,
+        "quote": "****\nFormalità a carico della procedura\nCapitale: € 180.000,00\nSpese: € 180.000,00\nPercentuale interessi: 6,50 %\nRogante: notaio Russo Francesco di Mont"
+      },
+      {
+        "page": 74,
+        "quote": "****\nFormalità a carico della procedura\nCapitale: € 180.000,00\nSpese: € 180.000,00\nPercentuale interessi: 6,50 %\nRogante: notaio Russo Francesco di Mont"
+      }
+    ],
+    "id": "m_000005"
+  },
+  {
+    "page": 12,
+    "amount_raw": "€ 180.000,00",
+    "amount_eur": 180000.0,
+    "quote": "Contro **** Omissis ****\nFormalità a carico della procedura\nCapitale: € 180.000,00\nSpese: € 180.000,00\nPercentuale interessi: 6,50 %\nRogante: notaio Rus",
+    "context": "to\nIscritto a Pescia il 16/05/2008\nReg. gen. 2637 - Reg. part. 699\nQuota: 1/1\nImporto: € 360.000,00\nA favore di **** Omissis ****\nContro **** Omissis ****\nFormalità a carico della procedura\nCapitale: € 180.000,00\nSpese: € 180.000,00\nPercentuale interessi: 6,50 %\nRogante: notaio Russo Francesco di Montecatini Terme\nData: 08/05/2008\nN° repertorio: 2424\nN° raccolta: 1564\nNote: Con il n.9 unisce la nota di Iscriz",
+    "low_quality_page": false,
+    "source": "pages_raw",
+    "occurrences": [
+      {
+        "page": 12,
+        "quote": "Contro **** Omissis ****\nFormalità a carico della procedura\nCapitale: € 180.000,00\nSpese: € 180.000,00\nPercentuale interessi: 6,50 %\nRogante: notaio Rus"
+      },
+      {
+        "page": 74,
+        "quote": "Contro **** Omissis ****\nFormalità a carico della procedura\nCapitale: € 180.000,00\nSpese: € 180.000,00\nPercentuale interessi: 6,50 %\nRogante: notaio Rus"
+      }
+    ],
+    "id": "m_000006"
+  },
+  {
+    "page": 12,
+    "amount_raw": "€ 360.000,00",
+    "amount_eur": 360000.0,
+    "quote": "cia il 16/05/2008\nReg. gen. 2637 - Reg. part. 699\nQuota: 1/1\nImporto: € 360.000,00\nA favore di **** Omissis ****\nContro **** Omissis ****\nFormalità a ca",
+    "context": "ormalità pregiudizievoli:\nIscrizioni\n•Ipoteca volontaria derivante da concessione a garanzia di apertura di credito\nIscritto a Pescia il 16/05/2008\nReg. gen. 2637 - Reg. part. 699\nQuota: 1/1\nImporto: € 360.000,00\nA favore di **** Omissis ****\nContro **** Omissis ****\nFormalità a carico della procedura\nCapitale: € 180.000,00\nSpese: € 180.000,00\nPercentuale interessi: 6,50 %\nRogante: notaio Russo Francesco di M",
+    "low_quality_page": false,
+    "source": "pages_raw",
+    "occurrences": [
+      {
+        "page": 12,
+        "quote": "cia il 16/05/2008\nReg. gen. 2637 - Reg. part. 699\nQuota: 1/1\nImporto: € 360.000,00\nA favore di **** Omissis ****\nContro **** Omissis ****\nFormalità a ca"
+      },
+      {
+        "page": 26,
+        "quote": "cia il 13/04/2015\nReg. gen. 1294 - Reg. part. 247\nQuota: 1/1\nImporto: € 360.000,00\nA favore di **** Omissis ****\nContro **** Omissis ****\nFormalità a ca"
+      },
+      {
+        "page": 43,
+        "quote": "cia il 13/04/2015\nReg. gen. 1294 - Reg. part. 247\nQuota: 1/1\nImporto: € 360.000,00\nA favore di **** Omissis ****\nContro **** Omissis ****\nFormalità a ca"
+      },
+      {
+        "page": 74,
+        "quote": "cia il 16/05/2008\nReg. gen. 2637 - Reg. part. 699\nQuota: 1/1\nImporto: € 360.000,00\nA favore di **** Omissis ****\nContro **** Omissis ****\nFormalità a ca"
+      },
+      {
+        "page": 76,
+        "quote": "cia il 13/04/2015\nReg. gen. 1294 - Reg. part. 247\nQuota: 1/1\nImporto: € 360.000,00\nA favore di **** Omissis ****\nContro **** Omissis ****\nFormalità a ca"
+      },
+      {
+        "page": 79,
+        "quote": "cia il 13/04/2015\nReg. gen. 1294 - Reg. part. 247\nQuota: 1/1\nImporto: € 360.000,00\nA favore di **** Omissis ****\nContro **** Omissis ****\nFormalità a ca"
+      }
+    ],
+    "id": "m_000007"
+  },
+  {
+    "page": 12,
+    "amount_raw": "€ 492.000,00",
+    "amount_eur": 492000.0,
+    "quote": "cia il 14/04/2015\nReg. gen. 1316 - Reg. part. 254\nQuota: 1/1\nImporto: € 492.000,00\nFirmato Da: BISOGNI FELICE Emesso Da: ARUBAPEC S.P.A. NG CA 3 Serial#",
+    "context": "Iscrizione Reg. Part. 699 del 16/05/2008\n•Ipoteca volontaria derivante da Concessione a garanzia di mutuo fondiario\nIscritto a Pescia il 14/04/2015\nReg. gen. 1316 - Reg. part. 254\nQuota: 1/1\nImporto: € 492.000,00\nFirmato Da: BISOGNI FELICE Emesso Da: ARUBAPEC S.P.A. NG CA 3 Serial#: 44cad88de49cb7a5d7e960d8990c605f\nPubblicazione ufficiale ad uso esclusivo personale - è vietata ogni \n\nripubblicazione o riprodu",
+    "low_quality_page": false,
+    "source": "pages_raw",
+    "occurrences": [
+      {
+        "page": 12,
+        "quote": "cia il 14/04/2015\nReg. gen. 1316 - Reg. part. 254\nQuota: 1/1\nImporto: € 492.000,00\nFirmato Da: BISOGNI FELICE Emesso Da: ARUBAPEC S.P.A. NG CA 3 Serial#"
+      }
+    ],
+    "id": "m_000008"
+  },
+  {
+    "page": 13,
+    "amount_raw": "€ 48.069,88",
+    "amount_eur": 48069.88,
+    "quote": "Contro **** Omissis ****\nFormalità a carico della procedura\nCapitale: € 48.069,88\nNote: Con il n. 11 unisce la nota di Iscrizione Reg. Part. 628 del 28",
+    "context": "8/1\nIscritto a Pescia il 28/09/2015\nReg. gen. 3396 - Reg. part. 628\nQuota: 1/1\nImporto: € 90.000,00\nA favore di **** Omissis ****\nContro **** Omissis ****\nFormalità a carico della procedura\nCapitale: € 48.069,88\nNote: Con il n. 11 unisce la nota di Iscrizione Reg. Part. 628 del 28/09/2015\n•Ipoteca Conc.Amministrativa/riscossione derivante da 0424 ruolo emessa da Equitalia Servizi di \nRiscossione spa  in data",
+    "low_quality_page": false,
+    "source": "pages_raw",
+    "occurrences": [
+      {
+        "page": 13,
+        "quote": "Contro **** Omissis ****\nFormalità a carico della procedura\nCapitale: € 48.069,88\nNote: Con il n. 11 unisce la nota di Iscrizione Reg. Part. 628 del 28"
+      },
+      {
+        "page": 27,
+        "quote": "Contro **** Omissis ****\nFormalità a carico della procedura\nCapitale: € 48.069,88\nNote: Con il n. 11 unisce la nota di Iscrizione Reg. Part. 628 del 28"
+      },
+      {
+        "page": 44,
+        "quote": "Contro **** Omissis ****\nFormalità a carico della procedura\nCapitale: € 48.069,88\nNote: Con il n. 11 unisce la nota di Iscrizione Reg. Part. 628 del 28"
+      },
+      {
+        "page": 74,
+        "quote": "Contro **** Omissis ****\nFormalità a carico della procedura\nCapitale: € 48.069,88\nNote: Con il n. 11 unisce la nota di Iscrizione Reg. Part. 628 del 28"
+      },
+      {
+        "page": 77,
+        "quote": "Contro **** Omissis ****\nFormalità a carico della procedura\nCapitale: € 48.069,88\nNote: Con il n. 11 unisce la nota di Iscrizione Reg. Part. 628 del 28"
+      },
+      {
+        "page": 79,
+        "quote": "Contro **** Omissis ****\nFormalità a carico della procedura\nCapitale: € 48.069,88\nNote: Con il n. 11 unisce la nota di Iscrizione Reg. Part. 628 del 28"
+      }
+    ],
+    "id": "m_000009"
+  },
+  {
+    "page": 13,
+    "amount_raw": "€ 84.201,61",
+    "amount_eur": 84201.61,
+    "quote": "Contro **** Omissis ****\nFormalità a carico della procedura\nCapitale: € 84.201,61\nNote: Con il n.12 unisce la nota di Iscrizione Reg. Part. 370 del 24/",
+    "context": "17\nIscritto a Pescia il 24/05/2017\nReg. gen. 2368 - Reg. part. 370\nQuota: 1/1\nImporto: € 168.403,22\nA favore di **** Omissis ****\nContro **** Omissis ****\nFormalità a carico della procedura\nCapitale: € 84.201,61\nNote: Con il n.12 unisce la nota di Iscrizione Reg. Part. 370 del 24/05/2017 e precisa che a margine \ndella suddetta Iscrizione figura l'annotazione Reg. Part. 669 del 16/02/2022 (non di interesse pe",
+    "low_quality_page": false,
+    "source": "pages_raw",
+    "occurrences": [
+      {
+        "page": 13,
+        "quote": "Contro **** Omissis ****\nFormalità a carico della procedura\nCapitale: € 84.201,61\nNote: Con il n.12 unisce la nota di Iscrizione Reg. Part. 370 del 24/"
+      },
+      {
+        "page": 27,
+        "quote": "Contro **** Omissis ****\nFormalità a carico della procedura\nCapitale: € 84.201,61\nNote: Con il n.12 unisce la nota di Iscrizione Reg. Part. 370 del 24/"
+      },
+      {
+        "page": 44,
+        "quote": "Contro **** Omissis ****\nFormalità a carico della procedura\nCapitale: € 84.201,61\nNote: Con il n.12 unisce la nota di Iscrizione Reg. Part. 370 del 24/"
+      },
+      {
+        "page": 75,
+        "quote": "Contro **** Omissis ****\nFormalità a carico della procedura\nCapitale: € 84.201,61\nNote: Con il n.12 unisce la nota di Iscrizione Reg. Part. 370 del 24/"
+      },
+      {
+        "page": 77,
+        "quote": "Contro **** Omissis ****\nFormalità a carico della procedura\nCapitale: € 84.201,61\nNote: Con il n.12 unisce la nota di Iscrizione Reg. Part. 370 del 24/"
+      },
+      {
+        "page": 80,
+        "quote": "Contro **** Omissis ****\nFormalità a carico della procedura\nCapitale: € 84.201,61\nNote: Con il n.12 unisce la nota di Iscrizione Reg. Part. 370 del 24/"
+      }
+    ],
+    "id": "m_000010"
+  },
+  {
+    "page": 13,
+    "amount_raw": "€ 90.000,00",
+    "amount_eur": 90000.0,
+    "quote": "cia il 28/09/2015\nReg. gen. 3396 - Reg. part. 628\nQuota: 1/1\nImporto: € 90.000,00\nA favore di **** Omissis ****\nContro **** Omissis ****\nFormalità a ca",
+    "context": "•Ipoteca giudiziale  derivante da Decreto Ingiuntivo emesso dal Tribunale di Lucca in data 18/09/2015 \nrep. 1778/1\nIscritto a Pescia il 28/09/2015\nReg. gen. 3396 - Reg. part. 628\nQuota: 1/1\nImporto: € 90.000,00\nA favore di **** Omissis ****\nContro **** Omissis ****\nFormalità a carico della procedura\nCapitale: € 48.069,88\nNote: Con il n. 11 unisce la nota di Iscrizione Reg. Part. 628 del 28/09/2015\n•Ipoteca",
+    "low_quality_page": false,
+    "source": "pages_raw",
+    "occurrences": [
+      {
+        "page": 13,
+        "quote": "cia il 28/09/2015\nReg. gen. 3396 - Reg. part. 628\nQuota: 1/1\nImporto: € 90.000,00\nA favore di **** Omissis ****\nContro **** Omissis ****\nFormalità a ca"
+      },
+      {
+        "page": 27,
+        "quote": "cia il 28/09/2015\nReg. gen. 3396 - Reg. part. 628\nQuota: 1/1\nImporto: € 90.000,00\nA favore di **** Omissis ****\nContro **** Omissis ****\nFormalità a ca"
+      },
+      {
+        "page": 74,
+        "quote": "cia il 28/09/2015\nReg. gen. 3396 - Reg. part. 628\nQuota: 1/1\nImporto: € 90.000,00\nA favore di **** Omissis ****\nContro **** Omissis ****\nFormalità a ca"
+      },
+      {
+        "page": 77,
+        "quote": "cia il 28/09/2015\nReg. gen. 3396 - Reg. part. 628\nQuota: 1/1\nImporto: € 90.000,00\nA favore di **** Omissis ****\nContro **** Omissis ****\nFormalità a ca"
+      },
+      {
+        "page": 79,
+        "quote": "cia il 28/09/2015\nReg. gen. 3396 - Reg. part. 628\nQuota: 1/1\nImporto: € 90.000,00\nA favore di **** Omissis ****\nContro **** Omissis ****\nFormalità a ca"
+      }
+    ],
+    "id": "m_000011"
+  },
+  {
+    "page": 13,
+    "amount_raw": "€ 94.847,36",
+    "amount_eur": 94847.36,
+    "quote": "cia il 13/06/2023\nReg. gen. 3306 - Reg. part. 426\nQuota: 1/1\nImporto: € 94.847,36\nA favore di **** Omissis ****\nFirmato Da: BISOGNI FELICE Emesso Da: A",
+    "context": "lo e avviso di accertamento \nesecutivo emessa dall'Agenzia delle Entrate -riscossione del 12/06/2023 rep. 1692/8923\nIscritto a Pescia il 13/06/2023\nReg. gen. 3306 - Reg. part. 426\nQuota: 1/1\nImporto: € 94.847,36\nA favore di **** Omissis ****\nFirmato Da: BISOGNI FELICE Emesso Da: ARUBAPEC S.P.A. NG CA 3 Serial#: 44cad88de49cb7a5d7e960d8990c605f\nPubblicazione ufficiale ad uso esclusivo personale - è vietata og",
+    "low_quality_page": false,
+    "source": "pages_raw",
+    "occurrences": [
+      {
+        "page": 13,
+        "quote": "cia il 13/06/2023\nReg. gen. 3306 - Reg. part. 426\nQuota: 1/1\nImporto: € 94.847,36\nA favore di **** Omissis ****\nFirmato Da: BISOGNI FELICE Emesso Da: A"
+      }
+    ],
+    "id": "m_000012"
+  },
+  {
+    "page": 13,
+    "amount_raw": "€ 132.615,83",
+    "amount_eur": 132615.83,
+    "quote": "Contro **** Omissis ****\nFormalità a carico della procedura\nCapitale: € 132.615,83\nNote: Con il n.13 unisce la nota di iscrizione Reg. Part. 813 del 09/",
+    "context": "18\nIscritto a Pescia il 09/10/2018\nReg. gen. 4968 - Reg. part. 813\nQuota: 1/1\nImporto: € 265.231,66\nA favore di **** Omissis ****\nContro **** Omissis ****\nFormalità a carico della procedura\nCapitale: € 132.615,83\nNote: Con il n.13 unisce la nota di iscrizione Reg. Part. 813 del 09/10/2018\n•ipoteca conc.Amministrativa/Riscossione derivante da 0420 ruolo e avviso di accertamento \nesecutivo emessa dall'Agenzia d",
+    "low_quality_page": false,
+    "source": "pages_raw",
+    "occurrences": [
+      {
+        "page": 13,
+        "quote": "Contro **** Omissis ****\nFormalità a carico della procedura\nCapitale: € 132.615,83\nNote: Con il n.13 unisce la nota di iscrizione Reg. Part. 813 del 09/"
+      },
+      {
+        "page": 27,
+        "quote": "Contro **** Omissis ****\nFormalità a carico della procedura\nCapitale: € 132.615,83\nNote: Con il n.13 unisce la nota di iscrizione Reg. Part. 813 del 09/"
+      },
+      {
+        "page": 44,
+        "quote": "Contro **** Omissis ****\nFormalità a carico della procedura\nCapitale: € 132.615,83\nNote: Con il n.13 unisce la nota di iscrizione Reg. Part. 813 del 09/"
+      },
+      {
+        "page": 75,
+        "quote": "Contro **** Omissis ****\nFormalità a carico della procedura\nCapitale: € 132.615,83\nNote: Con il n.13 unisce la nota di iscrizione Reg. Part. 813 del 09/"
+      },
+      {
+        "page": 77,
+        "quote": "Contro **** Omissis ****\nFormalità a carico della procedura\nCapitale: € 132.615,83\nNote: Con il n.13 unisce la nota di iscrizione Reg. Part. 813 del 09/"
+      },
+      {
+        "page": 80,
+        "quote": "Contro **** Omissis ****\nFormalità a carico della procedura\nCapitale: € 132.615,83\nNote: Con il n.13 unisce la nota di iscrizione Reg. Part. 813 del 09/"
+      }
+    ],
+    "id": "m_000013"
+  },
+  {
+    "page": 13,
+    "amount_raw": "€ 168.403,22",
+    "amount_eur": 168403.22,
+    "quote": "cia il 24/05/2017\nReg. gen. 2368 - Reg. part. 370\nQuota: 1/1\nImporto: € 168.403,22\nA favore di **** Omissis ****\nContro **** Omissis ****\nFormalità a ca",
+    "context": "iscossione derivante da 0424 ruolo emessa da Equitalia Servizi di \nRiscossione spa  in data 23/05/2017 rep 966/8917\nIscritto a Pescia il 24/05/2017\nReg. gen. 2368 - Reg. part. 370\nQuota: 1/1\nImporto: € 168.403,22\nA favore di **** Omissis ****\nContro **** Omissis ****\nFormalità a carico della procedura\nCapitale: € 84.201,61\nNote: Con il n.12 unisce la nota di Iscrizione Reg. Part. 370 del 24/05/2017 e precisa",
+    "low_quality_page": false,
+    "source": "pages_raw",
+    "occurrences": [
+      {
+        "page": 13,
+        "quote": "cia il 24/05/2017\nReg. gen. 2368 - Reg. part. 370\nQuota: 1/1\nImporto: € 168.403,22\nA favore di **** Omissis ****\nContro **** Omissis ****\nFormalità a ca"
+      },
+      {
+        "page": 27,
+        "quote": "cia il 24/05/2017\nReg. gen. 2368 - Reg. part. 370\nQuota: 1/1\nImporto: € 168.403,22\nA favore di **** Omissis ****\nContro **** Omissis ****\nFormalità a ca"
+      },
+      {
+        "page": 44,
+        "quote": "cia il 24/05/2017\nReg. gen. 2368 - Reg. part. 370\nQuota: 1/1\nImporto: € 168.403,22\nA favore di **** Omissis ****\nContro **** Omissis ****\nFormalità a ca"
+      },
+      {
+        "page": 75,
+        "quote": "cia il 24/05/2017\nReg. gen. 2368 - Reg. part. 370\nQuota: 1/1\nImporto: € 168.403,22\nA favore di **** Omissis ****\nContro **** Omissis ****\nFormalità a ca"
+      },
+      {
+        "page": 77,
+        "quote": "cia il 24/05/2017\nReg. gen. 2368 - Reg. part. 370\nQuota: 1/1\nImporto: € 168.403,22\nA favore di **** Omissis ****\nContro **** Omissis ****\nFormalità a ca"
+      }
+    ],
+    "id": "m_000014"
+  },
+  {
+    "page": 13,
+    "amount_raw": "€ 246.000,00",
+    "amount_eur": 246000.0,
+    "quote": "Formalità a carico della procedura\nCapitale: € 246.000,00\nInteressi: € 246.000,00\nPercentuale interessi: 4,10 %\nRogante: Notaio Monica Paggi di Pistoia",
+    "context": "13 di 81 A favore di **** Omissis ****\nFormalità a carico della procedura\nCapitale: € 246.000,00\nInteressi: € 246.000,00\nPercentuale interessi: 4,10 %\nRogante: Notaio Monica Paggi di Pistoia\nData: 09/04/2015\nN° repertorio: 1975\nN° raccolta: 1338\nNote: Con il n.10 unisce la nota di Iscrizione Reg. Part. 254 del 14/04/20",
+    "low_quality_page": false,
+    "source": "pages_raw",
+    "occurrences": [
+      {
+        "page": 13,
+        "quote": "Formalità a carico della procedura\nCapitale: € 246.000,00\nInteressi: € 246.000,00\nPercentuale interessi: 4,10 %\nRogante: Notaio Monica Paggi di Pistoia"
+      },
+      {
+        "page": 27,
+        "quote": "Formalità a carico della procedura\nCapitale: € 246.000,00\nInteressi: € 246.000,00\nPercentuale interessi: 4,10 %\nRogante: Notaio Monica Paggi di Pistoia"
+      },
+      {
+        "page": 43,
+        "quote": "Formalità a carico della procedura\nCapitale: € 246.000,00\nInteressi: € 246.000,00\nPercentuale interessi: 4,10 %\nRogante: Notaio Monica Paggi di Pistoia"
+      },
+      {
+        "page": 74,
+        "quote": "Formalità a carico della procedura\nCapitale: € 246.000,00\nInteressi: € 246.000,00\nPercentuale interessi: 4,10 %\nRogante: Notaio Monica Paggi di Pistoia"
+      },
+      {
+        "page": 79,
+        "quote": "Formalità a carico della procedura\nCapitale: € 246.000,00\nInteressi: € 246.000,00\nPercentuale interessi: 4,10 %\nRogante: Notaio Monica Paggi di Pistoia"
+      }
+    ],
+    "id": "m_000015"
+  },
+  {
+    "page": 13,
+    "amount_raw": "€ 246.000,00",
+    "amount_eur": 246000.0,
+    "quote": "ore di **** Omissis ****\nFormalità a carico della procedura\nCapitale: € 246.000,00\nInteressi: € 246.000,00\nPercentuale interessi: 4,10 %\nRogante: Notaio",
+    "context": "13 di 81 A favore di **** Omissis ****\nFormalità a carico della procedura\nCapitale: € 246.000,00\nInteressi: € 246.000,00\nPercentuale interessi: 4,10 %\nRogante: Notaio Monica Paggi di Pistoia\nData: 09/04/2015\nN° repertorio: 1975\nN° raccolta: 1338\nNote: Con il n.10 unisce la nota di Iscrizione Reg",
+    "low_quality_page": false,
+    "source": "pages_raw",
+    "occurrences": [
+      {
+        "page": 13,
+        "quote": "ore di **** Omissis ****\nFormalità a carico della procedura\nCapitale: € 246.000,00\nInteressi: € 246.000,00\nPercentuale interessi: 4,10 %\nRogante: Notaio"
+      },
+      {
+        "page": 27,
+        "quote": "ore di **** Omissis ****\nFormalità a carico della procedura\nCapitale: € 246.000,00\nInteressi: € 246.000,00\nPercentuale interessi: 4,10 %\nRogante: Notaio"
+      },
+      {
+        "page": 43,
+        "quote": "ore di **** Omissis ****\nFormalità a carico della procedura\nCapitale: € 246.000,00\nInteressi: € 246.000,00\nPercentuale interessi: 4,10 %\nRogante: Notaio"
+      },
+      {
+        "page": 74,
+        "quote": "ore di **** Omissis ****\nFormalità a carico della procedura\nCapitale: € 246.000,00\nInteressi: € 246.000,00\nPercentuale interessi: 4,10 %\nRogante: Notaio"
+      },
+      {
+        "page": 79,
+        "quote": "ore di **** Omissis ****\nFormalità a carico della procedura\nCapitale: € 246.000,00\nInteressi: € 246.000,00\nPercentuale interessi: 4,10 %\nRogante: Notaio"
+      }
+    ],
+    "id": "m_000016"
+  },
+  {
+    "page": 13,
+    "amount_raw": "€ 265.231,66",
+    "amount_eur": 265231.66,
+    "quote": "cia il 09/10/2018\nReg. gen. 4968 - Reg. part. 813\nQuota: 1/1\nImporto: € 265.231,66\nA favore di **** Omissis ****\nContro **** Omissis ****\nFormalità a ca",
+    "context": "-Riscossione derivante da 0424 ruolo emesso da Agenzia delle entrate-\nriscossione in data 08/10/2018 rep. 1191/8918\nIscritto a Pescia il 09/10/2018\nReg. gen. 4968 - Reg. part. 813\nQuota: 1/1\nImporto: € 265.231,66\nA favore di **** Omissis ****\nContro **** Omissis ****\nFormalità a carico della procedura\nCapitale: € 132.615,83\nNote: Con il n.13 unisce la nota di iscrizione Reg. Part. 813 del 09/10/2018\n•ipoteca",
+    "low_quality_page": false,
+    "source": "pages_raw",
+    "occurrences": [
+      {
+        "page": 13,
+        "quote": "cia il 09/10/2018\nReg. gen. 4968 - Reg. part. 813\nQuota: 1/1\nImporto: € 265.231,66\nA favore di **** Omissis ****\nContro **** Omissis ****\nFormalità a ca"
+      },
+      {
+        "page": 27,
+        "quote": "cia il 09/10/2018\nReg. gen. 4968 - Reg. part. 813\nQuota: 1/1\nImporto: € 265.231,66\nA favore di **** Omissis ****\nContro **** Omissis ****\nFormalità a ca"
+      },
+      {
+        "page": 44,
+        "quote": "cia il 09/10/2018\nReg. gen. 4968 - Reg. part. 813\nQuota: 1/1\nImporto: € 265.231,66\nA favore di **** Omissis ****\nContro **** Omissis ****\nFormalità a ca"
+      },
+      {
+        "page": 75,
+        "quote": "cia il 09/10/2018\nReg. gen. 4968 - Reg. part. 813\nQuota: 1/1\nImporto: € 265.231,66\nA favore di **** Omissis ****\nContro **** Omissis ****\nFormalità a ca"
+      },
+      {
+        "page": 77,
+        "quote": "cia il 09/10/2018\nReg. gen. 4968 - Reg. part. 813\nQuota: 1/1\nImporto: € 265.231,66\nA favore di **** Omissis ****\nContro **** Omissis ****\nFormalità a ca"
+      },
+      {
+        "page": 80,
+        "quote": "cia il 09/10/2018\nReg. gen. 4968 - Reg. part. 813\nQuota: 1/1\nImporto: € 265.231,66\nA favore di **** Omissis ****\nContro **** Omissis ****\nFormalità a ca"
+      }
+    ],
+    "id": "m_000017"
+  },
+  {
+    "page": 14,
+    "amount_raw": "€ 47.423,68",
+    "amount_eur": 47423.68,
+    "quote": "Contro **** Omissis ****\nFormalità a carico della procedura\nCapitale: € 47.423,68\nNote: Con il n.14 unisce la nota di Iscrizione Reg. Part. 426 del 13/",
+    "context": "14 di 81 Contro **** Omissis ****\nFormalità a carico della procedura\nCapitale: € 47.423,68\nNote: Con il n.14 unisce la nota di Iscrizione Reg. Part. 426 del 13/06/2023\n•Ipoteca conc.Amministrativa/Riscossione  derivante da 0420 ruolo e avviso di accertamento Ente \nemesso dall'Agenzia delle",
+    "low_quality_page": false,
+    "source": "pages_raw",
+    "occurrences": [
+      {
+        "page": 14,
+        "quote": "Contro **** Omissis ****\nFormalità a carico della procedura\nCapitale: € 47.423,68\nNote: Con il n.14 unisce la nota di Iscrizione Reg. Part. 426 del 13/"
+      },
+      {
+        "page": 28,
+        "quote": "Contro **** Omissis ****\nFormalità a carico della procedura\nCapitale: € 47.423,68\nNote: Con il n.14 unisce la nota di Iscrizione Reg. Part. 426 del 13/"
+      },
+      {
+        "page": 44,
+        "quote": "Contro **** Omissis ****\nFormalità a carico della procedura\nCapitale: € 47.423,68\nNote: Con il n.14 unisce la nota di Iscrizione Reg. Part. 426 del 13/"
+      },
+      {
+        "page": 75,
+        "quote": "Contro **** Omissis ****\nFormalità a carico della procedura\nCapitale: € 47.423,68\nNote: Con il n.14 unisce la nota di Iscrizione Reg. Part. 426 del 13/"
+      },
+      {
+        "page": 80,
+        "quote": "Contro **** Omissis ****\nFormalità a carico della procedura\nCapitale: € 47.423,68\nNote: Con il n.14 unisce la nota di Iscrizione Reg. Part. 426 del 13/"
+      }
+    ],
+    "id": "m_000018"
+  },
+  {
+    "page": 14,
+    "amount_raw": "€ 125.567,72",
+    "amount_eur": 125567.72,
+    "quote": "Contro **** Omissis ****\nFormalità a carico della procedura\nCapitale: € 125.567,72\nNote: Con il n. 15 unisce la nota di Iscrizione Reg. Part. 314 del 24",
+    "context": "4 \nIscritto a Pescia il 24/04/2024\nReg. gen. 2464 - Reg. part. 314\nQuota: 1/1\nImporto: € 251.135,44\nA favore di **** Omissis ****\nContro **** Omissis ****\nFormalità a carico della procedura\nCapitale: € 125.567,72\nNote: Con il n. 15 unisce la nota di Iscrizione Reg. Part. 314 del 24/04/2024\nTrascrizioni\n•Verbale di Pignoramento immobili emesso da UNEP c/o Tribunale di Crotone (KR)\nTrascritto a Pescia il 30/05/",
+    "low_quality_page": false,
+    "source": "pages_raw",
+    "occurrences": [
+      {
+        "page": 14,
+        "quote": "Contro **** Omissis ****\nFormalità a carico della procedura\nCapitale: € 125.567,72\nNote: Con il n. 15 unisce la nota di Iscrizione Reg. Part. 314 del 24"
+      },
+      {
+        "page": 75,
+        "quote": "Contro **** Omissis ****\nFormalità a carico della procedura\nCapitale: € 125.567,72\nNote: Con il n. 15 unisce la nota di Iscrizione Reg. Part. 314 del 24"
+      }
+    ],
+    "id": "m_000019"
+  },
+  {
+    "page": 14,
+    "amount_raw": "€ 251.135,44",
+    "amount_eur": 251135.44,
+    "quote": "cia il 24/04/2024\nReg. gen. 2464 - Reg. part. 314\nQuota: 1/1\nImporto: € 251.135,44\nA favore di **** Omissis ****\nContro **** Omissis ****\nFormalità a ca",
+    "context": "olo e avviso di accertamento Ente \nemesso dall'Agenzia delle Entrate -riscossione i ndata 23/04/2024 rep.1844/8924 \nIscritto a Pescia il 24/04/2024\nReg. gen. 2464 - Reg. part. 314\nQuota: 1/1\nImporto: € 251.135,44\nA favore di **** Omissis ****\nContro **** Omissis ****\nFormalità a carico della procedura\nCapitale: € 125.567,72\nNote: Con il n. 15 unisce la nota di Iscrizione Reg. Part. 314 del 24/04/2024\nTrascriz",
+    "low_quality_page": false,
+    "source": "pages_raw",
+    "occurrences": [
+      {
+        "page": 14,
+        "quote": "cia il 24/04/2024\nReg. gen. 2464 - Reg. part. 314\nQuota: 1/1\nImporto: € 251.135,44\nA favore di **** Omissis ****\nContro **** Omissis ****\nFormalità a ca"
+      },
+      {
+        "page": 28,
+        "quote": "cia il 24/04/2024\nReg. gen. 2464 - Reg. part. 314\nQuota: 1/1\nImporto: € 251.135,44\nA favore di **** Omissis ****\nContro **** Omissis ****\nFormalità a ca"
+      },
+      {
+        "page": 44,
+        "quote": "cia il 24/04/2024\nReg. gen. 2464 - Reg. part. 314\nQuota: 1/1\nImporto: € 251.135,44\nA favore di **** Omissis ****\nContro **** Omissis ****\nFormalità a ca"
+      },
+      {
+        "page": 75,
+        "quote": "cia il 24/04/2024\nReg. gen. 2464 - Reg. part. 314\nQuota: 1/1\nImporto: € 251.135,44\nA favore di **** Omissis ****\nContro **** Omissis ****\nFormalità a ca"
+      },
+      {
+        "page": 78,
+        "quote": "cia il 24/04/2024\nReg. gen. 2464 - Reg. part. 314\nQuota: 1/1\nImporto: € 251.135,44\nA favore di **** Omissis ****\nContro **** Omissis ****\nFormalità a ca"
+      },
+      {
+        "page": 80,
+        "quote": "cia il 24/04/2024\nReg. gen. 2464 - Reg. part. 314\nQuota: 1/1\nImporto: € 251.135,44\nA favore di **** Omissis ****\nContro **** Omissis ****\nFormalità a ca"
+      }
+    ],
+    "id": "m_000020"
+  },
+  {
+    "page": 21,
+    "amount_raw": "€ T-1",
+    "amount_eur": 1.0,
+    "quote": "ie\ncatastal\neRendita Piano Graffato\n6 1700 5 C2 7 250 mq 263 mq 1020 € T-1\n6 94 9 F1 70 mq T\n6 1873 F1 mq. 149\n6 1874 F1 mq. 222\nCorrispondenza",
+    "context": "fabbricati (CF)\nDati identificativi Dati di classamento \nSezione Foglio Part. Sub. Zona\nCens.Categori\naClasse Consiste\nnzaSuperfic\nie\ncatastal\neRendita Piano Graffato\n6 1700 5 C2 7 250 mq 263 mq 1020 € T-1\n6 94 9 F1 70 mq T\n6 1873 F1 mq. 149\n6 1874 F1 mq. 222\nCorrispondenza catastale\nNon sussiste corrispondenza catastale.\nL'intestazione catastale del magazzino e dell'area urbana, costituenti il lotto n",
+    "low_quality_page": false,
+    "source": "pages_raw",
+    "occurrences": [
+      {
+        "page": 21,
+        "quote": "ie\ncatastal\neRendita Piano Graffato\n6 1700 5 C2 7 250 mq 263 mq 1020 € T-1\n6 94 9 F1 70 mq T\n6 1873 F1 mq. 149\n6 1874 F1 mq. 222\nCorrispondenza"
+      }
+    ],
+    "id": "m_000021"
+  },
+  {
+    "page": 26,
+    "amount_raw": "€ 187.038,73",
+    "amount_eur": 187038.73,
+    "quote": "Contro **** Omissis ****\nFormalità a carico della procedura\nCapitale: € 187.038,73\nPercentuale interessi: 4,10 %\nRogante: notaio Monica Paggi di Pistoia",
+    "context": "to\nIscritto a Pescia il 13/04/2015\nReg. gen. 1294 - Reg. part. 247\nQuota: 1/1\nImporto: € 360.000,00\nA favore di **** Omissis ****\nContro **** Omissis ****\nFormalità a carico della procedura\nCapitale: € 187.038,73\nPercentuale interessi: 4,10 %\nRogante: notaio Monica Paggi di Pistoia\nData: 09/04/2015\nN° repertorio: 1972\nN° raccolta: 1335\nNote: Con il n.29 unisce la nota di Iscrizione Reg.Part. 247 del 13/04/201",
+    "low_quality_page": false,
+    "source": "pages_raw",
+    "occurrences": [
+      {
+        "page": 26,
+        "quote": "Contro **** Omissis ****\nFormalità a carico della procedura\nCapitale: € 187.038,73\nPercentuale interessi: 4,10 %\nRogante: notaio Monica Paggi di Pistoia"
+      },
+      {
+        "page": 43,
+        "quote": "Contro **** Omissis ****\nFormalità a carico della procedura\nCapitale: € 187.038,73\nPercentuale interessi: 4,10 %\nRogante: notaio Monica Paggi di Pistoia"
+      },
+      {
+        "page": 76,
+        "quote": "Contro **** Omissis ****\nFormalità a carico della procedura\nCapitale: € 187.038,73\nPercentuale interessi: 4,10 %\nRogante: notaio Monica Paggi di Pistoia"
+      },
+      {
+        "page": 79,
+        "quote": "Contro **** Omissis ****\nFormalità a carico della procedura\nCapitale: € 187.038,73\nPercentuale interessi: 4,10 %\nRogante: notaio Monica Paggi di Pistoia"
+      }
+    ],
+    "id": "m_000022"
+  },
+  {
+    "page": 26,
+    "amount_raw": "€ 425.000,00",
+    "amount_eur": 425000.0,
+    "quote": "****\nFormalità a carico della procedura\nCapitale: € 425.000,00\nSpese: € 425.000,00\nPercentuale interessi: 3,40 %\nRogante: notaio Francesco Russo \nData:",
+    "context": "il 04/12/2009\nReg. gen. 5984 - Reg. part. 1541\nQuota: 1/1\nImporto: € 850.000,00\nA favore di **** Omissis ****\nContro **** Omissis ****\nFormalità a carico della procedura\nCapitale: € 425.000,00\nSpese: € 425.000,00\nPercentuale interessi: 3,40 %\nRogante: notaio Francesco Russo \nData: 02/12/2009\nN° repertorio: 3028\nN° raccolta: 2066\nNote: Con il n. 28 unisce l'atto pubblico di mutuo fondiario e la nota di Iscrizi",
+    "low_quality_page": false,
+    "source": "pages_raw",
+    "occurrences": [
+      {
+        "page": 26,
+        "quote": "****\nFormalità a carico della procedura\nCapitale: € 425.000,00\nSpese: € 425.000,00\nPercentuale interessi: 3,40 %\nRogante: notaio Francesco Russo \nData:"
+      },
+      {
+        "page": 43,
+        "quote": "****\nFormalità a carico della procedura\nCapitale: € 425.000,00\nSpese: € 425.000,00\nPercentuale interessi: 3,40 %\nRogante: notaio Francesco Russo \nData:"
+      },
+      {
+        "page": 76,
+        "quote": "****\nFormalità a carico della procedura\nCapitale: € 425.000,00\nSpese: € 425.000,00\nPercentuale interessi: 3,40 %\nRogante: notaio Francesco Russo \nData:"
+      }
+    ],
+    "id": "m_000023"
+  },
+  {
+    "page": 26,
+    "amount_raw": "€ 425.000,00",
+    "amount_eur": 425000.0,
+    "quote": "Contro **** Omissis ****\nFormalità a carico della procedura\nCapitale: € 425.000,00\nSpese: € 425.000,00\nPercentuale interessi: 3,40 %\nRogante: notaio Fra",
+    "context": "o\nIscritto a Pescia il 04/12/2009\nReg. gen. 5984 - Reg. part. 1541\nQuota: 1/1\nImporto: € 850.000,00\nA favore di **** Omissis ****\nContro **** Omissis ****\nFormalità a carico della procedura\nCapitale: € 425.000,00\nSpese: € 425.000,00\nPercentuale interessi: 3,40 %\nRogante: notaio Francesco Russo \nData: 02/12/2009\nN° repertorio: 3028\nN° raccolta: 2066\nNote: Con il n. 28 unisce l'atto pubblico di mutuo fondiario",
+    "low_quality_page": false,
+    "source": "pages_raw",
+    "occurrences": [
+      {
+        "page": 26,
+        "quote": "Contro **** Omissis ****\nFormalità a carico della procedura\nCapitale: € 425.000,00\nSpese: € 425.000,00\nPercentuale interessi: 3,40 %\nRogante: notaio Fra"
+      },
+      {
+        "page": 43,
+        "quote": "Contro **** Omissis ****\nFormalità a carico della procedura\nCapitale: € 425.000,00\nSpese: € 425.000,00\nPercentuale interessi: 3,40 %\nRogante: notaio Fra"
+      },
+      {
+        "page": 76,
+        "quote": "Contro **** Omissis ****\nFormalità a carico della procedura\nCapitale: € 425.000,00\nSpese: € 425.000,00\nPercentuale interessi: 3,40 %\nRogante: notaio Fra"
+      }
+    ],
+    "id": "m_000024"
+  },
+  {
+    "page": 26,
+    "amount_raw": "€ 850.000,00",
+    "amount_eur": 850000.0,
+    "quote": "ia il 04/12/2009\nReg. gen. 5984 - Reg. part. 1541\nQuota: 1/1\nImporto: € 850.000,00\nA favore di **** Omissis ****\nContro **** Omissis ****\nFormalità a ca",
+    "context": "ultate le seguenti formalità pregiudizievoli:\nIscrizioni\n•ipoteca volontaria  derivante da atto di mutuo fondiario\nIscritto a Pescia il 04/12/2009\nReg. gen. 5984 - Reg. part. 1541\nQuota: 1/1\nImporto: € 850.000,00\nA favore di **** Omissis ****\nContro **** Omissis ****\nFormalità a carico della procedura\nCapitale: € 425.000,00\nSpese: € 425.000,00\nPercentuale interessi: 3,40 %\nRogante: notaio Francesco Russo \nDat",
+    "low_quality_page": false,
+    "source": "pages_raw",
+    "occurrences": [
+      {
+        "page": 26,
+        "quote": "ia il 04/12/2009\nReg. gen. 5984 - Reg. part. 1541\nQuota: 1/1\nImporto: € 850.000,00\nA favore di **** Omissis ****\nContro **** Omissis ****\nFormalità a ca"
+      },
+      {
+        "page": 43,
+        "quote": "ia il 04/12/2009\nReg. gen. 5984 - Reg. part. 1541\nQuota: 1/1\nImporto: € 850.000,00\nA favore di **** Omissis ****\nContro **** Omissis ****\nFormalità a ca"
+      },
+      {
+        "page": 76,
+        "quote": "ia il 04/12/2009\nReg. gen. 5984 - Reg. part. 1541\nQuota: 1/1\nImporto: € 850.000,00\nA favore di **** Omissis ****\nContro **** Omissis ****\nFormalità a ca"
+      },
+      {
+        "page": 78,
+        "quote": "ia il 04/12/2009\nReg. gen. 5984 - Reg. part. 1541\nQuota: 1/1\nImporto: € 850.000,00\nA favore di **** Omissis ****\nContro **** Omissis ****\nFormalità a ca"
+      }
+    ],
+    "id": "m_000025"
+  },
+  {
+    "page": 27,
+    "amount_raw": "€ 492.000,00",
+    "amount_eur": 492000.0,
+    "quote": "27 di 81 Importo: € 492.000,00\nA favore di **** Omissis ****\nFormalità a carico della procedura\nCapi",
+    "context": "27 di 81 Importo: € 492.000,00\nA favore di **** Omissis ****\nFormalità a carico della procedura\nCapitale: € 246.000,00\nInteressi: € 246.000,00\nPercentuale interessi: 4,10 %\nRogante: Notaio Monica Paggi di Pistoia\nData: 09/04/2015",
+    "low_quality_page": false,
+    "source": "pages_raw",
+    "occurrences": [
+      {
+        "page": 27,
+        "quote": "27 di 81 Importo: € 492.000,00\nA favore di **** Omissis ****\nFormalità a carico della procedura\nCapi"
+      }
+    ],
+    "id": "m_000026"
+  },
+  {
+    "page": 28,
+    "amount_raw": "€ 94.847,36",
+    "amount_eur": 94847.36,
+    "quote": "28 di 81 Importo: € 94.847,36\nA favore di **** Omissis ****\nContro **** Omissis ****\nFormalità a ca",
+    "context": "28 di 81 Importo: € 94.847,36\nA favore di **** Omissis ****\nContro **** Omissis ****\nFormalità a carico della procedura\nCapitale: € 47.423,68\nNote: Con il n.14 unisce la nota di Iscrizione Reg. Part. 426 del 13/06/2023\n•Ipoteca c",
+    "low_quality_page": false,
+    "source": "pages_raw",
+    "occurrences": [
+      {
+        "page": 28,
+        "quote": "28 di 81 Importo: € 94.847,36\nA favore di **** Omissis ****\nContro **** Omissis ****\nFormalità a ca"
+      }
+    ],
+    "id": "m_000027"
+  },
+  {
+    "page": 28,
+    "amount_raw": "€ 125.567,72",
+    "amount_eur": 125567.72,
+    "quote": "Contro **** Omissis ****\nFormalità a carico della procedura\nCapitale: € 125.567,72\nNote: Con il n.15 unisce la nota di Iscrizione Reg. Part. 314 del 24/",
+    "context": "4 \nIscritto a Pescia il 24/04/2024\nReg. gen. 2464 - Reg. part. 314\nQuota: 1/1\nImporto: € 251.135,44\nA favore di **** Omissis ****\nContro **** Omissis ****\nFormalità a carico della procedura\nCapitale: € 125.567,72\nNote: Con il n.15 unisce la nota di Iscrizione Reg. Part. 314 del 24/04/2024\nTrascrizioni\n•Verbale di Pignoramento immobili emesso da UNEP c/o Tribunale di Crotone (KR)\nTrascritto a Pescia il 30/05/2",
+    "low_quality_page": false,
+    "source": "pages_raw",
+    "occurrences": [
+      {
+        "page": 28,
+        "quote": "Contro **** Omissis ****\nFormalità a carico della procedura\nCapitale: € 125.567,72\nNote: Con il n.15 unisce la nota di Iscrizione Reg. Part. 314 del 24/"
+      },
+      {
+        "page": 78,
+        "quote": "Contro **** Omissis ****\nFormalità a carico della procedura\nCapitale: € 125.567,72\nNote: Con il n.15 unisce la nota di Iscrizione Reg. Part. 314 del 24/"
+      },
+      {
+        "page": 80,
+        "quote": "Contro **** Omissis ****\nFormalità a carico della procedura\nCapitale: € 125.567,72\nNote: Con il n.15 unisce la nota di Iscrizione Reg. Part. 314 del 24/"
+      }
+    ],
+    "id": "m_000028"
+  },
+  {
+    "page": 43,
+    "amount_raw": "€ 492.000,00",
+    "amount_eur": 492000.0,
+    "quote": "cia il 14/04/2015\nReg. gen. 1316 - Reg. part. 254\nQuota: 1/1\nImporto: € 492.000,00\nA favore di **** Omissis ****\nFormalità a carico della procedura\nCapi",
+    "context": "Iscrizione Reg.Part. 247 del 13/04/2015\n•Ipoteca volontaria derivante da Concessione a garanzia di mutuo fondiario\nIscritto a Pescia il 14/04/2015\nReg. gen. 1316 - Reg. part. 254\nQuota: 1/1\nImporto: € 492.000,00\nA favore di **** Omissis ****\nFormalità a carico della procedura\nCapitale: € 246.000,00\nInteressi: € 246.000,00\nPercentuale interessi: 4,10 %\nRogante: Notaio Monica Paggi di Pistoia\nData: 09/04/2015",
+    "low_quality_page": false,
+    "source": "pages_raw",
+    "occurrences": [
+      {
+        "page": 43,
+        "quote": "cia il 14/04/2015\nReg. gen. 1316 - Reg. part. 254\nQuota: 1/1\nImporto: € 492.000,00\nA favore di **** Omissis ****\nFormalità a carico della procedura\nCapi"
+      },
+      {
+        "page": 74,
+        "quote": "cia il 14/04/2015\nReg. gen. 1316 - Reg. part. 254\nQuota: 1/1\nImporto: € 492.000,00\nA favore di **** Omissis ****\nFormalità a carico della procedura\nCapi"
+      },
+      {
+        "page": 79,
+        "quote": "cia il 14/04/2015\nReg. gen. 1316 - Reg. part. 254\nQuota: 1/1\nImporto: € 492.000,00\nA favore di **** Omissis ****\nFormalità a carico della procedura\nCapi"
+      }
+    ],
+    "id": "m_000029"
+  },
+  {
+    "page": 44,
+    "amount_raw": "€ 90.000,00",
+    "amount_eur": 90000.0,
+    "quote": "44 di 81 Quota: 1/1\nImporto: € 90.000,00\nA favore di **** Omissis ****\nContro **** Omissis ****\nFormalità a ca",
+    "context": "44 di 81 Quota: 1/1\nImporto: € 90.000,00\nA favore di **** Omissis ****\nContro **** Omissis ****\nFormalità a carico della procedura\nCapitale: € 48.069,88\nNote: Con il n. 11 unisce la nota di Iscrizione Reg. Part. 628 del 28/09/2015\n•Ipoteca",
+    "low_quality_page": false,
+    "source": "pages_raw",
+    "occurrences": [
+      {
+        "page": 44,
+        "quote": "44 di 81 Quota: 1/1\nImporto: € 90.000,00\nA favore di **** Omissis ****\nContro **** Omissis ****\nFormalità a ca"
+      }
+    ],
+    "id": "m_000030"
+  },
+  {
+    "page": 44,
+    "amount_raw": "€ 94.847,36",
+    "amount_eur": 94847.36,
+    "quote": "cia il 13/06/2023\nReg. gen. 3306 - Reg. part. 426\nQuota: 1/1\nImporto: € 94.847,36\nA favore di **** Omissis ****\nContro **** Omissis ****\nFormalità a ca",
+    "context": "lo e avviso di accertamento \nesecutivo emessa dall'Agenzia delle Entrate -riscossione del 12/06/2023 rep. 1692/8923\nIscritto a Pescia il 13/06/2023\nReg. gen. 3306 - Reg. part. 426\nQuota: 1/1\nImporto: € 94.847,36\nA favore di **** Omissis ****\nContro **** Omissis ****\nFormalità a carico della procedura\nCapitale: € 47.423,68\nNote: Con il n.14 unisce la nota di Iscrizione Reg. Part. 426 del 13/06/2023\n•Ipoteca c",
+    "low_quality_page": false,
+    "source": "pages_raw",
+    "occurrences": [
+      {
+        "page": 44,
+        "quote": "cia il 13/06/2023\nReg. gen. 3306 - Reg. part. 426\nQuota: 1/1\nImporto: € 94.847,36\nA favore di **** Omissis ****\nContro **** Omissis ****\nFormalità a ca"
+      },
+      {
+        "page": 75,
+        "quote": "cia il 13/06/2023\nReg. gen. 3306 - Reg. part. 426\nQuota: 1/1\nImporto: € 94.847,36\nA favore di **** Omissis ****\nContro **** Omissis ****\nFormalità a ca"
+      },
+      {
+        "page": 80,
+        "quote": "cia il 13/06/2023\nReg. gen. 3306 - Reg. part. 426\nQuota: 1/1\nImporto: € 94.847,36\nA favore di **** Omissis ****\nContro **** Omissis ****\nFormalità a ca"
+      }
+    ],
+    "id": "m_000031"
+  },
+  {
+    "page": 45,
+    "amount_raw": "€ 125.567,72",
+    "amount_eur": 125567.72,
+    "quote": "45 di 81 Capitale: € 125.567,72\nNote: Con il n.15 unisce la nota di Iscrizione Reg. Part. 314 del 24/",
+    "context": "45 di 81 Capitale: € 125.567,72\nNote: Con il n.15 unisce la nota di Iscrizione Reg. Part. 314 del 24/04/2024\nTrascrizioni\n•Verbale di Pignoramento immobili emesso da UNEP c/o Tribunale di Crotone (KR)\nTrascritto a Pescia il 30/05/2",
+    "low_quality_page": false,
+    "source": "pages_raw",
+    "occurrences": [
+      {
+        "page": 45,
+        "quote": "45 di 81 Capitale: € 125.567,72\nNote: Con il n.15 unisce la nota di Iscrizione Reg. Part. 314 del 24/"
+      }
+    ],
+    "id": "m_000032"
+  },
+  {
+    "page": 49,
+    "amount_raw": "€ 80.248,00",
+    "amount_eur": 80248.0,
+    "quote": "n vendita per il diritto di Proprietà (1/1)\nValore di stima del bene: € 80.248,00\nPer quanto riguarda la scelta dei criteri di stima da adottare occorr",
+    "context": "irenze-Mare\". \nIdentificato al catasto Fabbricati - Fg. 18, Part. 465 , Zc. 1, Categoria A3, Graffato 488\nL'immobile viene posto in vendita per il diritto di Proprietà (1/1)\nValore di stima del bene: € 80.248,00\nPer quanto riguarda la scelta dei criteri di stima da adottare occorre premettere che lo scopo è quello di \ndeterminare il valore venale in comune commercio del bene in esame, cioè quel valore che in",
+    "low_quality_page": false,
+    "source": "pages_raw",
+    "occurrences": [
+      {
+        "page": 49,
+        "quote": "n vendita per il diritto di Proprietà (1/1)\nValore di stima del bene: € 80.248,00\nPer quanto riguarda la scelta dei criteri di stima da adottare occorr"
+      }
+    ],
+    "id": "m_000033"
+  },
+  {
+    "page": 51,
+    "amount_raw": "Euro 45.000,00",
+    "amount_eur": 45000.0,
+    "quote": "ascritto a Pescia il 30/09/2024 al n. 3744 del Registro \nParticolare: Euro 45.000,00;\n- sconto applicato: 0,00%\n- superficie convenzionale mq. 105;\n- stat",
+    "context": "to dall’atto di compravendita ai rogiti del notaio Simona Cirillo di Campi Bisenzio in data \n25/09/2025 rep. 16311 racc. 11250, trascritto a Pescia il 30/09/2024 al n. 3744 del Registro \nParticolare: Euro 45.000,00;\n- sconto applicato: 0,00%\n- superficie convenzionale mq. 105;\n- stato di conservazione: scadente\nSulla base del metodo di valutazione adottato lo scrivente ha così determinato il valore commerciale",
+    "low_quality_page": false,
+    "source": "pages_raw",
+    "occurrences": [
+      {
+        "page": 51,
+        "quote": "ascritto a Pescia il 30/09/2024 al n. 3744 del Registro \nParticolare: Euro 45.000,00;\n- sconto applicato: 0,00%\n- superficie convenzionale mq. 105;\n- stat"
+      }
+    ],
+    "id": "m_000034"
+  },
+  {
+    "page": 51,
+    "amount_raw": "Euro 53.000,00",
+    "amount_eur": 53000.0,
+    "quote": "ascritto a Pescia il 08/07/2024 al n. 2627 del Registro \nParticolare: Euro 53.000,00;\n- sconto applicato: 0,00%\n- superficie convenzionale mq. 74;\n- stato",
+    "context": "dall’atto di compravendita ai rogiti del notaio Simone Monacò di Montecatini Terme in \ndata 05/07/2024 rep. 23711 racc. 16957, trascritto a Pescia il 08/07/2024 al n. 2627 del Registro \nParticolare: Euro 53.000,00;\n- sconto applicato: 0,00%\n- superficie convenzionale mq. 74;\n- stato di conservazione: scadente\n* comparabile n. 3:\nfabbricato urbano da cielo a terra posto in Comune di Montecatini Terme (PT) via d",
+    "low_quality_page": false,
+    "source": "pages_raw",
+    "occurrences": [
+      {
+        "page": 51,
+        "quote": "ascritto a Pescia il 08/07/2024 al n. 2627 del Registro \nParticolare: Euro 53.000,00;\n- sconto applicato: 0,00%\n- superficie convenzionale mq. 74;\n- stato"
+      }
+    ],
+    "id": "m_000035"
+  },
+  {
+    "page": 51,
+    "amount_raw": "Euro 80.248,00",
+    "amount_eur": 80248.0,
+    "quote": "ituente il lotto n. 1 in condizioni di libero mercato, in complessivi Euro 80.248,00\nLo scrivente unisce:\n- con il n. 48 il contratto di compravendita e l",
+    "context": "ione: scadente\nSulla base del metodo di valutazione adottato lo scrivente ha così determinato il valore commerciale del \nbene costituente il lotto n. 1 in condizioni di libero mercato, in complessivi Euro 80.248,00\nLo scrivente unisce:\n- con il n. 48 il contratto di compravendita e la visura catastale relativa al comparabile n. 1,\n- con il n. 49 il contratto di compravendita e la visura catastale relativa al co",
+    "low_quality_page": false,
+    "source": "pages_raw",
+    "occurrences": [
+      {
+        "page": 51,
+        "quote": "ituente il lotto n. 1 in condizioni di libero mercato, in complessivi Euro 80.248,00\nLo scrivente unisce:\n- con il n. 48 il contratto di compravendita e l"
+      }
+    ],
+    "id": "m_000036"
+  },
+  {
+    "page": 51,
+    "amount_raw": "Euro 125.000,00",
+    "amount_eur": 125000.0,
+    "quote": "ascritto a Pescia il 01/08/2024 al n. 3131 del Registro Particolare: \nEuro 125.000,00;\n- sconto applicato: 0,00%\n- superficie convenzionale mq. 142,00;\n- s",
+    "context": "ilevato dall’atto di compravendita ai rogiti del notaio Ivana Troisi di Pieve a Nievole in data \n29/07/2024 rep. 1325 racc. 961 trascritto a Pescia il 01/08/2024 al n. 3131 del Registro Particolare: \nEuro 125.000,00;\n- sconto applicato: 0,00%\n- superficie convenzionale mq. 142,00;\n- stato di conservazione: normale\n* comparabile n. 2:\nappartamento per civile abitazione posto al piano primo del fabbricato situato",
+    "low_quality_page": false,
+    "source": "pages_raw",
+    "occurrences": [
+      {
+        "page": 51,
+        "quote": "ascritto a Pescia il 01/08/2024 al n. 3131 del Registro Particolare: \nEuro 125.000,00;\n- sconto applicato: 0,00%\n- superficie convenzionale mq. 142,00;\n- s"
+      }
+    ],
+    "id": "m_000037"
+  },
+  {
+    "page": 52,
+    "amount_raw": "100,00% €",
+    "amount_eur": 100.0,
+    "quote": "T) - via Giuseppe \nGaribaldi n.c. 23169,30 mq 474,00 €/mq € 80.248,20 100,00% € 80.248,00\nValore di stima: € 80.248,00\nValore di stima: € 80.248,00\nD",
+    "context": "erficie\nconvenzionaleValore unitario Valore\ncomplessivoQuota in\nvenditaTotale\nBene N° 1 - \nFabbricato civile\nMontecatini-Terme \n(PT) - via Giuseppe \nGaribaldi n.c. 23169,30 mq 474,00 €/mq € 80.248,20 100,00% € 80.248,00\nValore di stima: € 80.248,00\nValore di stima: € 80.248,00\nDeprezzamenti\nTipologia deprezzamento Valore Tipo\nAltro 20,00 %\nValore finale di stima: € 64.198,00\nLo scrivente precisa che il dep",
+    "low_quality_page": false,
+    "source": "pages_raw",
+    "occurrences": [
+      {
+        "page": 52,
+        "quote": "T) - via Giuseppe \nGaribaldi n.c. 23169,30 mq 474,00 €/mq € 80.248,20 100,00% € 80.248,00\nValore di stima: € 80.248,00\nValore di stima: € 80.248,00\nD"
+      }
+    ],
+    "id": "m_000038"
+  },
+  {
+    "page": 52,
+    "amount_raw": "€ 64.198,00",
+    "amount_eur": 64198.0,
+    "quote": "logia deprezzamento Valore Tipo\nAltro 20,00 %\nValore finale di stima: € 64.198,00\nLo scrivente precisa che il deprezzamento del 20% rispetto al valore",
+    "context": "169,30 mq 474,00 €/mq € 80.248,20 100,00% € 80.248,00\nValore di stima: € 80.248,00\nValore di stima: € 80.248,00\nDeprezzamenti\nTipologia deprezzamento Valore Tipo\nAltro 20,00 %\nValore finale di stima: € 64.198,00\nLo scrivente precisa che il deprezzamento del 20% rispetto al valore in condizioni di libero mercato è da \nattribuire, tra l'altro:\n- ai tempi di vendita giudiziaria del bene generalmente non brevi c",
+    "low_quality_page": false,
+    "source": "pages_raw",
+    "occurrences": [
+      {
+        "page": 52,
+        "quote": "logia deprezzamento Valore Tipo\nAltro 20,00 %\nValore finale di stima: € 64.198,00\nLo scrivente precisa che il deprezzamento del 20% rispetto al valore"
+      }
+    ],
+    "id": "m_000039"
+  },
+  {
+    "page": 52,
+    "amount_raw": "€ 80.248,00",
+    "amount_eur": 80248.0,
+    "quote": ",20 100,00% € 80.248,00\nValore di stima: € 80.248,00\nValore di stima: € 80.248,00\nDeprezzamenti\nTipologia deprezzamento Valore Tipo\nAltro 20,00 %\nValor",
+    "context": "nditaTotale\nBene N° 1 - \nFabbricato civile\nMontecatini-Terme \n(PT) - via Giuseppe \nGaribaldi n.c. 23169,30 mq 474,00 €/mq € 80.248,20 100,00% € 80.248,00\nValore di stima: € 80.248,00\nValore di stima: € 80.248,00\nDeprezzamenti\nTipologia deprezzamento Valore Tipo\nAltro 20,00 %\nValore finale di stima: € 64.198,00\nLo scrivente precisa che il deprezzamento del 20% rispetto al valore in condizioni di libero mercat",
+    "low_quality_page": false,
+    "source": "pages_raw",
+    "occurrences": [
+      {
+        "page": 52,
+        "quote": ",20 100,00% € 80.248,00\nValore di stima: € 80.248,00\nValore di stima: € 80.248,00\nDeprezzamenti\nTipologia deprezzamento Valore Tipo\nAltro 20,00 %\nValor"
+      }
+    ],
+    "id": "m_000040"
+  },
+  {
+    "page": 52,
+    "amount_raw": "€ 80.248,00",
+    "amount_eur": 80248.0,
+    "quote": "69,30 mq 474,00 €/mq € 80.248,20 100,00% € 80.248,00\nValore di stima: € 80.248,00\nValore di stima: € 80.248,00\nDeprezzamenti\nTipologia deprezzamento Va",
+    "context": "Valore\ncomplessivoQuota in\nvenditaTotale\nBene N° 1 - \nFabbricato civile\nMontecatini-Terme \n(PT) - via Giuseppe \nGaribaldi n.c. 23169,30 mq 474,00 €/mq € 80.248,20 100,00% € 80.248,00\nValore di stima: € 80.248,00\nValore di stima: € 80.248,00\nDeprezzamenti\nTipologia deprezzamento Valore Tipo\nAltro 20,00 %\nValore finale di stima: € 64.198,00\nLo scrivente precisa che il deprezzamento del 20% rispetto al valore i",
+    "low_quality_page": false,
+    "source": "pages_raw",
+    "occurrences": [
+      {
+        "page": 52,
+        "quote": "69,30 mq 474,00 €/mq € 80.248,20 100,00% € 80.248,00\nValore di stima: € 80.248,00\nValore di stima: € 80.248,00\nDeprezzamenti\nTipologia deprezzamento Va"
+      }
+    ],
+    "id": "m_000041"
+  },
+  {
+    "page": 52,
+    "amount_raw": "€/mq € 80.248,20 100,00",
+    "amount_eur": 80248.2,
+    "quote": "ecatini-Terme \n(PT) - via Giuseppe \nGaribaldi n.c. 23169,30 mq 474,00 €/mq € 80.248,20 100,00% € 80.248,00\nValore di stima: € 80.248,00\nValore di stima: € 80.248,0",
+    "context": "icativo corpo Superficie\nconvenzionaleValore unitario Valore\ncomplessivoQuota in\nvenditaTotale\nBene N° 1 - \nFabbricato civile\nMontecatini-Terme \n(PT) - via Giuseppe \nGaribaldi n.c. 23169,30 mq 474,00 €/mq € 80.248,20 100,00% € 80.248,00\nValore di stima: € 80.248,00\nValore di stima: € 80.248,00\nDeprezzamenti\nTipologia deprezzamento Valore Tipo\nAltro 20,00 %\nValore finale di stima: € 64.198,00\nLo scrivente precisa che il",
+    "low_quality_page": false,
+    "source": "pages_raw",
+    "occurrences": [
+      {
+        "page": 52,
+        "quote": "ecatini-Terme \n(PT) - via Giuseppe \nGaribaldi n.c. 23169,30 mq 474,00 €/mq € 80.248,20 100,00% € 80.248,00\nValore di stima: € 80.248,00\nValore di stima: € 80.248,0"
+      }
+    ],
+    "id": "m_000042"
+  },
+  {
+    "page": 52,
+    "amount_raw": "€ 80.248,20 100,00",
+    "amount_eur": 80248.2,
+    "quote": "ni-Terme \n(PT) - via Giuseppe \nGaribaldi n.c. 23169,30 mq 474,00 €/mq € 80.248,20 100,00% € 80.248,00\nValore di stima: € 80.248,00\nValore di stima: € 80.248,0",
+    "context": "vo corpo Superficie\nconvenzionaleValore unitario Valore\ncomplessivoQuota in\nvenditaTotale\nBene N° 1 - \nFabbricato civile\nMontecatini-Terme \n(PT) - via Giuseppe \nGaribaldi n.c. 23169,30 mq 474,00 €/mq € 80.248,20 100,00% € 80.248,00\nValore di stima: € 80.248,00\nValore di stima: € 80.248,00\nDeprezzamenti\nTipologia deprezzamento Valore Tipo\nAltro 20,00 %\nValore finale di stima: € 64.198,00\nLo scrivente precisa che il",
+    "low_quality_page": false,
+    "source": "pages_raw",
+    "occurrences": [
+      {
+        "page": 52,
+        "quote": "ni-Terme \n(PT) - via Giuseppe \nGaribaldi n.c. 23169,30 mq 474,00 €/mq € 80.248,20 100,00% € 80.248,00\nValore di stima: € 80.248,00\nValore di stima: € 80.248,0"
+      }
+    ],
+    "id": "m_000043"
+  },
+  {
+    "page": 53,
+    "amount_raw": "€ 105.000,00",
+    "amount_eur": 105000.0,
+    "quote": "n vendita per il diritto di Proprietà (1/1)\nValore di stima del bene: € 105.000,00\nPer quanto riguarda la scelta dei criteri di stima da adottare occorr",
+    "context": "g. 6, Part. 94, Sub. 9, \nCategoria F1 - Fg. 6, Part. 1873, Categoria F1 - Fg. 6, Part. 1874, Categoria F1\nL'immobile viene posto in vendita per il diritto di Proprietà (1/1)\nValore di stima del bene: € 105.000,00\nPer quanto riguarda la scelta dei criteri di stima da adottare occorre premettere che lo scopo è quello di \ndeterminare il valore venale in comune commercio del bene in esame, cioè quel valore che in",
+    "low_quality_page": false,
+    "source": "pages_raw",
+    "occurrences": [
+      {
+        "page": 53,
+        "quote": "n vendita per il diritto di Proprietà (1/1)\nValore di stima del bene: € 105.000,00\nPer quanto riguarda la scelta dei criteri di stima da adottare occorr"
+      }
+    ],
+    "id": "m_000044"
+  },
+  {
+    "page": 54,
+    "amount_raw": "Euro 75.000,00",
+    "amount_eur": 75000.0,
+    "quote": "zio igienico e piccola corte esclusiva\n- prezzo rilevato dall’offerta Euro 75.000,00;\n- sconto applicato all'offerta: 20%\n- superficie convenzionale mq. 2",
+    "context": "magazzino/laboratorio situata in zona semicentrale del Comune di Pieve a \nNievole (PT) composta da due locali oltre ufficio, servizio igienico e piccola corte esclusiva\n- prezzo rilevato dall’offerta Euro 75.000,00;\n- sconto applicato all'offerta: 20%\n- superficie convenzionale mq. 250,00;\n- stato di conservazione: scadente\n* comparabile n. 2:\nunità immobiliare ad uso magazzino/deposito situata in Comune di Mas",
+    "low_quality_page": false,
+    "source": "pages_raw",
+    "occurrences": [
+      {
+        "page": 54,
+        "quote": "zio igienico e piccola corte esclusiva\n- prezzo rilevato dall’offerta Euro 75.000,00;\n- sconto applicato all'offerta: 20%\n- superficie convenzionale mq. 2"
+      }
+    ],
+    "id": "m_000045"
+  },
+  {
+    "page": 55,
+    "amount_raw": "100,00% €",
+    "amount_eur": 100.0,
+    "quote": "- \nvia Colonna senza \nnumero civico258,50 mq 406,19 €/mq € 105.000,00 100,00% € 105.000,00\nValore di stima: € 105.000,00\nValore di stima: € 105.000,0",
+    "context": "corpo Superficie\nconvenzionaleValore unitario Valore\ncomplessivoQuota in\nvenditaTotale\nBene N° 2 - Magazzino\nPieve a Nievole (PT) - \nvia Colonna senza \nnumero civico258,50 mq 406,19 €/mq € 105.000,00 100,00% € 105.000,00\nValore di stima: € 105.000,00\nValore di stima: € 105.000,00\nFirmato Da: BISOGNI FELICE Emesso Da: ARUBAPEC S.P.A. NG CA 3 Serial#: 44cad88de49cb7a5d7e960d8990c605f\nPubblicazione ufficiale",
+    "low_quality_page": false,
+    "source": "pages_raw",
+    "occurrences": [
+      {
+        "page": 55,
+        "quote": "- \nvia Colonna senza \nnumero civico258,50 mq 406,19 €/mq € 105.000,00 100,00% € 105.000,00\nValore di stima: € 105.000,00\nValore di stima: € 105.000,0"
+      },
+      {
+        "page": 60,
+        "quote": "- \nvia Colonna senza \nnumero civico411,85 mq 680,67 €/mq € 280.336,00 100,00% € 280.336,00\nValore di stima: € 280.336,00\nValore di stima: € 280.336,0"
+      }
+    ],
+    "id": "m_000046"
+  },
+  {
+    "page": 55,
+    "amount_raw": "Euro 40.000,00",
+    "amount_eur": 40000.0,
+    "quote": "ascritto a Pescia il 18/04/2024 al n. 1489 \ndel Registro Particolare: Euro 40.000,00;\n- sconto applicato: 0,00%\n- superficie convenzionale mq. 47;\n- stato",
+    "context": "lico di compravendita ai rogiti del notaio Claudia Coppola Bottazzi di \nPescia in data 17/04/2024 rep. 52039 raccolta n. 17061, trascritto a Pescia il 18/04/2024 al n. 1489 \ndel Registro Particolare: Euro 40.000,00;\n- sconto applicato: 0,00%\n- superficie convenzionale mq. 47;\n- stato di conservazione: trascurato\nSulla base del metodo di valutazione adottato lo scrivente ha così determinato il valore commerciale",
+    "low_quality_page": false,
+    "source": "pages_raw",
+    "occurrences": [
+      {
+        "page": 55,
+        "quote": "ascritto a Pescia il 18/04/2024 al n. 1489 \ndel Registro Particolare: Euro 40.000,00;\n- sconto applicato: 0,00%\n- superficie convenzionale mq. 47;\n- stato"
+      }
+    ],
+    "id": "m_000047"
+  },
+  {
+    "page": 55,
+    "amount_raw": "€ 105.000,00",
+    "amount_eur": 105000.0,
+    "quote": ",50 mq 406,19 €/mq € 105.000,00 100,00% € 105.000,00\nValore di stima: € 105.000,00\nValore di stima: € 105.000,00\nFirmato Da: BISOGNI FELICE Emesso Da: A",
+    "context": "nitario Valore\ncomplessivoQuota in\nvenditaTotale\nBene N° 2 - Magazzino\nPieve a Nievole (PT) - \nvia Colonna senza \nnumero civico258,50 mq 406,19 €/mq € 105.000,00 100,00% € 105.000,00\nValore di stima: € 105.000,00\nValore di stima: € 105.000,00\nFirmato Da: BISOGNI FELICE Emesso Da: ARUBAPEC S.P.A. NG CA 3 Serial#: 44cad88de49cb7a5d7e960d8990c605f\nPubblicazione ufficiale ad uso esclusivo personale - è vietata og",
+    "low_quality_page": false,
+    "source": "pages_raw",
+    "occurrences": [
+      {
+        "page": 55,
+        "quote": ",50 mq 406,19 €/mq € 105.000,00 100,00% € 105.000,00\nValore di stima: € 105.000,00\nValore di stima: € 105.000,00\nFirmato Da: BISOGNI FELICE Emesso Da: A"
+      }
+    ],
+    "id": "m_000048"
+  },
+  {
+    "page": 55,
+    "amount_raw": "€ 105.000,00",
+    "amount_eur": 105000.0,
+    "quote": "0 100,00% € 105.000,00\nValore di stima: € 105.000,00\nValore di stima: € 105.000,00\nFirmato Da: BISOGNI FELICE Emesso Da: ARUBAPEC S.P.A. NG CA 3 Serial#",
+    "context": "a in\nvenditaTotale\nBene N° 2 - Magazzino\nPieve a Nievole (PT) - \nvia Colonna senza \nnumero civico258,50 mq 406,19 €/mq € 105.000,00 100,00% € 105.000,00\nValore di stima: € 105.000,00\nValore di stima: € 105.000,00\nFirmato Da: BISOGNI FELICE Emesso Da: ARUBAPEC S.P.A. NG CA 3 Serial#: 44cad88de49cb7a5d7e960d8990c605f\nPubblicazione ufficiale ad uso esclusivo personale - è vietata ogni \n\nripubblicazione o riprodu",
+    "low_quality_page": false,
+    "source": "pages_raw",
+    "occurrences": [
+      {
+        "page": 55,
+        "quote": "0 100,00% € 105.000,00\nValore di stima: € 105.000,00\nValore di stima: € 105.000,00\nFirmato Da: BISOGNI FELICE Emesso Da: ARUBAPEC S.P.A. NG CA 3 Serial#"
+      }
+    ],
+    "id": "m_000049"
+  },
+  {
+    "page": 55,
+    "amount_raw": "€ 105.000,00 100,00",
+    "amount_eur": 105000.0,
+    "quote": "Nievole (PT) - \nvia Colonna senza \nnumero civico258,50 mq 406,19 €/mq € 105.000,00 100,00% € 105.000,00\nValore di stima: € 105.000,00\nValore di stima: € 105.00",
+    "context": "entificativo corpo Superficie\nconvenzionaleValore unitario Valore\ncomplessivoQuota in\nvenditaTotale\nBene N° 2 - Magazzino\nPieve a Nievole (PT) - \nvia Colonna senza \nnumero civico258,50 mq 406,19 €/mq € 105.000,00 100,00% € 105.000,00\nValore di stima: € 105.000,00\nValore di stima: € 105.000,00\nFirmato Da: BISOGNI FELICE Emesso Da: ARUBAPEC S.P.A. NG CA 3 Serial#: 44cad88de49cb7a5d7e960d8990c605f\nPubblicazione ufficia",
+    "low_quality_page": false,
+    "source": "pages_raw",
+    "occurrences": [
+      {
+        "page": 55,
+        "quote": "Nievole (PT) - \nvia Colonna senza \nnumero civico258,50 mq 406,19 €/mq € 105.000,00 100,00% € 105.000,00\nValore di stima: € 105.000,00\nValore di stima: € 105.00"
+      }
+    ],
+    "id": "m_000050"
+  },
+  {
+    "page": 55,
+    "amount_raw": "Euro 105.000,00",
+    "amount_eur": 105000.0,
+    "quote": "ituente il lotto n. 2 in condizioni di libero mercato, in complessivi Euro 105.000,00\nLo scrivente unisce:\n- con il n. 53 la brochure pubblicitaria relativ",
+    "context": "ne: trascurato\nSulla base del metodo di valutazione adottato lo scrivente ha così determinato il valore commerciale del \nbene costituente il lotto n. 2 in condizioni di libero mercato, in complessivi Euro 105.000,00\nLo scrivente unisce:\n- con il n. 53 la brochure pubblicitaria relativa al comparabile n. 1;\n- con il n. 54 la brochure pubblicitaria relativa al comparabile n. 2;\n- con il n. 55 l'atto pubblico di co",
+    "low_quality_page": false,
+    "source": "pages_raw",
+    "occurrences": [
+      {
+        "page": 55,
+        "quote": "ituente il lotto n. 2 in condizioni di libero mercato, in complessivi Euro 105.000,00\nLo scrivente unisce:\n- con il n. 53 la brochure pubblicitaria relativ"
+      }
+    ],
+    "id": "m_000051"
+  },
+  {
+    "page": 55,
+    "amount_raw": "€/mq € 105.000,00 100,00",
+    "amount_eur": 105000.0,
+    "quote": "ve a Nievole (PT) - \nvia Colonna senza \nnumero civico258,50 mq 406,19 €/mq € 105.000,00 100,00% € 105.000,00\nValore di stima: € 105.000,00\nValore di stima: € 105.00",
+    "context": "2.\nIdentificativo corpo Superficie\nconvenzionaleValore unitario Valore\ncomplessivoQuota in\nvenditaTotale\nBene N° 2 - Magazzino\nPieve a Nievole (PT) - \nvia Colonna senza \nnumero civico258,50 mq 406,19 €/mq € 105.000,00 100,00% € 105.000,00\nValore di stima: € 105.000,00\nValore di stima: € 105.000,00\nFirmato Da: BISOGNI FELICE Emesso Da: ARUBAPEC S.P.A. NG CA 3 Serial#: 44cad88de49cb7a5d7e960d8990c605f\nPubblicazione ufficia",
+    "low_quality_page": false,
+    "source": "pages_raw",
+    "occurrences": [
+      {
+        "page": 55,
+        "quote": "ve a Nievole (PT) - \nvia Colonna senza \nnumero civico258,50 mq 406,19 €/mq € 105.000,00 100,00% € 105.000,00\nValore di stima: € 105.000,00\nValore di stima: € 105.00"
+      }
+    ],
+    "id": "m_000052"
+  },
+  {
+    "page": 55,
+    "amount_raw": "Euro 150.000,00",
+    "amount_eur": 150000.0,
+    "quote": "o e due servizi igienici con antibagno\n- prezzo rilevato dall’offerta Euro 150.000,00;\n- sconto applicato all'offerta: 20%\n- superficie convenzionale mq. 1",
+    "context": "55 di 81 comprendente due locali, oltre ufficio, ripostiglio e due servizi igienici con antibagno\n- prezzo rilevato dall’offerta Euro 150.000,00;\n- sconto applicato all'offerta: 20%\n- superficie convenzionale mq. 198;\n- stato di conservazione: trascurato\n* comparabile n. 3:\nunità immobiliare ad uso commerciale/magazzino posta al piano terreno",
+    "low_quality_page": false,
+    "source": "pages_raw",
+    "occurrences": [
+      {
+        "page": 55,
+        "quote": "o e due servizi igienici con antibagno\n- prezzo rilevato dall’offerta Euro 150.000,00;\n- sconto applicato all'offerta: 20%\n- superficie convenzionale mq. 1"
+      }
+    ],
+    "id": "m_000053"
+  },
+  {
+    "page": 56,
+    "amount_raw": "€ 84.000,00",
+    "amount_eur": 84000.0,
+    "quote": "logia deprezzamento Valore Tipo\nAltro 20,00 %\nValore finale di stima: € 84.000,00\nLo scrivente precisa che il deprezzamento del 20% rispetto al valore",
+    "context": "56 di 81 Deprezzamenti\nTipologia deprezzamento Valore Tipo\nAltro 20,00 %\nValore finale di stima: € 84.000,00\nLo scrivente precisa che il deprezzamento del 20% rispetto al valore in condizioni di libero mercato è da \nattribuire, tra l'altro:\n- ai tempi di vendita giudiziaria del bene generalmente non brevi c",
+    "low_quality_page": false,
+    "source": "pages_raw",
+    "occurrences": [
+      {
+        "page": 56,
+        "quote": "logia deprezzamento Valore Tipo\nAltro 20,00 %\nValore finale di stima: € 84.000,00\nLo scrivente precisa che il deprezzamento del 20% rispetto al valore"
+      }
+    ],
+    "id": "m_000054"
+  },
+  {
+    "page": 57,
+    "amount_raw": "€ 280.336,00",
+    "amount_eur": 280336.0,
+    "quote": "n vendita per il diritto di Proprietà (1/1)\nValore di stima del bene: € 280.336,00\nPer quanto riguarda la scelta dei criteri di stima da adottare occorr",
+    "context": "6, Part. 1700, Sub. 6, Categoria \nF5 - Fg. 6, Part. 1873, Categoria F1 - Fg. 6, Part. 1874, Categoria F1\nL'immobile viene posto in vendita per il diritto di Proprietà (1/1)\nValore di stima del bene: € 280.336,00\nPer quanto riguarda la scelta dei criteri di stima da adottare occorre premettere che lo scopo è quello di \ndeterminare il valore venale in comune commercio del bene in esame, cioè quel valore che in",
+    "low_quality_page": false,
+    "source": "pages_raw",
+    "occurrences": [
+      {
+        "page": 57,
+        "quote": "n vendita per il diritto di Proprietà (1/1)\nValore di stima del bene: € 280.336,00\nPer quanto riguarda la scelta dei criteri di stima da adottare occorr"
+      }
+    ],
+    "id": "m_000055"
+  },
+  {
+    "page": 58,
+    "amount_raw": "Euro 170.000,00",
+    "amount_eur": 170000.0,
+    "quote": "ascritto a Pescia il 25/09/2023 al n. 3528 del Registro Particolare: \nEuro 170.000,00;\n- sconto applicato: 0,00%\n- superficie convenzionale mq. 124,00;\n- s",
+    "context": "o rilevato dall’atto di compravendita ai rogiti del notaio Tullio Alberto Lops di Pistoia del \n21/09/2023 rep; 3576 racc. 3072, trascritto a Pescia il 25/09/2023 al n. 3528 del Registro Particolare: \nEuro 170.000,00;\n- sconto applicato: 0,00%\n- superficie convenzionale mq. 124,00;\n- stato di conservazione: normale\nFirmato Da: BISOGNI FELICE Emesso Da: ARUBAPEC S.P.A. NG CA 3 Serial#: 44cad88de49cb7a5d7e960d8990c",
+    "low_quality_page": false,
+    "source": "pages_raw",
+    "occurrences": [
+      {
+        "page": 58,
+        "quote": "ascritto a Pescia il 25/09/2023 al n. 3528 del Registro Particolare: \nEuro 170.000,00;\n- sconto applicato: 0,00%\n- superficie convenzionale mq. 124,00;\n- s"
+      }
+    ],
+    "id": "m_000056"
+  },
+  {
+    "page": 59,
+    "amount_raw": "Euro 122.000,00",
+    "amount_eur": 122000.0,
+    "quote": "rascritto a Pescia il 31/05/2024 al n. 2090 di \nRegistro Particolare: Euro 122.000,00;\n- sconto applicato: 0,00%\n- superficie convenzionale mq. 86;\n- stato",
+    "context": "to pubblico di compravendita ai rogiti del notaio Rosario Caliulo di Montelupo \nFiorentino, del 08/05/2024 rep. 8266 racc. 7471, trascritto a Pescia il 31/05/2024 al n. 2090 di \nRegistro Particolare: Euro 122.000,00;\n- sconto applicato: 0,00%\n- superficie convenzionale mq. 86;\n- stato di conservazione: normale\n* comparabile n. 3:\nfabbricato \"terra-tetto\" facente parte del complesso edilizio in Comune di Pieve a",
+    "low_quality_page": false,
+    "source": "pages_raw",
+    "occurrences": [
+      {
+        "page": 59,
+        "quote": "rascritto a Pescia il 31/05/2024 al n. 2090 di \nRegistro Particolare: Euro 122.000,00;\n- sconto applicato: 0,00%\n- superficie convenzionale mq. 86;\n- stato"
+      }
+    ],
+    "id": "m_000057"
+  },
+  {
+    "page": 59,
+    "amount_raw": "Euro 200.000,00",
+    "amount_eur": 200000.0,
+    "quote": "rascritto a Pescia il 19/01/2024 al n. 277 del Registro \nParticolare: Euro 200.000,00;\n- sconto applicato: 0,00%\n- superficie convenzionale mq. 170;\n- stat",
+    "context": "ll’atto pubblico di compravendita ai rogiti del notaio Alberto Carapelle di Buggiano \nin data 11/01/2024 rep. 31116 racc. 18664, trascritto a Pescia il 19/01/2024 al n. 277 del Registro \nParticolare: Euro 200.000,00;\n- sconto applicato: 0,00%\n- superficie convenzionale mq. 170;\n- stato di conservazione: normale\nSulla base del metodo di valutazione adottato lo scrivente ha così determinato il valore commerciale d",
+    "low_quality_page": false,
+    "source": "pages_raw",
+    "occurrences": [
+      {
+        "page": 59,
+        "quote": "rascritto a Pescia il 19/01/2024 al n. 277 del Registro \nParticolare: Euro 200.000,00;\n- sconto applicato: 0,00%\n- superficie convenzionale mq. 170;\n- stat"
+      }
+    ],
+    "id": "m_000058"
+  },
+  {
+    "page": 59,
+    "amount_raw": "Euro 280.336,00",
+    "amount_eur": 280336.0,
+    "quote": "ncompletezza dei lavori in cui attualmente si trova, risulta pari ad  Euro 280.336,00.\nLo scrivente unisce:\n- con il n. 58 l'atto di compravendita e la vis",
+    "context": "00 \ndebba essere applicata una percentuale di deprezzamento pari al 55% per cui il valore attuale del bene, \ncosì nello stato di incompletezza dei lavori in cui attualmente si trova, risulta pari ad  Euro 280.336,00.\nLo scrivente unisce:\n- con il n. 58 l'atto di compravendita e la visura catastale relativa al comparabile n. 1;\n- con il n. 59 l'atto di compravendita e la visura catastale relativa al comparabile n",
+    "low_quality_page": false,
+    "source": "pages_raw",
+    "occurrences": [
+      {
+        "page": 59,
+        "quote": "ncompletezza dei lavori in cui attualmente si trova, risulta pari ad  Euro 280.336,00.\nLo scrivente unisce:\n- con il n. 58 l'atto di compravendita e la vis"
+      }
+    ],
+    "id": "m_000059"
+  },
+  {
+    "page": 59,
+    "amount_raw": "Euro 622.970,00",
+    "amount_eur": 622970.0,
+    "quote": "fabbricato considerato \"a lavori ultimati\" come sopra determinato in Euro 622.970,00 \ndebba essere applicata una percentuale di deprezzamento pari al 55%",
+    "context": "primo \nsono destinati progettualmente, rispettivamente a laboratorio artigianale e mostra, lo scrivente ritiene \nche al valore del fabbricato considerato \"a lavori ultimati\" come sopra determinato in Euro 622.970,00 \ndebba essere applicata una percentuale di deprezzamento pari al 55% per cui il valore attuale del bene, \ncosì nello stato di incompletezza dei lavori in cui attualmente si trova, risulta pari ad  Eu",
+    "low_quality_page": false,
+    "source": "pages_raw",
+    "occurrences": [
+      {
+        "page": 59,
+        "quote": "fabbricato considerato \"a lavori ultimati\" come sopra determinato in Euro 622.970,00 \ndebba essere applicata una percentuale di deprezzamento pari al 55%"
+      }
+    ],
+    "id": "m_000060"
+  },
+  {
+    "page": 59,
+    "amount_raw": "Euro 622.970,00",
+    "amount_eur": 622970.0,
+    "quote": "in condizioni di libero mercato ed a lavori ultimati, in \ncomplessivi Euro 622.970,00.\nTenuto conto che il fabbricato promiscuo all'attualità risulta reali",
+    "context": "i valutazione adottato lo scrivente ha così determinato il valore commerciale del \nfabbricato promiscuo costituente il lotto n. 3 in condizioni di libero mercato ed a lavori ultimati, in \ncomplessivi Euro 622.970,00.\nTenuto conto che il fabbricato promiscuo all'attualità risulta realizzato \"al grezzo\" e perciò \nlimitatamente alle strutture portanti in cemento armato, ai tamponamenti esterni dei piani primo, \nsec",
+    "low_quality_page": false,
+    "source": "pages_raw",
+    "occurrences": [
+      {
+        "page": 59,
+        "quote": "in condizioni di libero mercato ed a lavori ultimati, in \ncomplessivi Euro 622.970,00.\nTenuto conto che il fabbricato promiscuo all'attualità risulta reali"
+      }
+    ],
+    "id": "m_000061"
+  },
+  {
+    "page": 60,
+    "amount_raw": "€ 224.268,00",
+    "amount_eur": 224268.0,
+    "quote": "logia deprezzamento Valore Tipo\nAltro 20,00 %\nValore finale di stima: € 224.268,00\nLo scrivente precisa che il deprezzamento del 20% rispetto al valore",
+    "context": "85 mq 680,67 €/mq € 280.336,00 100,00% € 280.336,00\nValore di stima: € 280.336,00\nValore di stima: € 280.336,00\nDeprezzamenti\nTipologia deprezzamento Valore Tipo\nAltro 20,00 %\nValore finale di stima: € 224.268,00\nLo scrivente precisa che il deprezzamento del 20% rispetto al valore in condizioni di libero mercato è da \nattribuire, tra l'altro:\n- ai tempi di vendita giudiziaria del bene generalmente non brevi c",
+    "low_quality_page": false,
+    "source": "pages_raw",
+    "occurrences": [
+      {
+        "page": 60,
+        "quote": "logia deprezzamento Valore Tipo\nAltro 20,00 %\nValore finale di stima: € 224.268,00\nLo scrivente precisa che il deprezzamento del 20% rispetto al valore"
+      }
+    ],
+    "id": "m_000062"
+  },
+  {
+    "page": 60,
+    "amount_raw": "€ 280.336,00",
+    "amount_eur": 280336.0,
+    "quote": ",85 mq 680,67 €/mq € 280.336,00 100,00% € 280.336,00\nValore di stima: € 280.336,00\nValore di stima: € 280.336,00\nDeprezzamenti\nTipologia deprezzamento V",
+    "context": "a in\nvenditaTotale\nBene N° 3 - Porzione \ndi fabbricato in \ncostruzione\nPieve a Nievole (PT) - \nvia Colonna senza \nnumero civico411,85 mq 680,67 €/mq € 280.336,00 100,00% € 280.336,00\nValore di stima: € 280.336,00\nValore di stima: € 280.336,00\nDeprezzamenti\nTipologia deprezzamento Valore Tipo\nAltro 20,00 %\nValore finale di stima: € 224.268,00\nLo scrivente precisa che il deprezzamento del 20% rispetto al valore",
+    "low_quality_page": false,
+    "source": "pages_raw",
+    "occurrences": [
+      {
+        "page": 60,
+        "quote": ",85 mq 680,67 €/mq € 280.336,00 100,00% € 280.336,00\nValore di stima: € 280.336,00\nValore di stima: € 280.336,00\nDeprezzamenti\nTipologia deprezzamento V"
+      }
+    ],
+    "id": "m_000063"
+  },
+  {
+    "page": 60,
+    "amount_raw": "€ 280.336,00",
+    "amount_eur": 280336.0,
+    "quote": "0 100,00% € 280.336,00\nValore di stima: € 280.336,00\nValore di stima: € 280.336,00\nDeprezzamenti\nTipologia deprezzamento Valore Tipo\nAltro 20,00 %\nValor",
+    "context": "Porzione \ndi fabbricato in \ncostruzione\nPieve a Nievole (PT) - \nvia Colonna senza \nnumero civico411,85 mq 680,67 €/mq € 280.336,00 100,00% € 280.336,00\nValore di stima: € 280.336,00\nValore di stima: € 280.336,00\nDeprezzamenti\nTipologia deprezzamento Valore Tipo\nAltro 20,00 %\nValore finale di stima: € 224.268,00\nLo scrivente precisa che il deprezzamento del 20% rispetto al valore in condizioni di libero merca",
+    "low_quality_page": false,
+    "source": "pages_raw",
+    "occurrences": [
+      {
+        "page": 60,
+        "quote": "0 100,00% € 280.336,00\nValore di stima: € 280.336,00\nValore di stima: € 280.336,00\nDeprezzamenti\nTipologia deprezzamento Valore Tipo\nAltro 20,00 %\nValor"
+      }
+    ],
+    "id": "m_000064"
+  },
+  {
+    "page": 60,
+    "amount_raw": "€ 280.336,00 100,00",
+    "amount_eur": 280336.0,
+    "quote": "Nievole (PT) - \nvia Colonna senza \nnumero civico411,85 mq 680,67 €/mq € 280.336,00 100,00% € 280.336,00\nValore di stima: € 280.336,00\nValore di stima: € 280.33",
+    "context": "convenzionaleValore unitario Valore\ncomplessivoQuota in\nvenditaTotale\nBene N° 3 - Porzione \ndi fabbricato in \ncostruzione\nPieve a Nievole (PT) - \nvia Colonna senza \nnumero civico411,85 mq 680,67 €/mq € 280.336,00 100,00% € 280.336,00\nValore di stima: € 280.336,00\nValore di stima: € 280.336,00\nDeprezzamenti\nTipologia deprezzamento Valore Tipo\nAltro 20,00 %\nValore finale di stima: € 224.268,00\nLo scrivente precisa che",
+    "low_quality_page": false,
+    "source": "pages_raw",
+    "occurrences": [
+      {
+        "page": 60,
+        "quote": "Nievole (PT) - \nvia Colonna senza \nnumero civico411,85 mq 680,67 €/mq € 280.336,00 100,00% € 280.336,00\nValore di stima: € 280.336,00\nValore di stima: € 280.33"
+      }
+    ],
+    "id": "m_000065"
+  },
+  {
+    "page": 60,
+    "amount_raw": "€/mq € 280.336,00 100,00",
+    "amount_eur": 280336.0,
+    "quote": "ve a Nievole (PT) - \nvia Colonna senza \nnumero civico411,85 mq 680,67 €/mq € 280.336,00 100,00% € 280.336,00\nValore di stima: € 280.336,00\nValore di stima: € 280.33",
+    "context": "icie\nconvenzionaleValore unitario Valore\ncomplessivoQuota in\nvenditaTotale\nBene N° 3 - Porzione \ndi fabbricato in \ncostruzione\nPieve a Nievole (PT) - \nvia Colonna senza \nnumero civico411,85 mq 680,67 €/mq € 280.336,00 100,00% € 280.336,00\nValore di stima: € 280.336,00\nValore di stima: € 280.336,00\nDeprezzamenti\nTipologia deprezzamento Valore Tipo\nAltro 20,00 %\nValore finale di stima: € 224.268,00\nLo scrivente precisa che",
+    "low_quality_page": false,
+    "source": "pages_raw",
+    "occurrences": [
+      {
+        "page": 60,
+        "quote": "ve a Nievole (PT) - \nvia Colonna senza \nnumero civico411,85 mq 680,67 €/mq € 280.336,00 100,00% € 280.336,00\nValore di stima: € 280.336,00\nValore di stima: € 280.33"
+      }
+    ],
+    "id": "m_000066"
+  },
+  {
+    "page": 67,
+    "amount_raw": "€ 64.198,00",
+    "amount_eur": 64198.0,
+    "quote": "tico del Comune di \nMontecatini Terme e delle NTA\nPrezzo base d'asta: € 64.198,00\nLOTTO 2\n•Bene N° 2 - Magazzino ubicato a Pieve a Nievole (PT) - via C",
+    "context": "67 di 81 ammissibile. Con il n. 19 unisce un estratto della cartografia del Regolamento Urbanistico del Comune di \nMontecatini Terme e delle NTA\nPrezzo base d'asta: € 64.198,00\nLOTTO 2\n•Bene N° 2 - Magazzino ubicato a Pieve a Nievole (PT) - via Colonna senza numero civico\nDiritti di piena proprietà per la quota di 1/1 (un primo) sopra porzione del fabbricato condominiale in",
+    "low_quality_page": false,
+    "source": "pages_raw",
+    "occurrences": [
+      {
+        "page": 67,
+        "quote": "tico del Comune di \nMontecatini Terme e delle NTA\nPrezzo base d'asta: € 64.198,00\nLOTTO 2\n•Bene N° 2 - Magazzino ubicato a Pieve a Nievole (PT) - via C"
+      }
+    ],
+    "id": "m_000067"
+  },
+  {
+    "page": 68,
+    "amount_raw": "€ 84.000,00",
+    "amount_eur": 84000.0,
+    "quote": "estratto della cartografia del RUC e delle NTA  \nPrezzo base d'asta: € 84.000,00\nLOTTO 3\n•Bene N° 3 - Porzione di fabbricato in costruzione ubicato a",
+    "context": "aso di progetti unitari coordinati tra lotti limitrofi sono ammessi incrementi fino all’ Uf = 0,80 mq/mq.  \nCon il n. 32 unisce un estratto della cartografia del RUC e delle NTA  \nPrezzo base d'asta: € 84.000,00\nLOTTO 3\n•Bene N° 3 - Porzione di fabbricato in costruzione ubicato a Pieve a Nievole (PT) - via Colonna senza \nnumero civico\nDiritti di piena proprietà per la quota di 1/1 (un primo) sopra porzione d",
+    "low_quality_page": false,
+    "source": "pages_raw",
+    "occurrences": [
+      {
+        "page": 68,
+        "quote": "estratto della cartografia del RUC e delle NTA  \nPrezzo base d'asta: € 84.000,00\nLOTTO 3\n•Bene N° 3 - Porzione di fabbricato in costruzione ubicato a"
+      }
+    ],
+    "id": "m_000068"
+  },
+  {
+    "page": 69,
+    "amount_raw": "€ 224.268,00",
+    "amount_eur": 224268.0,
+    "quote": "un estratto della cartografia del RUC e delle NTA\nPrezzo base d'asta: € 224.268,00\nFirmato Da: BISOGNI FELICE Emesso Da: ARUBAPEC S.P.A. NG CA 3 Serial#",
+    "context": "caso di progetti unitari coordinati tra lotti limitrofi sono ammessi incrementi fino all’ Uf = 0,80 mq/mq.  \nCon il n. 32 unisce un estratto della cartografia del RUC e delle NTA\nPrezzo base d'asta: € 224.268,00\nFirmato Da: BISOGNI FELICE Emesso Da: ARUBAPEC S.P.A. NG CA 3 Serial#: 44cad88de49cb7a5d7e960d8990c605f\nPubblicazione ufficiale ad uso esclusivo personale - è vietata ogni \n\nripubblicazione o riprodu",
+    "low_quality_page": false,
+    "source": "pages_raw",
+    "occurrences": [
+      {
+        "page": 69,
+        "quote": "un estratto della cartografia del RUC e delle NTA\nPrezzo base d'asta: € 224.268,00\nFirmato Da: BISOGNI FELICE Emesso Da: ARUBAPEC S.P.A. NG CA 3 Serial#"
+      }
+    ],
+    "id": "m_000069"
+  },
+  {
+    "page": 70,
+    "amount_raw": "€ 64.198,00",
+    "amount_eur": 64198.0,
+    "quote": "ECUZIONE IMMOBILIARE 69/2024 DEL R.G.E.\nLOTTO 1 - PREZZO BASE D'ASTA: € 64.198,00\nBene N° 1 - Fabbricato civile\nUbicazione: Montecatini-Terme (PT) - vi",
+    "context": "70 di 81 SCHEMA RIASSUNTIVO\nESECUZIONE IMMOBILIARE 69/2024 DEL R.G.E.\nLOTTO 1 - PREZZO BASE D'ASTA: € 64.198,00\nBene N° 1 - Fabbricato civile\nUbicazione: Montecatini-Terme (PT) - via Giuseppe Garibaldi n.c. 23\nDiritto reale: Proprietà Quota 1/1\nTipologia immobile: Fabbricato civile\nIdentificato al catasto Fabb",
+    "low_quality_page": false,
+    "source": "pages_raw",
+    "occurrences": [
+      {
+        "page": 70,
+        "quote": "ECUZIONE IMMOBILIARE 69/2024 DEL R.G.E.\nLOTTO 1 - PREZZO BASE D'ASTA: € 64.198,00\nBene N° 1 - Fabbricato civile\nUbicazione: Montecatini-Terme (PT) - vi"
+      }
+    ],
+    "id": "m_000070"
+  },
+  {
+    "page": 70,
+    "amount_raw": "€ 84.000,00",
+    "amount_eur": 84000.0,
+    "quote": "50 c.c.:SI\nStato di occupazione: Libero\nLOTTO 2 - PREZZO BASE D'ASTA: € 84.000,00\nBene N° 2 - Magazzino\nUbicazione: Pieve a Nievole (PT) - via Colonna",
+    "context": "tà extraurbana e con il casello dell'autostrada \"A11/Firenze-Mare\". \nVendita soggetta a IVA: NO\nContinuità trascrizioni\nex art. 2650 c.c.:SI\nStato di occupazione: Libero\nLOTTO 2 - PREZZO BASE D'ASTA: € 84.000,00\nBene N° 2 - Magazzino\nUbicazione: Pieve a Nievole (PT) - via Colonna senza numero civico\nDiritto reale: Proprietà Quota 1/1\nFirmato Da: BISOGNI FELICE Emesso Da: ARUBAPEC S.P.A. NG CA 3 Serial#: 44ca",
+    "low_quality_page": false,
+    "source": "pages_raw",
+    "occurrences": [
+      {
+        "page": 70,
+        "quote": "50 c.c.:SI\nStato di occupazione: Libero\nLOTTO 2 - PREZZO BASE D'ASTA: € 84.000,00\nBene N° 2 - Magazzino\nUbicazione: Pieve a Nievole (PT) - via Colonna"
+      }
+    ],
+    "id": "m_000071"
+  },
+  {
+    "page": 71,
+    "amount_raw": "€ 224.268,00",
+    "amount_eur": 224268.0,
+    "quote": "50 c.c.:SI\nStato di occupazione: Libero\nLOTTO 3 - PREZZO BASE D'ASTA: € 224.268,00\nBene N° 3 - Porzione di fabbricato in costruzione\nUbicazione: Pieve a",
+    "context": "tà extraurbana e con il casello dell'autostrada \"A11 Firenze-\nMare\".\nVendita soggetta a IVA: NO\nContinuità trascrizioni\nex art. 2650 c.c.:SI\nStato di occupazione: Libero\nLOTTO 3 - PREZZO BASE D'ASTA: € 224.268,00\nBene N° 3 - Porzione di fabbricato in costruzione\nUbicazione: Pieve a Nievole (PT) - via Colonna senza numero civico\nDiritto reale: Proprietà Quota 1/1\nFirmato Da: BISOGNI FELICE Emesso Da: ARUBAPEC",
+    "low_quality_page": false,
+    "source": "pages_raw",
+    "occurrences": [
+      {
+        "page": 71,
+        "quote": "50 c.c.:SI\nStato di occupazione: Libero\nLOTTO 3 - PREZZO BASE D'ASTA: € 224.268,00\nBene N° 3 - Porzione di fabbricato in costruzione\nUbicazione: Pieve a"
+      }
+    ],
+    "id": "m_000072"
+  },
+  {
+    "page": 76,
+    "amount_raw": "€ 492.000,00",
+    "amount_eur": 492000.0,
+    "quote": "cia il 14/04/2015\nReg. gen. 1316 - Reg. part. 254\nQuota: 1/1\nImporto: € 492.000,00\nA favore di **** Omissis ****\nFormalità a carico della procedura\nFirm",
+    "context": "Iscrizione Reg.Part. 247 del 13/04/2015\n•Ipoteca volontaria derivante da Concessione a garanzia di mutuo fondiario\nIscritto a Pescia il 14/04/2015\nReg. gen. 1316 - Reg. part. 254\nQuota: 1/1\nImporto: € 492.000,00\nA favore di **** Omissis ****\nFormalità a carico della procedura\nFirmato Da: BISOGNI FELICE Emesso Da: ARUBAPEC S.P.A. NG CA 3 Serial#: 44cad88de49cb7a5d7e960d8990c605f\nPubblicazione ufficiale ad uso",
+    "low_quality_page": false,
+    "source": "pages_raw",
+    "occurrences": [
+      {
+        "page": 76,
+        "quote": "cia il 14/04/2015\nReg. gen. 1316 - Reg. part. 254\nQuota: 1/1\nImporto: € 492.000,00\nA favore di **** Omissis ****\nFormalità a carico della procedura\nFirm"
+      }
+    ],
+    "id": "m_000073"
+  },
+  {
+    "page": 77,
+    "amount_raw": "€ 94.847,36",
+    "amount_eur": 94847.36,
+    "quote": "cia il 13/06/2023\nReg. gen. 3306 - Reg. part. 426\nQuota: 1/1\nImporto: € 94.847,36\nA favore di **** Omissis ****\nContro **** Omissis ****\nFirmato Da: BI",
+    "context": "lo e avviso di accertamento \nesecutivo emessa dall'Agenzia delle Entrate -riscossione del 12/06/2023 rep. 1692/8923\nIscritto a Pescia il 13/06/2023\nReg. gen. 3306 - Reg. part. 426\nQuota: 1/1\nImporto: € 94.847,36\nA favore di **** Omissis ****\nContro **** Omissis ****\nFirmato Da: BISOGNI FELICE Emesso Da: ARUBAPEC S.P.A. NG CA 3 Serial#: 44cad88de49cb7a5d7e960d8990c605f\nPubblicazione ufficiale ad uso esclusivo",
+    "low_quality_page": false,
+    "source": "pages_raw",
+    "occurrences": [
+      {
+        "page": 77,
+        "quote": "cia il 13/06/2023\nReg. gen. 3306 - Reg. part. 426\nQuota: 1/1\nImporto: € 94.847,36\nA favore di **** Omissis ****\nContro **** Omissis ****\nFirmato Da: BI"
+      }
+    ],
+    "id": "m_000074"
+  },
+  {
+    "page": 77,
+    "amount_raw": "€ 246.000,00",
+    "amount_eur": 246000.0,
+    "quote": "77 di 81 Capitale: € 246.000,00\nInteressi: € 246.000,00\nPercentuale interessi: 4,10 %\nRogante: Notaio",
+    "context": "77 di 81 Capitale: € 246.000,00\nInteressi: € 246.000,00\nPercentuale interessi: 4,10 %\nRogante: Notaio Monica Paggi di Pistoia\nData: 09/04/2015\nN° repertorio: 1975\nN° raccolta: 1338\nNote: Con il n.10 unisce l'atto pubblico di mutuo",
+    "low_quality_page": false,
+    "source": "pages_raw",
+    "occurrences": [
+      {
+        "page": 77,
+        "quote": "77 di 81 Capitale: € 246.000,00\nInteressi: € 246.000,00\nPercentuale interessi: 4,10 %\nRogante: Notaio"
+      }
+    ],
+    "id": "m_000075"
+  },
+  {
+    "page": 77,
+    "amount_raw": "€ 246.000,00",
+    "amount_eur": 246000.0,
+    "quote": "77 di 81 Capitale: € 246.000,00\nInteressi: € 246.000,00\nPercentuale interessi: 4,10 %\nRogante: Notaio Monica Paggi di Pistoia",
+    "context": "77 di 81 Capitale: € 246.000,00\nInteressi: € 246.000,00\nPercentuale interessi: 4,10 %\nRogante: Notaio Monica Paggi di Pistoia\nData: 09/04/2015\nN° repertorio: 1975\nN° raccolta: 1338\nNote: Con il n.10 unisce l'atto pubblico di mutuo fondiario e la nota di I",
+    "low_quality_page": false,
+    "source": "pages_raw",
+    "occurrences": [
+      {
+        "page": 77,
+        "quote": "77 di 81 Capitale: € 246.000,00\nInteressi: € 246.000,00\nPercentuale interessi: 4,10 %\nRogante: Notaio Monica Paggi di Pistoia"
+      }
+    ],
+    "id": "m_000076"
+  },
+  {
+    "page": 78,
+    "amount_raw": "€ 47.423,68",
+    "amount_eur": 47423.68,
+    "quote": "78 di 81 Formalità a carico della procedura\nCapitale: € 47.423,68\nNote: Con il n.14 unisce la nota di Iscrizione Reg. Part. 426 del 13/",
+    "context": "78 di 81 Formalità a carico della procedura\nCapitale: € 47.423,68\nNote: Con il n.14 unisce la nota di Iscrizione Reg. Part. 426 del 13/06/2023\n•Ipoteca conc.Amministrativa/Riscossione  derivante da 0420 ruolo e avviso di accertamento Ente \nemesso dall'Agenzia delle",
+    "low_quality_page": false,
+    "source": "pages_raw",
+    "occurrences": [
+      {
+        "page": 78,
+        "quote": "78 di 81 Formalità a carico della procedura\nCapitale: € 47.423,68\nNote: Con il n.14 unisce la nota di Iscrizione Reg. Part. 426 del 13/"
+      }
+    ],
+    "id": "m_000077"
+  },
+  {
+    "page": 78,
+    "amount_raw": "€ 425.000,00",
+    "amount_eur": 425000.0,
+    "quote": "****\nFormalità a carico della procedura\nCapitale: € 425.000,00\nSpese: € 425.000,00\nFirmato Da: BISOGNI FELICE Emesso Da: ARUBAPEC S.P.A. NG CA 3 Serial#",
+    "context": "il 04/12/2009\nReg. gen. 5984 - Reg. part. 1541\nQuota: 1/1\nImporto: € 850.000,00\nA favore di **** Omissis ****\nContro **** Omissis ****\nFormalità a carico della procedura\nCapitale: € 425.000,00\nSpese: € 425.000,00\nFirmato Da: BISOGNI FELICE Emesso Da: ARUBAPEC S.P.A. NG CA 3 Serial#: 44cad88de49cb7a5d7e960d8990c605f\nPubblicazione ufficiale ad uso esclusivo personale - è vietata ogni \n\nripubblicazione o riprodu",
+    "low_quality_page": false,
+    "source": "pages_raw",
+    "occurrences": [
+      {
+        "page": 78,
+        "quote": "****\nFormalità a carico della procedura\nCapitale: € 425.000,00\nSpese: € 425.000,00\nFirmato Da: BISOGNI FELICE Emesso Da: ARUBAPEC S.P.A. NG CA 3 Serial#"
+      }
+    ],
+    "id": "m_000078"
+  },
+  {
+    "page": 78,
+    "amount_raw": "€ 425.000,00",
+    "amount_eur": 425000.0,
+    "quote": "Contro **** Omissis ****\nFormalità a carico della procedura\nCapitale: € 425.000,00\nSpese: € 425.000,00\nFirmato Da: BISOGNI FELICE Emesso Da: ARUBAPEC S.",
+    "context": "o\nIscritto a Pescia il 04/12/2009\nReg. gen. 5984 - Reg. part. 1541\nQuota: 1/1\nImporto: € 850.000,00\nA favore di **** Omissis ****\nContro **** Omissis ****\nFormalità a carico della procedura\nCapitale: € 425.000,00\nSpese: € 425.000,00\nFirmato Da: BISOGNI FELICE Emesso Da: ARUBAPEC S.P.A. NG CA 3 Serial#: 44cad88de49cb7a5d7e960d8990c605f\nPubblicazione ufficiale ad uso esclusivo personale - è vietata ogni \n\nripub",
+    "low_quality_page": false,
+    "source": "pages_raw",
+    "occurrences": [
+      {
+        "page": 78,
+        "quote": "Contro **** Omissis ****\nFormalità a carico della procedura\nCapitale: € 425.000,00\nSpese: € 425.000,00\nFirmato Da: BISOGNI FELICE Emesso Da: ARUBAPEC S."
+      }
+    ],
+    "id": "m_000079"
+  },
+  {
+    "page": 80,
+    "amount_raw": "€ 168.403,22",
+    "amount_eur": 168403.22,
+    "quote": "80 di 81 Reg. gen. 2368 - Reg. part. 370\nQuota: 1/1\nImporto: € 168.403,22\nA favore di **** Omissis ****\nContro **** Omissis ****\nFormalità a ca",
+    "context": "80 di 81 Reg. gen. 2368 - Reg. part. 370\nQuota: 1/1\nImporto: € 168.403,22\nA favore di **** Omissis ****\nContro **** Omissis ****\nFormalità a carico della procedura\nCapitale: € 84.201,61\nNote: Con il n.12 unisce la nota di Iscrizione Reg. Part. 370 del 24/05/2017 e precisa",
+    "low_quality_page": false,
+    "source": "pages_raw",
+    "occurrences": [
+      {
+        "page": 80,
+        "quote": "80 di 81 Reg. gen. 2368 - Reg. part. 370\nQuota: 1/1\nImporto: € 168.403,22\nA favore di **** Omissis ****\nContro **** Omissis ****\nFormalità a ca"
+      }
+    ],
+    "id": "m_000080"
+  }
+]

@@ -1,0 +1,1050 @@
+[
+  {
+    "page": 4,
+    "amount_raw": "€ 391.849,00",
+    "amount_eur": 391849.0,
+    "quote": ".................................45\nLotto Unico - Prezzo base d'asta: € 391.849,00......................................................................",
+    "context": ".......42\nSchema riassuntivo Esecuzione Immobiliare 62/2024 del R.G.E..............................................................................................45\nLotto Unico - Prezzo base d'asta: € 391.849,00.....................................................................................................................45\nFormalità da cancellare con il decreto di trasferimento ........................",
+    "low_quality_page": true,
+    "source": "pages_raw",
+    "occurrences": [
+      {
+        "page": 4,
+        "quote": ".................................45\nLotto Unico - Prezzo base d'asta: € 391.849,00......................................................................"
+      }
+    ],
+    "id": "m_000001"
+  },
+  {
+    "page": 13,
+    "amount_raw": "€ 623,62",
+    "amount_eur": 623.62,
+    "quote": "sistenza 3,5 vani, Superficie \nCatastale 137 mq, Rendita Catastale di € 623,62.  \nAllegato n° 7  \n \n \nDurante il sopralluogo in data 14/06/2024 sono",
+    "context": "legato n° 6  \n \n \nAccatastamento attuale:  \nUfficio e rusti co: Foglio 20, Particella 433, Sub. 301, Categoria A/10, Classe 2, Consistenza 3,5 vani, Superficie \nCatastale 137 mq, Rendita Catastale di € 623,62.  \nAllegato n° 7  \n \n \nDurante il sopralluogo in data 14/06/2024 sono state riscontrate incongruenze nello stato di fatto attuale \nrispetto alla planimetria catastale esistente, riguardanti:  \n \n-esa",
+    "low_quality_page": false,
+    "source": "pages_raw",
+    "occurrences": [
+      {
+        "page": 13,
+        "quote": "sistenza 3,5 vani, Superficie \nCatastale 137 mq, Rendita Catastale di € 623,62.  \nAllegato n° 7  \n \n \nDurante il sopralluogo in data 14/06/2024 sono"
+      }
+    ],
+    "id": "m_000002"
+  },
+  {
+    "page": 13,
+    "amount_raw": "€ 623,62",
+    "amount_eur": 623.62,
+    "quote": "stenza 3,5 vani, Superficie \nCatastale 94,00 mq, Rendita Catastale di € 623,62  \nAllegato n° 6  \n \n \nAccatastamento attuale:  \nUfficio e rusti co: F",
+    "context": "t astale.  \n \nAccatastamento precedente:  \nUfficio e rustico: Foglio 20, Particella 433, Sub. 301, Categoria A/10, Classe 2, Consistenza 3,5 vani, Superficie \nCatastale 94,00 mq, Rendita Catastale di € 623,62  \nAllegato n° 6  \n \n \nAccatastamento attuale:  \nUfficio e rusti co: Foglio 20, Particella 433, Sub. 301, Categoria A/10, Classe 2, Consistenza 3,5 vani, Superficie \nCatastale 137 mq, Rendita Catastal",
+    "low_quality_page": false,
+    "source": "pages_raw",
+    "occurrences": [
+      {
+        "page": 13,
+        "quote": "stenza 3,5 vani, Superficie \nCatastale 94,00 mq, Rendita Catastale di € 623,62  \nAllegato n° 6  \n \n \nAccatastamento attuale:  \nUfficio e rusti co: F"
+      }
+    ],
+    "id": "m_000003"
+  },
+  {
+    "page": 14,
+    "amount_raw": "€ 85,53",
+    "amount_eur": 85.53,
+    "quote": "Consistenza 6 9 mq, Superficie \nCatastale 69 mq, Rendita Catastale di € 85,53.  \nAllegato n° 6  \n \nAccatastamento attuale:  \nAutorimessa: Foglio 20",
+    "context": "ispondenza catastale.  \n \nAccatastamento precedente:  \nAutorimessa: Foglio 20, Particella 433, Sub. 302, Categoria C/6, Classe 3, Consistenza 6 9 mq, Superficie \nCatastale 69 mq, Rendita Catastale di € 85,53.  \nAllegato n° 6  \n \nAccatastamento attuale:  \nAutorimessa: Foglio 20, Particella 433, Sub. 302, Categoria C/6, Classe 3, Consistenza 69 mq, Superficie \nCatastale 78 mq, Rendita Catastale di € 85,53.",
+    "low_quality_page": false,
+    "source": "pages_raw",
+    "occurrences": [
+      {
+        "page": 14,
+        "quote": "Consistenza 6 9 mq, Superficie \nCatastale 69 mq, Rendita Catastale di € 85,53.  \nAllegato n° 6  \n \nAccatastamento attuale:  \nAutorimessa: Foglio 20"
+      }
+    ],
+    "id": "m_000004"
+  },
+  {
+    "page": 14,
+    "amount_raw": "€ 85,53",
+    "amount_eur": 85.53,
+    "quote": "Consistenza 69 mq, Superficie \nCatastale 78 mq, Rendita Catastale di € 85,53.  \nAllegato n° 7  \n \nDurante il sopralluogo in data 14/06/2024 sono s",
+    "context": "€ 85,53.  \nAllegato n° 6  \n \nAccatastamento attuale:  \nAutorimessa: Foglio 20, Particella 433, Sub. 302, Categoria C/6, Classe 3, Consistenza 69 mq, Superficie \nCatastale 78 mq, Rendita Catastale di € 85,53.  \nAllegato n° 7  \n \nDurante il sopralluogo in data 14/06/2024 sono state riscontrate incongruenze nello stato di fatto attuale \nrispetto alla planimetria catastale esistente, riguardanti:  \n \n- esat",
+    "low_quality_page": false,
+    "source": "pages_raw",
+    "occurrences": [
+      {
+        "page": 14,
+        "quote": "Consistenza 69 mq, Superficie \nCatastale 78 mq, Rendita Catastale di € 85,53.  \nAllegato n° 7  \n \nDurante il sopralluogo in data 14/06/2024 sono s"
+      }
+    ],
+    "id": "m_000005"
+  },
+  {
+    "page": 15,
+    "amount_raw": "€ 43,90",
+    "amount_eur": 43.9,
+    "quote": "Consistenza 50 mq, Superficie Catastale \n50 mq, Rendita Catastale di € 43,90.  \nAllegato n° 6  \n \nAccatastamento attuale:  \nAutorimessa: Foglio 20",
+    "context": "orrispondenza catastale.  \n \nAccatastamento precedente:  \nAutorimessa: Foglio 20, Particella 600, Sub. 1, Categoria C/6, Classe 1, Consistenza 50 mq, Superficie Catastale \n50 mq, Rendita Catastale di € 43,90.  \nAllegato n° 6  \n \nAccatastamento attuale:  \nAutorimessa: Foglio 20, Particella 600 , Sub. 4, Categoria C/6, Classe 1, Consistenza 50 mq, Superficie Catastale \n62 mq, Rendita Catastale di € 43,90.",
+    "low_quality_page": false,
+    "source": "pages_raw",
+    "occurrences": [
+      {
+        "page": 15,
+        "quote": "Consistenza 50 mq, Superficie Catastale \n50 mq, Rendita Catastale di € 43,90.  \nAllegato n° 6  \n \nAccatastamento attuale:  \nAutorimessa: Foglio 20"
+      }
+    ],
+    "id": "m_000006"
+  },
+  {
+    "page": 15,
+    "amount_raw": "€ 43,90",
+    "amount_eur": 43.9,
+    "quote": "Consistenza 50 mq, Superficie Catastale \n62 mq, Rendita Catastale di € 43,90.  \nAllegato n° 7  \n \n \nDurante il sopralluogo in data 14/06/2024 sono",
+    "context": "i € 43,90.  \nAllegato n° 6  \n \nAccatastamento attuale:  \nAutorimessa: Foglio 20, Particella 600 , Sub. 4, Categoria C/6, Classe 1, Consistenza 50 mq, Superficie Catastale \n62 mq, Rendita Catastale di € 43,90.  \nAllegato n° 7  \n \n \nDurante il sopralluogo in data 14/06/2024 sono state riscontrate incongruenze nello stato di fatto attuale \nrispetto alla planim etria catastale esistente, riguardanti:  \n \n- e",
+    "low_quality_page": false,
+    "source": "pages_raw",
+    "occurrences": [
+      {
+        "page": 15,
+        "quote": "Consistenza 50 mq, Superficie Catastale \n62 mq, Rendita Catastale di € 43,90.  \nAllegato n° 7  \n \n \nDurante il sopralluogo in data 14/06/2024 sono"
+      }
+    ],
+    "id": "m_000007"
+  },
+  {
+    "page": 15,
+    "amount_raw": "€ 418,33",
+    "amount_eur": 418.33,
+    "quote": "nsistenza 6 vani, Super ficie Catastale \n140 mq, Rendita Catastale di € 418,33.  \nAllegato n° 6  \n \nAccatastamento attuale:  \nAstalegale.net - E' vi",
+    "context": "rispondenza catastale.  \n \nAccatastamento precedente:  \nAbitazione: Foglio 20, Particella 600, Sub. 2, Categoria A/7, Classe 3, Consistenza 6 vani, Super ficie Catastale \n140 mq, Rendita Catastale di € 418,33.  \nAllegato n° 6  \n \nAccatastamento attuale:  \nAstalegale.net - E' vietata la stampa e la riproduzione dei documenti per fini di carattere commerciale. Pubblicazione eseguita giusta iscriz. elenco Mi",
+    "low_quality_page": false,
+    "source": "pages_raw",
+    "occurrences": [
+      {
+        "page": 15,
+        "quote": "nsistenza 6 vani, Super ficie Catastale \n140 mq, Rendita Catastale di € 418,33.  \nAllegato n° 6  \n \nAccatastamento attuale:  \nAstalegale.net - E' vi"
+      }
+    ],
+    "id": "m_000008"
+  },
+  {
+    "page": 16,
+    "amount_raw": "€ 453",
+    "amount_eur": 453.0,
+    "quote": "sistenza 6,5 vani, Superficie Catastale \n139 mq, Rendita Catastale di € 453.19.  \nAllega to n° 7  \n \n \nDurante il sopralluogo in data 14/06/2024",
+    "context": "16 di 50  \n Abitazione: Foglio 20, Particella 600, Sub. 3, Categoria A/7, Classe 3, Consistenza 6,5 vani, Superficie Catastale \n139 mq, Rendita Catastale di € 453.19.  \nAllega to n° 7  \n \n \nDurante il sopralluogo in data 14/06/2024 sono state riscontrate incongruenze nello stato di fatto attuale \nrispetto alla planimetria catastale esistente, riguardanti:",
+    "low_quality_page": false,
+    "source": "pages_raw",
+    "occurrences": [
+      {
+        "page": 16,
+        "quote": "sistenza 6,5 vani, Superficie Catastale \n139 mq, Rendita Catastale di € 453.19.  \nAllega to n° 7  \n \n \nDurante il sopralluogo in data 14/06/2024"
+      }
+    ],
+    "id": "m_000009"
+  },
+  {
+    "page": 27,
+    "amount_raw": "€ 70",
+    "amount_eur": 70.0,
+    "quote": "Mantova il 22/12/2014  \nReg. gen. 12068 - Reg. part. 1618  \nImporto: € 70.0 00,00  \nA favore di **** Omissis ****  \nContro **** Omissis ****, *",
+    "context": "€ 200.000,00  \nData: 15/04/2014  \nN° repertorio: 1731  \nN° raccolta: 2014  \n Ipoteca Giudiziale  derivante da Titolo  \nIscritto a Mantova il 22/12/2014  \nReg. gen. 12068 - Reg. part. 1618  \nImporto: € 70.0 00,00  \nA favore di **** Omissis ****  \nContro **** Omissis ****, **** Omissis ****  \nFormalità a carico della procedura  \nCapitale: € 57.593,05  \nData: 15/04/2014  \nN° repertorio: 1730  \nN° raccol",
+    "low_quality_page": false,
+    "source": "pages_raw",
+    "occurrences": [
+      {
+        "page": 27,
+        "quote": "Mantova il 22/12/2014  \nReg. gen. 12068 - Reg. part. 1618  \nImporto: € 70.0 00,00  \nA favore di **** Omissis ****  \nContro **** Omissis ****, *"
+      }
+    ],
+    "id": "m_000010"
+  },
+  {
+    "page": 27,
+    "amount_raw": "€ 57.593,05",
+    "amount_eur": 57593.05,
+    "quote": "*, **** Omissis ****  \nFormalità a carico della procedura  \nCapitale: € 57.593,05  \nData: 15/04/2014  \nN° repertorio: 1730  \nN° raccolta: 2014  \n Ipot",
+    "context": "l 22/12/2014  \nReg. gen. 12068 - Reg. part. 1618  \nImporto: € 70.0 00,00  \nA favore di **** Omissis ****  \nContro **** Omissis ****, **** Omissis ****  \nFormalità a carico della procedura  \nCapitale: € 57.593,05  \nData: 15/04/2014  \nN° repertorio: 1730  \nN° raccolta: 2014  \n Ipoteca della riscossione  derivante da Titolo  \nIscritto a Roma il  09/04/2018  \nReg. gen. 4406 - Reg. part. 604  \nImporto: € 183.406",
+    "low_quality_page": false,
+    "source": "pages_raw",
+    "occurrences": [
+      {
+        "page": 27,
+        "quote": "*, **** Omissis ****  \nFormalità a carico della procedura  \nCapitale: € 57.593,05  \nData: 15/04/2014  \nN° repertorio: 1730  \nN° raccolta: 2014  \n Ipot"
+      },
+      {
+        "page": 29,
+        "quote": "*, **** Omissis ****  \nFormalità a carico della procedura  \nCapitale: € 57.593,05  \nData: 15/04/2014  \nN° repertorio: 1730  \nN° raccolta: 2014  \n Ipot"
+      },
+      {
+        "page": 47,
+        "quote": "*, **** Omissis ****  \nFormalità a carico della procedura  \nCapitale: € 57.593,05  \nData: 15/04/2014  \nN° repertorio: 1730  \nN° raccolta: 2014  \n Ipot"
+      },
+      {
+        "page": 49,
+        "quote": "*, **** Omissis ****  \nFormalità a carico della procedura  \nCapitale: € 57.593,05  \nData: 15/04/2014  \nN° repertorio: 1730  \nN° raccolta: 2014  \n Ipot"
+      },
+      {
+        "page": 50,
+        "quote": "*, **** Omissis ****  \nFormalità a carico della procedura  \nCapitale: € 57.593,05  \nData: 15/04/2014  \nN° repertorio: 1730  \nN° raccolta: 2014  \n Ipot"
+      }
+    ],
+    "id": "m_000011"
+  },
+  {
+    "page": 27,
+    "amount_raw": "€ 91.703,46",
+    "amount_eur": 91703.46,
+    "quote": "ro **** Omissis ****  \nFormalità a carico della procedura  \nCapitale: € 91.703,46  \nData: 05/04/2018  \nN° repertorio: 1435  \nN° raccolta: 6418  \nTrascr",
+    "context": "Iscritto a Roma il  09/04/2018  \nReg. gen. 4406 - Reg. part. 604  \nImporto: € 183.406,92  \nA favore di **** Omissis ****  \nContro **** Omissis ****  \nFormalità a carico della procedura  \nCapitale: € 91.703,46  \nData: 05/04/2018  \nN° repertorio: 1435  \nN° raccolta: 6418  \nTrascrizioni  \n \n Verbale d i pignoramento  \nTrascritto a Mantova il 13/03/2024  \nReg. gen. 3364 - Reg. part. 2472  \nA favore di **** O",
+    "low_quality_page": false,
+    "source": "pages_raw",
+    "occurrences": [
+      {
+        "page": 27,
+        "quote": "ro **** Omissis ****  \nFormalità a carico della procedura  \nCapitale: € 91.703,46  \nData: 05/04/2018  \nN° repertorio: 1435  \nN° raccolta: 6418  \nTrascr"
+      },
+      {
+        "page": 28,
+        "quote": "ro **** Omissis ****  \nFormalità a carico della procedura  \nCapitale: € 91.703,46  \nData: 05/04/2018  \nN° repertorio: 1435  \nN° raccolta: 6418  \nTrascr"
+      },
+      {
+        "page": 47,
+        "quote": "ro **** Omissis ****  \nFormalità a carico della procedura  \nCapitale: € 91.703,46  \nData: 05/04/2018  \nN° repertorio: 1435  \nN° raccolta: 6418  \nTrascr"
+      },
+      {
+        "page": 48,
+        "quote": "ro **** Omissis ****  \nFormalità a carico della procedura  \nCapitale: € 91.703,46  \nData: 05/04/2018  \nN° repertorio: 1435  \nN° raccolta: 6418  \nTrascr"
+      },
+      {
+        "page": 50,
+        "quote": "ro **** Omissis ****  \nFormalità a carico della procedura  \nCapitale: € 91.703,46  \nData: 05/04/2018  \nN° repertorio: 1435  \nN° raccolta: 6418  \nTrascr"
+      }
+    ],
+    "id": "m_000012"
+  },
+  {
+    "page": 27,
+    "amount_raw": "€ 183.406,92",
+    "amount_eur": 183406.92,
+    "quote": "to a Roma il  09/04/2018  \nReg. gen. 4406 - Reg. part. 604  \nImporto: € 183.406,92  \nA favore di **** Omissis ****  \nContro **** Omissis ****  \nFormalit",
+    "context": "57.593,05  \nData: 15/04/2014  \nN° repertorio: 1730  \nN° raccolta: 2014  \n Ipoteca della riscossione  derivante da Titolo  \nIscritto a Roma il  09/04/2018  \nReg. gen. 4406 - Reg. part. 604  \nImporto: € 183.406,92  \nA favore di **** Omissis ****  \nContro **** Omissis ****  \nFormalità a carico della procedura  \nCapitale: € 91.703,46  \nData: 05/04/2018  \nN° repertorio: 1435  \nN° raccolta: 6418  \nTrascrizioni",
+    "low_quality_page": false,
+    "source": "pages_raw",
+    "occurrences": [
+      {
+        "page": 27,
+        "quote": "to a Roma il  09/04/2018  \nReg. gen. 4406 - Reg. part. 604  \nImporto: € 183.406,92  \nA favore di **** Omissis ****  \nContro **** Omissis ****  \nFormalit"
+      }
+    ],
+    "id": "m_000013"
+  },
+  {
+    "page": 27,
+    "amount_raw": "€ 200.000,00",
+    "amount_eur": 200000.0,
+    "quote": "*, **** Omissis ****  \nFormalità a carico della procedura  \nCapitale: € 200.000,00  \nData: 15/04/2014  \nN° repertorio: 1731  \nN° raccolta: 2014  \n Ipot",
+    "context": "22/12/2014  \nReg. gen. 12070 - Reg. part. 1619  \nImporto: € 216.000,00  \nA favore di **** Omissis ****  \nContro **** Omissis ** **, **** Omissis ****  \nFormalità a carico della procedura  \nCapitale: € 200.000,00  \nData: 15/04/2014  \nN° repertorio: 1731  \nN° raccolta: 2014  \n Ipoteca Giudiziale  derivante da Titolo  \nIscritto a Mantova il 22/12/2014  \nReg. gen. 12068 - Reg. part. 1618  \nImporto: € 70.0 00,00",
+    "low_quality_page": false,
+    "source": "pages_raw",
+    "occurrences": [
+      {
+        "page": 27,
+        "quote": "*, **** Omissis ****  \nFormalità a carico della procedura  \nCapitale: € 200.000,00  \nData: 15/04/2014  \nN° repertorio: 1731  \nN° raccolta: 2014  \n Ipot"
+      },
+      {
+        "page": 29,
+        "quote": "*, **** Omissis ****  \nFormalità a carico della procedura  \nCapitale: € 200.000,00  \nData: 15/04/2014  \nN° repertorio: 1731  \nN° raccolta: 2014  \n Ipot"
+      },
+      {
+        "page": 49,
+        "quote": "*, **** Omissis ****  \nFormalità a carico della procedura  \nCapitale: € 200.000,00  \nData: 15/04/2014  \nN° repertorio: 1731  \nN° raccolta: 2014  \n Ipot"
+      }
+    ],
+    "id": "m_000014"
+  },
+  {
+    "page": 27,
+    "amount_raw": "€ 216.000,00",
+    "amount_eur": 216000.0,
+    "quote": "Mantova il 22/12/2014  \nReg. gen. 12070 - Reg. part. 1619  \nImporto: € 216.000,00  \nA favore di **** Omissis ****  \nContro **** Omissis ** **, **** Omi",
+    "context": ", sono \nrisultate le seguenti formalità pregiudizievoli:  \n \nIscrizioni  \n \n Ipoteca Giudiziale  derivante da Titolo  \nIscritto a Mantova il 22/12/2014  \nReg. gen. 12070 - Reg. part. 1619  \nImporto: € 216.000,00  \nA favore di **** Omissis ****  \nContro **** Omissis ** **, **** Omissis ****  \nFormalità a carico della procedura  \nCapitale: € 200.000,00  \nData: 15/04/2014  \nN° repertorio: 1731  \nN° raccolta: 20",
+    "low_quality_page": false,
+    "source": "pages_raw",
+    "occurrences": [
+      {
+        "page": 27,
+        "quote": "Mantova il 22/12/2014  \nReg. gen. 12070 - Reg. part. 1619  \nImporto: € 216.000,00  \nA favore di **** Omissis ****  \nContro **** Omissis ** **, **** Omi"
+      }
+    ],
+    "id": "m_000015"
+  },
+  {
+    "page": 28,
+    "amount_raw": "€ 57.593,05",
+    "amount_eur": 57593.05,
+    "quote": ", **** Omissis ****  \nFormalità a carico della procedura  \nCapita le: € 57.593,05  \nData: 15/04/2014  \nN° repertorio: 1730  \nN° raccolta: 2014  \n Ipot",
+    "context": "l 22/12/2014  \nReg. gen. 12068 - Reg. part. 1618  \nImporto: € 70.000,00  \nA favore di **** Omissis ****  \nContro **** Omissis ****, **** Omissis ****  \nFormalità a carico della procedura  \nCapita le: € 57.593,05  \nData: 15/04/2014  \nN° repertorio: 1730  \nN° raccolta: 2014  \n Ipoteca della riscossione  derivante da Titolo  \nIscritto a Roma il 09/04/2018  \nReg. gen. 4406 - Reg. part. 604  \nImporto: € 183.406,",
+    "low_quality_page": false,
+    "source": "pages_raw",
+    "occurrences": [
+      {
+        "page": 28,
+        "quote": ", **** Omissis ****  \nFormalità a carico della procedura  \nCapita le: € 57.593,05  \nData: 15/04/2014  \nN° repertorio: 1730  \nN° raccolta: 2014  \n Ipot"
+      }
+    ],
+    "id": "m_000016"
+  },
+  {
+    "page": 28,
+    "amount_raw": "€ 70.000,00",
+    "amount_eur": 70000.0,
+    "quote": "Mantova il 22/12/2014  \nReg. gen. 12068 - Reg. part. 1618  \nImporto: € 70.000,00  \nA favore di **** Omissis ****  \nContro **** Omissis ****, **** Omis",
+    "context": "200.000,00  \nData: 15/04/2014  \nN° repertorio: 1731  \nN° r accolta: 2014  \n Ipoteca Giudiziale  derivante da Titolo  \nIscritto a Mantova il 22/12/2014  \nReg. gen. 12068 - Reg. part. 1618  \nImporto: € 70.000,00  \nA favore di **** Omissis ****  \nContro **** Omissis ****, **** Omissis ****  \nFormalità a carico della procedura  \nCapita le: € 57.593,05  \nData: 15/04/2014  \nN° repertorio: 1730  \nN° raccolta: 201",
+    "low_quality_page": false,
+    "source": "pages_raw",
+    "occurrences": [
+      {
+        "page": 28,
+        "quote": "Mantova il 22/12/2014  \nReg. gen. 12068 - Reg. part. 1618  \nImporto: € 70.000,00  \nA favore di **** Omissis ****  \nContro **** Omissis ****, **** Omis"
+      },
+      {
+        "page": 29,
+        "quote": "Mantova il 22/12/2014  \nReg. gen. 12068 - Reg. part.  1618  \nImporto: € 70.000,00  \nA favore di **** Omissis ****  \nContro **** Omissis ****, **** Omis"
+      },
+      {
+        "page": 30,
+        "quote": "Mantova il 22/12/2014  \nReg. gen. 12068 - Reg. part. 1618  \nImporto: € 70.000,00  \nA favore di **** Omissis ****  \nContro **** Omissis ****, **** Omis"
+      },
+      {
+        "page": 47,
+        "quote": "Mantova il 22/12/2014  \nReg. gen. 12068 - Reg. part. 1618  \nImporto: € 70.000,00  \nA favore di **** Omissis ****  \nContro **** Omissis ****, **** Omis"
+      },
+      {
+        "page": 48,
+        "quote": "Mantova il 22/12/2014  \nReg. gen. 12068 - Reg. part. 1618  \nImporto: € 70.000,00  \nA favore di **** Omissis ****  \nContro **** Omissis ****, **** Omis"
+      },
+      {
+        "page": 49,
+        "quote": "Mantova il 22/12/2014  \nReg. gen. 12068 - Reg. part. 1618  \nImporto: € 70.000,00  \nA favore di **** Omissis ****  \nContro **** Omissis ****, **** Omis"
+      },
+      {
+        "page": 50,
+        "quote": "Mantova il 22/12/2014  \nReg. gen. 12068 - Reg. part. 1618  \nImporto: € 70.000,00  \nA favore di **** Omissis ****  \nContro **** Omissis ****, **** Omis"
+      }
+    ],
+    "id": "m_000017"
+  },
+  {
+    "page": 28,
+    "amount_raw": "€ 183.406,92",
+    "amount_eur": 183406.92,
+    "quote": "tto a Roma il 09/04/2018  \nReg. gen. 4406 - Reg. part. 604  \nImporto: € 183.406,92  \nA favore di **** Omissis ****  \nContro **** Omissis ****  \nFormalit",
+    "context": "57.593,05  \nData: 15/04/2014  \nN° repertorio: 1730  \nN° raccolta: 2014  \n Ipoteca della riscossione  derivante da Titolo  \nIscritto a Roma il 09/04/2018  \nReg. gen. 4406 - Reg. part. 604  \nImporto: € 183.406,92  \nA favore di **** Omissis ****  \nContro **** Omissis ****  \nFormalità a carico della procedura  \nCapitale: € 91.703,46  \nData: 05/04/2018  \nN° repertorio: 1435  \nN° raccolta: 6418  \nTrascrizioni",
+    "low_quality_page": false,
+    "source": "pages_raw",
+    "occurrences": [
+      {
+        "page": 28,
+        "quote": "tto a Roma il 09/04/2018  \nReg. gen. 4406 - Reg. part. 604  \nImporto: € 183.406,92  \nA favore di **** Omissis ****  \nContro **** Omissis ****  \nFormalit"
+      },
+      {
+        "page": 29,
+        "quote": "tto a Roma il 09/04/2018  \nReg. gen. 4406 - Reg. part. 604  \nImporto: € 183.406,92  \nA favore di **** Omissis ****  \nContro **** Omissis ****  \nFormalit"
+      },
+      {
+        "page": 48,
+        "quote": "tto a Roma il 09/04/2018  \nReg. gen. 4406 - Reg. part. 604  \nImporto: € 183.406,92  \nA favore di **** Omissis ****  \nContro **** Omissis ****  \nFormalit"
+      },
+      {
+        "page": 49,
+        "quote": "tto a Roma il 09/04/2018  \nReg. gen. 4406 - Reg. part. 604  \nImporto: € 183.406,92  \nA favore di **** Omissis ****  \nContro **** Omissis ****  \nFormalit"
+      },
+      {
+        "page": 50,
+        "quote": "tto a Roma il 09/04/2018  \nReg. gen. 4406 - Reg. part. 604  \nImporto: € 183.406,92  \nA favore di **** Omissis ****  \nContro **** Omissis ****  \nFormalit"
+      }
+    ],
+    "id": "m_000018"
+  },
+  {
+    "page": 28,
+    "amount_raw": "€ 200.000,00",
+    "amount_eur": 200000.0,
+    "quote": "*, **** Omissis ****  \nFormalità a carico della procedura  \nCapitale: € 200.000,00  \nData: 15/04/2014  \nN° repertorio: 1731  \nN° r accolta: 2014  \n Ipo",
+    "context": "l 22/12/2014  \nReg. gen. 12070 - Reg. part. 1619  \nImporto: € 216.000,00  \nA favore di **** Omissis ****  \nContro **** Omissis ****, **** Omissis ****  \nFormalità a carico della procedura  \nCapitale: € 200.000,00  \nData: 15/04/2014  \nN° repertorio: 1731  \nN° r accolta: 2014  \n Ipoteca Giudiziale  derivante da Titolo  \nIscritto a Mantova il 22/12/2014  \nReg. gen. 12068 - Reg. part. 1618  \nImporto: € 70.000,00",
+    "low_quality_page": false,
+    "source": "pages_raw",
+    "occurrences": [
+      {
+        "page": 28,
+        "quote": "*, **** Omissis ****  \nFormalità a carico della procedura  \nCapitale: € 200.000,00  \nData: 15/04/2014  \nN° repertorio: 1731  \nN° r accolta: 2014  \n Ipo"
+      }
+    ],
+    "id": "m_000019"
+  },
+  {
+    "page": 28,
+    "amount_raw": "€ 216.000,00",
+    "amount_eur": 216000.0,
+    "quote": "Mantova il 22/12/2014  \nReg. gen. 12070 - Reg. part. 1619  \nImporto: € 216.000,00  \nA favore di **** Omissis ****  \nContro **** Omissis ****, **** Omis",
+    "context": "sono \nrisultate le seguenti formalità pregiudizievoli:  \n \nIscrizioni  \n \n Ipoteca Giudiziale  derivante da Titolo  \nIscrit to a Mantova il 22/12/2014  \nReg. gen. 12070 - Reg. part. 1619  \nImporto: € 216.000,00  \nA favore di **** Omissis ****  \nContro **** Omissis ****, **** Omissis ****  \nFormalità a carico della procedura  \nCapitale: € 200.000,00  \nData: 15/04/2014  \nN° repertorio: 1731  \nN° r accolta: 20",
+    "low_quality_page": false,
+    "source": "pages_raw",
+    "occurrences": [
+      {
+        "page": 28,
+        "quote": "Mantova il 22/12/2014  \nReg. gen. 12070 - Reg. part. 1619  \nImporto: € 216.000,00  \nA favore di **** Omissis ****  \nContro **** Omissis ****, **** Omis"
+      },
+      {
+        "page": 29,
+        "quote": "Mantova il 22/12/2014  \nReg. gen. 12070 - Reg. part. 1619  \nImporto: € 216.000,00  \nA favore di **** Omissis ****  \nContro **** Omissis ****, **** Omis"
+      },
+      {
+        "page": 30,
+        "quote": "Mantova il 22/12/2014  \nReg. gen. 12070 - Reg. part. 1619  \nImporto: € 216.000,00  \nA favore di **** Omissis ****  \nContro **** Omissis ****, **** Omis"
+      },
+      {
+        "page": 47,
+        "quote": "Mantova il 22/12/2014  \nReg. gen. 12070 - Reg. part. 1619  \nImporto: € 216.000,00  \nA favore di **** Omissis ****  \nContro **** Omissis ****, **** Omis"
+      },
+      {
+        "page": 48,
+        "quote": "Mantova il 22/12/2014  \nReg. gen. 12070 - Reg. part. 1619  \nImporto: € 216.000,00  \nA favore di **** Omissis ****  \nContro **** Omissis ****, **** Omis"
+      },
+      {
+        "page": 49,
+        "quote": "Mantova il 22/12/2014  \nReg. gen. 12070 - Reg. part. 1619  \nImporto: € 216.000,00  \nA favore di **** Omissis ****  \nContro **** Omissis ****, **** Omis"
+      },
+      {
+        "page": 50,
+        "quote": "Mantova il 22/12/2014  \nReg. gen. 12070 - Reg. part. 1619  \nImporto: € 216.000,00  \nA favore di **** Omissis ****  \nContro **** Omissis ****, **** Omis"
+      }
+    ],
+    "id": "m_000020"
+  },
+  {
+    "page": 29,
+    "amount_raw": "€ 91.703,46",
+    "amount_eur": 91703.46,
+    "quote": "ro **** Omissis ****  \nFormalità a carico della procedura  \nCapitale: € 91.703,46  \nData: 05/04/2018  \nN° repertorio: 1435  \nN° raccolta: 6418  \nAstale",
+    "context": "lo \nIscritto a Roma il 09/04/2018  \nReg. gen. 4406 - Reg. part. 604  \nImporto: € 183.406,92  \nA favore di **** Omissis ****  \nContro **** Omissis ****  \nFormalità a carico della procedura  \nCapitale: € 91.703,46  \nData: 05/04/2018  \nN° repertorio: 1435  \nN° raccolta: 6418  \nAstalegale.net - E' vietata la stampa e la riproduzione dei documenti per fini di carattere commerciale. Pubblicazione eseguita giusta i",
+    "low_quality_page": false,
+    "source": "pages_raw",
+    "occurrences": [
+      {
+        "page": 29,
+        "quote": "ro **** Omissis ****  \nFormalità a carico della procedura  \nCapitale: € 91.703,46  \nData: 05/04/2018  \nN° repertorio: 1435  \nN° raccolta: 6418  \nAstale"
+      }
+    ],
+    "id": "m_000021"
+  },
+  {
+    "page": 30,
+    "amount_raw": "€ 57.593,05",
+    "amount_eur": 57593.05,
+    "quote": "*, **** Omissis ** ** \nFormalità a carico della procedura  \nCapitale: € 57.593,05  \nData: 15/04/2014  \nN° repertorio: 1730  \nN° raccolta: 2014  \n Ipot",
+    "context": "il 22/12/2014  \nReg. gen. 12068 - Reg. part. 1618  \nImporto: € 70.000,00  \nA favore di **** Omissis ****  \nContro **** Omissis ****, **** Omissis ** ** \nFormalità a carico della procedura  \nCapitale: € 57.593,05  \nData: 15/04/2014  \nN° repertorio: 1730  \nN° raccolta: 2014  \n Ipoteca della riscossione  derivante da Titolo  \nIscritto a Roma il 09/04/2018  \nReg. gen. 4406 - Reg. part. 604  \nImporto: € 183.406,",
+    "low_quality_page": false,
+    "source": "pages_raw",
+    "occurrences": [
+      {
+        "page": 30,
+        "quote": "*, **** Omissis ** ** \nFormalità a carico della procedura  \nCapitale: € 57.593,05  \nData: 15/04/2014  \nN° repertorio: 1730  \nN° raccolta: 2014  \n Ipot"
+      }
+    ],
+    "id": "m_000022"
+  },
+  {
+    "page": 30,
+    "amount_raw": "€ 183.406,92",
+    "amount_eur": 183406.92,
+    "quote": "tto a Roma il 09/04/2018  \nReg. gen. 4406 - Reg. part. 604  \nImporto: € 183.406,92  \nA favore di  **** Omissis ****  \nContro **** Omissis ****  \nAstaleg",
+    "context": "57.593,05  \nData: 15/04/2014  \nN° repertorio: 1730  \nN° raccolta: 2014  \n Ipoteca della riscossione  derivante da Titolo  \nIscritto a Roma il 09/04/2018  \nReg. gen. 4406 - Reg. part. 604  \nImporto: € 183.406,92  \nA favore di  **** Omissis ****  \nContro **** Omissis ****  \nAstalegale.net - E' vietata la stampa e la riproduzione dei documenti per fini di carattere commerciale. Pubblicazione eseguita giusta is",
+    "low_quality_page": false,
+    "source": "pages_raw",
+    "occurrences": [
+      {
+        "page": 30,
+        "quote": "tto a Roma il 09/04/2018  \nReg. gen. 4406 - Reg. part. 604  \nImporto: € 183.406,92  \nA favore di  **** Omissis ****  \nContro **** Omissis ****  \nAstaleg"
+      }
+    ],
+    "id": "m_000023"
+  },
+  {
+    "page": 30,
+    "amount_raw": "€ 200.000",
+    "amount_eur": 200000.0,
+    "quote": "*, **** Omissis ****  \nFormalità a carico della procedura  \nCapitale: € 200.000, 00 \nData: 15/04/2014  \nN° repertorio: 1731  \nN° raccolta: 2014  \n I",
+    "context": "l 22/12/2014  \nReg. gen. 12070 - Reg. part. 1619  \nImporto: € 216.000,00  \nA favore di **** Omissis ****  \nContro **** Omissis ****, **** Omissis ****  \nFormalità a carico della procedura  \nCapitale: € 200.000, 00 \nData: 15/04/2014  \nN° repertorio: 1731  \nN° raccolta: 2014  \n Ipoteca Giudiziale  derivante da Titolo  \nIscritto a Mantova il 22/12/2014  \nReg. gen. 12068 - Reg. part. 1618  \nImporto: € 70.000,",
+    "low_quality_page": false,
+    "source": "pages_raw",
+    "occurrences": [
+      {
+        "page": 30,
+        "quote": "*, **** Omissis ****  \nFormalità a carico della procedura  \nCapitale: € 200.000, 00 \nData: 15/04/2014  \nN° repertorio: 1731  \nN° raccolta: 2014  \n I"
+      }
+    ],
+    "id": "m_000024"
+  },
+  {
+    "page": 31,
+    "amount_raw": "€ 91.703,46",
+    "amount_eur": 91703.46,
+    "quote": "31 di 50  \n Formalità a carico della procedura  \nCapitale: € 91.703,46  \nData: 05/04/2018  \nN° repertorio: 1435  \nN° raccolta: 6418  \nTrascr",
+    "context": "31 di 50  \n Formalità a carico della procedura  \nCapitale: € 91.703,46  \nData: 05/04/2018  \nN° repertorio: 1435  \nN° raccolta: 6418  \nTrascrizioni  \n \n Verbale di pignoramento  \nTrascritto a Mantova il 13/03/2024  \nReg. gen. 3364 - Reg. part.  2472  \nA favore di **** O",
+    "low_quality_page": false,
+    "source": "pages_raw",
+    "occurrences": [
+      {
+        "page": 31,
+        "quote": "31 di 50  \n Formalità a carico della procedura  \nCapitale: € 91.703,46  \nData: 05/04/2018  \nN° repertorio: 1435  \nN° raccolta: 6418  \nTrascr"
+      }
+    ],
+    "id": "m_000025"
+  },
+  {
+    "page": 37,
+    "amount_raw": "€ 5.000,00",
+    "amount_eur": 5000.0,
+    "quote": "- Completamento lavori  \n€ 15.000,00;  \n- pratiche per abitabilità  \n€ 5.000,00  \nAstalegale.net - E' vietata la stampa e la riproduzione dei documen",
+    "context": "iorgio \nBigarello (MN).  \n \nSi quantificano le spese di massima per com pletare l’immobile e per le pratiche dell’abitabilità:  \n \n- Completamento lavori  \n€ 15.000,00;  \n- pratiche per abitabilità  \n€ 5.000,00  \nAstalegale.net - E' vietata la stampa e la riproduzione dei documenti per fini di carattere commerciale. Pubblicazione eseguita giusta iscriz. elenco Min. della Giustizia PDG 28/10/2009",
+    "low_quality_page": false,
+    "source": "pages_raw",
+    "occurrences": [
+      {
+        "page": 37,
+        "quote": "- Completamento lavori  \n€ 15.000,00;  \n- pratiche per abitabilità  \n€ 5.000,00  \nAstalegale.net - E' vietata la stampa e la riproduzione dei documen"
+      }
+    ],
+    "id": "m_000026"
+  },
+  {
+    "page": 37,
+    "amount_raw": "€ 15.000,00",
+    "amount_eur": 15000.0,
+    "quote": "bile e per le pratiche dell’abitabilità:  \n \n- Completamento lavori  \n€ 15.000,00;  \n- pratiche per abitabilità  \n€ 5.000,00  \nAstalegale.net - E' viet",
+    "context": "l Territorio relativamente al Comune di S. Giorgio \nBigarello (MN).  \n \nSi quantificano le spese di massima per com pletare l’immobile e per le pratiche dell’abitabilità:  \n \n- Completamento lavori  \n€ 15.000,00;  \n- pratiche per abitabilità  \n€ 5.000,00  \nAstalegale.net - E' vietata la stampa e la riproduzione dei documenti per fini di carattere commerciale. Pubblicazione eseguita giusta iscriz. elenco Min.",
+    "low_quality_page": false,
+    "source": "pages_raw",
+    "occurrences": [
+      {
+        "page": 37,
+        "quote": "bile e per le pratiche dell’abitabilità:  \n \n- Completamento lavori  \n€ 15.000,00;  \n- pratiche per abitabilità  \n€ 5.000,00  \nAstalegale.net - E' viet"
+      }
+    ],
+    "id": "m_000027"
+  },
+  {
+    "page": 37,
+    "amount_raw": "€ 104.751,00",
+    "amount_eur": 104751.0,
+    "quote": "vendita per il diritto di Proprietà (1/1)  \nValore di stima del bene: € 104.751,00  \nI valori unitari ap plicati sono congruenti con i valori di mercato",
+    "context": "ile.  Allegato n° 1  \nIdentificato al catasto Fabbricati - Fg. 20, Part. 433, Sub. 301, Categoria A10  \nL'immobile viene posto in vendita per il diritto di Proprietà (1/1)  \nValore di stima del bene: € 104.751,00  \nI valori unitari ap plicati sono congruenti con i valori di mercato locale; inoltre risultano congruenti con i \nvalori dell’“Osservatorio immobiliare” dell’Agenzia del Territorio relativamente al C",
+    "low_quality_page": false,
+    "source": "pages_raw",
+    "occurrences": [
+      {
+        "page": 37,
+        "quote": "vendita per il diritto di Proprietà (1/1)  \nValore di stima del bene: € 104.751,00  \nI valori unitari ap plicati sono congruenti con i valori di mercato"
+      }
+    ],
+    "id": "m_000028"
+  },
+  {
+    "page": 38,
+    "amount_raw": "€ 1.032,00",
+    "amount_eur": 1032.0,
+    "quote": "nico comunale.  \n \nN.B.  \nsi specifica che il costo dell’oblazione di € 1.032,00 (art. 36 bis) è indicativo e si consiglia di verificare \nAstalegale.n",
+    "context": "risultato che c’è la possibilità di un aume nto volumetrico.  \nSi consiglia, comunque, di verificare questa possibilità con il tecnico comunale.  \n \nN.B.  \nsi specifica che il costo dell’oblazione di € 1.032,00 (art. 36 bis) è indicativo e si consiglia di verificare \nAstalegale.net - E' vietata la stampa e la riproduzione dei documenti per fini di carattere commerciale. Pubblicazione eseguita giusta iscriz.",
+    "low_quality_page": false,
+    "source": "pages_raw",
+    "occurrences": [
+      {
+        "page": 38,
+        "quote": "nico comunale.  \n \nN.B.  \nsi specifica che il costo dell’oblazione di € 1.032,00 (art. 36 bis) è indicativo e si consiglia di verificare \nAstalegale.n"
+      }
+    ],
+    "id": "m_000029"
+  },
+  {
+    "page": 38,
+    "amount_raw": "€ 3.000,00",
+    "amount_eur": 3000.0,
+    "quote": ", le spese di massima della sanatoria:  \n \nspese di massima presunte: € 3.000,00.  \n \nN.B.  \nSi specifica che da informazioni presso l’Ufficio Tecnico",
+    "context": "rello (MN), si è \nverificato che le modifiche eseguite senza pratiche edilizie sono sanabili e si determinano quindi, \nattualmente, le spese di massima della sanatoria:  \n \nspese di massima presunte: € 3.000,00.  \n \nN.B.  \nSi specifica che da informazioni presso l’Ufficio Tecnico del Comune di S. Giorgio Bigarello, il ripostiglio, \nall’interno dell’autorimessa, determina volume.  \nDa verifiche sul luogo e d",
+    "low_quality_page": false,
+    "source": "pages_raw",
+    "occurrences": [
+      {
+        "page": 38,
+        "quote": ", le spese di massima della sanatoria:  \n \nspese di massima presunte: € 3.000,00.  \n \nN.B.  \nSi specifica che da informazioni presso l’Ufficio Tecnico"
+      }
+    ],
+    "id": "m_000030"
+  },
+  {
+    "page": 38,
+    "amount_raw": "€ 5.000,00",
+    "amount_eur": 5000.0,
+    "quote": "a per  le pratiche dell’abitabilità:  \n \n- pratiche per abitabilità  \n€ 5.000,00 (già conteggiate)  \n \n \n \n Bene N° 3  - Garage ubicato a San Giorgio",
+    "context": "biliare” dell’Agenzia del Territorio relativamente al Comune di S. Giorgio \nBigarello (MN).  \n \nSi quantificano le spese di massima per  le pratiche dell’abitabilità:  \n \n- pratiche per abitabilità  \n€ 5.000,00 (già conteggiate)  \n \n \n \n Bene N° 3  - Garage ubicato a San Giorgio Bigarello (MN) - Via Sordello n. 5, piano Seminterrato  \nL'immobile, costituito da un’autorimessa al piano seminterrato, è col lo",
+    "low_quality_page": false,
+    "source": "pages_raw",
+    "occurrences": [
+      {
+        "page": 38,
+        "quote": "a per  le pratiche dell’abitabilità:  \n \n- pratiche per abitabilità  \n€ 5.000,00 (già conteggiate)  \n \n \n \n Bene N° 3  - Garage ubicato a San Giorgio"
+      }
+    ],
+    "id": "m_000031"
+  },
+  {
+    "page": 38,
+    "amount_raw": "€ 34.650,00",
+    "amount_eur": 34650.0,
+    "quote": "vendita per il diritto di Proprietà (1/1)  \nValore di stima del bene: € 34.650,00  \nI valori unitar i applicati sono congruenti con i valori di mercato",
+    "context": "ale.  Allegato n° 1   \nIdentificato al catasto Fabbricati - Fg. 20, Part. 433, Sub. 302, Categoria C6  \nL'immobile viene posto in vendita per il diritto di Proprietà (1/1)  \nValore di stima del bene: € 34.650,00  \nI valori unitar i applicati sono congruenti con i valori di mercato locale; inoltre risultano congruenti con i \nvalori dell’“Osservatorio immobiliare” dell’Agenzia del Territorio relativamente al C",
+    "low_quality_page": false,
+    "source": "pages_raw",
+    "occurrences": [
+      {
+        "page": 38,
+        "quote": "vendita per il diritto di Proprietà (1/1)  \nValore di stima del bene: € 34.650,00  \nI valori unitar i applicati sono congruenti con i valori di mercato"
+      }
+    ],
+    "id": "m_000032"
+  },
+  {
+    "page": 38,
+    "amount_raw": "€ 49.308,00",
+    "amount_eur": 49308.0,
+    "quote": "vendita per il diritto di Proprietà (1/1)  \nValore di stima del bene: € 49.308,00  \nI valori u nitari applicati sono congruenti con i valori di mercato",
+    "context": "glio.  \nAllegato n° 1   \nIdentificato al catasto Fabbricati - Fg. 20, Part. 600, Sub. 4, Categoria C6  \nL'immobile viene posto in vendita per il diritto di Proprietà (1/1)  \nValore di stima del bene: € 49.308,00  \nI valori u nitari applicati sono congruenti con i valori di mercato locale; inoltre risultano congruenti con i \nvalori dell’“Osservatorio immobiliare” dell’Agenzia del Territorio relativamente al C",
+    "low_quality_page": false,
+    "source": "pages_raw",
+    "occurrences": [
+      {
+        "page": 38,
+        "quote": "vendita per il diritto di Proprietà (1/1)  \nValore di stima del bene: € 49.308,00  \nI valori u nitari applicati sono congruenti con i valori di mercato"
+      }
+    ],
+    "id": "m_000033"
+  },
+  {
+    "page": 39,
+    "amount_raw": "€ 49.3 08,00",
+    "amount_eur": 49.0,
+    "quote": "N) - Via Sordello n. \n5, piano Seminterrato  35,22 mq  1.400,00 €/mq  € 49.3 08,00  100,00%  € 49.308,00  \nBene N° 4  - Villetta  \nSan Giorgio Bigarello",
+    "context": "llo n. \n5, piano Terra  38,50 mq  900,00 €/mq  € 34.650,00  100,00%  € 34.650,00  \nBene N° 3  - Garage  \nSan Giorgio Bigarello \n(MN) - Via Sordello n. \n5, piano Seminterrato  35,22 mq  1.400,00 €/mq  € 49.3 08,00  100,00%  € 49.308,00  \nBene N° 4  - Villetta  \nSan Giorgio Bigarello \n(MN) - Via Sordello n. \n5, piano Piano terra \nrialzato -primo  165,10 mq  1.400,00 €/mq  € 231.140,00  100,00%  € 231.140,00  \nV",
+    "low_quality_page": false,
+    "source": "pages_raw",
+    "occurrences": [
+      {
+        "page": 39,
+        "quote": "N) - Via Sordello n. \n5, piano Seminterrato  35,22 mq  1.400,00 €/mq  € 49.3 08,00  100,00%  € 49.308,00  \nBene N° 4  - Villetta  \nSan Giorgio Bigarello"
+      }
+    ],
+    "id": "m_000034"
+  },
+  {
+    "page": 39,
+    "amount_raw": "€/mq € 49.3 08,00",
+    "amount_eur": 49.0,
+    "quote": "lo \n(MN) - Via Sordello n. \n5, piano Seminterrato  35,22 mq  1.400,00 €/mq  € 49.3 08,00  100,00%  € 49.308,00  \nBene N° 4  - Villetta  \nSan Giorgio Bigarello",
+    "context": "Sordello n. \n5, piano Terra  38,50 mq  900,00 €/mq  € 34.650,00  100,00%  € 34.650,00  \nBene N° 3  - Garage  \nSan Giorgio Bigarello \n(MN) - Via Sordello n. \n5, piano Seminterrato  35,22 mq  1.400,00 €/mq  € 49.3 08,00  100,00%  € 49.308,00  \nBene N° 4  - Villetta  \nSan Giorgio Bigarello \n(MN) - Via Sordello n. \n5, piano Piano terra \nrialzato -primo  165,10 mq  1.400,00 €/mq  € 231.140,00  100,00%  € 231.140,00  \nV",
+    "low_quality_page": false,
+    "source": "pages_raw",
+    "occurrences": [
+      {
+        "page": 39,
+        "quote": "lo \n(MN) - Via Sordello n. \n5, piano Seminterrato  35,22 mq  1.400,00 €/mq  € 49.3 08,00  100,00%  € 49.308,00  \nBene N° 4  - Villetta  \nSan Giorgio Bigarello"
+      }
+    ],
+    "id": "m_000035"
+  },
+  {
+    "page": 39,
+    "amount_raw": "100,00% €",
+    "amount_eur": 100.0,
+    "quote": "Piano terra \nrialzato -primo  165,10 mq  1.400,00 €/mq  € 231.140,00  100,00%  € 231.140,00  \nValore di stima:  € 419.849,00  \n \n \nValore di stima: €",
+    "context": "400,00 €/mq  € 49.3 08,00  100,00%  € 49.308,00  \nBene N° 4  - Villetta  \nSan Giorgio Bigarello \n(MN) - Via Sordello n. \n5, piano Piano terra \nrialzato -primo  165,10 mq  1.400,00 €/mq  € 231.140,00  100,00%  € 231.140,00  \nValore di stima:  € 419.849,00  \n \n \nValore di stima: € 419.849,00  \n \n \nAstalegale.net - E' vietata la stampa e la riproduzione dei documenti per fini di carattere commerciale. Pubblica",
+    "low_quality_page": false,
+    "source": "pages_raw",
+    "occurrences": [
+      {
+        "page": 39,
+        "quote": "Piano terra \nrialzato -primo  165,10 mq  1.400,00 €/mq  € 231.140,00  100,00%  € 231.140,00  \nValore di stima:  € 419.849,00  \n \n \nValore di stima: €"
+      }
+    ],
+    "id": "m_000036"
+  },
+  {
+    "page": 39,
+    "amount_raw": "100,00% €",
+    "amount_eur": 100.0,
+    "quote": "Via Sordello n. \n5, piano Terra  38,50 mq  900,00 €/mq  € 34.650,00  100,00%  € 34.650,00  \nBene N° 3  - Garage  \nSan Giorgio Bigarello \n(MN) - Via S",
+    "context": "o Terra -primo  116,39 mq  900,00 €/mq  € 104.751,00  100,00%  € 104. 751,00  \nBene N° 2  - Garage  \nSan Giorgio Bigarello \n(MN) - Via Sordello n. \n5, piano Terra  38,50 mq  900,00 €/mq  € 34.650,00  100,00%  € 34.650,00  \nBene N° 3  - Garage  \nSan Giorgio Bigarello \n(MN) - Via Sordello n. \n5, piano Seminterrato  35,22 mq  1.400,00 €/mq  € 49.3 08,00  100,00%  € 49.308,00  \nBene N° 4  - Villetta  \nSan Giorg",
+    "low_quality_page": false,
+    "source": "pages_raw",
+    "occurrences": [
+      {
+        "page": 39,
+        "quote": "Via Sordello n. \n5, piano Terra  38,50 mq  900,00 €/mq  € 34.650,00  100,00%  € 34.650,00  \nBene N° 3  - Garage  \nSan Giorgio Bigarello \n(MN) - Via S"
+      }
+    ],
+    "id": "m_000037"
+  },
+  {
+    "page": 39,
+    "amount_raw": "100,00% €",
+    "amount_eur": 100.0,
+    "quote": "llo n. \n5, piano Seminterrato  35,22 mq  1.400,00 €/mq  € 49.3 08,00  100,00%  € 49.308,00  \nBene N° 4  - Villetta  \nSan Giorgio Bigarello \n(MN) - Via",
+    "context": "no Terra  38,50 mq  900,00 €/mq  € 34.650,00  100,00%  € 34.650,00  \nBene N° 3  - Garage  \nSan Giorgio Bigarello \n(MN) - Via Sordello n. \n5, piano Seminterrato  35,22 mq  1.400,00 €/mq  € 49.3 08,00  100,00%  € 49.308,00  \nBene N° 4  - Villetta  \nSan Giorgio Bigarello \n(MN) - Via Sordello n. \n5, piano Piano terra \nrialzato -primo  165,10 mq  1.400,00 €/mq  € 231.140,00  100,00%  € 231.140,00  \nValore di sti",
+    "low_quality_page": false,
+    "source": "pages_raw",
+    "occurrences": [
+      {
+        "page": 39,
+        "quote": "llo n. \n5, piano Seminterrato  35,22 mq  1.400,00 €/mq  € 49.3 08,00  100,00%  € 49.308,00  \nBene N° 4  - Villetta  \nSan Giorgio Bigarello \n(MN) - Via"
+      }
+    ],
+    "id": "m_000038"
+  },
+  {
+    "page": 39,
+    "amount_raw": "€ 104",
+    "amount_eur": 104.0,
+    "quote": "5, piano Terra -primo  116,39 mq  900,00 €/mq  € 104.751,00  100,00%  € 104. 751,00  \nBene N° 2  - Garage  \nSan Giorgio Bigarello \n(MN) - Via Sor",
+    "context": "nitario  Valore  \ncomplessivo  Quota in  \nvendita  Totale  \nBene N° 1  - Ufficio  \nSan Giorgio Bigarello \n(MN) - Via Sordello n. \n5, piano Terra -primo  116,39 mq  900,00 €/mq  € 104.751,00  100,00%  € 104. 751,00  \nBene N° 2  - Garage  \nSan Giorgio Bigarello \n(MN) - Via Sordello n. \n5, piano Terra  38,50 mq  900,00 €/mq  € 34.650,00  100,00%  € 34.650,00  \nBene N° 3  - Garage  \nSan Giorgio Bigarello",
+    "low_quality_page": false,
+    "source": "pages_raw",
+    "occurrences": [
+      {
+        "page": 39,
+        "quote": "5, piano Terra -primo  116,39 mq  900,00 €/mq  € 104.751,00  100,00%  € 104. 751,00  \nBene N° 2  - Garage  \nSan Giorgio Bigarello \n(MN) - Via Sor"
+      }
+    ],
+    "id": "m_000039"
+  },
+  {
+    "page": 39,
+    "amount_raw": "€/mq € 34.650,00 100,00",
+    "amount_eur": 34650.0,
+    "quote": "o Bigarello \n(MN) - Via Sordello n. \n5, piano Terra  38,50 mq  900,00 €/mq  € 34.650,00  100,00%  € 34.650,00  \nBene N° 3  - Garage  \nSan Giorgio Bigarello \n(MN) - V",
+    "context": "ordello n. \n5, piano Terra -primo  116,39 mq  900,00 €/mq  € 104.751,00  100,00%  € 104. 751,00  \nBene N° 2  - Garage  \nSan Giorgio Bigarello \n(MN) - Via Sordello n. \n5, piano Terra  38,50 mq  900,00 €/mq  € 34.650,00  100,00%  € 34.650,00  \nBene N° 3  - Garage  \nSan Giorgio Bigarello \n(MN) - Via Sordello n. \n5, piano Seminterrato  35,22 mq  1.400,00 €/mq  € 49.3 08,00  100,00%  € 49.308,00  \nBene N° 4  - Villetta  \nSan G",
+    "low_quality_page": false,
+    "source": "pages_raw",
+    "occurrences": [
+      {
+        "page": 39,
+        "quote": "o Bigarello \n(MN) - Via Sordello n. \n5, piano Terra  38,50 mq  900,00 €/mq  € 34.650,00  100,00%  € 34.650,00  \nBene N° 3  - Garage  \nSan Giorgio Bigarello \n(MN) - V"
+      }
+    ],
+    "id": "m_000040"
+  },
+  {
+    "page": 39,
+    "amount_raw": "€ 34.650,00 100,00",
+    "amount_eur": 34650.0,
+    "quote": "rello \n(MN) - Via Sordello n. \n5, piano Terra  38,50 mq  900,00 €/mq  € 34.650,00  100,00%  € 34.650,00  \nBene N° 3  - Garage  \nSan Giorgio Bigarello \n(MN) - V",
+    "context": "o n. \n5, piano Terra -primo  116,39 mq  900,00 €/mq  € 104.751,00  100,00%  € 104. 751,00  \nBene N° 2  - Garage  \nSan Giorgio Bigarello \n(MN) - Via Sordello n. \n5, piano Terra  38,50 mq  900,00 €/mq  € 34.650,00  100,00%  € 34.650,00  \nBene N° 3  - Garage  \nSan Giorgio Bigarello \n(MN) - Via Sordello n. \n5, piano Seminterrato  35,22 mq  1.400,00 €/mq  € 49.3 08,00  100,00%  € 49.308,00  \nBene N° 4  - Villetta  \nSan G",
+    "low_quality_page": false,
+    "source": "pages_raw",
+    "occurrences": [
+      {
+        "page": 39,
+        "quote": "rello \n(MN) - Via Sordello n. \n5, piano Terra  38,50 mq  900,00 €/mq  € 34.650,00  100,00%  € 34.650,00  \nBene N° 3  - Garage  \nSan Giorgio Bigarello \n(MN) - V"
+      }
+    ],
+    "id": "m_000041"
+  },
+  {
+    "page": 39,
+    "amount_raw": "€ 104.751,00 100,00",
+    "amount_eur": 104751.0,
+    "quote": "MN) - Via Sordello n. \n5, piano Terra -primo  116,39 mq  900,00 €/mq  € 104.751,00  100,00%  € 104. 751,00  \nBene N° 2  - Garage  \nSan Giorgio Bigarello \n(MN) -",
+    "context": "convenzionale  Valore unitario  Valore  \ncomplessivo  Quota in  \nvendita  Totale  \nBene N° 1  - Ufficio  \nSan Giorgio Bigarello \n(MN) - Via Sordello n. \n5, piano Terra -primo  116,39 mq  900,00 €/mq  € 104.751,00  100,00%  € 104. 751,00  \nBene N° 2  - Garage  \nSan Giorgio Bigarello \n(MN) - Via Sordello n. \n5, piano Terra  38,50 mq  900,00 €/mq  € 34.650,00  100,00%  € 34.650,00  \nBene N° 3  - Garage  \nSan Giorgio Big",
+    "low_quality_page": false,
+    "source": "pages_raw",
+    "occurrences": [
+      {
+        "page": 39,
+        "quote": "MN) - Via Sordello n. \n5, piano Terra -primo  116,39 mq  900,00 €/mq  € 104.751,00  100,00%  € 104. 751,00  \nBene N° 2  - Garage  \nSan Giorgio Bigarello \n(MN) -"
+      }
+    ],
+    "id": "m_000042"
+  },
+  {
+    "page": 39,
+    "amount_raw": "€/mq € 104.751,00 100,00",
+    "amount_eur": 104751.0,
+    "quote": "llo \n(MN) - Via Sordello n. \n5, piano Terra -primo  116,39 mq  900,00 €/mq  € 104.751,00  100,00%  € 104. 751,00  \nBene N° 2  - Garage  \nSan Giorgio Bigarello \n(MN) -",
+    "context": "cie  \nconvenzionale  Valore unitario  Valore  \ncomplessivo  Quota in  \nvendita  Totale  \nBene N° 1  - Ufficio  \nSan Giorgio Bigarello \n(MN) - Via Sordello n. \n5, piano Terra -primo  116,39 mq  900,00 €/mq  € 104.751,00  100,00%  € 104. 751,00  \nBene N° 2  - Garage  \nSan Giorgio Bigarello \n(MN) - Via Sordello n. \n5, piano Terra  38,50 mq  900,00 €/mq  € 34.650,00  100,00%  € 34.650,00  \nBene N° 3  - Garage  \nSan Giorgio Big",
+    "low_quality_page": false,
+    "source": "pages_raw",
+    "occurrences": [
+      {
+        "page": 39,
+        "quote": "llo \n(MN) - Via Sordello n. \n5, piano Terra -primo  116,39 mq  900,00 €/mq  € 104.751,00  100,00%  € 104. 751,00  \nBene N° 2  - Garage  \nSan Giorgio Bigarello \n(MN) -"
+      }
+    ],
+    "id": "m_000043"
+  },
+  {
+    "page": 39,
+    "amount_raw": "€ 231.140,00 100,00",
+    "amount_eur": 231140.0,
+    "quote": "n. \n5, piano Piano terra \nrialzato -primo  165,10 mq  1.400,00 €/mq  € 231.140,00  100,00%  € 231.140,00  \nValore di stima:  € 419.849,00  \n \n \nValore di stima",
+    "context": "35,22 mq  1.400,00 €/mq  € 49.3 08,00  100,00%  € 49.308,00  \nBene N° 4  - Villetta  \nSan Giorgio Bigarello \n(MN) - Via Sordello n. \n5, piano Piano terra \nrialzato -primo  165,10 mq  1.400,00 €/mq  € 231.140,00  100,00%  € 231.140,00  \nValore di stima:  € 419.849,00  \n \n \nValore di stima: € 419.849,00  \n \n \nAstalegale.net - E' vietata la stampa e la riproduzione dei documenti per fini di carattere commerciale. Pubb",
+    "low_quality_page": false,
+    "source": "pages_raw",
+    "occurrences": [
+      {
+        "page": 39,
+        "quote": "n. \n5, piano Piano terra \nrialzato -primo  165,10 mq  1.400,00 €/mq  € 231.140,00  100,00%  € 231.140,00  \nValore di stima:  € 419.849,00  \n \n \nValore di stima"
+      }
+    ],
+    "id": "m_000044"
+  },
+  {
+    "page": 39,
+    "amount_raw": "€/mq € 231.140,00 100,00",
+    "amount_eur": 231140.0,
+    "quote": "rdello n. \n5, piano Piano terra \nrialzato -primo  165,10 mq  1.400,00 €/mq  € 231.140,00  100,00%  € 231.140,00  \nValore di stima:  € 419.849,00  \n \n \nValore di stima",
+    "context": "errato  35,22 mq  1.400,00 €/mq  € 49.3 08,00  100,00%  € 49.308,00  \nBene N° 4  - Villetta  \nSan Giorgio Bigarello \n(MN) - Via Sordello n. \n5, piano Piano terra \nrialzato -primo  165,10 mq  1.400,00 €/mq  € 231.140,00  100,00%  € 231.140,00  \nValore di stima:  € 419.849,00  \n \n \nValore di stima: € 419.849,00  \n \n \nAstalegale.net - E' vietata la stampa e la riproduzione dei documenti per fini di carattere commerciale. Pubb",
+    "low_quality_page": false,
+    "source": "pages_raw",
+    "occurrences": [
+      {
+        "page": 39,
+        "quote": "rdello n. \n5, piano Piano terra \nrialzato -primo  165,10 mq  1.400,00 €/mq  € 231.140,00  100,00%  € 231.140,00  \nValore di stima:  € 419.849,00  \n \n \nValore di stima"
+      }
+    ],
+    "id": "m_000045"
+  },
+  {
+    "page": 39,
+    "amount_raw": "€ 231.140,00",
+    "amount_eur": 231140.0,
+    "quote": "vendita per il diritto di Proprietà (1/1)  \nValore di stima del bene: € 231.140,00  \nI valori unitari applicati sono congruenti con i valori di mercato",
+    "context": "zzato.  Allegato n° 1   \nIdentificato al catasto Fabbricati - Fg. 20, Part. 600, Sub. 3, Categoria A7  \nL'immobile viene posto in vendita per il diritto di Proprietà (1/1)  \nValore di stima del bene: € 231.140,00  \nI valori unitari applicati sono congruenti con i valori di mercato locale; inoltre risultano congruenti con i \nvalori dell’“Osservatorio immobiliare” dell’Agenzia del Territorio relativamente al Co",
+    "low_quality_page": false,
+    "source": "pages_raw",
+    "occurrences": [
+      {
+        "page": 39,
+        "quote": "vendita per il diritto di Proprietà (1/1)  \nValore di stima del bene: € 231.140,00  \nI valori unitari applicati sono congruenti con i valori di mercato"
+      }
+    ],
+    "id": "m_000046"
+  },
+  {
+    "page": 39,
+    "amount_raw": "€ 419.849,00",
+    "amount_eur": 419849.0,
+    "quote": ".400,00 €/mq  € 231.140,00  100,00%  € 231.140,00  \nValore di stima:  € 419.849,00  \n \n \nValore di stima: € 419.849,00  \n \n \nAstalegale.net - E' vietata",
+    "context": "08,00  \nBene N° 4  - Villetta  \nSan Giorgio Bigarello \n(MN) - Via Sordello n. \n5, piano Piano terra \nrialzato -primo  165,10 mq  1.400,00 €/mq  € 231.140,00  100,00%  € 231.140,00  \nValore di stima:  € 419.849,00  \n \n \nValore di stima: € 419.849,00  \n \n \nAstalegale.net - E' vietata la stampa e la riproduzione dei documenti per fini di carattere commerciale. Pubblicazione eseguita giusta iscriz. elenco Min. de",
+    "low_quality_page": false,
+    "source": "pages_raw",
+    "occurrences": [
+      {
+        "page": 39,
+        "quote": ".400,00 €/mq  € 231.140,00  100,00%  € 231.140,00  \nValore di stima:  € 419.849,00  \n \n \nValore di stima: € 419.849,00  \n \n \nAstalegale.net - E' vietata"
+      }
+    ],
+    "id": "m_000047"
+  },
+  {
+    "page": 39,
+    "amount_raw": "€ 419.849,00",
+    "amount_eur": 419849.0,
+    "quote": "€ 231.140,00  \nValore di stima:  € 419.849,00  \n \n \nValore di stima: € 419.849,00  \n \n \nAstalegale.net - E' vietata la stampa e la riproduzione dei doc",
+    "context": "Giorgio Bigarello \n(MN) - Via Sordello n. \n5, piano Piano terra \nrialzato -primo  165,10 mq  1.400,00 €/mq  € 231.140,00  100,00%  € 231.140,00  \nValore di stima:  € 419.849,00  \n \n \nValore di stima: € 419.849,00  \n \n \nAstalegale.net - E' vietata la stampa e la riproduzione dei documenti per fini di carattere commerciale. Pubblicazione eseguita giusta iscriz. elenco Min. della Giustizia PDG 28/10/2009",
+    "low_quality_page": false,
+    "source": "pages_raw",
+    "occurrences": [
+      {
+        "page": 39,
+        "quote": "€ 231.140,00  \nValore di stima:  € 419.849,00  \n \n \nValore di stima: € 419.849,00  \n \n \nAstalegale.net - E' vietata la stampa e la riproduzione dei doc"
+      }
+    ],
+    "id": "m_000048"
+  },
+  {
+    "page": 40,
+    "amount_raw": "00,00 €",
+    "amount_eur": 0.0,
+    "quote": "eprezzamento  Valore  Tipo \nOneri di regolarizzazione urbanistica  23000,00  € \nRischio assunto per mancata garanzia  5000,00  € \n \nValore finale di",
+    "context": "40 di 50  \n Depr ezzamenti  \nTipologia deprezzamento  Valore  Tipo \nOneri di regolarizzazione urbanistica  23000,00  € \nRischio assunto per mancata garanzia  5000,00  € \n \nValore finale di stima: € 391.849,00  \n \n \n \n \n \n \n \nAssolto il proprio mandato, il sottoscritto Esperto ex art. 568 c.p.c.  deposita la relazione",
+    "low_quality_page": false,
+    "source": "pages_raw",
+    "occurrences": [
+      {
+        "page": 40,
+        "quote": "eprezzamento  Valore  Tipo \nOneri di regolarizzazione urbanistica  23000,00  € \nRischio assunto per mancata garanzia  5000,00  € \n \nValore finale di"
+      }
+    ],
+    "id": "m_000049"
+  },
+  {
+    "page": 40,
+    "amount_raw": "0,00 €",
+    "amount_eur": 0.0,
+    "quote": "ne urbanistica  23000,00  € \nRischio assunto per mancata garanzia  5000,00  € \n \nValore finale di stima: € 391.849,00  \n \n \n \n \n \n \n \nAssolto il pr",
+    "context": "40 di 50  \n Depr ezzamenti  \nTipologia deprezzamento  Valore  Tipo \nOneri di regolarizzazione urbanistica  23000,00  € \nRischio assunto per mancata garanzia  5000,00  € \n \nValore finale di stima: € 391.849,00  \n \n \n \n \n \n \n \nAssolto il proprio mandato, il sottoscritto Esperto ex art. 568 c.p.c.  deposita la relazione di stima presso questo \nSpettabile Tribunale, tan",
+    "low_quality_page": false,
+    "source": "pages_raw",
+    "occurrences": [
+      {
+        "page": 40,
+        "quote": "ne urbanistica  23000,00  € \nRischio assunto per mancata garanzia  5000,00  € \n \nValore finale di stima: € 391.849,00  \n \n \n \n \n \n \n \nAssolto il pr"
+      }
+    ],
+    "id": "m_000050"
+  },
+  {
+    "page": 40,
+    "amount_raw": "€ 391.849,00",
+    "amount_eur": 391849.0,
+    "quote": "o assunto per mancata garanzia  5000,00  € \n \nValore finale di stima: € 391.849,00  \n \n \n \n \n \n \n \nAssolto il proprio mandato, il sottoscritto Esperto e",
+    "context": "40 di 50  \n Depr ezzamenti  \nTipologia deprezzamento  Valore  Tipo \nOneri di regolarizzazione urbanistica  23000,00  € \nRischio assunto per mancata garanzia  5000,00  € \n \nValore finale di stima: € 391.849,00  \n \n \n \n \n \n \n \nAssolto il proprio mandato, il sottoscritto Esperto ex art. 568 c.p.c.  deposita la relazione di stima presso questo \nSpettabile Tribunale, tanto in assolvimento dell'incarico conferi",
+    "low_quality_page": false,
+    "source": "pages_raw",
+    "occurrences": [
+      {
+        "page": 40,
+        "quote": "o assunto per mancata garanzia  5000,00  € \n \nValore finale di stima: € 391.849,00  \n \n \n \n \n \n \n \nAssolto il proprio mandato, il sottoscritto Esperto e"
+      }
+    ],
+    "id": "m_000051"
+  },
+  {
+    "page": 44,
+    "amount_raw": "€ 391.849,00",
+    "amount_eur": 391849.0,
+    "quote": "da densità \nmedio -alta Art. 39  Allegato n° 9  \nPrezzo base d'asta: € 391.849,00  \nAstalegale.net - E' vietata la stampa e la riproduzione dei documen",
+    "context": "Fg. Mappale/i Destinazione P.G.T. Rif. \narticolo/i P.d.R.  20 433 – 600 “AREC 2” – Ambiti residenziali conso lidati caratterizzati da densità \nmedio -alta Art. 39  Allegato n° 9  \nPrezzo base d'asta: € 391.849,00  \nAstalegale.net - E' vietata la stampa e la riproduzione dei documenti per fini di carattere commerciale. Pubblicazione eseguita giusta iscriz. elenco Min. della Giustizia PDG 28/10/2009",
+    "low_quality_page": false,
+    "source": "pages_raw",
+    "occurrences": [
+      {
+        "page": 44,
+        "quote": "da densità \nmedio -alta Art. 39  Allegato n° 9  \nPrezzo base d'asta: € 391.849,00  \nAstalegale.net - E' vietata la stampa e la riproduzione dei documen"
+      }
+    ],
+    "id": "m_000052"
+  },
+  {
+    "page": 45,
+    "amount_raw": "€ 391.849,00",
+    "amount_eur": 391849.0,
+    "quote": "E IMMOBILIA RE 62/2024 DEL R.G.E . \nLOTTO UNICO - PREZZO BASE D'ASTA: € 391.849,00  \nBene N° 1 - Ufficio  \nUbicazione:  San Giorgio B igarello (MN) - Vi",
+    "context": "45 di 50  \n SCHEMA RIASSUNTIVO  \nESECUZIONE IMMOBILIA RE 62/2024 DEL R.G.E . \nLOTTO UNICO - PREZZO BASE D'ASTA: € 391.849,00  \nBene N° 1 - Ufficio  \nUbicazione:  San Giorgio B igarello (MN) - Via Sordello n. 5, piano Terra -primo  \nDiritto reale:  Proprietà  \n Quota  1/1 \n \nTipologia immobile:  Ufficio  \nIdentificato al ca",
+    "low_quality_page": false,
+    "source": "pages_raw",
+    "occurrences": [
+      {
+        "page": 45,
+        "quote": "E IMMOBILIA RE 62/2024 DEL R.G.E . \nLOTTO UNICO - PREZZO BASE D'ASTA: € 391.849,00  \nBene N° 1 - Ufficio  \nUbicazione:  San Giorgio B igarello (MN) - Vi"
+      }
+    ],
+    "id": "m_000053"
+  },
+  {
+    "page": 47,
+    "amount_raw": "€ 183.406,92",
+    "amount_eur": 183406.92,
+    "quote": "tto a Roma il 09/04/2018  \nReg. gen. 4406 - Reg. part. 604  \nImporto: € 183.406,92  \nA favore di **** O missis ****  \nContro **** Omissis ****  \nFormali",
+    "context": "200.000,00  \nData: 15/04/2014  \nN° repertorio: 1731  \nN° raccolta: 2014  \n Ipoteca della riscossione  derivante da Titolo  \nIscritto a Roma il 09/04/2018  \nReg. gen. 4406 - Reg. part. 604  \nImporto: € 183.406,92  \nA favore di **** O missis ****  \nContro **** Omissis ****  \nFormalità a carico della procedura  \nCapitale: € 91.703,46  \nData: 05/04/2018  \nN° repertorio: 1435  \nN° raccolta: 6418  \nTrascrizioni",
+    "low_quality_page": false,
+    "source": "pages_raw",
+    "occurrences": [
+      {
+        "page": 47,
+        "quote": "tto a Roma il 09/04/2018  \nReg. gen. 4406 - Reg. part. 604  \nImporto: € 183.406,92  \nA favore di **** O missis ****  \nContro **** Omissis ****  \nFormali"
+      }
+    ],
+    "id": "m_000054"
+  },
+  {
+    "page": 47,
+    "amount_raw": "€ 200.000,00",
+    "amount_eur": 200000.0,
+    "quote": ", **** Omissis ****  \nForma lità a carico della procedura  \nCapitale: € 200.000,00  \nData: 15/04/2014  \nN° repertorio: 1731  \nN° raccolta: 2014  \n Ipot",
+    "context": "22/12/2014  \nReg. gen. 12070 - Reg. part. 1619  \nImporto: € 216.000,00  \nA favore di **** Omissis ****  \nContro **** Omissis ****, **** Omissis ****  \nForma lità a carico della procedura  \nCapitale: € 200.000,00  \nData: 15/04/2014  \nN° repertorio: 1731  \nN° raccolta: 2014  \n Ipoteca della riscossione  derivante da Titolo  \nIscritto a Roma il 09/04/2018  \nReg. gen. 4406 - Reg. part. 604  \nImporto: € 183.406,",
+    "low_quality_page": false,
+    "source": "pages_raw",
+    "occurrences": [
+      {
+        "page": 47,
+        "quote": ", **** Omissis ****  \nForma lità a carico della procedura  \nCapitale: € 200.000,00  \nData: 15/04/2014  \nN° repertorio: 1731  \nN° raccolta: 2014  \n Ipot"
+      }
+    ],
+    "id": "m_000055"
+  },
+  {
+    "page": 48,
+    "amount_raw": "€ 57.593,05",
+    "amount_eur": 57593.05,
+    "quote": "*, **** Omissis ****  \nFormalità a carico della procedura  \nCapitale: € 57.593,05  \nData: 15/04/2014  \nN° repertorio: 1730  \nN° racc olta: 2014  \n Ipo",
+    "context": "il 22/12/2014  \nReg. gen. 12068 - Reg. part. 1618  \nImporto: € 70.000,00  \nA favore di **** Omissis ****  \nContro **** Omissis ****, **** Omissis ****  \nFormalità a carico della procedura  \nCapitale: € 57.593,05  \nData: 15/04/2014  \nN° repertorio: 1730  \nN° racc olta: 2014  \n Ipoteca Giudiziale  derivante da Titolo  \nIscritto a Mantova il 22/12/2014  \nReg. gen. 12070 - Reg. part. 1619  \nImporto: € 216.000,0",
+    "low_quality_page": false,
+    "source": "pages_raw",
+    "occurrences": [
+      {
+        "page": 48,
+        "quote": "*, **** Omissis ****  \nFormalità a carico della procedura  \nCapitale: € 57.593,05  \nData: 15/04/2014  \nN° repertorio: 1730  \nN° racc olta: 2014  \n Ipo"
+      }
+    ],
+    "id": "m_000056"
+  },
+  {
+    "page": 48,
+    "amount_raw": "€ 200.000,00",
+    "amount_eur": 200000.0,
+    "quote": ", **** Omissis ****  \nFormalità a carico della procedura  \nCapitale : € 200.000,00  \nData: 15/04/2014  \nN° repertorio: 1731  \nN° raccolta: 2014  \n Ipot",
+    "context": "22/12/2014  \nReg. gen. 12070 - Reg. part. 1619  \nImporto: € 216.000,00  \nA favore di **** Omissis ****  \nContro **** Omissis ****, **** Omissis ****  \nFormalità a carico della procedura  \nCapitale : € 200.000,00  \nData: 15/04/2014  \nN° repertorio: 1731  \nN° raccolta: 2014  \n Ipoteca della riscossione  derivante da Titolo  \nIscritto a Roma il 09/04/2018  \nReg. gen. 4406 - Reg. part. 604  \nImporto: € 183.406,",
+    "low_quality_page": false,
+    "source": "pages_raw",
+    "occurrences": [
+      {
+        "page": 48,
+        "quote": ", **** Omissis ****  \nFormalità a carico della procedura  \nCapitale : € 200.000,00  \nData: 15/04/2014  \nN° repertorio: 1731  \nN° raccolta: 2014  \n Ipot"
+      }
+    ],
+    "id": "m_000057"
+  },
+  {
+    "page": 49,
+    "amount_raw": "€ 91.703,46",
+    "amount_eur": 91703.46,
+    "quote": "ro **** Omissis ****  \nFormalità a carico della procedu ra \nCapitale: € 91.703,46  \nData: 05/04/2018  \nN° repertorio: 1435  \nN° raccolta: 6418  \nTrascr",
+    "context": "o  \nIscritto a Roma il 09/04/2018  \nReg. gen. 4406 - Reg. part. 604  \nImporto: € 183.406,92  \nA favore di **** Omissis ****  \nContro **** Omissis ****  \nFormalità a carico della procedu ra \nCapitale: € 91.703,46  \nData: 05/04/2018  \nN° repertorio: 1435  \nN° raccolta: 6418  \nTrascrizioni  \n \n Verbale di pignoramento  \nTrascritto a Mantova il 13/03/2024  \nReg. gen. 3364 - Reg. part. 2472  \nA favore di **** Om",
+    "low_quality_page": false,
+    "source": "pages_raw",
+    "occurrences": [
+      {
+        "page": 49,
+        "quote": "ro **** Omissis ****  \nFormalità a carico della procedu ra \nCapitale: € 91.703,46  \nData: 05/04/2018  \nN° repertorio: 1435  \nN° raccolta: 6418  \nTrascr"
+      }
+    ],
+    "id": "m_000058"
+  },
+  {
+    "page": 50,
+    "amount_raw": "€ 200.000,00",
+    "amount_eur": 200000.0,
+    "quote": "*, **** Omissis ****  \nFormalità a carico della procedura  \nCapitale: € 200.000,00  \nData: 15/04/2014  \nN° repertorio:  1731  \nN° raccolta: 2014  \n Ipo",
+    "context": "l 22/12/2014  \nReg. gen. 12070 - Reg. part. 1619  \nImporto: € 216.000,00  \nA favore di **** Omissis ****  \nContro **** Omissis ****, **** Omissis ****  \nFormalità a carico della procedura  \nCapitale: € 200.000,00  \nData: 15/04/2014  \nN° repertorio:  1731  \nN° raccolta: 2014  \n Ipoteca della riscossione  derivante da Titolo  \nIscritto a Roma il 09/04/2018  \nReg. gen. 4406 - Reg. part. 604  \nImporto: € 183.406",
+    "low_quality_page": false,
+    "source": "pages_raw",
+    "occurrences": [
+      {
+        "page": 50,
+        "quote": "*, **** Omissis ****  \nFormalità a carico della procedura  \nCapitale: € 200.000,00  \nData: 15/04/2014  \nN° repertorio:  1731  \nN° raccolta: 2014  \n Ipo"
+      }
+    ],
+    "id": "m_000059"
+  }
+]

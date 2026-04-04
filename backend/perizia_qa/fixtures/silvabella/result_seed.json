@@ -1,0 +1,3465 @@
+{
+  "report_header": {
+    "title": "NEXODIFY INTELLIGENCE | Auction Scan",
+    "procedure": {
+      "value": "R.G.E. 95/2025",
+      "evidence": [
+        {
+          "page": 2,
+          "quote": "RGE 95/2025",
+          "start_offset": 265,
+          "end_offset": 276,
+          "bbox": null,
+          "offset_mode": "PAGE_LOCAL",
+          "page_text_hash": "5af595597c747f239f8f8f770c1fd4f03ed2559736c735445909a9e8ef0c67f0",
+          "search_hint": "RGE 95/2025"
+        }
+      ]
+    },
+    "lotto": {
+      "value": "DA VERIFICARE",
+      "evidence": []
+    },
+    "tribunale": {
+      "value": "TRIBUNALE DI PAVIA UFFICIO ESECUZIONI IMMOBILIARI Numero di ruolo generale",
+      "evidence": [
+        {
+          "page": 2,
+          "quote": "TRIBUNALE DI PAVIA UFFICIO ESECUZIONI IMMOBILIARI",
+          "start_offset": 187,
+          "end_offset": 263,
+          "bbox": null,
+          "offset_mode": "PAGE_LOCAL",
+          "page_text_hash": "5af595597c747f239f8f8f770c1fd4f03ed2559736c735445909a9e8ef0c67f0",
+          "search_hint": "TRIBUNALE DI PAVIA UFFICIO ESECUZIONI IMMOBILIARI"
+        }
+      ]
+    },
+    "address": {
+      "value": "DA VERIFICARE",
+      "evidence": [
+        {
+          "page": 19,
+          "quote": "il 30% della superficie delle terrazze/balconi (a seconda della loro ubicazione e\ncomunque sono definite così solo se sono più larghe di ml. 1,20 tali cioè da",
+          "start_offset": 1172,
+          "end_offset": 1189,
+          "bbox": null,
+          "offset_mode": "PAGE_LOCAL",
+          "page_text_hash": "edb5f3e3c62580b3868dbef13cb9a0cd992b98e85b48cba2799ea3f947c74ae9",
+          "search_hint": "ubicazione e comu"
+        }
+      ]
+    },
+    "is_multi_lot": false,
+    "generated_at": "2026-04-02T23:58:55.985989+00:00"
+  },
+  "section_9_legal_killers": {
+    "items": [],
+    "resolver_meta": {
+      "themes": [
+        {
+          "theme": "occupazione_titolo_opponibilita",
+          "theme_resolution": "REVIEW_REQUIRED",
+          "contradiction_flag": true,
+          "source_priority": "field_state",
+          "driver_field": "opponibilita_occupazione",
+          "driver_status": "LOW_CONFIDENCE",
+          "driver_value": "DA VERIFICARE"
+        },
+        {
+          "theme": "urbanistica",
+          "theme_resolution": "BLOCKER_CLEAR",
+          "contradiction_flag": false,
+          "source_priority": "field_state",
+          "driver_field": "regolarita_urbanistica",
+          "driver_status": "FOUND",
+          "driver_value": "PRESENTI DIFFORMITÀ"
+        },
+        {
+          "theme": "catastale",
+          "theme_resolution": "SAFE_CLEAR",
+          "contradiction_flag": false,
+          "source_priority": "field_state",
+          "driver_field": "conformita_catastale",
+          "driver_status": "FOUND",
+          "driver_value": "CONFORME"
+        }
+      ]
+    },
+    "top_items": []
+  },
+  "field_states": {
+    "tribunale": {
+      "value": "TRIBUNALE DI PAVIA UFFICIO ESECUZIONI IMMOBILIARI Numero di ruolo generale",
+      "status": "FOUND",
+      "confidence": 0.9,
+      "evidence": [
+        {
+          "page": 2,
+          "quote": "TRIBUNALE DI PAVIA UFFICIO ESECUZIONI IMMOBILIARI",
+          "start_offset": 187,
+          "end_offset": 263,
+          "bbox": null,
+          "offset_mode": "PAGE_LOCAL",
+          "page_text_hash": "5af595597c747f239f8f8f770c1fd4f03ed2559736c735445909a9e8ef0c67f0",
+          "search_hint": "TRIBUNALE DI PAVIA UFFICIO ESECUZIONI IMMOBILIARI"
+        }
+      ],
+      "searched_in": [],
+      "user_prompt_it": null
+    },
+    "procedura": {
+      "value": "R.G.E. 95/2025",
+      "status": "FOUND",
+      "confidence": 0.9,
+      "evidence": [
+        {
+          "page": 2,
+          "quote": "RGE 95/2025",
+          "start_offset": 265,
+          "end_offset": 276,
+          "bbox": null,
+          "offset_mode": "PAGE_LOCAL",
+          "page_text_hash": "5af595597c747f239f8f8f770c1fd4f03ed2559736c735445909a9e8ef0c67f0",
+          "search_hint": "RGE 95/2025"
+        }
+      ],
+      "searched_in": [],
+      "user_prompt_it": null
+    },
+    "lotto": {
+      "value": "Lotto 1",
+      "status": "LOW_CONFIDENCE",
+      "confidence": 0.45,
+      "evidence": [],
+      "searched_in": [
+        {
+          "page": 1,
+          "quote": "Ricerca eseguita: lotto, lotti, lotto unico. Nessuna occorrenza trovata nel documento.",
+          "start_offset": 0,
+          "end_offset": 0,
+          "bbox": null,
+          "offset_mode": "PAGE_LOCAL",
+          "page_text_hash": null
+        }
+      ],
+      "user_prompt_it": "Verifica il lotto indicato nella perizia (schema riassuntivo)."
+    },
+    "address": {
+      "value": "il 30% della superficie delle terrazze/balconi (a seconda della loro ubicazione e comunque sono definite così solo se sono più larghe di ml. 1,20 tali cioè da",
+      "status": "LOW_CONFIDENCE",
+      "confidence": 0.45,
+      "evidence": [
+        {
+          "page": 19,
+          "quote": "il 30% della superficie delle terrazze/balconi (a seconda della loro ubicazione e\ncomunque sono definite così solo se sono più larghe di ml. 1,20 tali cioè da",
+          "start_offset": 1172,
+          "end_offset": 1189,
+          "bbox": null,
+          "offset_mode": "PAGE_LOCAL",
+          "page_text_hash": "edb5f3e3c62580b3868dbef13cb9a0cd992b98e85b48cba2799ea3f947c74ae9",
+          "search_hint": "ubicazione e comu"
+        }
+      ],
+      "searched_in": [
+        {
+          "page": 1,
+          "quote": "Generale 2266, Pubblico ufficiale UFFICIALE GIUDIZIARIO DI PAVIA Repertorio\n1419 del 20/02/2025, ATTO ESECUTIVO O CAUTELARE VERBALE DI\nPIGNORAMENTO IMMOBILI. La presente trascrizione risulta inerente al",
+          "start_offset": 1581,
+          "end_offset": 1701,
+          "bbox": null,
+          "offset_mode": "PAGE_LOCAL",
+          "page_text_hash": "febc4163499ecdaf98d2b8f776940c01a7bca75fc3285a15bd7ebd0ca8f5e35b"
+        },
+        {
+          "page": 2,
+          "quote": "Astalegale.net - E' vietata la stampa e la riproduzione dei documenti per fini di carattere commerciale. Pubblicazione eseguita giusta iscriz. elenco Min. della Giustizia PDG 28/10/2009\nTRIBUNALE DI PAVIA\nUFFICIO ESECUZIONI IMMOBILIARI\nNumero di ruolo generale: RGE 95/2025\nEsecuzione Immobiliare promossa da:",
+          "start_offset": 162,
+          "end_offset": 282,
+          "bbox": null,
+          "offset_mode": "PAGE_LOCAL",
+          "page_text_hash": "5af595597c747f239f8f8f770c1fd4f03ed2559736c735445909a9e8ef0c67f0"
+        },
+        {
+          "page": 3,
+          "quote": "Esperto Estimatore nella vertenza, iscritto all'Albo\ndegli Ingegneri di Pavia e all'Albo dei Consulenti Tecnici del Tribunale di Pavia, si\npregia di rassegnare la presente relazione tecnica d'ufficio in ordine al quesito",
+          "start_offset": 283,
+          "end_offset": 403,
+          "bbox": null,
+          "offset_mode": "PAGE_LOCAL",
+          "page_text_hash": "a9e51d038262c80e37656aae78d80d929b5e3985f8181957d9802c194b90f1fb"
+        }
+      ],
+      "user_prompt_it": "Verifica l'indirizzo completo (via/piazza e comune) indicato nella perizia."
+    },
+    "prezzo_base_asta": {
+      "value": 2.0,
+      "status": "FOUND",
+      "confidence": 0.9,
+      "evidence": [
+        {
+          "page": 22,
+          "quote": "PREZZO ABASED'ASTA DELL'IMMOBILE (Subalterno 2)",
+          "start_offset": 1190,
+          "end_offset": 1239,
+          "bbox": null,
+          "offset_mode": "PAGE_LOCAL",
+          "page_text_hash": "0da0b70209d52f60abcbd72b796cf068af54130818b636018a9cef0811551ffe",
+          "search_hint": "PREZZO ABASED'ASTA DELL'IMMOBILE (Subalterno 2"
+        }
+      ],
+      "searched_in": [],
+      "user_prompt_it": null
+    },
+    "superficie": {
+      "value": {
+        "value": 59.0,
+        "unit": "mq",
+        "label": "Superficie Catastale:"
+      },
+      "status": "FOUND",
+      "confidence": 0.9,
+      "evidence": [
+        {
+          "page": 1,
+          "quote": "Categoria: A/2; Classe: 3; Consistenza: 3,5 vani; Superficie Catastale: 59 mq (Totale",
+          "start_offset": 706,
+          "end_offset": 733,
+          "bbox": null,
+          "offset_mode": "PAGE_LOCAL",
+          "page_text_hash": "febc4163499ecdaf98d2b8f776940c01a7bca75fc3285a15bd7ebd0ca8f5e35b",
+          "search_hint": "Superficie Catastale: 59 mq"
+        }
+      ],
+      "searched_in": [],
+      "user_prompt_it": null
+    },
+    "diritto_reale": {
+      "value": "Proprietà 02/11",
+      "status": "FOUND",
+      "confidence": 0.9,
+      "evidence": [
+        {
+          "page": 1,
+          "quote": "Proprietà",
+          "start_offset": 836,
+          "end_offset": 845,
+          "bbox": null,
+          "offset_mode": "PAGE_LOCAL",
+          "page_text_hash": "febc4163499ecdaf98d2b8f776940c01a7bca75fc3285a15bd7ebd0ca8f5e35b",
+          "search_hint": "Proprietà"
+        }
+      ],
+      "searched_in": [],
+      "user_prompt_it": null
+    },
+    "stato_occupativo": {
+      "value": "OCCUPATO",
+      "status": "FOUND",
+      "confidence": 0.9,
+      "evidence": [
+        {
+          "page": 21,
+          "quote": "Coefficiente di locazione",
+          "start_offset": 245,
+          "end_offset": 270,
+          "bbox": null,
+          "offset_mode": "PAGE_LOCAL",
+          "page_text_hash": "be0bc88c4042e566eb8de2bf99a949d5a0452e1aaf6caa38fbee594616173370",
+          "search_hint": "locazione"
+        }
+      ],
+      "searched_in": [],
+      "user_prompt_it": null,
+      "review_required": false,
+      "needs_user_confirmation": false,
+      "resolver_meta": {
+        "resolver_version": "occupancy_v1",
+        "resolver_confidence": 0.612,
+        "conflict_flag": false,
+        "candidate_count": 3
+      },
+      "conflicts": [],
+      "all_candidates": [
+        {
+          "value": "OCCUPATO",
+          "status": "FOUND",
+          "priority": 2,
+          "score": 6.12,
+          "page": 21,
+          "match_text": "locazione",
+          "sentence_text": "della Giustizia PDG 28/10/2009 Subalterno 2 COEFFICIENTI Coefficiente di piano 1,000 Coefficiente di locazione 1,000 Coefficiente di Usufrutto 1,000 Coefficiente di posizione 1,000 rispetto al centro urbano Coefficiente di età 0,800 Coefficiente di qualità 0,950 Coefficiente di manutenzione 0,950 Coefficiente conseg",
+          "prev_sentence": "elenco Min.",
+          "next_sentence": "",
+          "context_window_text": "ta la stampa e la riproduzione dei documenti per fini di carattere commerciale. Pubblicazione eseguita giusta iscriz. elenco Min. della Giustizia PDG 28/10/2009 Subalterno 2 COEFFICIENTI Coefficiente di piano 1,000 Coefficiente di locazione 1,000 Coefficiente di Usufrutto 1,000 Coefficiente di posizione 1,000 rispetto al centro urbano Coefficiente di età 0,800 Coefficiente di qualità 0,950 Coefficiente di manutenzione 0,950 Coefficiente conseg",
+          "window_word_count": 69,
+          "section_hint": "",
+          "is_table_like": false,
+          "is_heading_like": false,
+          "authority_score": 6.12,
+          "contradiction_group": "OCCUPIED",
+          "ocr_noise_hint": null,
+          "speculative": false,
+          "evidence": [
+            {
+              "page": 21,
+              "quote": "Coefficiente di locazione",
+              "start_offset": 245,
+              "end_offset": 270,
+              "bbox": null,
+              "offset_mode": "PAGE_LOCAL",
+              "page_text_hash": "be0bc88c4042e566eb8de2bf99a949d5a0452e1aaf6caa38fbee594616173370",
+              "search_hint": "locazione"
+            }
+          ]
+        },
+        {
+          "value": "OCCUPATO",
+          "status": "FOUND",
+          "priority": 2,
+          "score": 5.2,
+          "page": 5,
+          "match_text": "occupato",
+          "sentence_text": "Si precisa che, al momento del sopralluogo, avvenuto in data 11/09/2025, dall'analisi dello stato dei luoghi e dalle informazioni disponibili, il bene non appariva occupato da È stato possibile accedere a tutte le parti dell'immobile mediante chiavi in possesso dell'Istituto Vendite Giudiziarie.",
+          "prev_sentence": "È altresì presente una cantina al piano S1.",
+          "next_sentence": "Non era accessibile la cantina al piano S1.",
+          "context_window_text": "a un ingresso/soggiorno/cucina, una camera, un bagno ed un disimpegno, oltre un balcone. È altresì presente una cantina al piano S1. Si precisa che, al momento del sopralluogo, avvenuto in data 11/09/2025, dall'analisi dello stato dei luoghi e dalle informazioni disponibili, il bene non appariva occupato da È stato possibile accedere a tutte le parti dell'immobile mediante chiavi in possesso dell'Istituto Vendite Giudiziarie. Non era accessibile la cantina al piano S1. nessuno. **** Descrizione sommaria Il bene oggetto",
+          "window_word_count": 84,
+          "section_hint": "",
+          "is_table_like": false,
+          "is_heading_like": false,
+          "authority_score": 5.2,
+          "contradiction_group": "OCCUPIED",
+          "ocr_noise_hint": null,
+          "speculative": false,
+          "evidence": [
+            {
+              "page": 5,
+              "quote": "occupato da",
+              "start_offset": 503,
+              "end_offset": 592,
+              "bbox": null,
+              "offset_mode": "PAGE_LOCAL",
+              "page_text_hash": "339731c335111aa5bbc524c05df1478658df5d7af74294536e84e4d408bc2bb8",
+              "search_hint": "occupato"
+            }
+          ]
+        },
+        {
+          "value": "OCCUPATO",
+          "status": "FOUND",
+          "priority": 2,
+          "score": 5.04,
+          "page": 12,
+          "match_text": "occupato",
+          "sentence_text": "3587 con cui il Comune informava che la Giunta Municipale in seduta del 17/04/1962 invitava il richiedente a voler fissare la data e l'ora relativi al sopralluogo per il controllo della superficie di suolo pubblico occupato con le fondazioni del fabbricato.",
+          "prev_sentence": "04/1962 Prot.",
+          "next_sentence": "Il sopralluogo venne eseguito il 13/09/1962 con esito di riscontro esatto.",
+          "context_window_text": "04/1962 Prot. 3587 con cui il Comune informava che la Giunta Municipale in seduta del 17/04/1962 invitava il richiedente a voler fissare la data e l'ora relativi al sopralluogo per il controllo della superficie di suolo pubblico occupato con le fondazioni del fabbricato. Il sopralluogo venne eseguito il 13/09/1962 con esito di riscontro esatto. Collaudo statico del 30/04/1962, presentato presso la Prefettura di pavia in data 05/06/1962 prot. 22535. Comunicazione del 30/05/1969 prot. 7204 con cui il Comune rilevava",
+          "window_word_count": 91,
+          "section_hint": "",
+          "is_table_like": false,
+          "is_heading_like": false,
+          "authority_score": 5.04,
+          "contradiction_group": "OCCUPIED",
+          "ocr_noise_hint": null,
+          "speculative": false,
+          "evidence": [
+            {
+              "page": 12,
+              "quote": "occupato con le fondazioni del fabbricato.",
+              "start_offset": 1452,
+              "end_offset": 1533,
+              "bbox": null,
+              "offset_mode": "PAGE_LOCAL",
+              "page_text_hash": "8821158efdc1b0f17dd0ca131320ef4b09112eab8907214c612ac0706445eb1d",
+              "search_hint": "occupato"
+            }
+          ]
+        }
+      ],
+      "chosen_candidate": {
+        "value": "OCCUPATO",
+        "status": "FOUND",
+        "priority": 2,
+        "score": 6.12,
+        "page": 21,
+        "match_text": "locazione",
+        "sentence_text": "della Giustizia PDG 28/10/2009 Subalterno 2 COEFFICIENTI Coefficiente di piano 1,000 Coefficiente di locazione 1,000 Coefficiente di Usufrutto 1,000 Coefficiente di posizione 1,000 rispetto al centro urbano Coefficiente di età 0,800 Coefficiente di qualità 0,950 Coefficiente di manutenzione 0,950 Coefficiente conseg",
+        "prev_sentence": "elenco Min.",
+        "next_sentence": "",
+        "context_window_text": "ta la stampa e la riproduzione dei documenti per fini di carattere commerciale. Pubblicazione eseguita giusta iscriz. elenco Min. della Giustizia PDG 28/10/2009 Subalterno 2 COEFFICIENTI Coefficiente di piano 1,000 Coefficiente di locazione 1,000 Coefficiente di Usufrutto 1,000 Coefficiente di posizione 1,000 rispetto al centro urbano Coefficiente di età 0,800 Coefficiente di qualità 0,950 Coefficiente di manutenzione 0,950 Coefficiente conseg",
+        "window_word_count": 69,
+        "section_hint": "",
+        "is_table_like": false,
+        "is_heading_like": false,
+        "authority_score": 6.12,
+        "contradiction_group": "OCCUPIED",
+        "ocr_noise_hint": null,
+        "speculative": false,
+        "evidence": [
+          {
+            "page": 21,
+            "quote": "Coefficiente di locazione",
+            "start_offset": 245,
+            "end_offset": 270,
+            "bbox": null,
+            "offset_mode": "PAGE_LOCAL",
+            "page_text_hash": "be0bc88c4042e566eb8de2bf99a949d5a0452e1aaf6caa38fbee594616173370",
+            "search_hint": "locazione"
+          }
+        ]
+      },
+      "top_candidates": [
+        {
+          "value": "OCCUPATO",
+          "status": "FOUND",
+          "priority": 2,
+          "score": 6.12,
+          "page": 21,
+          "match_text": "locazione",
+          "sentence_text": "della Giustizia PDG 28/10/2009 Subalterno 2 COEFFICIENTI Coefficiente di piano 1,000 Coefficiente di locazione 1,000 Coefficiente di Usufrutto 1,000 Coefficiente di posizione 1,000 rispetto al centro urbano Coefficiente di età 0,800 Coefficiente di qualità 0,950 Coefficiente di manutenzione 0,950 Coefficiente conseg",
+          "prev_sentence": "elenco Min.",
+          "next_sentence": "",
+          "context_window_text": "ta la stampa e la riproduzione dei documenti per fini di carattere commerciale. Pubblicazione eseguita giusta iscriz. elenco Min. della Giustizia PDG 28/10/2009 Subalterno 2 COEFFICIENTI Coefficiente di piano 1,000 Coefficiente di locazione 1,000 Coefficiente di Usufrutto 1,000 Coefficiente di posizione 1,000 rispetto al centro urbano Coefficiente di età 0,800 Coefficiente di qualità 0,950 Coefficiente di manutenzione 0,950 Coefficiente conseg",
+          "window_word_count": 69,
+          "section_hint": "",
+          "is_table_like": false,
+          "is_heading_like": false,
+          "authority_score": 6.12,
+          "contradiction_group": "OCCUPIED",
+          "ocr_noise_hint": null,
+          "speculative": false,
+          "evidence": [
+            {
+              "page": 21,
+              "quote": "Coefficiente di locazione",
+              "start_offset": 245,
+              "end_offset": 270,
+              "bbox": null,
+              "offset_mode": "PAGE_LOCAL",
+              "page_text_hash": "be0bc88c4042e566eb8de2bf99a949d5a0452e1aaf6caa38fbee594616173370",
+              "search_hint": "locazione"
+            }
+          ]
+        }
+      ]
+    },
+    "opponibilita_occupazione": {
+      "value": "LOCAZIONE DA VERIFICARE",
+      "status": "LOW_CONFIDENCE",
+      "confidence": 0.45,
+      "evidence": [
+        {
+          "page": 21,
+          "quote": "Coefficiente di locazione",
+          "start_offset": 245,
+          "end_offset": 270,
+          "bbox": null,
+          "offset_mode": "PAGE_LOCAL",
+          "page_text_hash": "be0bc88c4042e566eb8de2bf99a949d5a0452e1aaf6caa38fbee594616173370",
+          "search_hint": "locazione"
+        }
+      ],
+      "searched_in": [
+        {
+          "page": 13,
+          "quote": "richiedente aveva reso noto di aver completato i lavori e di aver richiesto il\nsopralluogo per il rilascio della dichiarazione di abitabilità\nRelazione dell'Ufficio Tecnico del 27/11/1962 con cui veniva dato riscontro di un",
+          "start_offset": 731,
+          "end_offset": 851,
+          "bbox": null,
+          "offset_mode": "PAGE_LOCAL",
+          "page_text_hash": "6b82210eb8d6b6ef70efb713d8b714655a94a8c926d8179338a90f91e465dd9f"
+        },
+        {
+          "page": 21,
+          "quote": "Coefficiente di piano\n1,000\nCoefficiente di locazione\n1,000\nCoefficiente di Usufrutto\n1,000\nCoefficiente di posizione\n1,000",
+          "start_offset": 221,
+          "end_offset": 341,
+          "bbox": null,
+          "offset_mode": "PAGE_LOCAL",
+          "page_text_hash": "be0bc88c4042e566eb8de2bf99a949d5a0452e1aaf6caa38fbee594616173370"
+        }
+      ],
+      "user_prompt_it": "L'opponibilità dell'occupazione richiede conferma manuale. Verifica le evidenze principali e conferma il valore corretto.",
+      "review_required": true,
+      "needs_user_confirmation": true,
+      "resolver_meta": {
+        "resolver_version": "opponibilita_v1",
+        "resolver_confidence": 0.9,
+        "conflict_flag": false,
+        "candidate_count": 1
+      },
+      "conflicts": [],
+      "all_candidates": [
+        {
+          "value": "LOCAZIONE DA VERIFICARE",
+          "status": "LOW_CONFIDENCE",
+          "score": 9.0,
+          "page": 21,
+          "match_text": "locazione",
+          "sentence_text": "della Giustizia PDG 28/10/2009 Subalterno 2 COEFFICIENTI Coefficiente di piano 1,000 Coefficiente di locazione 1,000 Coefficiente di Usufrutto 1,000 Coefficiente di posizione 1,000 rispetto al centro urbano Coefficiente di età 0,800 Coefficiente di qualità 0,950 Coefficiente di manutenzione 0,950 Coefficiente conseg",
+          "prev_sentence": "elenco Min.",
+          "next_sentence": "",
+          "context_window_text": "ta la stampa e la riproduzione dei documenti per fini di carattere commerciale. Pubblicazione eseguita giusta iscriz. elenco Min. della Giustizia PDG 28/10/2009 Subalterno 2 COEFFICIENTI Coefficiente di piano 1,000 Coefficiente di locazione 1,000 Coefficiente di Usufrutto 1,000 Coefficiente di posizione 1,000 rispetto al centro urbano Coefficiente di età 0,800 Coefficiente di qualità 0,950 Coefficiente di manutenzione 0,950 Coefficiente conseg",
+          "window_word_count": 69,
+          "section_hint": "Coefficiente di locazione",
+          "is_table_like": false,
+          "is_heading_like": false,
+          "authority_score": 9.0,
+          "contradiction_group": "VERIFY",
+          "ocr_noise_hint": null,
+          "speculative": false,
+          "quote": "Coefficiente di locazione",
+          "evidence": [
+            {
+              "page": 21,
+              "quote": "Coefficiente di locazione",
+              "start_offset": 245,
+              "end_offset": 270,
+              "bbox": null,
+              "offset_mode": "PAGE_LOCAL",
+              "page_text_hash": "be0bc88c4042e566eb8de2bf99a949d5a0452e1aaf6caa38fbee594616173370",
+              "search_hint": "locazione"
+            }
+          ]
+        }
+      ],
+      "chosen_candidate": {
+        "value": "LOCAZIONE DA VERIFICARE",
+        "status": "LOW_CONFIDENCE",
+        "score": 9.0,
+        "page": 21,
+        "match_text": "locazione",
+        "sentence_text": "della Giustizia PDG 28/10/2009 Subalterno 2 COEFFICIENTI Coefficiente di piano 1,000 Coefficiente di locazione 1,000 Coefficiente di Usufrutto 1,000 Coefficiente di posizione 1,000 rispetto al centro urbano Coefficiente di età 0,800 Coefficiente di qualità 0,950 Coefficiente di manutenzione 0,950 Coefficiente conseg",
+        "prev_sentence": "elenco Min.",
+        "next_sentence": "",
+        "context_window_text": "ta la stampa e la riproduzione dei documenti per fini di carattere commerciale. Pubblicazione eseguita giusta iscriz. elenco Min. della Giustizia PDG 28/10/2009 Subalterno 2 COEFFICIENTI Coefficiente di piano 1,000 Coefficiente di locazione 1,000 Coefficiente di Usufrutto 1,000 Coefficiente di posizione 1,000 rispetto al centro urbano Coefficiente di età 0,800 Coefficiente di qualità 0,950 Coefficiente di manutenzione 0,950 Coefficiente conseg",
+        "window_word_count": 69,
+        "section_hint": "Coefficiente di locazione",
+        "is_table_like": false,
+        "is_heading_like": false,
+        "authority_score": 9.0,
+        "contradiction_group": "VERIFY",
+        "ocr_noise_hint": null,
+        "speculative": false,
+        "quote": "Coefficiente di locazione",
+        "evidence": [
+          {
+            "page": 21,
+            "quote": "Coefficiente di locazione",
+            "start_offset": 245,
+            "end_offset": 270,
+            "bbox": null,
+            "offset_mode": "PAGE_LOCAL",
+            "page_text_hash": "be0bc88c4042e566eb8de2bf99a949d5a0452e1aaf6caa38fbee594616173370",
+            "search_hint": "locazione"
+          }
+        ]
+      },
+      "top_candidates": [
+        {
+          "value": "LOCAZIONE DA VERIFICARE",
+          "status": "LOW_CONFIDENCE",
+          "score": 9.0,
+          "page": 21,
+          "match_text": "locazione",
+          "sentence_text": "della Giustizia PDG 28/10/2009 Subalterno 2 COEFFICIENTI Coefficiente di piano 1,000 Coefficiente di locazione 1,000 Coefficiente di Usufrutto 1,000 Coefficiente di posizione 1,000 rispetto al centro urbano Coefficiente di età 0,800 Coefficiente di qualità 0,950 Coefficiente di manutenzione 0,950 Coefficiente conseg",
+          "prev_sentence": "elenco Min.",
+          "next_sentence": "",
+          "context_window_text": "ta la stampa e la riproduzione dei documenti per fini di carattere commerciale. Pubblicazione eseguita giusta iscriz. elenco Min. della Giustizia PDG 28/10/2009 Subalterno 2 COEFFICIENTI Coefficiente di piano 1,000 Coefficiente di locazione 1,000 Coefficiente di Usufrutto 1,000 Coefficiente di posizione 1,000 rispetto al centro urbano Coefficiente di età 0,800 Coefficiente di qualità 0,950 Coefficiente di manutenzione 0,950 Coefficiente conseg",
+          "window_word_count": 69,
+          "section_hint": "Coefficiente di locazione",
+          "is_table_like": false,
+          "is_heading_like": false,
+          "authority_score": 9.0,
+          "contradiction_group": "VERIFY",
+          "ocr_noise_hint": null,
+          "speculative": false,
+          "quote": "Coefficiente di locazione",
+          "evidence": [
+            {
+              "page": 21,
+              "quote": "Coefficiente di locazione",
+              "start_offset": 245,
+              "end_offset": 270,
+              "bbox": null,
+              "offset_mode": "PAGE_LOCAL",
+              "page_text_hash": "be0bc88c4042e566eb8de2bf99a949d5a0452e1aaf6caa38fbee594616173370",
+              "search_hint": "locazione"
+            }
+          ]
+        }
+      ]
+    },
+    "delivery_timeline": {
+      "value": null,
+      "status": "NOT_FOUND",
+      "confidence": 0.0,
+      "evidence": [],
+      "searched_in": [
+        {
+          "page": 12,
+          "quote": "relative. Intimavano di dar corso a tali opere entro otto giorni, in quanto i\nristagni d'acqua negli scavi causavano inconvenienti igienici. Invitavano inoltre al",
+          "start_offset": 1852,
+          "end_offset": 1972,
+          "bbox": null,
+          "offset_mode": "PAGE_LOCAL",
+          "page_text_hash": "8821158efdc1b0f17dd0ca131320ef4b09112eab8907214c612ac0706445eb1d"
+        },
+        {
+          "page": 13,
+          "quote": "richiedente aveva reso noto di aver completato i lavori e di aver richiesto il\nsopralluogo per il rilascio della dichiarazione di abitabilità\nRelazione dell'Ufficio Tecnico del 27/11/1962 con cui veniva dato riscontro di un",
+          "start_offset": 731,
+          "end_offset": 851,
+          "bbox": null,
+          "offset_mode": "PAGE_LOCAL",
+          "page_text_hash": "6b82210eb8d6b6ef70efb713d8b714655a94a8c926d8179338a90f91e465dd9f"
+        }
+      ],
+      "user_prompt_it": null
+    },
+    "regolarita_urbanistica": {
+      "value": "PRESENTI DIFFORMITÀ",
+      "status": "FOUND",
+      "confidence": 0.9,
+      "evidence": [
+        {
+          "page": 13,
+          "quote": "sopralluogo eseguito dal tecnico, da cui non sono emerse irregolarità afferente",
+          "start_offset": 898,
+          "end_offset": 977,
+          "bbox": null,
+          "offset_mode": "PAGE_LOCAL",
+          "page_text_hash": "6b82210eb8d6b6ef70efb713d8b714655a94a8c926d8179338a90f91e465dd9f",
+          "search_hint": "irregolarità"
+        }
+      ],
+      "searched_in": [],
+      "user_prompt_it": null,
+      "review_required": false,
+      "needs_user_confirmation": false,
+      "resolver_meta": {
+        "resolver_version": "urbanistica_v1",
+        "resolver_confidence": 0.86,
+        "conflict_flag": false,
+        "candidate_count": 6
+      },
+      "conflicts": [],
+      "all_candidates": [
+        {
+          "value": "PRESENTI DIFFORMITÀ",
+          "status": "FOUND",
+          "score": 8.6,
+          "page": 13,
+          "match_text": "irregolarità",
+          "sentence_text": "edente aveva reso noto di aver completato i lavori e di aver richiesto il sopralluogo per il rilascio della dichiarazione di abitabilità Relazione dell'Ufficio Tecnico del 27/11/1962 con cui veniva dato riscontro di un sopralluogo eseguito dal tecnico, da cui non sono emerse irregolarità afferente all'occupazione di suolo pubblico e sulla posizione di parte delle fondazioni, dando descrizione delle prove di misurazione e controllo eseguite.",
+          "prev_sentence": "",
+          "next_sentence": "à prove di misurazione e controllo eses Comunicazione del 20/12/1963 pr",
+          "context_window_text": "edente aveva reso noto di aver completato i lavori e di aver richiesto il sopralluogo per il rilascio della dichiarazione di abitabilità Relazione dell'Ufficio Tecnico del 27/11/1962 con cui veniva dato riscontro di un sopralluogo eseguito dal tecnico, da cui non sono emerse irregolarità afferente all'occupazione di suolo pubblico e sulla posizione di parte delle fondazioni, dando descrizione delle prove di misurazione e controllo eseguite. à prove di misurazione e controllo eses Comunicazione del 20/12/1963 pr",
+          "window_word_count": 82,
+          "section_hint": "",
+          "is_table_like": false,
+          "is_heading_like": false,
+          "authority_score": 8.6,
+          "contradiction_group": "IRREGULAR",
+          "ocr_noise_hint": null,
+          "speculative": false,
+          "quote": "sopralluogo eseguito dal tecnico, da cui non sono emerse irregolarità afferente",
+          "evidence": [
+            {
+              "page": 13,
+              "quote": "sopralluogo eseguito dal tecnico, da cui non sono emerse irregolarità afferente",
+              "start_offset": 898,
+              "end_offset": 977,
+              "bbox": null,
+              "offset_mode": "PAGE_LOCAL",
+              "page_text_hash": "6b82210eb8d6b6ef70efb713d8b714655a94a8c926d8179338a90f91e465dd9f",
+              "search_hint": "irregolarità"
+            }
+          ]
+        },
+        {
+          "value": "PRESENTI DIFFORMITÀ",
+          "status": "FOUND",
+          "score": 7.1,
+          "page": 23,
+          "match_text": "difformità urbanistico",
+          "sentence_text": "altre limitazioni d'uso Spese per lo smaltimento di eventuali rifiuti dell'acquirente Onorari notarili e ↑ provvigioni mediatori a carico Spese di cancellazioni trascrizione ed iscrizioni a carico dell'acquirente Spese tecniche di regolazione difformità urbanistico edilizie Spese tecniche di regolazione Catastale Spese condominiali scadute e non pagate TOTALE Riduzione cautelativa Riduzione del valore del 15% per differenza tra oneri tributari su base catastale e reale e per assenza d",
+          "prev_sentence": "",
+          "next_sentence": "",
+          "context_window_text": "altre limitazioni d'uso Spese per lo smaltimento di eventuali rifiuti dell'acquirente Onorari notarili e ↑ provvigioni mediatori a carico Spese di cancellazioni trascrizione ed iscrizioni a carico dell'acquirente Spese tecniche di regolazione difformità urbanistico edilizie Spese tecniche di regolazione Catastale Spese condominiali scadute e non pagate TOTALE Riduzione cautelativa Riduzione del valore del 15% per differenza tra oneri tributari su base catastale e reale e per assenza d",
+          "window_word_count": 70,
+          "section_hint": "",
+          "is_table_like": false,
+          "is_heading_like": false,
+          "authority_score": 7.1,
+          "contradiction_group": "IRREGULAR",
+          "ocr_noise_hint": null,
+          "speculative": false,
+          "quote": "Spese tecniche di regolazione difformità urbanistico edilizie",
+          "evidence": [
+            {
+              "page": 23,
+              "quote": "Spese tecniche di regolazione difformità urbanistico edilizie",
+              "start_offset": 722,
+              "end_offset": 783,
+              "bbox": null,
+              "offset_mode": "PAGE_LOCAL",
+              "page_text_hash": "90d3d30a3293aac38725d85d50fe56e70b79989257b4dfe09cdfa3bb535ac169",
+              "search_hint": "difformità urbanistico"
+            }
+          ]
+        },
+        {
+          "value": "PRESENTI DIFFORMITÀ",
+          "status": "FOUND",
+          "score": 7.1,
+          "page": 22,
+          "match_text": "difformità urbanistico",
+          "sentence_text": "per lo smaltimento di eventuali rifiuti nessuna nessuna nessuna nessuna Onorari notarili e provvigioni mediatori a carico dell'acquirente Spese di cancellazioni trascrizione ed iscrizioni a carico dell'acquirente Spese tecniche di regolazione difformità urbanistico edilizie Spese tecniche di regolazione Catastale Spese condominiali scadute e non pagate negli ultimi due anni dalla data di trascrione del pignoramento TOTALE nessuna nessuna € 500,00 nessuna € 3.021,94 € 3.521,94 Riduz",
+          "prev_sentence": "",
+          "next_sentence": "",
+          "context_window_text": "per lo smaltimento di eventuali rifiuti nessuna nessuna nessuna nessuna Onorari notarili e provvigioni mediatori a carico dell'acquirente Spese di cancellazioni trascrizione ed iscrizioni a carico dell'acquirente Spese tecniche di regolazione difformità urbanistico edilizie Spese tecniche di regolazione Catastale Spese condominiali scadute e non pagate negli ultimi due anni dalla data di trascrione del pignoramento TOTALE nessuna nessuna € 500,00 nessuna € 3.021,94 € 3.521,94 Riduz",
+          "window_word_count": 70,
+          "section_hint": "",
+          "is_table_like": false,
+          "is_heading_like": false,
+          "authority_score": 7.1,
+          "contradiction_group": "IRREGULAR",
+          "ocr_noise_hint": null,
+          "speculative": false,
+          "quote": "Spese tecniche di regolazione difformità urbanistico edilizie",
+          "evidence": [
+            {
+              "page": 22,
+              "quote": "Spese tecniche di regolazione difformità urbanistico edilizie",
+              "start_offset": 641,
+              "end_offset": 702,
+              "bbox": null,
+              "offset_mode": "PAGE_LOCAL",
+              "page_text_hash": "0da0b70209d52f60abcbd72b796cf068af54130818b636018a9cef0811551ffe",
+              "search_hint": "difformità urbanistico"
+            }
+          ]
+        },
+        {
+          "value": "NON EMERGONO ABUSI",
+          "status": "FOUND",
+          "score": 5.4,
+          "page": 10,
+          "match_text": "regolarizzazione urbanistico",
+          "sentence_text": "della Giustizia PDG 28/10/2009 **** Oneri di regolarizzazione urbanistico-edilizio e catastale Conformità urbanistico-edilizia Le pratiche edilizie relative ai beni oggetto della presente relazione estimativa sono le seguenti:",
+          "prev_sentence": "elenco Min.",
+          "next_sentence": "Pratica n.",
+          "context_window_text": "Astalegale.net - E' vietata la stampa e la riproduzione dei documenti per fini di carattere commerciale. Pubblicazione eseguita giusta iscriz. elenco Min. della Giustizia PDG 28/10/2009 **** Oneri di regolarizzazione urbanistico-edilizio e catastale Conformità urbanistico-edilizia Le pratiche edilizie relative ai beni oggetto della presente relazione estimativa sono le seguenti: Pratica n. 52/1959 - - - Nulla osta del 22/04/1959 dei Vigili del Fuoco Prot. 1",
+          "window_word_count": 68,
+          "section_hint": "",
+          "is_table_like": false,
+          "is_heading_like": false,
+          "authority_score": 5.4,
+          "contradiction_group": "REGULAR",
+          "ocr_noise_hint": null,
+          "speculative": false,
+          "quote": "Oneri di regolarizzazione urbanistico-edilizio e catastale",
+          "evidence": [
+            {
+              "page": 10,
+              "quote": "Oneri di regolarizzazione urbanistico-edilizio e catastale",
+              "start_offset": 193,
+              "end_offset": 251,
+              "bbox": null,
+              "offset_mode": "PAGE_LOCAL",
+              "page_text_hash": "ab42e61a73a4d8ff84f5af41af7cd56972638bb54aeb10e394a1fafa52f88e1b",
+              "search_hint": "regolarizzazione urbanistico"
+            }
+          ]
+        },
+        {
+          "value": "NON EMERGONO ABUSI",
+          "status": "FOUND",
+          "score": 5.4,
+          "page": 10,
+          "match_text": "Conformità urbanistico",
+          "sentence_text": "della Giustizia PDG 28/10/2009 **** Oneri di regolarizzazione urbanistico-edilizio e catastale Conformità urbanistico-edilizia Le pratiche edilizie relative ai beni oggetto della presente relazione estimativa sono le seguenti:",
+          "prev_sentence": "elenco Min.",
+          "next_sentence": "Pratica n.",
+          "context_window_text": "ampa e la riproduzione dei documenti per fini di carattere commerciale. Pubblicazione eseguita giusta iscriz. elenco Min. della Giustizia PDG 28/10/2009 **** Oneri di regolarizzazione urbanistico-edilizio e catastale Conformità urbanistico-edilizia Le pratiche edilizie relative ai beni oggetto della presente relazione estimativa sono le seguenti: Pratica n. 52/1959 - - - Nulla osta del 22/04/1959 dei Vigili del Fuoco Prot. 14768. Comunicazione del Consorzi",
+          "window_word_count": 66,
+          "section_hint": "",
+          "is_table_like": false,
+          "is_heading_like": false,
+          "authority_score": 5.4,
+          "contradiction_group": "REGULAR",
+          "ocr_noise_hint": null,
+          "speculative": false,
+          "quote": "Conformità urbanistico-edilizia",
+          "evidence": [
+            {
+              "page": 10,
+              "quote": "Conformità urbanistico-edilizia",
+              "start_offset": 253,
+              "end_offset": 284,
+              "bbox": null,
+              "offset_mode": "PAGE_LOCAL",
+              "page_text_hash": "ab42e61a73a4d8ff84f5af41af7cd56972638bb54aeb10e394a1fafa52f88e1b",
+              "search_hint": "Conformità urbanistico"
+            }
+          ]
+        },
+        {
+          "value": "NON EMERGONO ABUSI",
+          "status": "FOUND",
+          "score": 4.56,
+          "page": 3,
+          "match_text": "regolarizzazione urbanistico",
+          "sentence_text": "Identificazione dei beni immobili oggetto della vendita Descrizione sommaria Attuali e precedenti proprietari Vincoli ed oneri giuridici Oneri di regolarizzazione urbanistico-edilizio e catastale one urbanistico-edilizio e catastale Altre informazioni per l'acquirente Descrizione analitica dei beni Valutazione complessiva dei beni Conclusioni 4 5 6 7 10 15 .17 19 23 Pagina 3",
+          "prev_sentence": "La relazione tecnica d'ufficio risulta così articolata:",
+          "next_sentence": "",
+          "context_window_text": "in data 08/05/2025: La relazione tecnica d'ufficio risulta così articolata: Identificazione dei beni immobili oggetto della vendita Descrizione sommaria Attuali e precedenti proprietari Vincoli ed oneri giuridici Oneri di regolarizzazione urbanistico-edilizio e catastale one urbanistico-edilizio e catastale Altre informazioni per l'acquirente Descrizione analitica dei beni Valutazione complessiva dei beni Conclusioni 4 5 6 7 10 15 .17 19 23 Pagina 3",
+          "window_word_count": 67,
+          "section_hint": "",
+          "is_table_like": false,
+          "is_heading_like": false,
+          "authority_score": 4.56,
+          "contradiction_group": "REGULAR",
+          "ocr_noise_hint": null,
+          "speculative": false,
+          "quote": "Oneri di regolarizzazione urbanistico-edilizio e catastale",
+          "evidence": [
+            {
+              "page": 3,
+              "quote": "Oneri di regolarizzazione urbanistico-edilizio e catastale",
+              "start_offset": 762,
+              "end_offset": 820,
+              "bbox": null,
+              "offset_mode": "PAGE_LOCAL",
+              "page_text_hash": "a9e51d038262c80e37656aae78d80d929b5e3985f8181957d9802c194b90f1fb",
+              "search_hint": "regolarizzazione urbanistico"
+            }
+          ]
+        }
+      ],
+      "chosen_candidate": {
+        "value": "PRESENTI DIFFORMITÀ",
+        "status": "FOUND",
+        "score": 8.6,
+        "page": 13,
+        "match_text": "irregolarità",
+        "sentence_text": "edente aveva reso noto di aver completato i lavori e di aver richiesto il sopralluogo per il rilascio della dichiarazione di abitabilità Relazione dell'Ufficio Tecnico del 27/11/1962 con cui veniva dato riscontro di un sopralluogo eseguito dal tecnico, da cui non sono emerse irregolarità afferente all'occupazione di suolo pubblico e sulla posizione di parte delle fondazioni, dando descrizione delle prove di misurazione e controllo eseguite.",
+        "prev_sentence": "",
+        "next_sentence": "à prove di misurazione e controllo eses Comunicazione del 20/12/1963 pr",
+        "context_window_text": "edente aveva reso noto di aver completato i lavori e di aver richiesto il sopralluogo per il rilascio della dichiarazione di abitabilità Relazione dell'Ufficio Tecnico del 27/11/1962 con cui veniva dato riscontro di un sopralluogo eseguito dal tecnico, da cui non sono emerse irregolarità afferente all'occupazione di suolo pubblico e sulla posizione di parte delle fondazioni, dando descrizione delle prove di misurazione e controllo eseguite. à prove di misurazione e controllo eses Comunicazione del 20/12/1963 pr",
+        "window_word_count": 82,
+        "section_hint": "",
+        "is_table_like": false,
+        "is_heading_like": false,
+        "authority_score": 8.6,
+        "contradiction_group": "IRREGULAR",
+        "ocr_noise_hint": null,
+        "speculative": false,
+        "quote": "sopralluogo eseguito dal tecnico, da cui non sono emerse irregolarità afferente",
+        "evidence": [
+          {
+            "page": 13,
+            "quote": "sopralluogo eseguito dal tecnico, da cui non sono emerse irregolarità afferente",
+            "start_offset": 898,
+            "end_offset": 977,
+            "bbox": null,
+            "offset_mode": "PAGE_LOCAL",
+            "page_text_hash": "6b82210eb8d6b6ef70efb713d8b714655a94a8c926d8179338a90f91e465dd9f",
+            "search_hint": "irregolarità"
+          }
+        ]
+      },
+      "top_candidates": [
+        {
+          "value": "PRESENTI DIFFORMITÀ",
+          "status": "FOUND",
+          "score": 8.6,
+          "page": 13,
+          "match_text": "irregolarità",
+          "sentence_text": "edente aveva reso noto di aver completato i lavori e di aver richiesto il sopralluogo per il rilascio della dichiarazione di abitabilità Relazione dell'Ufficio Tecnico del 27/11/1962 con cui veniva dato riscontro di un sopralluogo eseguito dal tecnico, da cui non sono emerse irregolarità afferente all'occupazione di suolo pubblico e sulla posizione di parte delle fondazioni, dando descrizione delle prove di misurazione e controllo eseguite.",
+          "prev_sentence": "",
+          "next_sentence": "à prove di misurazione e controllo eses Comunicazione del 20/12/1963 pr",
+          "context_window_text": "edente aveva reso noto di aver completato i lavori e di aver richiesto il sopralluogo per il rilascio della dichiarazione di abitabilità Relazione dell'Ufficio Tecnico del 27/11/1962 con cui veniva dato riscontro di un sopralluogo eseguito dal tecnico, da cui non sono emerse irregolarità afferente all'occupazione di suolo pubblico e sulla posizione di parte delle fondazioni, dando descrizione delle prove di misurazione e controllo eseguite. à prove di misurazione e controllo eses Comunicazione del 20/12/1963 pr",
+          "window_word_count": 82,
+          "section_hint": "",
+          "is_table_like": false,
+          "is_heading_like": false,
+          "authority_score": 8.6,
+          "contradiction_group": "IRREGULAR",
+          "ocr_noise_hint": null,
+          "speculative": false,
+          "quote": "sopralluogo eseguito dal tecnico, da cui non sono emerse irregolarità afferente",
+          "evidence": [
+            {
+              "page": 13,
+              "quote": "sopralluogo eseguito dal tecnico, da cui non sono emerse irregolarità afferente",
+              "start_offset": 898,
+              "end_offset": 977,
+              "bbox": null,
+              "offset_mode": "PAGE_LOCAL",
+              "page_text_hash": "6b82210eb8d6b6ef70efb713d8b714655a94a8c926d8179338a90f91e465dd9f",
+              "search_hint": "irregolarità"
+            }
+          ]
+        },
+        {
+          "value": "NON EMERGONO ABUSI",
+          "status": "FOUND",
+          "score": 5.4,
+          "page": 10,
+          "match_text": "regolarizzazione urbanistico",
+          "sentence_text": "della Giustizia PDG 28/10/2009 **** Oneri di regolarizzazione urbanistico-edilizio e catastale Conformità urbanistico-edilizia Le pratiche edilizie relative ai beni oggetto della presente relazione estimativa sono le seguenti:",
+          "prev_sentence": "elenco Min.",
+          "next_sentence": "Pratica n.",
+          "context_window_text": "Astalegale.net - E' vietata la stampa e la riproduzione dei documenti per fini di carattere commerciale. Pubblicazione eseguita giusta iscriz. elenco Min. della Giustizia PDG 28/10/2009 **** Oneri di regolarizzazione urbanistico-edilizio e catastale Conformità urbanistico-edilizia Le pratiche edilizie relative ai beni oggetto della presente relazione estimativa sono le seguenti: Pratica n. 52/1959 - - - Nulla osta del 22/04/1959 dei Vigili del Fuoco Prot. 1",
+          "window_word_count": 68,
+          "section_hint": "",
+          "is_table_like": false,
+          "is_heading_like": false,
+          "authority_score": 5.4,
+          "contradiction_group": "REGULAR",
+          "ocr_noise_hint": null,
+          "speculative": false,
+          "quote": "Oneri di regolarizzazione urbanistico-edilizio e catastale",
+          "evidence": [
+            {
+              "page": 10,
+              "quote": "Oneri di regolarizzazione urbanistico-edilizio e catastale",
+              "start_offset": 193,
+              "end_offset": 251,
+              "bbox": null,
+              "offset_mode": "PAGE_LOCAL",
+              "page_text_hash": "ab42e61a73a4d8ff84f5af41af7cd56972638bb54aeb10e394a1fafa52f88e1b",
+              "search_hint": "regolarizzazione urbanistico"
+            }
+          ]
+        }
+      ]
+    },
+    "conformita_catastale": {
+      "value": "CONFORME",
+      "status": "FOUND",
+      "confidence": 0.9,
+      "evidence": [
+        {
+          "page": 15,
+          "quote": "Conformità catastale",
+          "start_offset": 1163,
+          "end_offset": 1183,
+          "bbox": null,
+          "offset_mode": "PAGE_LOCAL",
+          "page_text_hash": "32c123b11b06bb89493fd2026ffc767d60d2bcde2ecd4caf4f379d378471dd95",
+          "search_hint": "Conformità catastale"
+        }
+      ],
+      "searched_in": [],
+      "user_prompt_it": null,
+      "review_required": false,
+      "needs_user_confirmation": false,
+      "resolver_meta": {
+        "resolver_version": "catastale_v1",
+        "resolver_confidence": 1.0,
+        "conflict_flag": false,
+        "candidate_count": 1
+      },
+      "conflicts": [],
+      "all_candidates": [
+        {
+          "value": "CONFORME",
+          "status": "FOUND",
+          "score": 11.0,
+          "page": 15,
+          "match_text": "Conformità catastale",
+          "sentence_text": "astale Conformità catastale ASTALEGALE.NET Le pratiche catastali relative ai beni oggetto della presente relazione estimativa sono le seguenti:",
+          "prev_sentence": "Per fornire un'accurata valutazione del bene e per le motivazioni esposte lo scrivente provvederà ad ogni modo ad inserire cautelativamente i costi di regolarizzazione necessari.",
+          "next_sentence": "Estratto di mappa:",
+          "context_window_text": "te a definire quanto esposto. Per fornire un'accurata valutazione del bene e per le motivazioni esposte lo scrivente provvederà ad ogni modo ad inserire cautelativamente i costi di regolarizzazione necessari. astale Conformità catastale ASTALEGALE.NET Le pratiche catastali relative ai beni oggetto della presente relazione estimativa sono le seguenti: Estratto di mappa: conforme Visura catastale: riportano correttamente i nominativi degli intestata",
+          "window_word_count": 62,
+          "section_hint": "Conformità catastale",
+          "is_table_like": false,
+          "is_heading_like": false,
+          "authority_score": 11.0,
+          "contradiction_group": "REGULAR",
+          "ocr_noise_hint": null,
+          "speculative": false,
+          "quote": "Conformità catastale",
+          "evidence": [
+            {
+              "page": 15,
+              "quote": "Conformità catastale",
+              "start_offset": 1163,
+              "end_offset": 1183,
+              "bbox": null,
+              "offset_mode": "PAGE_LOCAL",
+              "page_text_hash": "32c123b11b06bb89493fd2026ffc767d60d2bcde2ecd4caf4f379d378471dd95",
+              "search_hint": "Conformità catastale"
+            }
+          ]
+        }
+      ],
+      "chosen_candidate": {
+        "value": "CONFORME",
+        "status": "FOUND",
+        "score": 11.0,
+        "page": 15,
+        "match_text": "Conformità catastale",
+        "sentence_text": "astale Conformità catastale ASTALEGALE.NET Le pratiche catastali relative ai beni oggetto della presente relazione estimativa sono le seguenti:",
+        "prev_sentence": "Per fornire un'accurata valutazione del bene e per le motivazioni esposte lo scrivente provvederà ad ogni modo ad inserire cautelativamente i costi di regolarizzazione necessari.",
+        "next_sentence": "Estratto di mappa:",
+        "context_window_text": "te a definire quanto esposto. Per fornire un'accurata valutazione del bene e per le motivazioni esposte lo scrivente provvederà ad ogni modo ad inserire cautelativamente i costi di regolarizzazione necessari. astale Conformità catastale ASTALEGALE.NET Le pratiche catastali relative ai beni oggetto della presente relazione estimativa sono le seguenti: Estratto di mappa: conforme Visura catastale: riportano correttamente i nominativi degli intestata",
+        "window_word_count": 62,
+        "section_hint": "Conformità catastale",
+        "is_table_like": false,
+        "is_heading_like": false,
+        "authority_score": 11.0,
+        "contradiction_group": "REGULAR",
+        "ocr_noise_hint": null,
+        "speculative": false,
+        "quote": "Conformità catastale",
+        "evidence": [
+          {
+            "page": 15,
+            "quote": "Conformità catastale",
+            "start_offset": 1163,
+            "end_offset": 1183,
+            "bbox": null,
+            "offset_mode": "PAGE_LOCAL",
+            "page_text_hash": "32c123b11b06bb89493fd2026ffc767d60d2bcde2ecd4caf4f379d378471dd95",
+            "search_hint": "Conformità catastale"
+          }
+        ]
+      },
+      "top_candidates": [
+        {
+          "value": "CONFORME",
+          "status": "FOUND",
+          "score": 11.0,
+          "page": 15,
+          "match_text": "Conformità catastale",
+          "sentence_text": "astale Conformità catastale ASTALEGALE.NET Le pratiche catastali relative ai beni oggetto della presente relazione estimativa sono le seguenti:",
+          "prev_sentence": "Per fornire un'accurata valutazione del bene e per le motivazioni esposte lo scrivente provvederà ad ogni modo ad inserire cautelativamente i costi di regolarizzazione necessari.",
+          "next_sentence": "Estratto di mappa:",
+          "context_window_text": "te a definire quanto esposto. Per fornire un'accurata valutazione del bene e per le motivazioni esposte lo scrivente provvederà ad ogni modo ad inserire cautelativamente i costi di regolarizzazione necessari. astale Conformità catastale ASTALEGALE.NET Le pratiche catastali relative ai beni oggetto della presente relazione estimativa sono le seguenti: Estratto di mappa: conforme Visura catastale: riportano correttamente i nominativi degli intestata",
+          "window_word_count": 62,
+          "section_hint": "Conformità catastale",
+          "is_table_like": false,
+          "is_heading_like": false,
+          "authority_score": 11.0,
+          "contradiction_group": "REGULAR",
+          "ocr_noise_hint": null,
+          "speculative": false,
+          "quote": "Conformità catastale",
+          "evidence": [
+            {
+              "page": 15,
+              "quote": "Conformità catastale",
+              "start_offset": 1163,
+              "end_offset": 1183,
+              "bbox": null,
+              "offset_mode": "PAGE_LOCAL",
+              "page_text_hash": "32c123b11b06bb89493fd2026ffc767d60d2bcde2ecd4caf4f379d378471dd95",
+              "search_hint": "Conformità catastale"
+            }
+          ]
+        }
+      ]
+    },
+    "spese_condominiali_arretrate": {
+      "value": null,
+      "status": "NOT_FOUND",
+      "confidence": 0.0,
+      "evidence": [],
+      "searched_in": [
+        {
+          "page": 22,
+          "quote": "pese tecniche di regolazione Catastale\n\nSpese condominiali scadute e non pagate negli ultimi due anni\ndalla data di tras",
+          "start_offset": 704,
+          "end_offset": 824,
+          "bbox": null,
+          "offset_mode": "PAGE_LOCAL",
+          "page_text_hash": "0da0b70209d52f60abcbd72b796cf068af54130818b636018a9cef0811551ffe"
+        },
+        {
+          "page": 23,
+          "quote": "pese tecniche di regolazione Catastale\n\nSpese condominiali scadute e non pagate\n\nTOTALE\n\nRiduzione cautelativa\n\nRiduzion",
+          "start_offset": 786,
+          "end_offset": 906,
+          "bbox": null,
+          "offset_mode": "PAGE_LOCAL",
+          "page_text_hash": "90d3d30a3293aac38725d85d50fe56e70b79989257b4dfe09cdfa3bb535ac169"
+        }
+      ],
+      "user_prompt_it": "Verifica le spese condominiali arretrate nella perizia o presso l'amministratore."
+    },
+    "ape": {
+      "value": null,
+      "status": "NOT_FOUND",
+      "confidence": 0.0,
+      "evidence": [],
+      "searched_in": [
+        {
+          "page": 18,
+          "quote": "Battiscopa: zoccolino in gres\nSerramenti interni: porte con apertura ad anta in tamburato ed inserto in vetro\nsatinato. Porta di ingresso non blindata.",
+          "start_offset": 321,
+          "end_offset": 441,
+          "bbox": null,
+          "offset_mode": "PAGE_LOCAL",
+          "page_text_hash": "6dadc2980dd93856e38feabeccd29c0df47deb288605625cbf78297ca9a791cc"
+        }
+      ],
+      "user_prompt_it": null
+    },
+    "dichiarazione_impianto_elettrico": {
+      "value": "MENZIONE GENERICA SENZA DICHIARAZIONE",
+      "status": "LOW_CONFIDENCE",
+      "confidence": 0.45,
+      "evidence": [
+        {
+          "page": 18,
+          "quote": "Acqua calda sanitaria: è presente un boiler elettrico.",
+          "start_offset": 1150,
+          "end_offset": 1204,
+          "bbox": null,
+          "offset_mode": "PAGE_LOCAL",
+          "page_text_hash": "6dadc2980dd93856e38feabeccd29c0df47deb288605625cbf78297ca9a791cc",
+          "search_hint": "elettrico"
+        }
+      ],
+      "searched_in": [
+        {
+          "page": 1,
+          "quote": "Ricerca eseguita: impianto\\s+elettric\\w*, elettric\\w*, dichiarazione di conformità, certificato di conformità, certificazione impianto, non conforme, non a norma, da adeguare. Nessuna occorrenza trovata nel documento.",
+          "start_offset": 0,
+          "end_offset": 0,
+          "bbox": null,
+          "offset_mode": "PAGE_LOCAL",
+          "page_text_hash": null
+        }
+      ],
+      "user_prompt_it": null,
+      "review_required": false,
+      "needs_user_confirmation": false,
+      "resolver_meta": {
+        "resolver_version": "impianti_cert_v1",
+        "candidates_found": 0,
+        "generic_mentions_found": 3
+      },
+      "conflicts": [],
+      "all_candidates": [
+        {
+          "value": "MENZIONE GENERICA SENZA DICHIARAZIONE",
+          "page": 18,
+          "score": 1.6,
+          "status": "LOW_CONFIDENCE",
+          "speculative": true,
+          "match_text": "elettrico",
+          "sentence_text": "Acqua calda sanitaria: è presente un boiler elettrico.",
+          "prev_sentence": "",
+          "next_sentence": "",
+          "context_window_text": "utomatico. Conformità impianto di Riscaldamento: non verificabile. Conformità Linea distribuzione: non verificabile. Acqua calda sanitaria: è presente un boiler elettrico. Impianto citofonico E presente un impianto citofonico di cui non è stato possibile appurare il funzionamento. 18 Pagi",
+          "window_word_count": 38,
+          "quote": "Acqua calda sanitaria: è presente un boiler elettrico.",
+          "evidence": {
+            "page": 18,
+            "quote": "Acqua calda sanitaria: è presente un boiler elettrico.",
+            "start_offset": 1150,
+            "end_offset": 1204,
+            "bbox": null,
+            "offset_mode": "PAGE_LOCAL",
+            "page_text_hash": "6dadc2980dd93856e38feabeccd29c0df47deb288605625cbf78297ca9a791cc",
+            "search_hint": "elettrico"
+          },
+          "section_hint": "Acqua calda sanitaria: è presente un boiler elettrico.",
+          "is_table_like": false,
+          "is_heading_like": false,
+          "authority_score": 1.2,
+          "contradiction_group": "generic_mention",
+          "ocr_noise_hint": false
+        },
+        {
+          "value": "MENZIONE GENERICA SENZA DICHIARAZIONE",
+          "page": 18,
+          "score": 1.6,
+          "status": "LOW_CONFIDENCE",
+          "speculative": true,
+          "match_text": "elettriche",
+          "sentence_text": "BTicino; prese elettriche: BTicino; Conformità non verificabile.",
+          "prev_sentence": "Impianto elettrico: Impianto: non a vista; apparecchi di comando/interruttori:",
+          "next_sentence": "",
+          "context_window_text": ", tapparella. CARATTERISTICHE IMPIANTI Impianto elettrico: Impianto: non a vista; apparecchi di comando/interruttori: BTicino; prese elettriche: BTicino; Conformità non verificabile. Impianto idrosanitario: Impianto: non a vista; Conformità impianto di idrosanitario non verificabile. Apparecchi idr",
+          "window_word_count": 34,
+          "quote": "BTicino; prese elettriche: BTicino; Conformità non verificabile.",
+          "evidence": {
+            "page": 18,
+            "quote": "BTicino; prese elettriche: BTicino; Conformità non verificabile.",
+            "start_offset": 616,
+            "end_offset": 680,
+            "bbox": null,
+            "offset_mode": "PAGE_LOCAL",
+            "page_text_hash": "6dadc2980dd93856e38feabeccd29c0df47deb288605625cbf78297ca9a791cc",
+            "search_hint": "elettriche"
+          },
+          "section_hint": "Impianto elettrico: Impianto: non a vista; apparecchi di comando/interruttori:",
+          "is_table_like": false,
+          "is_heading_like": false,
+          "authority_score": 1.2,
+          "contradiction_group": "generic_mention",
+          "ocr_noise_hint": false
+        },
+        {
+          "value": "MENZIONE GENERICA SENZA DICHIARAZIONE",
+          "page": 18,
+          "score": 1.6,
+          "status": "LOW_CONFIDENCE",
+          "speculative": true,
+          "match_text": "Impianto elettrico",
+          "sentence_text": "Impianto elettrico: Impianto: non a vista; apparecchi di comando/interruttori:",
+          "prev_sentence": "",
+          "next_sentence": "BTicino; prese elettriche: BTicino; Conformità non verificabile.",
+          "context_window_text": "ato. Porta di ingresso non blindata. Serramenti esterni: legno, vetro semplice, tapparella. CARATTERISTICHE IMPIANTI Impianto elettrico: Impianto: non a vista; apparecchi di comando/interruttori: BTicino; prese elettriche: BTicino; Conformità non verificabile. Impianto idrosanitario: Impianto: non a vista; Confor",
+          "window_word_count": 37,
+          "quote": "Impianto elettrico: Impianto: non a vista; apparecchi di comando/interruttori:",
+          "evidence": {
+            "page": 18,
+            "quote": "Impianto elettrico: Impianto: non a vista; apparecchi di comando/interruttori:",
+            "start_offset": 537,
+            "end_offset": 615,
+            "bbox": null,
+            "offset_mode": "PAGE_LOCAL",
+            "page_text_hash": "6dadc2980dd93856e38feabeccd29c0df47deb288605625cbf78297ca9a791cc",
+            "search_hint": "Impianto elettrico"
+          },
+          "section_hint": "Impianto elettrico: Impianto: non a vista; apparecchi di comando/interruttori:",
+          "is_table_like": false,
+          "is_heading_like": true,
+          "authority_score": 1.2,
+          "contradiction_group": "generic_mention",
+          "ocr_noise_hint": false
+        }
+      ],
+      "chosen_candidate": {
+        "value": "MENZIONE GENERICA SENZA DICHIARAZIONE",
+        "page": 18,
+        "score": 1.6,
+        "status": "LOW_CONFIDENCE",
+        "speculative": true,
+        "match_text": "elettrico",
+        "sentence_text": "Acqua calda sanitaria: è presente un boiler elettrico.",
+        "prev_sentence": "",
+        "next_sentence": "",
+        "context_window_text": "utomatico. Conformità impianto di Riscaldamento: non verificabile. Conformità Linea distribuzione: non verificabile. Acqua calda sanitaria: è presente un boiler elettrico. Impianto citofonico E presente un impianto citofonico di cui non è stato possibile appurare il funzionamento. 18 Pagi",
+        "window_word_count": 38,
+        "quote": "Acqua calda sanitaria: è presente un boiler elettrico.",
+        "evidence": {
+          "page": 18,
+          "quote": "Acqua calda sanitaria: è presente un boiler elettrico.",
+          "start_offset": 1150,
+          "end_offset": 1204,
+          "bbox": null,
+          "offset_mode": "PAGE_LOCAL",
+          "page_text_hash": "6dadc2980dd93856e38feabeccd29c0df47deb288605625cbf78297ca9a791cc",
+          "search_hint": "elettrico"
+        },
+        "section_hint": "Acqua calda sanitaria: è presente un boiler elettrico.",
+        "is_table_like": false,
+        "is_heading_like": false,
+        "authority_score": 1.2,
+        "contradiction_group": "generic_mention",
+        "ocr_noise_hint": false
+      },
+      "top_candidates": [
+        {
+          "value": "MENZIONE GENERICA SENZA DICHIARAZIONE",
+          "page": 18,
+          "score": 1.6,
+          "status": "LOW_CONFIDENCE",
+          "speculative": true,
+          "match_text": "elettrico",
+          "sentence_text": "Acqua calda sanitaria: è presente un boiler elettrico.",
+          "prev_sentence": "",
+          "next_sentence": "",
+          "context_window_text": "utomatico. Conformità impianto di Riscaldamento: non verificabile. Conformità Linea distribuzione: non verificabile. Acqua calda sanitaria: è presente un boiler elettrico. Impianto citofonico E presente un impianto citofonico di cui non è stato possibile appurare il funzionamento. 18 Pagi",
+          "window_word_count": 38,
+          "quote": "Acqua calda sanitaria: è presente un boiler elettrico.",
+          "evidence": {
+            "page": 18,
+            "quote": "Acqua calda sanitaria: è presente un boiler elettrico.",
+            "start_offset": 1150,
+            "end_offset": 1204,
+            "bbox": null,
+            "offset_mode": "PAGE_LOCAL",
+            "page_text_hash": "6dadc2980dd93856e38feabeccd29c0df47deb288605625cbf78297ca9a791cc",
+            "search_hint": "elettrico"
+          },
+          "section_hint": "Acqua calda sanitaria: è presente un boiler elettrico.",
+          "is_table_like": false,
+          "is_heading_like": false,
+          "authority_score": 1.2,
+          "contradiction_group": "generic_mention",
+          "ocr_noise_hint": false
+        }
+      ]
+    },
+    "dichiarazione_impianto_idrico": {
+      "value": "MENZIONE GENERICA SENZA DICHIARAZIONE",
+      "status": "LOW_CONFIDENCE",
+      "confidence": 0.45,
+      "evidence": [
+        {
+          "page": 18,
+          "quote": "Acqua calda sanitaria: è presente un boiler elettrico.",
+          "start_offset": 1150,
+          "end_offset": 1204,
+          "bbox": null,
+          "offset_mode": "PAGE_LOCAL",
+          "page_text_hash": "6dadc2980dd93856e38feabeccd29c0df47deb288605625cbf78297ca9a791cc",
+          "search_hint": "Acqua calda sanitaria: è presente un boiler elettrico."
+        }
+      ],
+      "searched_in": [
+        {
+          "page": 12,
+          "quote": "relative. Intimavano di dar corso a tali opere entro otto giorni, in quanto i\nristagni d'acqua negli scavi causavano inconvenienti igienici. Invitavano inoltre al\nripristino del marciapiede manomesso durante gli scavi.",
+          "start_offset": 1883,
+          "end_offset": 2003,
+          "bbox": null,
+          "offset_mode": "PAGE_LOCAL",
+          "page_text_hash": "8821158efdc1b0f17dd0ca131320ef4b09112eab8907214c612ac0706445eb1d"
+        },
+        {
+          "page": 18,
+          "quote": "Conformità Linea distribuzione: non verificabile.\nAcqua calda sanitaria: è presente un boiler elettrico.\nImpianto citofonico E presente un impianto citofonico di cui non è stato possibile",
+          "start_offset": 1110,
+          "end_offset": 1230,
+          "bbox": null,
+          "offset_mode": "PAGE_LOCAL",
+          "page_text_hash": "6dadc2980dd93856e38feabeccd29c0df47deb288605625cbf78297ca9a791cc"
+        }
+      ],
+      "user_prompt_it": null,
+      "review_required": false,
+      "needs_user_confirmation": false,
+      "resolver_meta": {
+        "resolver_version": "impianti_cert_v1",
+        "candidates_found": 0,
+        "generic_mentions_found": 2
+      },
+      "conflicts": [],
+      "all_candidates": [
+        {
+          "value": "MENZIONE GENERICA SENZA DICHIARAZIONE",
+          "page": 18,
+          "score": 1.6,
+          "status": "LOW_CONFIDENCE",
+          "speculative": true,
+          "match_text": "Acqua",
+          "sentence_text": "Acqua calda sanitaria: è presente un boiler elettrico.",
+          "prev_sentence": "",
+          "next_sentence": "",
+          "context_window_text": "utomatico. Conformità impianto di Riscaldamento: non verificabile. Conformità Linea distribuzione: non verificabile. Acqua calda sanitaria: è presente un boiler elettrico. Impianto citofonico E presente un impianto citofonico di cui non è stato possibile appurare il funzionamento. 18 Pagi",
+          "window_word_count": 38,
+          "quote": "Acqua calda sanitaria: è presente un boiler elettrico.",
+          "evidence": {
+            "page": 18,
+            "quote": "Acqua calda sanitaria: è presente un boiler elettrico.",
+            "start_offset": 1150,
+            "end_offset": 1204,
+            "bbox": null,
+            "offset_mode": "PAGE_LOCAL",
+            "page_text_hash": "6dadc2980dd93856e38feabeccd29c0df47deb288605625cbf78297ca9a791cc",
+            "search_hint": "Acqua calda sanitaria: è presente un boiler elettrico."
+          },
+          "section_hint": "Acqua calda sanitaria: è presente un boiler elettrico.",
+          "is_table_like": false,
+          "is_heading_like": false,
+          "authority_score": 1.2,
+          "contradiction_group": "generic_mention",
+          "ocr_noise_hint": false
+        },
+        {
+          "value": "MENZIONE GENERICA SENZA DICHIARAZIONE",
+          "page": 12,
+          "score": 1.6,
+          "status": "LOW_CONFIDENCE",
+          "speculative": true,
+          "match_text": "acqua",
+          "sentence_text": "ristagni d'acqua negli scavi causavano inconvenienti igienici. Invitavano inoltre al",
+          "prev_sentence": "relative. Intimavano di dar corso a tali opere entro otto giorni, in quanto i",
+          "next_sentence": "",
+          "context_window_text": "e, senza inizio delle opere di fondazioni relative. Intimavano di dar corso a tali opere entro otto giorni, in quanto i ristagni d'acqua negli scavi causavano inconvenienti igienici. Invitavano inoltre al ripristino del marciapiede manomesso durante gli scavi. Pagina 12",
+          "window_word_count": 40,
+          "quote": "ristagni d'acqua negli scavi causavano inconvenienti igienici. Invitavano inoltre al",
+          "evidence": {
+            "page": 12,
+            "quote": "ristagni d'acqua negli scavi causavano inconvenienti igienici. Invitavano inoltre al",
+            "start_offset": 1912,
+            "end_offset": 1996,
+            "bbox": null,
+            "offset_mode": "PAGE_LOCAL",
+            "page_text_hash": "8821158efdc1b0f17dd0ca131320ef4b09112eab8907214c612ac0706445eb1d",
+            "search_hint": "ristagni d'acqua negli scavi causavano inconvenienti igienici. Invitavano"
+          },
+          "section_hint": "ristagni d'acqua negli scavi causavano inconvenienti igienici. Invitavano inoltre al",
+          "is_table_like": false,
+          "is_heading_like": false,
+          "authority_score": 1.2,
+          "contradiction_group": "generic_mention",
+          "ocr_noise_hint": false
+        }
+      ],
+      "chosen_candidate": {
+        "value": "MENZIONE GENERICA SENZA DICHIARAZIONE",
+        "page": 18,
+        "score": 1.6,
+        "status": "LOW_CONFIDENCE",
+        "speculative": true,
+        "match_text": "Acqua",
+        "sentence_text": "Acqua calda sanitaria: è presente un boiler elettrico.",
+        "prev_sentence": "",
+        "next_sentence": "",
+        "context_window_text": "utomatico. Conformità impianto di Riscaldamento: non verificabile. Conformità Linea distribuzione: non verificabile. Acqua calda sanitaria: è presente un boiler elettrico. Impianto citofonico E presente un impianto citofonico di cui non è stato possibile appurare il funzionamento. 18 Pagi",
+        "window_word_count": 38,
+        "quote": "Acqua calda sanitaria: è presente un boiler elettrico.",
+        "evidence": {
+          "page": 18,
+          "quote": "Acqua calda sanitaria: è presente un boiler elettrico.",
+          "start_offset": 1150,
+          "end_offset": 1204,
+          "bbox": null,
+          "offset_mode": "PAGE_LOCAL",
+          "page_text_hash": "6dadc2980dd93856e38feabeccd29c0df47deb288605625cbf78297ca9a791cc",
+          "search_hint": "Acqua calda sanitaria: è presente un boiler elettrico."
+        },
+        "section_hint": "Acqua calda sanitaria: è presente un boiler elettrico.",
+        "is_table_like": false,
+        "is_heading_like": false,
+        "authority_score": 1.2,
+        "contradiction_group": "generic_mention",
+        "ocr_noise_hint": false
+      },
+      "top_candidates": [
+        {
+          "value": "MENZIONE GENERICA SENZA DICHIARAZIONE",
+          "page": 18,
+          "score": 1.6,
+          "status": "LOW_CONFIDENCE",
+          "speculative": true,
+          "match_text": "Acqua",
+          "sentence_text": "Acqua calda sanitaria: è presente un boiler elettrico.",
+          "prev_sentence": "",
+          "next_sentence": "",
+          "context_window_text": "utomatico. Conformità impianto di Riscaldamento: non verificabile. Conformità Linea distribuzione: non verificabile. Acqua calda sanitaria: è presente un boiler elettrico. Impianto citofonico E presente un impianto citofonico di cui non è stato possibile appurare il funzionamento. 18 Pagi",
+          "window_word_count": 38,
+          "quote": "Acqua calda sanitaria: è presente un boiler elettrico.",
+          "evidence": {
+            "page": 18,
+            "quote": "Acqua calda sanitaria: è presente un boiler elettrico.",
+            "start_offset": 1150,
+            "end_offset": 1204,
+            "bbox": null,
+            "offset_mode": "PAGE_LOCAL",
+            "page_text_hash": "6dadc2980dd93856e38feabeccd29c0df47deb288605625cbf78297ca9a791cc",
+            "search_hint": "Acqua calda sanitaria: è presente un boiler elettrico."
+          },
+          "section_hint": "Acqua calda sanitaria: è presente un boiler elettrico.",
+          "is_table_like": false,
+          "is_heading_like": false,
+          "authority_score": 1.2,
+          "contradiction_group": "generic_mention",
+          "ocr_noise_hint": false
+        }
+      ]
+    },
+    "dichiarazione_impianto_termico": {
+      "value": "MENZIONE GENERICA SENZA DICHIARAZIONE",
+      "status": "LOW_CONFIDENCE",
+      "confidence": 0.45,
+      "evidence": [
+        {
+          "page": 18,
+          "quote": "Conformità impianto di Riscaldamento: non verificabile.",
+          "start_offset": 1042,
+          "end_offset": 1097,
+          "bbox": null,
+          "offset_mode": "PAGE_LOCAL",
+          "page_text_hash": "6dadc2980dd93856e38feabeccd29c0df47deb288605625cbf78297ca9a791cc",
+          "search_hint": "Riscaldamento"
+        }
+      ],
+      "searched_in": [
+        {
+          "page": 1,
+          "quote": "Ricerca eseguita: impianto\\s+termic\\w*, termic\\w*, riscaldament\\w*, dichiarazione di conformità, certificato di conformità, certificazione impianto, non conforme, non a norma, da adeguare. Nessuna occorrenza trovata nel documento.",
+          "start_offset": 0,
+          "end_offset": 0,
+          "bbox": null,
+          "offset_mode": "PAGE_LOCAL",
+          "page_text_hash": null
+        }
+      ],
+      "user_prompt_it": null,
+      "review_required": false,
+      "needs_user_confirmation": false,
+      "resolver_meta": {
+        "resolver_version": "impianti_cert_v1",
+        "candidates_found": 0,
+        "generic_mentions_found": 3
+      },
+      "conflicts": [],
+      "all_candidates": [
+        {
+          "value": "MENZIONE GENERICA SENZA DICHIARAZIONE",
+          "page": 18,
+          "score": 1.6,
+          "status": "LOW_CONFIDENCE",
+          "speculative": true,
+          "match_text": "Riscaldamento",
+          "sentence_text": "Conformità impianto di Riscaldamento: non verificabile.",
+          "prev_sentence": "",
+          "next_sentence": "",
+          "context_window_text": "ralizzato Corpi scaldanti: tipologia: termosifoni in ghisa. Termostato: tipologia: a zona con termostato automatico. Conformità impianto di Riscaldamento: non verificabile. Conformità Linea distribuzione: non verificabile. Acqua calda sanitaria: è presente un boiler elettrico. Impianto ci",
+          "window_word_count": 35,
+          "quote": "Conformità impianto di Riscaldamento: non verificabile.",
+          "evidence": {
+            "page": 18,
+            "quote": "Conformità impianto di Riscaldamento: non verificabile.",
+            "start_offset": 1042,
+            "end_offset": 1097,
+            "bbox": null,
+            "offset_mode": "PAGE_LOCAL",
+            "page_text_hash": "6dadc2980dd93856e38feabeccd29c0df47deb288605625cbf78297ca9a791cc",
+            "search_hint": "Riscaldamento"
+          },
+          "section_hint": "Conformità impianto di Riscaldamento: non verificabile.",
+          "is_table_like": false,
+          "is_heading_like": false,
+          "authority_score": 1.2,
+          "contradiction_group": "generic_mention",
+          "ocr_noise_hint": false
+        },
+        {
+          "value": "MENZIONE GENERICA SENZA DICHIARAZIONE",
+          "page": 18,
+          "score": 1.6,
+          "status": "LOW_CONFIDENCE",
+          "speculative": true,
+          "match_text": "riscaldamento",
+          "sentence_text": "Impianto di riscaldamento Centralizzato",
+          "prev_sentence": "",
+          "next_sentence": "",
+          "context_window_text": "erificabile. Apparecchi idrosanitari: lavabo, wc, bidet, vasca, attacco lavatrice; lavabo, wc, bidet, vasca, attacco Impianto di riscaldamento Centralizzato Corpi scaldanti: tipologia: termosifoni in ghisa. Termostato: tipologia: a zona con termostato automatico. Conformit",
+          "window_word_count": 32,
+          "quote": "Impianto di riscaldamento Centralizzato",
+          "evidence": {
+            "page": 18,
+            "quote": "Impianto di riscaldamento Centralizzato",
+            "start_offset": 892,
+            "end_offset": 931,
+            "bbox": null,
+            "offset_mode": "PAGE_LOCAL",
+            "page_text_hash": "6dadc2980dd93856e38feabeccd29c0df47deb288605625cbf78297ca9a791cc",
+            "search_hint": "riscaldamento"
+          },
+          "section_hint": "Impianto di riscaldamento Centralizzato",
+          "is_table_like": false,
+          "is_heading_like": true,
+          "authority_score": 1.2,
+          "contradiction_group": "generic_mention",
+          "ocr_noise_hint": false
+        },
+        {
+          "value": "MENZIONE GENERICA SENZA DICHIARAZIONE",
+          "page": 13,
+          "score": 1.6,
+          "status": "LOW_CONFIDENCE",
+          "speculative": true,
+          "match_text": "riscaldamento",
+          "sentence_text": "fini antincendio dell'impianto di riscaldamento.",
+          "prev_sentence": "31/12/1962 prot. 16707, con cui i Vigili del Fuoco davano il proprio nulla osta a",
+          "next_sentence": "",
+          "context_window_text": "7650, protocollato il Comune in data 31/12/1962 prot. 16707, con cui i Vigili del Fuoco davano il proprio nulla osta a fini antincendio dell'impianto di riscaldamento. Relazione dell'Ufficio Tecnico del 04/01/1960 prot. 10800/962 in cui sono riepilogati precedenti comunicazioni emesse",
+          "window_word_count": 40,
+          "quote": "fini antincendio dell'impianto di riscaldamento.",
+          "evidence": {
+            "page": 13,
+            "quote": "fini antincendio dell'impianto di riscaldamento.",
+            "start_offset": 1455,
+            "end_offset": 1503,
+            "bbox": null,
+            "offset_mode": "PAGE_LOCAL",
+            "page_text_hash": "6b82210eb8d6b6ef70efb713d8b714655a94a8c926d8179338a90f91e465dd9f",
+            "search_hint": "riscaldamento"
+          },
+          "section_hint": "fini antincendio dell'impianto di riscaldamento.",
+          "is_table_like": false,
+          "is_heading_like": false,
+          "authority_score": 1.2,
+          "contradiction_group": "generic_mention",
+          "ocr_noise_hint": false
+        }
+      ],
+      "chosen_candidate": {
+        "value": "MENZIONE GENERICA SENZA DICHIARAZIONE",
+        "page": 18,
+        "score": 1.6,
+        "status": "LOW_CONFIDENCE",
+        "speculative": true,
+        "match_text": "Riscaldamento",
+        "sentence_text": "Conformità impianto di Riscaldamento: non verificabile.",
+        "prev_sentence": "",
+        "next_sentence": "",
+        "context_window_text": "ralizzato Corpi scaldanti: tipologia: termosifoni in ghisa. Termostato: tipologia: a zona con termostato automatico. Conformità impianto di Riscaldamento: non verificabile. Conformità Linea distribuzione: non verificabile. Acqua calda sanitaria: è presente un boiler elettrico. Impianto ci",
+        "window_word_count": 35,
+        "quote": "Conformità impianto di Riscaldamento: non verificabile.",
+        "evidence": {
+          "page": 18,
+          "quote": "Conformità impianto di Riscaldamento: non verificabile.",
+          "start_offset": 1042,
+          "end_offset": 1097,
+          "bbox": null,
+          "offset_mode": "PAGE_LOCAL",
+          "page_text_hash": "6dadc2980dd93856e38feabeccd29c0df47deb288605625cbf78297ca9a791cc",
+          "search_hint": "Riscaldamento"
+        },
+        "section_hint": "Conformità impianto di Riscaldamento: non verificabile.",
+        "is_table_like": false,
+        "is_heading_like": false,
+        "authority_score": 1.2,
+        "contradiction_group": "generic_mention",
+        "ocr_noise_hint": false
+      },
+      "top_candidates": [
+        {
+          "value": "MENZIONE GENERICA SENZA DICHIARAZIONE",
+          "page": 18,
+          "score": 1.6,
+          "status": "LOW_CONFIDENCE",
+          "speculative": true,
+          "match_text": "Riscaldamento",
+          "sentence_text": "Conformità impianto di Riscaldamento: non verificabile.",
+          "prev_sentence": "",
+          "next_sentence": "",
+          "context_window_text": "ralizzato Corpi scaldanti: tipologia: termosifoni in ghisa. Termostato: tipologia: a zona con termostato automatico. Conformità impianto di Riscaldamento: non verificabile. Conformità Linea distribuzione: non verificabile. Acqua calda sanitaria: è presente un boiler elettrico. Impianto ci",
+          "window_word_count": 35,
+          "quote": "Conformità impianto di Riscaldamento: non verificabile.",
+          "evidence": {
+            "page": 18,
+            "quote": "Conformità impianto di Riscaldamento: non verificabile.",
+            "start_offset": 1042,
+            "end_offset": 1097,
+            "bbox": null,
+            "offset_mode": "PAGE_LOCAL",
+            "page_text_hash": "6dadc2980dd93856e38feabeccd29c0df47deb288605625cbf78297ca9a791cc",
+            "search_hint": "Riscaldamento"
+          },
+          "section_hint": "Conformità impianto di Riscaldamento: non verificabile.",
+          "is_table_like": false,
+          "is_heading_like": false,
+          "authority_score": 1.2,
+          "contradiction_group": "generic_mention",
+          "ocr_noise_hint": false
+        }
+      ]
+    },
+    "dichiarazione_impianto_gas": {
+      "value": null,
+      "status": "NOT_FOUND",
+      "confidence": 0.0,
+      "evidence": [],
+      "searched_in": [
+        {
+          "page": 1,
+          "quote": "Ricerca eseguita: impianto\\s+gas, gas, dichiarazione di conformità, certificato di conformità, certificazione impianto, non conforme, non a norma, da adeguare. Nessuna occorrenza trovata nel documento.",
+          "start_offset": 0,
+          "end_offset": 0,
+          "bbox": null,
+          "offset_mode": "PAGE_LOCAL",
+          "page_text_hash": null
+        }
+      ],
+      "user_prompt_it": null
+    },
+    "agibilita": {
+      "value": null,
+      "status": "NOT_FOUND",
+      "confidence": 0.0,
+      "evidence": [],
+      "searched_in": [
+        {
+          "page": 13,
+          "quote": "proprio nulla osta a fini antincendio alla agibilità.\nComunicazione del 24/12/1963 prot. 7650, protocollato il Comune in data",
+          "start_offset": 1248,
+          "end_offset": 1368,
+          "bbox": null,
+          "offset_mode": "PAGE_LOCAL",
+          "page_text_hash": "6b82210eb8d6b6ef70efb713d8b714655a94a8c926d8179338a90f91e465dd9f"
+        },
+        {
+          "page": 14,
+          "quote": "Prot. 11011, con allegate dichiarazioni di conformità impiantistiche.\nRichiesta di Certificato di agibilità del 04/05/2006\nComunicazione RUP per la richiesta di certificato di agibilità del 10/05/2006 prot.",
+          "start_offset": 509,
+          "end_offset": 629,
+          "bbox": null,
+          "offset_mode": "PAGE_LOCAL",
+          "page_text_hash": "c83c28fc2fa49f431c46beb8d5481eb381172fd355309153e959c617b8050b04"
+        }
+      ],
+      "user_prompt_it": null
+    },
+    "dati_asta": {
+      "value": null,
+      "status": "NOT_FOUND",
+      "confidence": 0.0,
+      "evidence": [],
+      "searched_in": [
+        {
+          "page": 1,
+          "quote": "Repertorio 20679/13463 del 19/10/2016, ATTO TRA VIVI - COMPRAVENDITA.\nRegime Patrimoniale: legalmente separata\nIscrizioni\n-\n3 - ISCRIZIONI E TRASCRIZIONI PREGIUDIZIEVOLI",
+          "start_offset": 999,
+          "end_offset": 1119,
+          "bbox": null,
+          "offset_mode": "PAGE_LOCAL",
+          "page_text_hash": "febc4163499ecdaf98d2b8f776940c01a7bca75fc3285a15bd7ebd0ca8f5e35b"
+        },
+        {
+          "page": 3,
+          "quote": "Identificazione dei beni immobili oggetto della vendita\nDescrizione sommaria\nAttuali e precedenti proprietari\nVincoli ed oneri giuridici",
+          "start_offset": 629,
+          "end_offset": 749,
+          "bbox": null,
+          "offset_mode": "PAGE_LOCAL",
+          "page_text_hash": "a9e51d038262c80e37656aae78d80d929b5e3985f8181957d9802c194b90f1fb"
+        },
+        {
+          "page": 4,
+          "quote": "Identificazione dei beni immobili oggetto della vendita\nAll'interno dell'atto di pignoramento è inserita la seguente descrizione dei beni,",
+          "start_offset": 201,
+          "end_offset": 321,
+          "bbox": null,
+          "offset_mode": "PAGE_LOCAL",
+          "page_text_hash": "2d2ba15bb86f7258e0078bf1d70958aa91318630a5a906bf86b0e54b55cadb16"
+        }
+      ],
+      "user_prompt_it": null
+    },
+    "formalita_pregiudizievoli": {
+      "value": "PRESENTI FORMALITÀ",
+      "status": "FOUND",
+      "confidence": 0.9,
+      "evidence": [
+        {
+          "page": 1,
+          "quote": "in forza di TRASCRIZIONE A FAVORE del 02/11/2016 - Registro",
+          "start_offset": 857,
+          "end_offset": 916,
+          "bbox": null,
+          "offset_mode": "PAGE_LOCAL",
+          "page_text_hash": "febc4163499ecdaf98d2b8f776940c01a7bca75fc3285a15bd7ebd0ca8f5e35b",
+          "search_hint": "in forza di TRASCRIZIONE A FAVORE del 02/11/2016 - Registro"
+        }
+      ],
+      "searched_in": [],
+      "user_prompt_it": null
+    }
+  },
+  "dati_certi_del_lotto": {
+    "prezzo_base_asta": {
+      "value": 2.0,
+      "formatted": "€2",
+      "evidence": [
+        {
+          "page": 22,
+          "quote": "PREZZO ABASED'ASTA DELL'IMMOBILE (Subalterno 2)",
+          "start_offset": 1190,
+          "end_offset": 1239,
+          "bbox": null,
+          "offset_mode": "PAGE_LOCAL",
+          "page_text_hash": "0da0b70209d52f60abcbd72b796cf068af54130818b636018a9cef0811551ffe",
+          "search_hint": "PREZZO ABASED'ASTA DELL'IMMOBILE (Subalterno 2"
+        }
+      ]
+    },
+    "superficie_catastale": {
+      "value": "NON SPECIFICATO IN PERIZIA",
+      "evidence": []
+    },
+    "catasto": {
+      "categoria": "NON SPECIFICATO IN PERIZIA",
+      "classe": "NON SPECIFICATO IN PERIZIA",
+      "vani": "NON SPECIFICATO IN PERIZIA"
+    },
+    "diritto_reale": {
+      "value": "Proprietà",
+      "evidence": [
+        {
+          "page": 1,
+          "quote": "Proprietà",
+          "start_offset": 836,
+          "end_offset": 845,
+          "bbox": null,
+          "offset_mode": "PAGE_LOCAL",
+          "page_text_hash": "febc4163499ecdaf98d2b8f776940c01a7bca75fc3285a15bd7ebd0ca8f5e35b",
+          "search_hint": "Proprietà"
+        }
+      ]
+    },
+    "superficie": {
+      "value": "59 mq",
+      "evidence": [
+        {
+          "page": 1,
+          "quote": "Categoria: A/2; Classe: 3; Consistenza: 3,5 vani; Superficie Catastale: 59 mq (Totale",
+          "start_offset": 706,
+          "end_offset": 733,
+          "bbox": null,
+          "offset_mode": "PAGE_LOCAL",
+          "page_text_hash": "febc4163499ecdaf98d2b8f776940c01a7bca75fc3285a15bd7ebd0ca8f5e35b",
+          "search_hint": "Superficie Catastale: 59 mq"
+        }
+      ]
+    },
+    "quota": {
+      "value": "02/11",
+      "evidence": [
+        {
+          "page": 1,
+          "quote": "Proprietà",
+          "start_offset": 836,
+          "end_offset": 845,
+          "bbox": null,
+          "offset_mode": "PAGE_LOCAL",
+          "page_text_hash": "febc4163499ecdaf98d2b8f776940c01a7bca75fc3285a15bd7ebd0ca8f5e35b",
+          "search_hint": "Proprietà"
+        }
+      ]
+    }
+  },
+  "document_quality": {
+    "status": "NEEDS_OCR",
+    "reason": "A significant portion of pages likely needs OCR due to low readability signals.",
+    "pages_total": 24,
+    "pages_needing_ocr": [
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7,
+      8,
+      9,
+      10,
+      11,
+      12,
+      13,
+      14,
+      15,
+      16,
+      17,
+      18,
+      19,
+      20,
+      21,
+      22,
+      23,
+      24
+    ],
+    "thresholds": {
+      "page_needs_ocr": {
+        "word_count_lt": 30,
+        "chars_non_ws_lt": 200,
+        "alpha_ratio_lt": 0.3,
+        "garbage_ratio_gt": 0.25,
+        "fail_flags": [
+          "word_extract_failed",
+          "text_extract_failed"
+        ]
+      },
+      "document_status": {
+        "needs_ocr_ratio_gte": 0.35,
+        "needs_ocr_ratio_gte_with_images": 0.2,
+        "avg_image_count_per_page_gte": 1.0,
+        "unreadable_ratio_gte": 0.75,
+        "unreadable_median_word_count_lt": 10,
+        "unreadable_avg_alpha_ratio_lt": 0.15
+      }
+    },
+    "metrics_summary": {
+      "needs_ocr_pages_ratio": 1.0,
+      "avg_image_count_per_page": 1.0,
+      "median_word_count": 26,
+      "avg_alpha_ratio": 0.9
+    },
+    "customer_message_it": "Documento parzialmente leggibile in automatico (probabile scansione/immagini o qualità bassa). È consigliata OCR/revisione manuale.",
+    "customer_message_en": "Document appears only partially machine-readable (likely scan/images or low quality). OCR/manual review is recommended."
+  },
+  "semaforo_generale": {
+    "status": "AMBER",
+    "status_it": "ATTENZIONE",
+    "status_en": "CAUTION",
+    "reason_it": "Analisi automatica parziale - revisione manuale raccomandata",
+    "reason_en": "Partial automatic analysis - manual review recommended",
+    "evidence": [],
+    "top_blockers": [
+      {
+        "key": "opponibilita_occupazione",
+        "label_it": "Opponibilità occupazione",
+        "status": "LOW_CONFIDENCE",
+        "value": "DA VERIFICARE",
+        "evidence": [
+          {
+            "page": 21,
+            "quote": "Coefficiente di locazione",
+            "start_offset": 245,
+            "end_offset": 270,
+            "bbox": null,
+            "offset_mode": "PAGE_LOCAL",
+            "page_text_hash": "be0bc88c4042e566eb8de2bf99a949d5a0452e1aaf6caa38fbee594616173370",
+            "search_hint": "locazione"
+          }
+        ],
+        "searched_in": [
+          {
+            "page": 13,
+            "quote": "richiedente aveva reso noto di aver completato i lavori e di aver richiesto il\nsopralluogo per il rilascio della dichiarazione di abitabilità\nRelazione dell'Ufficio Tecnico del 27/11/1962 con cui veniva dato riscontro di un",
+            "start_offset": 731,
+            "end_offset": 851,
+            "bbox": null,
+            "offset_mode": "PAGE_LOCAL",
+            "page_text_hash": "6b82210eb8d6b6ef70efb713d8b714655a94a8c926d8179338a90f91e465dd9f"
+          },
+          {
+            "page": 21,
+            "quote": "Coefficiente di piano\n1,000\nCoefficiente di locazione\n1,000\nCoefficiente di Usufrutto\n1,000\nCoefficiente di posizione\n1,000",
+            "start_offset": 221,
+            "end_offset": 341,
+            "bbox": null,
+            "offset_mode": "PAGE_LOCAL",
+            "page_text_hash": "be0bc88c4042e566eb8de2bf99a949d5a0452e1aaf6caa38fbee594616173370"
+          }
+        ]
+      },
+      {
+        "key": "ape",
+        "label_it": "APE",
+        "status": "NOT_FOUND",
+        "value": "NON SPECIFICATO IN PERIZIA",
+        "evidence": [],
+        "searched_in": [
+          {
+            "page": 18,
+            "quote": "Battiscopa: zoccolino in gres\nSerramenti interni: porte con apertura ad anta in tamburato ed inserto in vetro\nsatinato. Porta di ingresso non blindata.",
+            "start_offset": 321,
+            "end_offset": 441,
+            "bbox": null,
+            "offset_mode": "PAGE_LOCAL",
+            "page_text_hash": "6dadc2980dd93856e38feabeccd29c0df47deb288605625cbf78297ca9a791cc"
+          }
+        ]
+      },
+      {
+        "key": "dati_asta",
+        "label_it": "Dati asta",
+        "status": "NOT_FOUND",
+        "value": "NON SPECIFICATO IN PERIZIA",
+        "evidence": [],
+        "searched_in": [
+          {
+            "page": 1,
+            "quote": "Repertorio 20679/13463 del 19/10/2016, ATTO TRA VIVI - COMPRAVENDITA.\nRegime Patrimoniale: legalmente separata\nIscrizioni\n-\n3 - ISCRIZIONI E TRASCRIZIONI PREGIUDIZIEVOLI",
+            "start_offset": 999,
+            "end_offset": 1119,
+            "bbox": null,
+            "offset_mode": "PAGE_LOCAL",
+            "page_text_hash": "febc4163499ecdaf98d2b8f776940c01a7bca75fc3285a15bd7ebd0ca8f5e35b"
+          },
+          {
+            "page": 3,
+            "quote": "Identificazione dei beni immobili oggetto della vendita\nDescrizione sommaria\nAttuali e precedenti proprietari\nVincoli ed oneri giuridici",
+            "start_offset": 629,
+            "end_offset": 749,
+            "bbox": null,
+            "offset_mode": "PAGE_LOCAL",
+            "page_text_hash": "a9e51d038262c80e37656aae78d80d929b5e3985f8181957d9802c194b90f1fb"
+          },
+          {
+            "page": 4,
+            "quote": "Identificazione dei beni immobili oggetto della vendita\nAll'interno dell'atto di pignoramento è inserita la seguente descrizione dei beni,",
+            "start_offset": 201,
+            "end_offset": 321,
+            "bbox": null,
+            "offset_mode": "PAGE_LOCAL",
+            "page_text_hash": "2d2ba15bb86f7258e0078bf1d70958aa91318630a5a906bf86b0e54b55cadb16"
+          }
+        ]
+      },
+      {
+        "key": "delivery_timeline",
+        "label_it": "Tempistica liberazione",
+        "status": "NOT_FOUND",
+        "value": "NON SPECIFICATO IN PERIZIA",
+        "evidence": [],
+        "searched_in": [
+          {
+            "page": 12,
+            "quote": "relative. Intimavano di dar corso a tali opere entro otto giorni, in quanto i\nristagni d'acqua negli scavi causavano inconvenienti igienici. Invitavano inoltre al",
+            "start_offset": 1852,
+            "end_offset": 1972,
+            "bbox": null,
+            "offset_mode": "PAGE_LOCAL",
+            "page_text_hash": "8821158efdc1b0f17dd0ca131320ef4b09112eab8907214c612ac0706445eb1d"
+          },
+          {
+            "page": 13,
+            "quote": "richiedente aveva reso noto di aver completato i lavori e di aver richiesto il\nsopralluogo per il rilascio della dichiarazione di abitabilità\nRelazione dell'Ufficio Tecnico del 27/11/1962 con cui veniva dato riscontro di un",
+            "start_offset": 731,
+            "end_offset": 851,
+            "bbox": null,
+            "offset_mode": "PAGE_LOCAL",
+            "page_text_hash": "6b82210eb8d6b6ef70efb713d8b714655a94a8c926d8179338a90f91e465dd9f"
+          }
+        ]
+      }
+    ]
+  },
+  "summary_for_client": {
+    "summary_it": "Documento parzialmente leggibile. Semaforo AMBER: revisione manuale raccomandata. Verificare Opponibilità occupazione e recuperare APE da perizia o allegati. Prossimo passo: eseguire OCR o verifica manuale delle pagine poco leggibili.",
+    "summary_en": "Partially readable document. Traffic light AMBER: manual review recommended. Check Occupancy opposability and retrieve APE from appraisal or attachments. Next step: run OCR or manually review the poorly readable pages.",
+    "disclaimer_it": "Documento informativo. Non costituisce consulenza legale. Consultare un professionista qualificato.",
+    "disclaimer_en": "Informational document. Not legal advice. Consult a qualified professional.",
+    "generation_mode": "llm_canonical_bundle"
+  },
+  "lots": [
+    {
+      "lot_number": 1,
+      "prezzo_base_eur": "TBD",
+      "prezzo_base_value": null,
+      "ubicazione": "il 30% della superficie delle terrazze/balconi (a seconda della loro ubicazione e comunque sono definite così solo se sono più larghe di ml. 1,20 tali cioè da",
+      "superficie_mq": "TBD",
+      "superficie_catastale": null,
+      "diritto_reale": "TBD",
+      "quota": null,
+      "shared_rights_note": null,
+      "detail_scope": "LOT",
+      "evidence": {
+        "lotto": [],
+        "prezzo_base": [],
+        "ubicazione": [
+          {
+            "page": 19,
+            "quote": "il 30% della superficie delle terrazze/balconi (a seconda della loro ubicazione e\ncomunque sono definite così solo se sono più larghe di ml. 1,20 tali cioè da",
+            "start_offset": 1172,
+            "end_offset": 1189,
+            "bbox": null,
+            "offset_mode": "PAGE_LOCAL",
+            "page_text_hash": "edb5f3e3c62580b3868dbef13cb9a0cd992b98e85b48cba2799ea3f947c74ae9",
+            "search_hint": "ubicazione e comu"
+          }
+        ],
+        "superficie": [],
+        "superficie_catastale": [],
+        "diritto_reale": [],
+        "quota": [],
+        "shared_rights_note": [],
+        "tipologia": [],
+        "valore_stima": [],
+        "deprezzamento": []
+      },
+      "beni": []
+    }
+  ],
+  "lots_count": 1,
+  "is_multi_lot": false,
+  "money_box": {
+    "items": [
+      {
+        "code": "A",
+        "label_it": "Regolarizzazione urbanistica",
+        "label_en": "Urban regularization",
+        "type": "TBD",
+        "stima_euro": "TBD",
+        "stima_nota": "TBD (NON SPECIFICATO IN PERIZIA) — Verifica tecnico",
+        "fonte_perizia": {
+          "value": "Non specificato",
+          "evidence": []
+        },
+        "action_required_it": "Verificare con tecnico",
+        "action_required_en": "Verify with technician"
+      },
+      {
+        "code": "B",
+        "label_it": "Oneri tecnici / istruttoria",
+        "label_en": "Technical fees",
+        "type": "TBD",
+        "stima_euro": "TBD",
+        "stima_nota": "TBD (NON SPECIFICATO IN PERIZIA)",
+        "source": "TBD"
+      },
+      {
+        "code": "C",
+        "label_it": "Rischio ripristini",
+        "label_en": "Restoration risk",
+        "type": "TBD",
+        "stima_euro": "TBD",
+        "stima_nota": "TBD (NON SPECIFICATO IN PERIZIA)",
+        "fonte_perizia": {
+          "value": "Non specificato",
+          "evidence": []
+        },
+        "source": "TBD"
+      },
+      {
+        "code": "D",
+        "label_it": "Allineamento catastale",
+        "label_en": "Cadastral alignment",
+        "type": "TBD",
+        "stima_euro": "TBD",
+        "stima_nota": "TBD (NON SPECIFICATO IN PERIZIA)",
+        "source": "TBD"
+      },
+      {
+        "code": "E",
+        "label_it": "Spese condominiali arretrate",
+        "label_en": "Condo arrears",
+        "type": "TBD",
+        "stima_euro": "TBD",
+        "stima_nota": "NON SPECIFICATO IN PERIZIA",
+        "action_required_it": "Verificare con amministratore",
+        "action_required_en": "Verify with administrator",
+        "fonte_perizia": {
+          "value": "Non specificato in perizia",
+          "evidence": []
+        },
+        "source": "Non specificato in perizia"
+      },
+      {
+        "code": "F",
+        "label_it": "Costi procedura",
+        "label_en": "Procedure costs",
+        "type": "TBD",
+        "stima_euro": "TBD",
+        "stima_nota": "TBD (NON SPECIFICATO IN PERIZIA)",
+        "action_required_it": "Verificare con delegato",
+        "action_required_en": "Verify with delegate"
+      },
+      {
+        "code": "G",
+        "label_it": "Cancellazione formalità",
+        "label_en": "Formality cancellation",
+        "type": "INFO_ONLY",
+        "stima_euro": "TBD",
+        "stima_nota": "Da liquidare con decreto di trasferimento"
+      },
+      {
+        "code": "H",
+        "label_it": "Costo liberazione",
+        "label_en": "Liberation cost",
+        "type": "TBD",
+        "stima_euro": "TBD",
+        "stima_nota": "TBD (NON SPECIFICATO IN PERIZIA)",
+        "source": "TBD"
+      },
+      {
+        "code": "S3C01",
+        "label_it": "Costo rilevato da perizia",
+        "label_en": "Cost extracted from appraisal",
+        "type": "ESTIMATE",
+        "stima_euro": 2.0,
+        "stima_nota": "Deterministic candidate-based cost",
+        "fonte_perizia": {
+          "value": "Perizia",
+          "evidence": [
+            {
+              "page": 1,
+              "quote": "MPLESSIVA Valore al netto dei costi di regolarizzazione. Subalterno 2 € 56.861,33 € 53.339,39 Valore al netto dei costi di regolarizzazione",
+              "search_hint": "MPLESSIVA Valore al netto dei costi di regolarizzazione. Subalterno 2 €"
+            }
+          ]
+        },
+        "action_required_it": "Verifica documentale",
+        "action_required_en": "Document check",
+        "source": "step3_candidates",
+        "candidate_ids": [
+          "m_000001"
+        ]
+      },
+      {
+        "code": "S3C02",
+        "label_it": "Costo rilevato da perizia",
+        "label_en": "Cost extracted from appraisal",
+        "type": "ESTIMATE",
+        "stima_euro": 45338.48,
+        "stima_nota": "Deterministic candidate-based cost",
+        "fonte_perizia": {
+          "value": "Perizia",
+          "evidence": [
+            {
+              "page": 1,
+              "quote": "al netto dei costi di regolarizzazione e della riduzione cautelativa € 45.338,48 Pagina 1",
+              "search_hint": "al netto dei costi di regolarizzazione e della riduzione cautelativa € 45.338,48"
+            }
+          ]
+        },
+        "action_required_it": "Verifica documentale",
+        "action_required_en": "Document check",
+        "source": "step3_candidates",
+        "candidate_ids": [
+          "m_000003"
+        ]
+      },
+      {
+        "code": "S3C03",
+        "label_it": "Costo rilevato da perizia",
+        "label_en": "Cost extracted from appraisal",
+        "type": "ESTIMATE",
+        "stima_euro": 53339.39,
+        "stima_nota": "Deterministic candidate-based cost",
+        "fonte_perizia": {
+          "value": "Perizia",
+          "evidence": [
+            {
+              "page": 1,
+              "quote": "e al netto dei costi di regolarizzazione. Subalterno 2 € 56.861,33 € 53.339,39 Valore al netto dei costi di regolarizzazione e della riduzione caut",
+              "search_hint": "e al netto dei costi di regolarizzazione. Subalterno 2 € 56.861,33 € 53.339,39"
+            }
+          ]
+        },
+        "action_required_it": "Verifica documentale",
+        "action_required_en": "Document check",
+        "source": "step3_candidates",
+        "candidate_ids": [
+          "m_000004"
+        ]
+      },
+      {
+        "code": "S3C04",
+        "label_it": "Costo rilevato da perizia",
+        "label_en": "Cost extracted from appraisal",
+        "type": "ESTIMATE",
+        "stima_euro": 178.82,
+        "stima_nota": "Deterministic candidate-based cost",
+        "fonte_perizia": {
+          "value": "Perizia",
+          "evidence": [
+            {
+              "page": 16,
+              "quote": "nari Rate Versate Saldo esercizio corrente 8.245,36 € 1.326,29 € 178,82 € 9.750,47 € L'importo delle spese annue ammonta ad € 1.300,00 circa",
+              "search_hint": "nari Rate Versate Saldo esercizio corrente 8.245,36 € 1.326,29 € 178,82 €"
+            }
+          ]
+        },
+        "action_required_it": "Verifica documentale",
+        "action_required_en": "Document check",
+        "source": "step3_candidates",
+        "candidate_ids": [
+          "m_000007"
+        ]
+      },
+      {
+        "code": "S3C05",
+        "label_it": "Costo rilevato da perizia",
+        "label_en": "Cost extracted from appraisal",
+        "type": "ESTIMATE",
+        "stima_euro": 200.0,
+        "stima_nota": "Deterministic candidate-based cost",
+        "fonte_perizia": {
+          "value": "Perizia",
+          "evidence": [
+            {
+              "page": 16,
+              "quote": "cedente 912,25 € Spese gestione Rate Versate corrente 1.136,36 € 200,00 € Esercizio ordinario 2019-20 Saldo esercizio corrente 912,25 € Sa",
+              "search_hint": "cedente 912,25 € Spese gestione Rate Versate corrente 1.136,36 € 200,00 €"
+            }
+          ]
+        },
+        "action_required_it": "Verifica documentale",
+        "action_required_en": "Document check",
+        "source": "step3_candidates",
+        "candidate_ids": [
+          "m_000008"
+        ]
+      },
+      {
+        "code": "S3C06",
+        "label_it": "Costo rilevato da perizia",
+        "label_en": "Cost extracted from appraisal",
+        "type": "ESTIMATE",
+        "stima_euro": 365.08,
+        "stima_nota": "Deterministic candidate-based cost",
+        "fonte_perizia": {
+          "value": "Perizia",
+          "evidence": [
+            {
+              "page": 16,
+              "quote": "i Saldo esercizio Rate Versate corrente straordinari 1.151,75 € 365,08 € corrente 8.245,36 € Esercizio ordinario 2024-25 (ancora da approvar",
+              "search_hint": "i Saldo esercizio Rate Versate corrente straordinari 1.151,75 € 365,08 €"
+            }
+          ]
+        },
+        "action_required_it": "Verifica documentale",
+        "action_required_en": "Document check",
+        "source": "step3_candidates",
+        "candidate_ids": [
+          "m_000009"
+        ]
+      },
+      {
+        "code": "S3C07",
+        "label_it": "Costo rilevato da perizia",
+        "label_en": "Cost extracted from appraisal",
+        "type": "ESTIMATE",
+        "stima_euro": 500.0,
+        "stima_nota": "Deterministic candidate-based cost",
+        "fonte_perizia": {
+          "value": "Perizia",
+          "evidence": [
+            {
+              "page": 16,
+              "quote": "ercizio Rate Versate precedente corrente corrente € 2.636,52 € 500,00 € - 2.136,52 € Esercizio ordinario 2017-18 Saldo esercizio Spese ge",
+              "search_hint": "ercizio Rate Versate precedente corrente corrente € 2.636,52 € 500,00 € -"
+            }
+          ]
+        },
+        "action_required_it": "Verifica documentale",
+        "action_required_en": "Document check",
+        "source": "step3_candidates",
+        "candidate_ids": [
+          "m_000010"
+        ]
+      },
+      {
+        "code": "S3C08",
+        "label_it": "Costo rilevato da perizia",
+        "label_en": "Cost extracted from appraisal",
+        "type": "ESTIMATE",
+        "stima_euro": 912.25,
+        "stima_nota": "Deterministic candidate-based cost",
+        "fonte_perizia": {
+          "value": "Perizia",
+          "evidence": [
+            {
+              "page": 16,
+              "quote": "2.585,50 € Esercizio ordinario 2018-19 Saldo esercizio precedente 912,25 € Spese gestione Rate Versate corrente 1.136,36 € 200,00 € Eserci",
+              "search_hint": "2.585,50 € Esercizio ordinario 2018-19 Saldo esercizio precedente 912,25 € Spese"
+            }
+          ]
+        },
+        "action_required_it": "Verifica documentale",
+        "action_required_en": "Document check",
+        "source": "step3_candidates",
+        "candidate_ids": [
+          "m_000011"
+        ]
+      },
+      {
+        "code": "S3C09",
+        "label_it": "Costo rilevato da perizia",
+        "label_en": "Cost extracted from appraisal",
+        "type": "ESTIMATE",
+        "stima_euro": 912.25,
+        "stima_nota": "Deterministic candidate-based cost",
+        "fonte_perizia": {
+          "value": "Perizia",
+          "evidence": [
+            {
+              "page": 16,
+              "quote": "€ 200,00 € Esercizio ordinario 2019-20 Saldo esercizio corrente 912,25 € Saldo esercizio corrente 1.848,61 € Saldo esercizio Spese gestion",
+              "search_hint": "€ 200,00 € Esercizio ordinario 2019-20 Saldo esercizio corrente 912,25 € Saldo"
+            }
+          ]
+        },
+        "action_required_it": "Verifica documentale",
+        "action_required_en": "Document check",
+        "source": "step3_candidates",
+        "candidate_ids": [
+          "m_000012"
+        ]
+      },
+      {
+        "code": "S3C10",
+        "label_it": "Costo rilevato da perizia",
+        "label_en": "Cost extracted from appraisal",
+        "type": "ESTIMATE",
+        "stima_euro": 1136.36,
+        "stima_nota": "Deterministic candidate-based cost",
+        "fonte_perizia": {
+          "value": "Perizia",
+          "evidence": [
+            {
+              "page": 16,
+              "quote": "sercizio precedente 912,25 € Spese gestione Rate Versate corrente 1.136,36 € 200,00 € Esercizio ordinario 2019-20 Saldo esercizio corrente 91",
+              "search_hint": "sercizio precedente 912,25 € Spese gestione Rate Versate corrente 1.136,36 €"
+            }
+          ]
+        },
+        "action_required_it": "Verifica documentale",
+        "action_required_en": "Document check",
+        "source": "step3_candidates",
+        "candidate_ids": [
+          "m_000013"
+        ]
+      },
+      {
+        "code": "S3C11",
+        "label_it": "Costo rilevato da perizia",
+        "label_en": "Cost extracted from appraisal",
+        "type": "ESTIMATE",
+        "stima_euro": 1151.75,
+        "stima_nota": "Deterministic candidate-based cost",
+        "fonte_perizia": {
+          "value": "Perizia",
+          "evidence": [
+            {
+              "page": 16,
+              "quote": "aldo esercizi Saldo esercizio Rate Versate corrente straordinari 1.151,75 € 365,08 € corrente 8.245,36 € Esercizio ordinario 2024-25 (ancora d",
+              "search_hint": "aldo esercizi Saldo esercizio Rate Versate corrente straordinari 1.151,75 €"
+            }
+          ]
+        },
+        "action_required_it": "Verifica documentale",
+        "action_required_en": "Document check",
+        "source": "step3_candidates",
+        "candidate_ids": [
+          "m_000014"
+        ]
+      },
+      {
+        "code": "S3C12",
+        "label_it": "Costo rilevato da perizia",
+        "label_en": "Cost extracted from appraisal",
+        "type": "ESTIMATE",
+        "stima_euro": 1162.78,
+        "stima_nota": "Deterministic candidate-based cost",
+        "fonte_perizia": {
+          "value": "Perizia",
+          "evidence": [
+            {
+              "page": 16,
+              "quote": "ese gestione Saldo esercizio Versate Saldo Rate Versate corrente 1.162,78 € corrente zioJET 4.263,93 € Saldo esercizio precedente 4.263,93",
+              "search_hint": "ese gestione Saldo esercizio Versate Saldo Rate Versate corrente 1.162,78 €"
+            }
+          ]
+        },
+        "action_required_it": "Verifica documentale",
+        "action_required_en": "Document check",
+        "source": "step3_candidates",
+        "candidate_ids": [
+          "m_000015"
+        ]
+      },
+      {
+        "code": "S3C13",
+        "label_it": "Costo rilevato da perizia",
+        "label_en": "Cost extracted from appraisal",
+        "type": "ESTIMATE",
+        "stima_euro": 1194.74,
+        "stima_nota": "Deterministic candidate-based cost",
+        "fonte_perizia": {
+          "value": "Perizia",
+          "evidence": [
+            {
+              "page": 16,
+              "quote": "tione Saldo esercizio Rate Versate precedente 5.533,79 € corrente 1.194,74 € corrente 6.728,53 € Esercizio ordinario 2023-24 Saldo esercizio pr",
+              "search_hint": "tione Saldo esercizio Rate Versate precedente 5.533,79 € corrente 1.194,74 €"
+            }
+          ]
+        },
+        "action_required_it": "Verifica documentale",
+        "action_required_en": "Document check",
+        "source": "step3_candidates",
+        "candidate_ids": [
+          "m_000016"
+        ]
+      },
+      {
+        "code": "S3C14",
+        "label_it": "Costo rilevato da perizia",
+        "label_en": "Cost extracted from appraisal",
+        "type": "ESTIMATE",
+        "stima_euro": 1252.54,
+        "stima_nota": "Deterministic candidate-based cost",
+        "fonte_perizia": {
+          "value": "Perizia",
+          "evidence": [
+            {
+              "page": 16,
+              "quote": "ione Saldo esercizio Rate Versate precedente 1.848,61 € corrente 1.252,54 € corrente 3.101,15 € Saldo esercizio precedente 3.101,15 € Eserci",
+              "search_hint": "ione Saldo esercizio Rate Versate precedente 1.848,61 € corrente 1.252,54 €"
+            }
+          ]
+        },
+        "action_required_it": "Verifica documentale",
+        "action_required_en": "Document check",
+        "source": "step3_candidates",
+        "candidate_ids": [
+          "m_000017"
+        ]
+      },
+      {
+        "code": "S3C15",
+        "label_it": "Costo rilevato da perizia",
+        "label_en": "Cost extracted from appraisal",
+        "type": "ESTIMATE",
+        "stima_euro": 1269.86,
+        "stima_nota": "Deterministic candidate-based cost",
+        "fonte_perizia": {
+          "value": "Perizia",
+          "evidence": [
+            {
+              "page": 16,
+              "quote": "rio 2021-22 Spese gestione Saldo esercizio Rate Versate corrente 1.269,86 € corrente 5.533,79 € Esercizio ordinario 2022-23 Saldo esercizio S",
+              "search_hint": "rio 2021-22 Spese gestione Saldo esercizio Rate Versate corrente 1.269,86 €"
+            }
+          ]
+        },
+        "action_required_it": "Verifica documentale",
+        "action_required_en": "Document check",
+        "source": "step3_candidates",
+        "candidate_ids": [
+          "m_000018"
+        ]
+      },
+      {
+        "code": "S3C16",
+        "label_it": "Costo rilevato da perizia",
+        "label_en": "Cost extracted from appraisal",
+        "type": "ESTIMATE",
+        "stima_euro": 1300.0,
+        "stima_nota": "Deterministic candidate-based cost",
+        "fonte_perizia": {
+          "value": "Perizia",
+          "evidence": [
+            {
+              "page": 16,
+              "quote": "26,29 € 178,82 € 9.750,47 € L'importo delle spese annue ammonta ad € 1.300,00 circa Pagina 16",
+              "search_hint": "26,29 € 178,82 € 9.750,47 € L'importo delle spese annue ammonta ad € 1.300,00"
+            }
+          ]
+        },
+        "action_required_it": "Verifica documentale",
+        "action_required_en": "Document check",
+        "source": "step3_candidates",
+        "candidate_ids": [
+          "m_000019"
+        ]
+      },
+      {
+        "code": "S3C17",
+        "label_it": "Costo rilevato da perizia",
+        "label_en": "Cost extracted from appraisal",
+        "type": "ESTIMATE",
+        "stima_euro": 1326.29,
+        "stima_nota": "Deterministic candidate-based cost",
+        "fonte_perizia": {
+          "value": "Perizia",
+          "evidence": [
+            {
+              "page": 16,
+              "quote": "izi straordinari Rate Versate Saldo esercizio corrente 8.245,36 € 1.326,29 € 178,82 € 9.750,47 € L'importo delle spese annue ammonta ad € 1.300",
+              "search_hint": "izi straordinari Rate Versate Saldo esercizio corrente 8.245,36 € 1.326,29 €"
+            }
+          ]
+        },
+        "action_required_it": "Verifica documentale",
+        "action_required_en": "Document check",
+        "source": "step3_candidates",
+        "candidate_ids": [
+          "m_000020"
+        ]
+      },
+      {
+        "code": "S3C18",
+        "label_it": "Costo rilevato da perizia",
+        "label_en": "Cost extracted from appraisal",
+        "type": "ESTIMATE",
+        "stima_euro": 1361.23,
+        "stima_nota": "Deterministic candidate-based cost",
+        "fonte_perizia": {
+          "value": "Perizia",
+          "evidence": [
+            {
+              "page": 16,
+              "quote": "io Spese gestione Rate Versate precedente corrente 2.136,52 € - 1.361,23 € 2.585,50 € Esercizio ordinario 2018-19 Saldo esercizio precedente",
+              "search_hint": "io Spese gestione Rate Versate precedente corrente 2.136,52 € - 1.361,23 €"
+            }
+          ]
+        },
+        "action_required_it": "Verifica documentale",
+        "action_required_en": "Document check",
+        "source": "step3_candidates",
+        "candidate_ids": [
+          "m_000021"
+        ]
+      },
+      {
+        "code": "S3C19",
+        "label_it": "Costo rilevato da perizia",
+        "label_en": "Cost extracted from appraisal",
+        "type": "ESTIMATE",
+        "stima_euro": 1848.61,
+        "stima_nota": "Deterministic candidate-based cost",
+        "fonte_perizia": {
+          "value": "Perizia",
+          "evidence": [
+            {
+              "page": 16,
+              "quote": "19-20 Saldo esercizio corrente 912,25 € Saldo esercizio corrente 1.848,61 € Saldo esercizio Spese gestione Saldo esercizio Rate Versate prec",
+              "search_hint": "19-20 Saldo esercizio corrente 912,25 € Saldo esercizio corrente 1.848,61 €"
+            }
+          ]
+        },
+        "action_required_it": "Verifica documentale",
+        "action_required_en": "Document check",
+        "source": "step3_candidates",
+        "candidate_ids": [
+          "m_000022"
+        ]
+      },
+      {
+        "code": "S3C20",
+        "label_it": "Costo rilevato da perizia",
+        "label_en": "Cost extracted from appraisal",
+        "type": "ESTIMATE",
+        "stima_euro": 1848.61,
+        "stima_nota": "Deterministic candidate-based cost",
+        "fonte_perizia": {
+          "value": "Perizia",
+          "evidence": [
+            {
+              "page": 16,
+              "quote": "esercizio Spese gestione Saldo esercizio Rate Versate precedente 1.848,61 € corrente 1.252,54 € corrente 3.101,15 € Saldo esercizio precede",
+              "search_hint": "esercizio Spese gestione Saldo esercizio Rate Versate precedente 1.848,61 €"
+            }
+          ]
+        },
+        "action_required_it": "Verifica documentale",
+        "action_required_en": "Document check",
+        "source": "step3_candidates",
+        "candidate_ids": [
+          "m_000023"
+        ]
+      },
+      {
+        "code": "S3C21",
+        "label_it": "Costo rilevato da perizia",
+        "label_en": "Cost extracted from appraisal",
+        "type": "ESTIMATE",
+        "stima_euro": 2136.52,
+        "stima_nota": "Deterministic candidate-based cost",
+        "fonte_perizia": {
+          "value": "Perizia",
+          "evidence": [
+            {
+              "page": 16,
+              "quote": "Saldo esercizio Spese gestione Rate Versate precedente corrente 2.136,52 € - 1.361,23 € 2.585,50 € Esercizio ordinario 2018-19 Saldo eserciz",
+              "search_hint": "Saldo esercizio Spese gestione Rate Versate precedente corrente 2.136,52 € -"
+            }
+          ]
+        },
+        "action_required_it": "Verifica documentale",
+        "action_required_en": "Document check",
+        "source": "step3_candidates",
+        "candidate_ids": [
+          "m_000024"
+        ]
+      },
+      {
+        "code": "S3C22",
+        "label_it": "Costo rilevato da perizia",
+        "label_en": "Cost extracted from appraisal",
+        "type": "ESTIMATE",
+        "stima_euro": 2136.52,
+        "stima_nota": "Deterministic candidate-based cost",
+        "fonte_perizia": {
+          "value": "Perizia",
+          "evidence": [
+            {
+              "page": 16,
+              "quote": "e Versate precedente corrente corrente € 2.636,52 € 500,00 € - 2.136,52 € Esercizio ordinario 2017-18 Saldo esercizio Spese gestione Rate V",
+              "search_hint": "e Versate precedente corrente corrente € 2.636,52 € 500,00 € - 2.136,52 €"
+            }
+          ]
+        },
+        "action_required_it": "Verifica documentale",
+        "action_required_en": "Document check",
+        "source": "step3_candidates",
+        "candidate_ids": [
+          "m_000025"
+        ]
+      },
+      {
+        "code": "S3C23",
+        "label_it": "Costo rilevato da perizia",
+        "label_en": "Cost extracted from appraisal",
+        "type": "ESTIMATE",
+        "stima_euro": 2585.5,
+        "stima_nota": "Deterministic candidate-based cost",
+        "fonte_perizia": {
+          "value": "Perizia",
+          "evidence": [
+            {
+              "page": 16,
+              "quote": "stione Rate Versate precedente corrente 2.136,52 € - 1.361,23 € 2.585,50 € Esercizio ordinario 2018-19 Saldo esercizio precedente 912,25 € Sp",
+              "search_hint": "stione Rate Versate precedente corrente 2.136,52 € - 1.361,23 € 2.585,50 €"
+            }
+          ]
+        },
+        "action_required_it": "Verifica documentale",
+        "action_required_en": "Document check",
+        "source": "step3_candidates",
+        "candidate_ids": [
+          "m_000026"
+        ]
+      },
+      {
+        "code": "S3C24",
+        "label_it": "Costo rilevato da perizia",
+        "label_en": "Cost extracted from appraisal",
+        "type": "ESTIMATE",
+        "stima_euro": 2636.52,
+        "stima_nota": "Deterministic candidate-based cost",
+        "fonte_perizia": {
+          "value": "Perizia",
+          "evidence": [
+            {
+              "page": 16,
+              "quote": "ne Saldo esercizio Rate Versate precedente corrente corrente € 2.636,52 € 500,00 € - 2.136,52 € Esercizio ordinario 2017-18 Saldo esercizio",
+              "search_hint": "ne Saldo esercizio Rate Versate precedente corrente corrente € 2.636,52 € 500,00"
+            }
+          ]
+        },
+        "action_required_it": "Verifica documentale",
+        "action_required_en": "Document check",
+        "source": "step3_candidates",
+        "candidate_ids": [
+          "m_000027"
+        ]
+      },
+      {
+        "code": "S3C25",
+        "label_it": "Costo rilevato da perizia",
+        "label_en": "Cost extracted from appraisal",
+        "type": "ESTIMATE",
+        "stima_euro": 2636.52,
+        "stima_nota": "Deterministic candidate-based cost",
+        "fonte_perizia": {
+          "value": "Perizia",
+          "evidence": [
+            {
+              "page": 16,
+              "quote": "tione Saldo esercizio Rate Versate precedente corrente corrente € 2.636,52 € 500,00 € - 2.136,52 € Esercizio ordinario 2017-18 Saldo eserciz",
+              "search_hint": "tione Saldo esercizio Rate Versate precedente corrente corrente € 2.636,52 €"
+            }
+          ]
+        },
+        "action_required_it": "Verifica documentale",
+        "action_required_en": "Document check",
+        "source": "step3_candidates",
+        "candidate_ids": [
+          "m_000028"
+        ]
+      },
+      {
+        "code": "S3C26",
+        "label_it": "Costo rilevato da perizia",
+        "label_en": "Cost extracted from appraisal",
+        "type": "ESTIMATE",
+        "stima_euro": 3101.15,
+        "stima_nota": "Deterministic candidate-based cost",
+        "fonte_perizia": {
+          "value": "Perizia",
+          "evidence": [
+            {
+              "page": 16,
+              "quote": "Rate Versate precedente 1.848,61 € corrente 1.252,54 € corrente 3.101,15 € Saldo esercizio precedente 3.101,15 € Esercizio ordinario 2020-21",
+              "search_hint": "Rate Versate precedente 1.848,61 € corrente 1.252,54 € corrente 3.101,15 € Saldo"
+            }
+          ]
+        },
+        "action_required_it": "Verifica documentale",
+        "action_required_en": "Document check",
+        "source": "step3_candidates",
+        "candidate_ids": [
+          "m_000029"
+        ]
+      },
+      {
+        "code": "S3C27",
+        "label_it": "Costo rilevato da perizia",
+        "label_en": "Cost extracted from appraisal",
+        "type": "ESTIMATE",
+        "stima_euro": 3101.15,
+        "stima_nota": "Deterministic candidate-based cost",
+        "fonte_perizia": {
+          "value": "Perizia",
+          "evidence": [
+            {
+              "page": 16,
+              "quote": "rrente 1.252,54 € corrente 3.101,15 € Saldo esercizio precedente 3.101,15 € Esercizio ordinario 2020-21 Spese gestione Saldo esercizio Versat",
+              "search_hint": "rrente 1.252,54 € corrente 3.101,15 € Saldo esercizio precedente 3.101,15 €"
+            }
+          ]
+        },
+        "action_required_it": "Verifica documentale",
+        "action_required_en": "Document check",
+        "source": "step3_candidates",
+        "candidate_ids": [
+          "m_000030"
+        ]
+      },
+      {
+        "code": "S3C28",
+        "label_it": "Costo rilevato da perizia",
+        "label_en": "Cost extracted from appraisal",
+        "type": "ESTIMATE",
+        "stima_euro": 4263.93,
+        "stima_nota": "Deterministic candidate-based cost",
+        "fonte_perizia": {
+          "value": "Perizia",
+          "evidence": [
+            {
+              "page": 16,
+              "quote": ".162,78 € corrente zioJET 4.263,93 € Saldo esercizio precedente 4.263,93 € Esercizio ordinario 2021-22 Spese gestione Saldo esercizio Rate V",
+              "search_hint": ".162,78 € corrente zioJET 4.263,93 € Saldo esercizio precedente 4.263,93 €"
+            }
+          ]
+        },
+        "action_required_it": "Verifica documentale",
+        "action_required_en": "Document check",
+        "source": "step3_candidates",
+        "candidate_ids": [
+          "m_000031"
+        ]
+      },
+      {
+        "code": "S3C29",
+        "label_it": "Costo rilevato da perizia",
+        "label_en": "Cost extracted from appraisal",
+        "type": "ESTIMATE",
+        "stima_euro": 4263.93,
+        "stima_nota": "Deterministic candidate-based cost",
+        "fonte_perizia": {
+          "value": "Perizia",
+          "evidence": [
+            {
+              "page": 16,
+              "quote": "Versate Saldo Rate Versate corrente 1.162,78 € corrente zioJET 4.263,93 € Saldo esercizio precedente 4.263,93 € Esercizio ordinario 2021-22",
+              "search_hint": "Versate Saldo Rate Versate corrente 1.162,78 € corrente zioJET 4.263,93 € Saldo"
+            }
+          ]
+        },
+        "action_required_it": "Verifica documentale",
+        "action_required_en": "Document check",
+        "source": "step3_candidates",
+        "candidate_ids": [
+          "m_000032"
+        ]
+      },
+      {
+        "code": "S3C30",
+        "label_it": "Costo rilevato da perizia",
+        "label_en": "Cost extracted from appraisal",
+        "type": "ESTIMATE",
+        "stima_euro": 5533.79,
+        "stima_nota": "Deterministic candidate-based cost",
+        "fonte_perizia": {
+          "value": "Perizia",
+          "evidence": [
+            {
+              "page": 16,
+              "quote": "esercizio Spese gestione Saldo esercizio Rate Versate precedente 5.533,79 € corrente 1.194,74 € corrente 6.728,53 € Esercizio ordinario 2023-2",
+              "search_hint": "esercizio Spese gestione Saldo esercizio Rate Versate precedente 5.533,79 €"
+            }
+          ]
+        },
+        "action_required_it": "Verifica documentale",
+        "action_required_en": "Document check",
+        "source": "step3_candidates",
+        "candidate_ids": [
+          "m_000033"
+        ]
+      },
+      {
+        "code": "S3C31",
+        "label_it": "Costo rilevato da perizia",
+        "label_en": "Cost extracted from appraisal",
+        "type": "ESTIMATE",
+        "stima_euro": 5533.79,
+        "stima_nota": "Deterministic candidate-based cost",
+        "fonte_perizia": {
+          "value": "Perizia",
+          "evidence": [
+            {
+              "page": 16,
+              "quote": "stione Saldo esercizio Rate Versate corrente 1.269,86 € corrente 5.533,79 € Esercizio ordinario 2022-23 Saldo esercizio Spese gestione Saldo",
+              "search_hint": "stione Saldo esercizio Rate Versate corrente 1.269,86 € corrente 5.533,79 €"
+            }
+          ]
+        },
+        "action_required_it": "Verifica documentale",
+        "action_required_en": "Document check",
+        "source": "step3_candidates",
+        "candidate_ids": [
+          "m_000034"
+        ]
+      },
+      {
+        "code": "S3C32",
+        "label_it": "Costo rilevato da perizia",
+        "label_en": "Cost extracted from appraisal",
+        "type": "ESTIMATE",
+        "stima_euro": 6728.53,
+        "stima_nota": "Deterministic candidate-based cost",
+        "fonte_perizia": {
+          "value": "Perizia",
+          "evidence": [
+            {
+              "page": 16,
+              "quote": "e 6.728,53 € Esercizio ordinario 2023-24 Saldo esercizio precedente 6.728,53 € Spese gestione Saldo esercizi Saldo esercizio Rate Versate corre",
+              "search_hint": "e 6.728,53 € Esercizio ordinario 2023-24 Saldo esercizio precedente 6.728,53 €"
+            }
+          ]
+        },
+        "action_required_it": "Verifica documentale",
+        "action_required_en": "Document check",
+        "source": "step3_candidates",
+        "candidate_ids": [
+          "m_000035"
+        ]
+      },
+      {
+        "code": "S3C33",
+        "label_it": "Costo rilevato da perizia",
+        "label_en": "Cost extracted from appraisal",
+        "type": "ESTIMATE",
+        "stima_euro": 6728.53,
+        "stima_nota": "Deterministic candidate-based cost",
+        "fonte_perizia": {
+          "value": "Perizia",
+          "evidence": [
+            {
+              "page": 16,
+              "quote": "o Rate Versate precedente 5.533,79 € corrente 1.194,74 € corrente 6.728,53 € Esercizio ordinario 2023-24 Saldo esercizio precedente 6.728,53 €",
+              "search_hint": "o Rate Versate precedente 5.533,79 € corrente 1.194,74 € corrente 6.728,53 €"
+            }
+          ]
+        },
+        "action_required_it": "Verifica documentale",
+        "action_required_en": "Document check",
+        "source": "step3_candidates",
+        "candidate_ids": [
+          "m_000036"
+        ]
+      },
+      {
+        "code": "S3C34",
+        "label_it": "Costo rilevato da perizia",
+        "label_en": "Cost extracted from appraisal",
+        "type": "ESTIMATE",
+        "stima_euro": 8245.36,
+        "stima_nota": "Deterministic candidate-based cost",
+        "fonte_perizia": {
+          "value": "Perizia",
+          "evidence": [
+            {
+              "page": 16,
+              "quote": "Rate Versate corrente straordinari 1.151,75 € 365,08 € corrente 8.245,36 € Esercizio ordinario 2024-25 (ancora da approvare) Saldo esercizio p",
+              "search_hint": "Rate Versate corrente straordinari 1.151,75 € 365,08 € corrente 8.245,36 €"
+            }
+          ]
+        },
+        "action_required_it": "Verifica documentale",
+        "action_required_en": "Document check",
+        "source": "step3_candidates",
+        "candidate_ids": [
+          "m_000037"
+        ]
+      },
+      {
+        "code": "S3C35",
+        "label_it": "Costo rilevato da perizia",
+        "label_en": "Cost extracted from appraisal",
+        "type": "ESTIMATE",
+        "stima_euro": 8245.36,
+        "stima_nota": "Deterministic candidate-based cost",
+        "fonte_perizia": {
+          "value": "Perizia",
+          "evidence": [
+            {
+              "page": 16,
+              "quote": "Saldo esercizi straordinari Rate Versate Saldo esercizio corrente 8.245,36 € 1.326,29 € 178,82 € 9.750,47 € L'importo delle spese annue ammont",
+              "search_hint": "Saldo esercizi straordinari Rate Versate Saldo esercizio corrente 8.245,36 €"
+            }
+          ]
+        },
+        "action_required_it": "Verifica documentale",
+        "action_required_en": "Document check",
+        "source": "step3_candidates",
+        "candidate_ids": [
+          "m_000038"
+        ]
+      },
+      {
+        "code": "S3C36",
+        "label_it": "Costo rilevato da perizia",
+        "label_en": "Cost extracted from appraisal",
+        "type": "ESTIMATE",
+        "stima_euro": 9750.47,
+        "stima_nota": "Deterministic candidate-based cost",
+        "fonte_perizia": {
+          "value": "Perizia",
+          "evidence": [
+            {
+              "page": 16,
+              "quote": "Versate Saldo esercizio corrente 8.245,36 € 1.326,29 € 178,82 € 9.750,47 € L'importo delle spese annue ammonta ad € 1.300,00 circa Pagina 16",
+              "search_hint": "Versate Saldo esercizio corrente 8.245,36 € 1.326,29 € 178,82 € 9.750,47 €"
+            }
+          ]
+        },
+        "action_required_it": "Verifica documentale",
+        "action_required_en": "Document check",
+        "source": "step3_candidates",
+        "candidate_ids": [
+          "m_000039"
+        ]
+      },
+      {
+        "code": "S3C37",
+        "label_it": "Costo rilevato da perizia",
+        "label_en": "Cost extracted from appraisal",
+        "type": "ESTIMATE",
+        "stima_euro": 500.0,
+        "stima_nota": "Deterministic candidate-based cost",
+        "fonte_perizia": {
+          "value": "Perizia",
+          "evidence": [
+            {
+              "page": 22,
+              "quote": "dalla data di trascrione del pignoramento TOTALE nessuna nessuna € 500,00 nessuna € 3.021,94 € 3.521,94 Riduzione cautelativa Riduzione del",
+              "search_hint": "dalla data di trascrione del pignoramento TOTALE nessuna nessuna € 500,00"
+            }
+          ]
+        },
+        "action_required_it": "Verifica documentale",
+        "action_required_en": "Document check",
+        "source": "step3_candidates",
+        "candidate_ids": [
+          "m_000042"
+        ]
+      },
+      {
+        "code": "S3C38",
+        "label_it": "Costo rilevato da perizia",
+        "label_en": "Cost extracted from appraisal",
+        "type": "ESTIMATE",
+        "stima_euro": 3021.94,
+        "stima_nota": "Deterministic candidate-based cost",
+        "fonte_perizia": {
+          "value": "Perizia",
+          "evidence": [
+            {
+              "page": 22,
+              "quote": "rione del pignoramento TOTALE nessuna nessuna € 500,00 nessuna € 3.021,94 € 3.521,94 Riduzione cautelativa Riduzione del valore del 15% per dif",
+              "search_hint": "rione del pignoramento TOTALE nessuna nessuna € 500,00 nessuna € 3.021,94 €"
+            }
+          ]
+        },
+        "action_required_it": "Verifica documentale",
+        "action_required_en": "Document check",
+        "source": "step3_candidates",
+        "candidate_ids": [
+          "m_000043"
+        ]
+      },
+      {
+        "code": "S3C39",
+        "label_it": "Costo rilevato da perizia",
+        "label_en": "Cost extracted from appraisal",
+        "type": "ESTIMATE",
+        "stima_euro": 3021.94,
+        "stima_nota": "Deterministic candidate-based cost",
+        "fonte_perizia": {
+          "value": "Perizia",
+          "evidence": [
+            {
+              "page": 22,
+              "quote": "scrione del pignoramento TOTALE nessuna nessuna € 500,00 nessuna € 3.021,94 € 3.521,94 Riduzione cautelativa Riduzione del valore del 15% per",
+              "search_hint": "scrione del pignoramento TOTALE nessuna nessuna € 500,00 nessuna € 3.021,94 €"
+            }
+          ]
+        },
+        "action_required_it": "Verifica documentale",
+        "action_required_en": "Document check",
+        "source": "step3_candidates",
+        "candidate_ids": [
+          "m_000044"
+        ]
+      },
+      {
+        "code": "S3C40",
+        "label_it": "Costo rilevato da perizia",
+        "label_en": "Cost extracted from appraisal",
+        "type": "ESTIMATE",
+        "stima_euro": 8000.91,
+        "stima_nota": "Deterministic candidate-based cost",
+        "fonte_perizia": {
+          "value": "Perizia",
+          "evidence": [
+            {
+              "page": 22,
+              "quote": "se condominiali insolute nel biennio anteriore alla vendita CALE NE € 8.000,91 PREZZO ABASED'ASTA DELL'IMMOBILE (Subalterno 2) Valore dell'immob",
+              "search_hint": "se condominiali insolute nel biennio anteriore alla vendita CALE NE € 8.000,91"
+            }
+          ]
+        },
+        "action_required_it": "Verifica documentale",
+        "action_required_en": "Document check",
+        "source": "step3_candidates",
+        "candidate_ids": [
+          "m_000045"
+        ]
+      },
+      {
+        "code": "S3C41",
+        "label_it": "Costo rilevato da perizia",
+        "label_en": "Cost extracted from appraisal",
+        "type": "ESTIMATE",
+        "stima_euro": 45338.48,
+        "stima_nota": "Deterministic candidate-based cost",
+        "fonte_perizia": {
+          "value": "Perizia",
+          "evidence": [
+            {
+              "page": 22,
+              "quote": "al netto dei costi di regolarizzazione e della riduzione cautelativa € 45.338,48 7 Pagina 22",
+              "search_hint": "al netto dei costi di regolarizzazione e della riduzione cautelativa € 45.338,48"
+            }
+          ]
+        },
+        "action_required_it": "Verifica documentale",
+        "action_required_en": "Document check",
+        "source": "step3_candidates",
+        "candidate_ids": [
+          "m_000046"
+        ]
+      },
+      {
+        "code": "S3C42",
+        "label_it": "Costo rilevato da perizia",
+        "label_en": "Cost extracted from appraisal",
+        "type": "ESTIMATE",
+        "stima_euro": 53339.39,
+        "stima_nota": "Deterministic candidate-based cost",
+        "fonte_perizia": {
+          "value": "Perizia",
+          "evidence": [
+            {
+              "page": 22,
+              "quote": "lessivo Valore al netto dei costi di regolarizzazione. € 56.861,33 € 53.339,39 Valore al netto dei costi di regolarizzazione e della riduzione caut",
+              "search_hint": "lessivo Valore al netto dei costi di regolarizzazione. € 56.861,33 € 53.339,39"
+            }
+          ]
+        },
+        "action_required_it": "Verifica documentale",
+        "action_required_en": "Document check",
+        "source": "step3_candidates",
+        "candidate_ids": [
+          "m_000047"
+        ]
+      },
+      {
+        "code": "S3C43",
+        "label_it": "Costo rilevato da perizia",
+        "label_en": "Cost extracted from appraisal",
+        "type": "ESTIMATE",
+        "stima_euro": 56861.33,
+        "stima_nota": "Deterministic candidate-based cost",
+        "fonte_perizia": {
+          "value": "Perizia",
+          "evidence": [
+            {
+              "page": 22,
+              "quote": "Valore complessivo Valore al netto dei costi di regolarizzazione. € 56.861,33 € 53.339,39 Valore al netto dei costi di regolarizzazione e della r",
+              "search_hint": "Valore complessivo Valore al netto dei costi di regolarizzazione. € 56.861,33 €"
+            }
+          ]
+        },
+        "action_required_it": "Verifica documentale",
+        "action_required_en": "Document check",
+        "source": "step3_candidates",
+        "candidate_ids": [
+          "m_000048"
+        ]
+      },
+      {
+        "code": "S3C44",
+        "label_it": "Costo rilevato da perizia",
+        "label_en": "Cost extracted from appraisal",
+        "type": "ESTIMATE",
+        "stima_euro": 2.0,
+        "stima_nota": "Deterministic candidate-based cost",
+        "fonte_perizia": {
+          "value": "Perizia",
+          "evidence": [
+            {
+              "page": 23,
+              "quote": "mplessivo Valore al netto dei costi di regolarizzazione. Subalterno 2 € 56.861,33 nessuna nessuna nessuna nessuna nessuna nessuna € 50",
+              "search_hint": "mplessivo Valore al netto dei costi di regolarizzazione. Subalterno 2 €"
+            }
+          ]
+        },
+        "action_required_it": "Verifica documentale",
+        "action_required_en": "Document check",
+        "source": "step3_candidates",
+        "candidate_ids": [
+          "m_000049"
+        ]
+      },
+      {
+        "code": "S3C45",
+        "label_it": "Costo rilevato da perizia",
+        "label_en": "Cost extracted from appraisal",
+        "type": "ESTIMATE",
+        "stima_euro": 500.0,
+        "stima_nota": "Deterministic candidate-based cost",
+        "fonte_perizia": {
+          "value": "Perizia",
+          "evidence": [
+            {
+              "page": 23,
+              "quote": "2 € 56.861,33 nessuna nessuna nessuna nessuna nessuna nessuna € 500,00 nessuna € 3.021,94 € 3.521,94 € 8.000,91 € 56.861,33 € 53.339,3",
+              "search_hint": "2 € 56.861,33 nessuna nessuna nessuna nessuna nessuna nessuna € 500,00 nessuna €"
+            }
+          ]
+        },
+        "action_required_it": "Verifica documentale",
+        "action_required_en": "Document check",
+        "source": "step3_candidates",
+        "candidate_ids": [
+          "m_000050"
+        ]
+      },
+      {
+        "code": "S3C46",
+        "label_it": "Costo rilevato da perizia",
+        "label_en": "Cost extracted from appraisal",
+        "type": "ESTIMATE",
+        "stima_euro": 3021.94,
+        "stima_nota": "Deterministic candidate-based cost",
+        "fonte_perizia": {
+          "value": "Perizia",
+          "evidence": [
+            {
+              "page": 23,
+              "quote": "na nessuna nessuna nessuna nessuna nessuna € 500,00 nessuna € 3.021,94 € 3.521,94 € 8.000,91 € 56.861,33 € 53.339,39 Valore al netto dei c",
+              "search_hint": "na nessuna nessuna nessuna nessuna nessuna € 500,00 nessuna € 3.021,94 €"
+            }
+          ]
+        },
+        "action_required_it": "Verifica documentale",
+        "action_required_en": "Document check",
+        "source": "step3_candidates",
+        "candidate_ids": [
+          "m_000051"
+        ]
+      },
+      {
+        "code": "S3C47",
+        "label_it": "Costo rilevato da perizia",
+        "label_en": "Cost extracted from appraisal",
+        "type": "ESTIMATE",
+        "stima_euro": 3021.94,
+        "stima_nota": "Deterministic candidate-based cost",
+        "fonte_perizia": {
+          "value": "Perizia",
+          "evidence": [
+            {
+              "page": 23,
+              "quote": "suna nessuna nessuna nessuna nessuna nessuna € 500,00 nessuna € 3.021,94 € 3.521,94 € 8.000,91 € 56.861,33 € 53.339,39 Valore al netto de",
+              "search_hint": "suna nessuna nessuna nessuna nessuna nessuna € 500,00 nessuna € 3.021,94 €"
+            }
+          ]
+        },
+        "action_required_it": "Verifica documentale",
+        "action_required_en": "Document check",
+        "source": "step3_candidates",
+        "candidate_ids": [
+          "m_000052"
+        ]
+      },
+      {
+        "code": "S3C48",
+        "label_it": "Costo rilevato da perizia",
+        "label_en": "Cost extracted from appraisal",
+        "type": "ESTIMATE",
+        "stima_euro": 3521.94,
+        "stima_nota": "Deterministic candidate-based cost",
+        "fonte_perizia": {
+          "value": "Perizia",
+          "evidence": [
+            {
+              "page": 23,
+              "quote": "nessuna nessuna nessuna nessuna € 500,00 nessuna € 3.021,94 € 3.521,94 € 8.000,91 € 56.861,33 € 53.339,39 Valore al netto dei costi di rego",
+              "search_hint": "nessuna nessuna nessuna nessuna € 500,00 nessuna € 3.021,94 € 3.521,94 €"
+            }
+          ]
+        },
+        "action_required_it": "Verifica documentale",
+        "action_required_en": "Document check",
+        "source": "step3_candidates",
+        "candidate_ids": [
+          "m_000053"
+        ]
+      },
+      {
+        "code": "S3C49",
+        "label_it": "Costo rilevato da perizia",
+        "label_en": "Cost extracted from appraisal",
+        "type": "ESTIMATE",
+        "stima_euro": 8000.91,
+        "stima_nota": "Deterministic candidate-based cost",
+        "fonte_perizia": {
+          "value": "Perizia",
+          "evidence": [
+            {
+              "page": 23,
+              "quote": "ssuna nessuna nessuna € 500,00 nessuna € 3.021,94 € 3.521,94 € 8.000,91 € 56.861,33 € 53.339,39 Valore al netto dei costi di regolarizzazione",
+              "search_hint": "ssuna nessuna nessuna € 500,00 nessuna € 3.021,94 € 3.521,94 € 8.000,91 €"
+            }
+          ]
+        },
+        "action_required_it": "Verifica documentale",
+        "action_required_en": "Document check",
+        "source": "step3_candidates",
+        "candidate_ids": [
+          "m_000054"
+        ]
+      },
+      {
+        "code": "S3C50",
+        "label_it": "Costo rilevato da perizia",
+        "label_en": "Cost extracted from appraisal",
+        "type": "ESTIMATE",
+        "stima_euro": 53339.39,
+        "stima_nota": "Deterministic candidate-based cost",
+        "fonte_perizia": {
+          "value": "Perizia",
+          "evidence": [
+            {
+              "page": 23,
+              "quote": "€ 500,00 nessuna € 3.021,94 € 3.521,94 € 8.000,91 € 56.861,33 € 53.339,39 Valore al netto dei costi di regolarizzazione e della riduzione caut",
+              "search_hint": "€ 500,00 nessuna € 3.021,94 € 3.521,94 € 8.000,91 € 56.861,33 € 53.339,39 Valore"
+            }
+          ]
+        },
+        "action_required_it": "Verifica documentale",
+        "action_required_en": "Document check",
+        "source": "step3_candidates",
+        "candidate_ids": [
+          "m_000055"
+        ]
+      }
+    ],
+    "total_extra_costs": {
+      "range": {
+        "min": "TBD",
+        "max": "TBD"
+      },
+      "max_is_open": true,
+      "note": "TBD because one or more cost items are unspecified"
+    },
+    "policy": "CONSERVATIVE",
+    "qualitative_burdens": [
+      {
+        "code": "QB_1",
+        "label_it": "Regolarizzazione edilizia / urbanistica da verificare",
+        "label_en": "Regolarizzazione edilizia / urbanistica da verificare",
+        "type": "QUALITATIVE",
+        "stima_euro": "NON_QUANTIFICATO",
+        "stima_nota": "Onere buyer-side segnalato dalla perizia ma non quantificato in modo difendibile",
+        "source": "PERIZIA_QUALITATIVE",
+        "evidence": []
+      },
+      {
+        "code": "QB_2",
+        "label_it": "Oneri tecnici / istruttoria da verificare",
+        "label_en": "Oneri tecnici / istruttoria da verificare",
+        "type": "QUALITATIVE",
+        "stima_euro": "NON_QUANTIFICATO",
+        "stima_nota": "Onere buyer-side segnalato dalla perizia ma non quantificato in modo difendibile",
+        "source": "PERIZIA_QUALITATIVE",
+        "evidence": []
+      },
+      {
+        "code": "QB_3",
+        "label_it": "Eventuali ripristini / problemi conservativi segnalati in perizia",
+        "label_en": "Eventuali ripristini / problemi conservativi segnalati in perizia",
+        "type": "QUALITATIVE",
+        "stima_euro": "NON_QUANTIFICATO",
+        "stima_nota": "Onere buyer-side segnalato dalla perizia ma non quantificato in modo difendibile",
+        "source": "PERIZIA_QUALITATIVE",
+        "evidence": []
+      },
+      {
+        "code": "QB_4",
+        "label_it": "Allineamento catastale da verificare",
+        "label_en": "Allineamento catastale da verificare",
+        "type": "QUALITATIVE",
+        "stima_euro": "NON_QUANTIFICATO",
+        "stima_nota": "Onere buyer-side segnalato dalla perizia ma non quantificato in modo difendibile",
+        "source": "PERIZIA_QUALITATIVE",
+        "evidence": []
+      },
+      {
+        "code": "QB_5",
+        "label_it": "Spese condominiali arretrate da verificare",
+        "label_en": "Spese condominiali arretrate da verificare",
+        "type": "QUALITATIVE",
+        "stima_euro": "NON_QUANTIFICATO",
+        "stima_nota": "Onere buyer-side segnalato dalla perizia ma non quantificato in modo difendibile",
+        "source": "PERIZIA_QUALITATIVE",
+        "evidence": []
+      },
+      {
+        "code": "QB_6",
+        "label_it": "Eventuali costi connessi alla liberazione dell'immobile",
+        "label_en": "Eventuali costi connessi alla liberazione dell'immobile",
+        "type": "QUALITATIVE",
+        "stima_euro": "NON_QUANTIFICATO",
+        "stima_nota": "Onere buyer-side segnalato dalla perizia ma non quantificato in modo difendibile",
+        "source": "PERIZIA_QUALITATIVE",
+        "evidence": []
+      }
+    ]
+  },
+  "formalita": {
+    "ipoteca": {
+      "status": "UNKNOWN",
+      "evidence": []
+    },
+    "pignoramento": {
+      "status": "UNKNOWN",
+      "evidence": []
+    },
+    "cancellazione_decreto": {
+      "status": "UNKNOWN",
+      "evidence": []
+    },
+    "summary_it": "PRESENTI FORMALITÀ",
+    "summary_evidence": [
+      {
+        "page": 1,
+        "quote": "in forza di TRASCRIZIONE A FAVORE del 02/11/2016 - Registro",
+        "start_offset": 857,
+        "end_offset": 916,
+        "bbox": null,
+        "offset_mode": "PAGE_LOCAL",
+        "page_text_hash": "febc4163499ecdaf98d2b8f776940c01a7bca75fc3285a15bd7ebd0ca8f5e35b",
+        "search_hint": "in forza di TRASCRIZIONE A FAVORE del 02/11/2016 - Registro"
+      }
+    ]
+  }
+}

@@ -1,0 +1,45 @@
+{
+  "fixture_name": "silvabella",
+  "source_analysis_id": "analysis_8954c511ed4e",
+  "seed_semaforo_status": "AMBER",
+  "quota": null,
+  "pricing": {
+    "selected_price": 45338.48,
+    "benchmark_value": 56861.33,
+    "absurdity_guard_triggered": false
+  },
+  "occupancy": {
+    "status": "LIBERO",
+    "opponibilita": "NON VERIFICABILE",
+    "invalid_candidate_count": 1
+  },
+  "costs": {
+    "explicit_total": 3521.94,
+    "explicit_total_low_confidence": null,
+    "explicit_item_count": 1
+  },
+  "top_issue": {
+    "code": "EXPLICIT_BUYER_COSTS",
+    "title_it": "Costi espliciti a carico dell'acquirente: € 3.521,94",
+    "category": "costs"
+  },
+  "summary_mentions_top_issue": true,
+  "summary_top_issue_it": "Costi espliciti a carico dell'acquirente: € 3.521,94",
+  "summary_decision_it": "Costi espliciti a carico dell'acquirente: € 3.521,94. Verifica l'importo totale dei costi e il perimetro delle spese prima dell'offerta.",
+  "legal_notes": {
+    "cancellable_count": 1,
+    "surviving_count": 0,
+    "background_count": 1
+  },
+  "tags": [
+    "single_lot",
+    "ocr_heavy",
+    "explicit_costs",
+    "occupancy_sensitive",
+    "legal_cancellable_formalities",
+    "urbanistica_difformita",
+    "condo_arrears",
+    "agibilita_present",
+    "noisy_numbers"
+  ]
+}

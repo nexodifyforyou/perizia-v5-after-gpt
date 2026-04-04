@@ -1,0 +1,20 @@
+{
+  "fixture_name": "silvabella",
+  "analysis_id": "silvabella",
+  "source_analysis_id": "analysis_8954c511ed4e",
+  "file_name": "Piazza Silvabella,12.pdf",
+  "source_kind": "mongo_analysis",
+  "pages_count": 24,
+  "tags": [
+    "single_lot",
+    "ocr_heavy",
+    "explicit_costs",
+    "occupancy_sensitive",
+    "legal_cancellable_formalities",
+    "urbanistica_difformita",
+    "condo_arrears",
+    "agibilita_present",
+    "noisy_numbers"
+  ],
+  "notes": "Known trust-killer case with nearby-number, quota/date, occupancy, and cost-priority failure modes."
+}

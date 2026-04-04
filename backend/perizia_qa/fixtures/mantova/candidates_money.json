@@ -1,0 +1,174 @@
+[
+  {
+    "page": 5,
+    "amount_raw": "€T-130",
+    "amount_eur": 130.0,
+    "quote": "sistenzaSuperficiecatastaleRenditaPianoGraffato303231A246158 mq387,34 €T-1303232C621922 mq43,18 €TCorrispondenza catastaleSussiste corrispondenza",
+    "context": "i 14 DATI CATASTALICatasto fabbricati (CF)Dati identificativiDati di classamento SezioneFoglioPart.Sub.ZonaCens.CategoriaClasseConsistenzaSuperficiecatastaleRenditaPianoGraffato303231A246158 mq387,34 €T-1303232C621922 mq43,18 €TCorrispondenza catastaleSussiste corrispondenza tra lo stato dei luoghi e la planimetria catastale esistente nonché con quanto presente nell’atto di pignoramento.STATO CONSERVATI",
+    "low_quality_page": false,
+    "source": "pages_raw",
+    "occurrences": [
+      {
+        "page": 5,
+        "quote": "sistenzaSuperficiecatastaleRenditaPianoGraffato303231A246158 mq387,34 €T-1303232C621922 mq43,18 €TCorrispondenza catastaleSussiste corrispondenza"
+      }
+    ],
+    "id": "m_000001"
+  },
+  {
+    "page": 5,
+    "amount_raw": "3232C621922 mq43,18 €",
+    "amount_eur": 323.0,
+    "quote": "zaSuperficiecatastaleRenditaPianoGraffato303231A246158 mq387,34 €T-1303232C621922 mq43,18 €TCorrispondenza catastaleSussiste corrispondenza tra lo stato dei luog",
+    "context": "ATI CATASTALICatasto fabbricati (CF)Dati identificativiDati di classamento SezioneFoglioPart.Sub.ZonaCens.CategoriaClasseConsistenzaSuperficiecatastaleRenditaPianoGraffato303231A246158 mq387,34 €T-1303232C621922 mq43,18 €TCorrispondenza catastaleSussiste corrispondenza tra lo stato dei luoghi e la planimetria catastale esistente nonché con quanto presente nell’atto di pignoramento.STATO CONSERVATIVOLe unità nonostante",
+    "low_quality_page": false,
+    "source": "pages_raw",
+    "occurrences": [
+      {
+        "page": 5,
+        "quote": "zaSuperficiecatastaleRenditaPianoGraffato303231A246158 mq387,34 €T-1303232C621922 mq43,18 €TCorrispondenza catastaleSussiste corrispondenza tra lo stato dei luog"
+      }
+    ],
+    "id": "m_000002"
+  },
+  {
+    "page": 8,
+    "amount_raw": "€ 77.701,73",
+    "amount_eur": 77701.73,
+    "quote": "***Formalità a carico della proceduraCapitale: € 155.403,46Interessi: € 77.701,73Rogante: Notaio Santosuosso FabrizioData: 08/01/2019N° repertorio: 664",
+    "context": "8/01/2019Reg. gen. 1067 - Reg. part. 125Importo: € 233.105,19A favore di **** Omissis ****Contro **** Omissis ****, **** Omissis ****Formalità a carico della proceduraCapitale: € 155.403,46Interessi: € 77.701,73Rogante: Notaio Santosuosso FabrizioData: 08/01/2019N° repertorio: 66481N° raccolta: 37511Trascrizioni•verbale pignoramento immobiliTrascritto a Mantova il 02/05/2024Reg. gen. 5760 - Reg. part. 4252A",
+    "low_quality_page": false,
+    "source": "pages_raw",
+    "occurrences": [
+      {
+        "page": 8,
+        "quote": "***Formalità a carico della proceduraCapitale: € 155.403,46Interessi: € 77.701,73Rogante: Notaio Santosuosso FabrizioData: 08/01/2019N° repertorio: 664"
+      },
+      {
+        "page": 14,
+        "quote": "***Formalità a carico della proceduraCapitale: € 155.403,46Interessi: € 77.701,73Rogante: Notaio Santosuosso FabrizioData: 08/01/2019N° repertorio: 664"
+      }
+    ],
+    "id": "m_000003"
+  },
+  {
+    "page": 8,
+    "amount_raw": "€ 155.403,46",
+    "amount_eur": 155403.46,
+    "quote": "is ****, **** Omissis ****Formalità a carico della proceduraCapitale: € 155.403,46Interessi: € 77.701,73Rogante: Notaio Santosuosso FabrizioData: 08/01/",
+    "context": "Iscritto a Mantova il 28/01/2019Reg. gen. 1067 - Reg. part. 125Importo: € 233.105,19A favore di **** Omissis ****Contro **** Omissis ****, **** Omissis ****Formalità a carico della proceduraCapitale: € 155.403,46Interessi: € 77.701,73Rogante: Notaio Santosuosso FabrizioData: 08/01/2019N° repertorio: 66481N° raccolta: 37511Trascrizioni•verbale pignoramento immobiliTrascritto a Mantova il 02/05/2024Reg. gen. 57",
+    "low_quality_page": false,
+    "source": "pages_raw",
+    "occurrences": [
+      {
+        "page": 8,
+        "quote": "is ****, **** Omissis ****Formalità a carico della proceduraCapitale: € 155.403,46Interessi: € 77.701,73Rogante: Notaio Santosuosso FabrizioData: 08/01/"
+      },
+      {
+        "page": 14,
+        "quote": "is ****, **** Omissis ****Formalità a carico della proceduraCapitale: € 155.403,46Interessi: € 77.701,73Rogante: Notaio Santosuosso FabrizioData: 08/01/"
+      }
+    ],
+    "id": "m_000004"
+  },
+  {
+    "page": 8,
+    "amount_raw": "€ 233.105,19",
+    "amount_eur": 233105.19,
+    "quote": "critto a Mantova il 28/01/2019Reg. gen. 1067 - Reg. part. 125Importo: € 233.105,19A favore di **** Omissis ****Contro **** Omissis ****, **** Omissis **",
+    "context": "ltate le seguenti formalità pregiudizievoli:Iscrizioni•ipoteca volontaria derivante da concessione a garanzia di mutuo fondiarioIscritto a Mantova il 28/01/2019Reg. gen. 1067 - Reg. part. 125Importo: € 233.105,19A favore di **** Omissis ****Contro **** Omissis ****, **** Omissis ****Formalità a carico della proceduraCapitale: € 155.403,46Interessi: € 77.701,73Rogante: Notaio Santosuosso FabrizioData: 08/01/20",
+    "low_quality_page": false,
+    "source": "pages_raw",
+    "occurrences": [
+      {
+        "page": 8,
+        "quote": "critto a Mantova il 28/01/2019Reg. gen. 1067 - Reg. part. 125Importo: € 233.105,19A favore di **** Omissis ****Contro **** Omissis ****, **** Omissis **"
+      },
+      {
+        "page": 14,
+        "quote": "critto a Mantova il 28/01/2019Reg. gen. 1067 - Reg. part. 125Importo: € 233.105,19A favore di **** Omissis ****Contro **** Omissis ****, **** Omissis **"
+      }
+    ],
+    "id": "m_000005"
+  },
+  {
+    "page": 10,
+    "amount_raw": "1/3161,64 mq800,00 €",
+    "amount_eur": 1.0,
+    "quote": "Bene N° 1 - Fabbricato civileBorgo Virgilio (MN) - Via Ippolito Nievo 1/3161,64 mq800,00 €/mq€ 129.312,00100,00%€ 129.312,00Valore di stima:€ 129.312,00\nAssolto",
+    "context": "re di stima del bene: € 129.312,00Identificativo corpoSuperficieconvenzionaleValore unitarioValorecomplessivoQuota invenditaTotaleBene N° 1 - Fabbricato civileBorgo Virgilio (MN) - Via Ippolito Nievo 1/3161,64 mq800,00 €/mq€ 129.312,00100,00%€ 129.312,00Valore di stima:€ 129.312,00\nAssolto il proprio mandato, il sottoscritto Esperto ex art. 568 c.p.c. deposita la relazione di stima presso questo Spettabile Tribunale,",
+    "low_quality_page": false,
+    "source": "pages_raw",
+    "occurrences": [
+      {
+        "page": 10,
+        "quote": "Bene N° 1 - Fabbricato civileBorgo Virgilio (MN) - Via Ippolito Nievo 1/3161,64 mq800,00 €/mq€ 129.312,00100,00%€ 129.312,00Valore di stima:€ 129.312,00\nAssolto"
+      }
+    ],
+    "id": "m_000006"
+  },
+  {
+    "page": 10,
+    "amount_raw": "100,00%€",
+    "amount_eur": 100.0,
+    "quote": "Virgilio (MN) - Via Ippolito Nievo 1/3161,64 mq800,00 €/mq€ 129.312,00100,00%€ 129.312,00Valore di stima:€ 129.312,00\nAssolto il proprio mandato, il",
+    "context": "dentificativo corpoSuperficieconvenzionaleValore unitarioValorecomplessivoQuota invenditaTotaleBene N° 1 - Fabbricato civileBorgo Virgilio (MN) - Via Ippolito Nievo 1/3161,64 mq800,00 €/mq€ 129.312,00100,00%€ 129.312,00Valore di stima:€ 129.312,00\nAssolto il proprio mandato, il sottoscritto Esperto ex art. 568 c.p.c. deposita la relazione di stima presso questo Spettabile Tribunale, tanto in assolvimento",
+    "low_quality_page": false,
+    "source": "pages_raw",
+    "occurrences": [
+      {
+        "page": 10,
+        "quote": "Virgilio (MN) - Via Ippolito Nievo 1/3161,64 mq800,00 €/mq€ 129.312,00100,00%€ 129.312,00Valore di stima:€ 129.312,00\nAssolto il proprio mandato, il"
+      }
+    ],
+    "id": "m_000007"
+  },
+  {
+    "page": 10,
+    "amount_raw": "€ 129.312,00",
+    "amount_eur": 129312.0,
+    "quote": "1/3161,64 mq800,00 €/mq€ 129.312,00100,00%€ 129.312,00Valore di stima:€ 129.312,00\nAssolto il proprio mandato, il sottoscritto Esperto ex art. 568 c.p.c",
+    "context": "zionaleValore unitarioValorecomplessivoQuota invenditaTotaleBene N° 1 - Fabbricato civileBorgo Virgilio (MN) - Via Ippolito Nievo 1/3161,64 mq800,00 €/mq€ 129.312,00100,00%€ 129.312,00Valore di stima:€ 129.312,00\nAssolto il proprio mandato, il sottoscritto Esperto ex art. 568 c.p.c. deposita la relazione di stima presso questo Spettabile Tribunale, tanto in assolvimento dell'incarico conferitogli dalla S.V. e",
+    "low_quality_page": false,
+    "source": "pages_raw",
+    "occurrences": [
+      {
+        "page": 10,
+        "quote": "1/3161,64 mq800,00 €/mq€ 129.312,00100,00%€ 129.312,00Valore di stima:€ 129.312,00\nAssolto il proprio mandato, il sottoscritto Esperto ex art. 568 c.p.c"
+      }
+    ],
+    "id": "m_000008"
+  },
+  {
+    "page": 10,
+    "amount_raw": "€ 129.312,00100,00",
+    "amount_eur": 129312.0,
+    "quote": "civileBorgo Virgilio (MN) - Via Ippolito Nievo 1/3161,64 mq800,00 €/mq€ 129.312,00100,00%€ 129.312,00Valore di stima:€ 129.312,00\nAssolto il proprio mandato,",
+    "context": "129.312,00Identificativo corpoSuperficieconvenzionaleValore unitarioValorecomplessivoQuota invenditaTotaleBene N° 1 - Fabbricato civileBorgo Virgilio (MN) - Via Ippolito Nievo 1/3161,64 mq800,00 €/mq€ 129.312,00100,00%€ 129.312,00Valore di stima:€ 129.312,00\nAssolto il proprio mandato, il sottoscritto Esperto ex art. 568 c.p.c. deposita la relazione di stima presso questo Spettabile Tribunale, tanto in assolviment",
+    "low_quality_page": false,
+    "source": "pages_raw",
+    "occurrences": [
+      {
+        "page": 10,
+        "quote": "civileBorgo Virgilio (MN) - Via Ippolito Nievo 1/3161,64 mq800,00 €/mq€ 129.312,00100,00%€ 129.312,00Valore di stima:€ 129.312,00\nAssolto il proprio mandato,"
+      }
+    ],
+    "id": "m_000009"
+  },
+  {
+    "page": 10,
+    "amount_raw": "€ 129.312,00",
+    "amount_eur": 129312.0,
+    "quote": "in vendita per il diritto di Proprietà (1/1)Valore di stima del bene: € 129.312,00Identificativo corpoSuperficieconvenzionaleValore unitarioValorecomple",
+    "context": "o al catasto Fabbricati - Fg. 30, Part. 323, Sub. 1, Categoria A2 - Fg. 30, Part. 323, Sub. 2, Categoria C6L'immobile viene posto in vendita per il diritto di Proprietà (1/1)Valore di stima del bene: € 129.312,00Identificativo corpoSuperficieconvenzionaleValore unitarioValorecomplessivoQuota invenditaTotaleBene N° 1 - Fabbricato civileBorgo Virgilio (MN) - Via Ippolito Nievo 1/3161,64 mq800,00 €/mq€ 129.312,0",
+    "low_quality_page": false,
+    "source": "pages_raw",
+    "occurrences": [
+      {
+        "page": 10,
+        "quote": "in vendita per il diritto di Proprietà (1/1)Valore di stima del bene: € 129.312,00Identificativo corpoSuperficieconvenzionaleValore unitarioValorecomple"
+      }
+    ],
+    "id": "m_000010"
+  }
+]
