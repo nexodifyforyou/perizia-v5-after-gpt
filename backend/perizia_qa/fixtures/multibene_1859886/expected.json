@@ -9,9 +9,9 @@
     "absurdity_guard_triggered": false
   },
   "occupancy": {
-    "status": "LIBERO",
+    "status": "OCCUPATO",
     "opponibilita": "NON VERIFICABILE",
-    "invalid_candidate_count": 0
+    "invalid_candidate_count": 5
   },
   "costs": {
     "explicit_total": null,
@@ -19,13 +19,13 @@
     "explicit_item_count": 0
   },
   "top_issue": {
-    "code": null,
-    "title_it": null,
-    "category": null
+    "code": "OCCUPANCY_RISK",
+    "title_it": "Immobile occupato",
+    "category": "occupancy"
   },
-  "summary_mentions_top_issue": false,
-  "summary_top_issue_it": "",
-  "summary_decision_it": "Verifica manualmente i punti critici prima dell'offerta.",
+  "summary_mentions_top_issue": true,
+  "summary_top_issue_it": "Immobile occupato",
+  "summary_decision_it": "Immobile occupato. Verifica titolo e tempi di liberazione.",
   "legal_notes": {
     "cancellable_count": 0,
     "surviving_count": 0,

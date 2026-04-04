@@ -7,6 +7,33 @@ from perizia_tools.evidence_span_tool import make_evidence
 from perizia_tools.section_router_tool import classify_section_type
 
 
+def _is_non_property_libero_noise(quote: str) -> bool:
+    low = quote.lower()
+    return any(
+        marker in low
+        for marker in [
+            "@libero.it",
+            ".libero.it",
+            "stato libero",
+            "regime patrimoniale",
+            "separazione legale dei beni",
+        ]
+    )
+
+
+def _occupancy_confidence(quote: str, value: str) -> float:
+    low = quote.lower()
+    if value == "OCCUPATO":
+        if "stato di occupazione" in low or "occupato da" in low:
+            return 0.96
+        return 0.7
+    if "non appariva occupato" in low or "nessuno" in low:
+        return 0.92
+    if "stato di occupazione" in low or "immobile libero" in low or "bene libero" in low:
+        return 0.9
+    return 0.58
+
+
 def run_occupancy_agent(state: RuntimeState) -> None:
     candidates = []
     for idx, page in enumerate(state.pages, start=1):
@@ -50,14 +77,25 @@ def run_occupancy_agent(state: RuntimeState) -> None:
                     }
                 )
                 continue
+            if _is_non_property_libero_noise(quote):
+                candidates.append(
+                    {
+                        "value": "INVALID_OCCUPANCY_SIGNAL",
+                        "confidence": 0.0,
+                        "valid": False,
+                        "reason": "non_property_libero_noise",
+                        "evidence": [make_evidence(page_number, quote, "non_property_noise", [], 0.0)],
+                    }
+                )
+                continue
             value = None
             confidence = 0.0
             if "non appariva occupato" in quote.lower() or "nessuno" in quote.lower() or "liber" in quote.lower():
                 value = "LIBERO"
-                confidence = 0.92
             elif "occupato" in quote.lower():
                 value = "OCCUPATO"
-                confidence = 0.7
+            if value:
+                confidence = _occupancy_confidence(quote, value)
             if value:
                 candidates.append(
                     {
@@ -88,6 +126,7 @@ def run_occupancy_agent(state: RuntimeState) -> None:
                 "guards": [
                     "valuation_coefficient_not_valid_occupancy",
                     "public_space_occupancy_not_property_occupancy",
+                    "non_property_libero_noise",
                     "non_verificabile_not_assente",
                 ],
             }
@@ -110,8 +149,8 @@ def run_occupancy_agent(state: RuntimeState) -> None:
                 "guards": [
                     "valuation_coefficient_not_valid_occupancy",
                     "public_space_occupancy_not_property_occupancy",
+                    "non_property_libero_noise",
                     "non_verificabile_not_assente",
                 ],
             }
         )
-

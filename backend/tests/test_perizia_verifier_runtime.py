@@ -142,3 +142,19 @@ def test_verifier_emits_legal_attention_fallback_for_cancellable_only_cases():
         assert summary["top_issue_it"] == top_issue["title_it"]
         assert summary["decision_summary_it"] != "Verifica manualmente i punti critici prima dell'offerta."
         assert "cancellazione delle formalità" in summary["decision_summary_it"]
+
+
+def test_multibene_occupancy_prefers_property_occupied_state_over_libero_noise():
+    result, pages = _repo_fixture("multibene_1859886")
+    payload = run_quality_verifier(
+        analysis_id="multibene_1859886",
+        result=result,
+        pages=pages,
+        full_text="\n\n".join(page["text"] for page in pages),
+    )
+    canonical = payload["canonical_case"]
+    invalid_occ = [item for item in canonical["occupancy"]["candidates"] if not item["valid"]]
+    assert canonical["occupancy"]["status"] == "OCCUPATO"
+    assert canonical["priority"]["top_issue"]["code"] == "OCCUPANCY_RISK"
+    assert canonical["summary_bundle"]["decision_summary_it"] != "Verifica manualmente i punti critici prima dell'offerta."
+    assert any(item["reason"] == "non_property_libero_noise" for item in invalid_occ)
