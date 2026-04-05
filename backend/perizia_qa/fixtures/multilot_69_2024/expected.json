@@ -19,13 +19,13 @@
     "explicit_item_count": 0
   },
   "top_issue": {
-    "code": "LEGAL_CANCELLABLE_ATTENTION",
-    "title_it": "Formalità da cancellare",
-    "category": "legal_background"
+    "code": "AGIBILITA_NEGATIVE",
+    "title_it": "Agibilità assente / non rilasciata",
+    "category": "agibilita"
   },
   "summary_mentions_top_issue": true,
-  "summary_top_issue_it": "Formalità da cancellare",
-  "summary_decision_it": "Formalità da cancellare. Verifica che il decreto di trasferimento disponga la cancellazione delle formalità indicate.",
+  "summary_top_issue_it": "Agibilità assente / non rilasciata",
+  "summary_decision_it": "Agibilità assente / non rilasciata. Verifica titoli edilizi, agibilità/abitabilità e costi necessari per la regolarizzazione.",
   "legal_notes": {
     "cancellable_count": 1,
     "surviving_count": 0,

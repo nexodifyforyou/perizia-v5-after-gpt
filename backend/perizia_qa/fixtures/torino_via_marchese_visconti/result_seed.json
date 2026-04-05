@@ -1,0 +1,10 @@
+{
+  "field_states": {},
+  "dati_certi_del_lotto": {},
+  "document_quality": {
+    "status": "TEXT_OK"
+  },
+  "semaforo_generale": {
+    "status": "AMBER"
+  }
+}

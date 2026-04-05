@@ -9,7 +9,9 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from perizia_qa.fixture_runner import run_named_fixture
+import perizia_agents.agibilita_agent as agibilita_agent
 from perizia_runtime.runtime import apply_verifier_to_result, run_quality_verifier
+from perizia_runtime.state import RuntimeState
 from perizia_tools import valuation_table_tool
 
 
@@ -37,6 +39,666 @@ def _pricing_probe(name: str):
         full_text="\n\n".join(page["text"] for page in pages),
     )
     return payload["canonical_case"]["pricing"]
+
+
+def test_runtime_state_initializes_document_root_scope():
+    state = RuntimeState(
+        analysis_id="scope_init",
+        result={},
+        pages=[],
+        full_text="",
+    )
+    assert "document_root" in state.scopes
+    root = state.scopes["document_root"]
+    assert root.scope_type == "document_root"
+    assert root.parent_scope_id is None
+    assert root.label == "Document Root"
+
+
+def test_runtime_state_can_create_child_scopes_with_parent_links():
+    state = RuntimeState(
+        analysis_id="scope_children",
+        result={},
+        pages=[],
+        full_text="",
+    )
+    state.get_or_create_scope("lotto:1", scope_type="lotto", parent_scope_id="document_root", label="Lotto 1")
+    state.get_or_create_scope("bene:1", scope_type="bene", parent_scope_id="lotto:1", label="Bene 1")
+    children = state.list_child_scopes("document_root")
+    assert [scope.scope_id for scope in children] == ["lotto:1"]
+    assert state.scope_path("bene:1") == ["document_root", "lotto:1", "bene:1"]
+
+
+def test_runtime_state_can_attach_evidence_ownership_to_scope():
+    state = RuntimeState(
+        analysis_id="scope_evidence",
+        result={},
+        pages=[],
+        full_text="",
+    )
+    state.get_or_create_scope("lotto:1", scope_type="lotto", parent_scope_id="document_root", label="Lotto 1")
+    ownership = state.attach_evidence_ownership(
+        scope_id="lotto:1",
+        field_target="pricing.selected_price",
+        source_page=7,
+        quote="Lotto 1 - Prezzo base d'asta: € 64.198,00",
+        confidence=0.98,
+        ownership_method="heading_propagation",
+        evidence_id="ev_test_price",
+    )
+    assert ownership.evidence_id == "ev_test_price"
+    assert ownership.scope_id == "lotto:1"
+    assert ownership.scope_path == ["document_root", "lotto:1"]
+    assert state.scopes["lotto:1"].evidence_ids == ["ev_test_price"]
+    assert state.evidence_ownership["ev_test_price"].field_target == "pricing.selected_price"
+
+
+def test_structure_agent_discovers_single_lot_single_bene_scope_tree():
+    result = {
+        "field_states": {},
+        "dati_certi_del_lotto": {},
+        "document_quality": {"status": "TEXT_OK"},
+        "semaforo_generale": {"status": "AMBER"},
+    }
+    pages = [
+        {
+            "page_number": 1,
+            "text": "LOTTO UNICO\nBene N° 1 - Appartamento\nValore di stima del bene: € 129.312,00",
+        },
+    ]
+    payload = run_quality_verifier(
+        analysis_id="synthetic_scope_single",
+        result=result,
+        pages=pages,
+        full_text="\n\n".join(page["text"] for page in pages),
+    )
+    scopes = payload["scopes"]
+    assert "document_root" in scopes
+    assert "lotto:unico" in scopes
+    assert "bene:1" in scopes
+    assert scopes["lotto:unico"]["parent_scope_id"] == "document_root"
+    assert scopes["bene:1"]["parent_scope_id"] == "lotto:unico"
+    assert scopes["bene:1"]["metadata"]["ownership_method"] == "nearest_lotto_heading"
+
+
+def test_structure_agent_discovers_multiple_lotto_scopes():
+    result = {
+        "field_states": {},
+        "dati_certi_del_lotto": {},
+        "document_quality": {"status": "TEXT_OK"},
+        "semaforo_generale": {"status": "AMBER"},
+    }
+    pages = [
+        {
+            "page_number": 1,
+            "text": "LOTTO 1\nBene N° 1 - Appartamento\nLOTTO 2\nBene N° 2 - Garage",
+        },
+    ]
+    payload = run_quality_verifier(
+        analysis_id="synthetic_scope_multilot",
+        result=result,
+        pages=pages,
+        full_text="\n\n".join(page["text"] for page in pages),
+    )
+    scopes = payload["scopes"]
+    assert "lotto:1" in scopes
+    assert "lotto:2" in scopes
+    assert scopes["lotto:1"]["parent_scope_id"] == "document_root"
+    assert scopes["lotto:2"]["parent_scope_id"] == "document_root"
+    assert scopes["bene:1"]["parent_scope_id"] == "lotto:1"
+    assert scopes["bene:2"]["parent_scope_id"] == "lotto:2"
+
+
+def test_structure_agent_discovers_multi_bene_fixture_scopes():
+    result, pages = _repo_fixture("multibene_1859886")
+    payload = run_quality_verifier(
+        analysis_id="multibene_scope_probe",
+        result=result,
+        pages=pages,
+        full_text="\n\n".join(page["text"] for page in pages),
+    )
+    scopes = payload["scopes"]
+    bene_scope_ids = sorted(scope_id for scope_id, scope in scopes.items() if scope["scope_type"] == "bene")
+    assert len(bene_scope_ids) >= 4
+    assert "bene:1" in bene_scope_ids
+    assert "bene:2" in bene_scope_ids
+    assert "bene:3" in bene_scope_ids
+    assert "bene:4" in bene_scope_ids
+
+
+def test_structure_agent_parents_bene_to_lotto_when_structure_supports_it():
+    result, pages = _repo_fixture("multilot_69_2024")
+    payload = run_quality_verifier(
+        analysis_id="multilot_scope_probe",
+        result=result,
+        pages=pages,
+        full_text="\n\n".join(page["text"] for page in pages),
+    )
+    scopes = payload["scopes"]
+    assert "lotto:1" in scopes
+    assert "lotto:2" in scopes
+    assert "lotto:3" in scopes
+    assert scopes["bene:1"]["parent_scope_id"] == "lotto:1"
+    assert scopes["bene:2"]["parent_scope_id"] == "lotto:2"
+    assert scopes["bene:3"]["parent_scope_id"] == "lotto:3"
+
+
+def test_agibilita_negative_writes_to_bene_scope_first():
+    result = {
+        "field_states": {},
+        "dati_certi_del_lotto": {},
+        "document_quality": {"status": "TEXT_OK"},
+        "semaforo_generale": {"status": "AMBER"},
+    }
+    pages = [
+        {
+            "page_number": 1,
+            "text": "LOTTO UNICO\nBene N° 1 - Appartamento\nL'immobile non risulta agibile.",
+        },
+    ]
+    payload = run_quality_verifier(
+        analysis_id="synthetic_agibilita_bene_negative",
+        result=result,
+        pages=pages,
+        full_text="\n\n".join(page["text"] for page in pages),
+    )
+    bene = payload["scopes"]["bene:1"]["agibilita"]
+    assert bene["status"] == "ASSENTE"
+    assert bene["issue_code"] == "AGIBILITA_NEGATIVE"
+    ownership = list(payload["evidence_ownership"].values())
+    assert any(item["scope_id"] == "bene:1" and item["field_target"] == "agibilita" for item in ownership)
+
+
+def test_agibilita_positive_writes_to_bene_scope_first():
+    result = {
+        "field_states": {},
+        "dati_certi_del_lotto": {},
+        "document_quality": {"status": "TEXT_OK"},
+        "semaforo_generale": {"status": "AMBER"},
+    }
+    pages = [
+        {
+            "page_number": 1,
+            "text": "LOTTO UNICO\nBene N° 1 - Appartamento\nL'immobile risulta agibile.",
+        },
+    ]
+    payload = run_quality_verifier(
+        analysis_id="synthetic_agibilita_bene_positive",
+        result=result,
+        pages=pages,
+        full_text="\n\n".join(page["text"] for page in pages),
+    )
+    bene = payload["scopes"]["bene:1"]["agibilita"]
+    assert bene["status"] == "PRESENTE"
+    assert payload["canonical_case"]["agibilita"]["status"] == "PRESENTE"
+
+
+def test_agibilita_mixed_across_beni_is_not_same_scope_conflict():
+    result = {
+        "field_states": {},
+        "dati_certi_del_lotto": {},
+        "document_quality": {"status": "TEXT_OK"},
+        "semaforo_generale": {"status": "AMBER"},
+    }
+    pages = [
+        {
+            "page_number": 1,
+            "text": "LOTTO UNICO\nBene N° 1 - Appartamento\nL'immobile non risulta agibile.\nBene N° 2 - Garage\nL'immobile risulta agibile.",
+        },
+    ]
+    payload = run_quality_verifier(
+        analysis_id="synthetic_agibilita_mixed_beni",
+        result=result,
+        pages=pages,
+        full_text="\n\n".join(page["text"] for page in pages),
+    )
+    assert payload["scopes"]["bene:1"]["agibilita"]["status"] == "ASSENTE"
+    assert payload["scopes"]["bene:2"]["agibilita"]["status"] == "PRESENTE"
+    assert payload["canonical_case"]["agibilita"]["status"] == "NON_VERIFICABILE"
+    assert "mixed_scope_agibilita_non_collapsible" in payload["canonical_case"]["agibilita"]["guards"]
+    assert payload["scopes"]["bene:1"]["metadata"]["agibilita_internal"]["raw_conflict_detected"] is False
+    assert payload["scopes"]["bene:2"]["metadata"]["agibilita_internal"]["raw_conflict_detected"] is False
+    trail = payload["canonical_case"]["agibilita"]["verification_trail"]
+    assert trail["reason_unresolved"] == "truth differs by scope"
+    assert trail["checked_pages"] == [1]
+    assert trail["key_evidence_found"]
+    assert trail["verify_next"]
+    assert trail["checked_scope_label"] == "Documento"
+
+
+def test_agibilita_same_scope_explicit_negative_beats_positive_and_resolves_assente():
+    result = {
+        "field_states": {},
+        "dati_certi_del_lotto": {},
+        "document_quality": {"status": "TEXT_OK"},
+        "semaforo_generale": {"status": "AMBER"},
+    }
+    pages = [
+        {
+            "page_number": 1,
+            "text": "LOTTO UNICO\nBene N° 1 - Appartamento\nL'immobile non risulta agibile.\nL'immobile risulta agibile.",
+        },
+    ]
+    payload = run_quality_verifier(
+        analysis_id="synthetic_agibilita_same_scope_negative_wins",
+        result=result,
+        pages=pages,
+        full_text="\n\n".join(page["text"] for page in pages),
+    )
+    scoped = payload["scopes"]["bene:1"]["agibilita"]
+    assert scoped["status"] == "ASSENTE"
+    assert "resolver_meta" not in scoped
+    assert "verification_trail" not in scoped
+    assert payload["scopes"]["bene:1"]["metadata"]["agibilita_internal"]["raw_conflict_detected"] is True
+    assert payload["scopes"]["bene:1"]["metadata"]["agibilita_internal"]["resolution_reason"] == "higher_tier_negative_beats_positive"
+    assert payload["canonical_case"]["agibilita"]["status"] == "ASSENTE"
+
+
+def test_agibilita_same_scope_local_positive_beats_inherited_negative():
+    result = {
+        "field_states": {},
+        "dati_certi_del_lotto": {},
+        "document_quality": {"status": "TEXT_OK"},
+        "semaforo_generale": {"status": "AMBER"},
+    }
+    pages = [
+        {
+            "page_number": 1,
+            "text": (
+                "LOTTO UNICO\nBene N° 1 - Appartamento\n"
+                "Tutti i beni del lotto unico non risultano agibili.\n"
+                "Bene N° 1 - Appartamento\nL'immobile risulta agibile."
+            ),
+        },
+    ]
+    payload = run_quality_verifier(
+        analysis_id="synthetic_agibilita_local_positive_beats_inherited_negative",
+        result=result,
+        pages=pages,
+        full_text="\n\n".join(page["text"] for page in pages),
+    )
+    scoped = payload["scopes"]["bene:1"]["agibilita"]
+    assert scoped["status"] == "PRESENTE"
+    assert "resolver_meta" not in scoped
+    assert "verification_trail" not in scoped
+    assert payload["scopes"]["bene:1"]["metadata"]["agibilita_internal"]["raw_conflict_detected"] is True
+    assert payload["scopes"]["bene:1"]["metadata"]["agibilita_internal"]["resolution_reason"] == "higher_tier_positive_beats_negative"
+    assert payload["canonical_case"]["agibilita"]["status"] == "PRESENTE"
+
+
+def test_agibilita_same_scope_unresolved_ambiguity_becomes_non_verificabile_not_conflict():
+    result = {
+        "field_states": {},
+        "dati_certi_del_lotto": {},
+        "document_quality": {"status": "TEXT_OK"},
+        "semaforo_generale": {"status": "AMBER"},
+    }
+    pages = [
+        {
+            "page_number": 1,
+            "text": (
+                "LOTTO UNICO\nBene N° 1 - Appartamento\n"
+                "Tutti i beni del lotto unico non risultano agibili.\n"
+                "Tutti i beni del lotto unico: l'immobile risulta agibile."
+            ),
+        },
+    ]
+    payload = run_quality_verifier(
+        analysis_id="synthetic_agibilita_same_scope_unresolved_ambiguity",
+        result=result,
+        pages=pages,
+        full_text="\n\n".join(page["text"] for page in pages),
+    )
+    scoped = payload["scopes"]["bene:1"]["agibilita"]
+    assert scoped["status"] == "NON_VERIFICABILE"
+    assert "resolver_meta" not in scoped
+    assert payload["scopes"]["bene:1"]["metadata"]["agibilita_internal"]["raw_conflict_detected"] is True
+    assert payload["scopes"]["bene:1"]["metadata"]["agibilita_internal"]["unresolved_reason"] == "same_scope_conflict_survives_expanded_reading"
+    trail = scoped["verification_trail"]
+    assert trail["checked_scope_label"] == "Bene 1"
+    assert trail["checked_pages"] == [1]
+    assert trail["key_evidence_found"]
+    assert trail["verify_next"]
+    assert payload["canonical_case"]["agibilita"]["status"] == "NON_VERIFICABILE"
+    assert payload["canonical_case"]["agibilita"]["status"] != "CONFLITTO"
+
+
+def test_agibilita_parent_scope_universal_statement_inherits_to_children():
+    result = {
+        "field_states": {},
+        "dati_certi_del_lotto": {},
+        "document_quality": {"status": "TEXT_OK"},
+        "semaforo_generale": {"status": "AMBER"},
+    }
+    pages = [
+        {
+            "page_number": 1,
+            "text": "LOTTO UNICO\nBene N° 1 - Appartamento\nBene N° 2 - Garage\nTutti i beni del lotto unico non risultano agibili.",
+        },
+    ]
+    payload = run_quality_verifier(
+        analysis_id="synthetic_agibilita_inheritance",
+        result=result,
+        pages=pages,
+        full_text="\n\n".join(page["text"] for page in pages),
+    )
+    bene1 = payload["scopes"]["bene:1"]["agibilita"]
+    bene2 = payload["scopes"]["bene:2"]["agibilita"]
+    assert bene1["status"] == "ASSENTE"
+    assert bene2["status"] == "ASSENTE"
+    internal = payload["scopes"]["bene:1"]["metadata"]["agibilita_internal"]
+    assert internal["winner_inherited"] is True
+    assert internal["winner_inherited_from_scope_id"] == "lotto:unico"
+
+
+def test_agibilita_inherited_parent_statement_loses_to_explicit_local_contrary_evidence():
+    result = {
+        "field_states": {},
+        "dati_certi_del_lotto": {},
+        "document_quality": {"status": "TEXT_OK"},
+        "semaforo_generale": {"status": "AMBER"},
+    }
+    pages = [
+        {
+            "page_number": 1,
+            "text": (
+                "LOTTO UNICO\nBene N° 1 - Appartamento\n"
+                "Tutti i beni del lotto unico non risultano agibili.\n"
+                "Bene N° 1 - Appartamento\nL'immobile risulta agibile."
+            ),
+        },
+    ]
+    payload = run_quality_verifier(
+        analysis_id="synthetic_agibilita_inherited_loses_to_local",
+        result=result,
+        pages=pages,
+        full_text="\n\n".join(page["text"] for page in pages),
+    )
+    scoped = payload["scopes"]["bene:1"]["agibilita"]
+    assert scoped["status"] == "PRESENTE"
+    assert payload["scopes"]["bene:1"]["metadata"]["agibilita_internal"]["resolution_reason"] == "higher_tier_positive_beats_negative"
+
+
+def test_agibilita_root_output_remains_backward_compatible_for_negative_case():
+    result = {
+        "field_states": {},
+        "dati_certi_del_lotto": {},
+        "document_quality": {"status": "TEXT_OK"},
+        "semaforo_generale": {"status": "AMBER"},
+    }
+    pages = [
+        {
+            "page_number": 1,
+            "text": "REGOLARITÀ EDILIZIA. Lotto 2. L'immobile non risulta agibile.",
+        },
+    ]
+    payload = run_quality_verifier(
+        analysis_id="synthetic_agibilita_root_compat",
+        result=result,
+        pages=pages,
+        full_text="\n\n".join(page["text"] for page in pages),
+    )
+    root = payload["canonical_case"]["agibilita"]
+    assert root["status"] == "ASSENTE"
+    assert root["issue_code"] == "AGIBILITA_NEGATIVE"
+
+
+def test_agibilita_root_never_exposes_raw_conflict():
+    result = {
+        "field_states": {},
+        "dati_certi_del_lotto": {},
+        "document_quality": {"status": "TEXT_OK"},
+        "semaforo_generale": {"status": "AMBER"},
+    }
+    pages = [
+        {
+            "page_number": 1,
+            "text": (
+                "LOTTO UNICO\nBene N° 1 - Appartamento\n"
+                "Tutti i beni del lotto unico non risultano agibili.\n"
+                "Tutti i beni del lotto unico risultano agibili."
+            ),
+        },
+    ]
+    payload = run_quality_verifier(
+        analysis_id="synthetic_agibilita_root_never_conflict",
+        result=result,
+        pages=pages,
+        full_text="\n\n".join(page["text"] for page in pages),
+    )
+    assert payload["canonical_case"]["agibilita"]["status"] != "CONFLITTO"
+    assert payload["canonical_case"]["agibilita"]["verification_trail"]["verify_next"]
+
+
+def test_agibilita_multi_bene_same_lotto_keeps_bene_ownership_and_does_not_create_false_lotto_assente():
+    result = {
+        "field_states": {},
+        "dati_certi_del_lotto": {},
+        "document_quality": {"status": "TEXT_OK"},
+        "semaforo_generale": {"status": "AMBER"},
+    }
+    pages = [
+        {
+            "page_number": 1,
+            "text": (
+                "LOTTO UNICO\n"
+                "Bene N° 1 - Appartamento\nL'immobile non risulta agibile.\n"
+                "Bene N° 2 - Garage\nL'immobile risulta agibile."
+            ),
+        },
+    ]
+    payload = run_quality_verifier(
+        analysis_id="synthetic_agibilita_bene_stickiness",
+        result=result,
+        pages=pages,
+        full_text="\n\n".join(page["text"] for page in pages),
+    )
+    assert payload["scopes"]["bene:1"]["agibilita"]["status"] == "ASSENTE"
+    assert payload["scopes"]["bene:2"]["agibilita"]["status"] == "PRESENTE"
+    assert payload["scopes"]["lotto:unico"]["agibilita"] == {}
+
+
+def test_agibilita_lot_wide_universal_wording_can_assign_to_lotto_scope():
+    result = {
+        "field_states": {},
+        "dati_certi_del_lotto": {},
+        "document_quality": {"status": "TEXT_OK"},
+        "semaforo_generale": {"status": "AMBER"},
+    }
+    pages = [
+        {
+            "page_number": 1,
+            "text": "LOTTO UNICO\nBene N° 1 - Appartamento\nBene N° 2 - Garage\nTutti i beni del lotto unico non risultano agibili.",
+        },
+    ]
+    payload = run_quality_verifier(
+        analysis_id="synthetic_agibilita_lotto_universal_owner",
+        result=result,
+        pages=pages,
+        full_text="\n\n".join(page["text"] for page in pages),
+    )
+    assert payload["scopes"]["lotto:unico"]["agibilita"]["status"] == "ASSENTE"
+    assert payload["scopes"]["bene:1"]["agibilita"]["status"] == "ASSENTE"
+    assert payload["scopes"]["bene:2"]["agibilita"]["status"] == "ASSENTE"
+
+
+def test_agibilita_single_scope_document_can_fall_back_safely():
+    result = {
+        "field_states": {},
+        "dati_certi_del_lotto": {},
+        "document_quality": {"status": "TEXT_OK"},
+        "semaforo_generale": {"status": "AMBER"},
+    }
+    pages = [
+        {
+            "page_number": 1,
+            "text": "L'immobile non risulta agibile.",
+        },
+    ]
+    payload = run_quality_verifier(
+        analysis_id="synthetic_agibilita_single_scope_fallback",
+        result=result,
+        pages=pages,
+        full_text="\n\n".join(page["text"] for page in pages),
+    )
+    assert payload["canonical_case"]["agibilita"]["status"] == "ASSENTE"
+
+
+def test_agibilita_root_checked_scope_label_is_buyer_readable():
+    result = {
+        "field_states": {},
+        "dati_certi_del_lotto": {},
+        "document_quality": {"status": "TEXT_OK"},
+        "semaforo_generale": {"status": "AMBER"},
+    }
+    pages = [
+        {
+            "page_number": 1,
+            "text": "L'immobile risulta agibile.\nL'immobile non risulta agibile.",
+        },
+    ]
+    payload = run_quality_verifier(
+        analysis_id="synthetic_agibilita_root_scope_label",
+        result=result,
+        pages=pages,
+        full_text="\n\n".join(page["text"] for page in pages),
+    )
+    trail = payload["canonical_case"]["agibilita"]["verification_trail"]
+    assert trail["checked_scope_label"] == "Documento"
+    assert "checked_scope_id" not in trail
+
+
+def test_agibilita_ownership_decision_can_become_unresolved_when_signals_are_too_close():
+    state = RuntimeState(
+        analysis_id="ownership_decision_ambiguity",
+        result={},
+        pages=[],
+        full_text="",
+    )
+    state.get_or_create_scope("lotto:unico", scope_type="lotto", parent_scope_id="document_root", label="Lotto Unico")
+    state.get_or_create_scope("bene:1", scope_type="bene", parent_scope_id="lotto:unico", label="Bene 1")
+    state.get_or_create_scope("bene:2", scope_type="bene", parent_scope_id="lotto:unico", label="Bene 2")
+    raw_text = "LOTTO UNICO\nBene N° 1 - Appartamento\nBene N° 2 - Garage\nL'immobile non risulta agibile."
+    start = raw_text.lower().find("non risulta agibile")
+    decision = agibilita_agent._build_ownership_decision(
+        state,
+        quote="Bene N° 1 - Appartamento\nBene N° 2 - Garage\nL'immobile non risulta agibile.",
+        page_number=1,
+        raw_text=raw_text,
+        expanded_quote=raw_text,
+        start=start,
+    )
+    assert decision.winning_scope is None
+    assert decision.ownership_method == "UNRESOLVED"
+    assert decision.unresolved_reason is not None
+
+
+def test_agibilita_mixed_scope_root_rollup_no_longer_crashes_on_fixture():
+    result, pages = _repo_fixture("multibene_1859886")
+    payload = run_quality_verifier(
+        analysis_id="multibene_agibilita_rollup_probe",
+        result=result,
+        pages=pages,
+        full_text="\n\n".join(page["text"] for page in pages),
+    )
+    root = payload["canonical_case"]["agibilita"]
+    assert root["status"] == "NON_VERIFICABILE"
+    assert root["verification_trail"]["reason_unresolved"] == "truth differs by scope"
+    assert root["verification_trail"]["checked_pages"]
+    assert payload["scopes"]["lotto:unico"]["agibilita"] == {}
+    assert payload["scopes"]["bene:1"]["agibilita"]["status"] == "ASSENTE"
+    assert payload["scopes"]["bene:4"]["agibilita"]["status"] == "PRESENTE"
+
+
+def test_agibilita_client_facing_output_does_not_leak_internal_labels():
+    result = {
+        "field_states": {},
+        "dati_certi_del_lotto": {},
+        "document_quality": {"status": "TEXT_OK"},
+        "semaforo_generale": {"status": "AMBER"},
+    }
+    pages = [
+        {
+            "page_number": 1,
+            "text": "REGOLARITÀ EDILIZIA. Lotto 2. L'immobile non risulta agibile.",
+        },
+    ]
+    payload = run_quality_verifier(
+        analysis_id="synthetic_agibilita_client_safety",
+        result=result,
+        pages=pages,
+        full_text="\n\n".join(page["text"] for page in pages),
+    )
+    client_text = json.dumps(
+        {
+            "root": payload["canonical_case"]["agibilita"],
+            "scoped": payload["scopes"]["lotto:2"]["agibilita"],
+        },
+        ensure_ascii=False,
+    )
+    for token in ["explicit_negative", "explicit_positive", "certificate_missing", "inherited_negative", "scope_id", "evidence_id", "checked_scope_id"]:
+        assert token not in client_text
+
+
+def test_agibilita_client_facing_trail_uses_only_readable_field_names():
+    result, pages = _repo_fixture("multibene_1859886")
+    payload = run_quality_verifier(
+        analysis_id="multibene_agibilita_trail_field_names",
+        result=result,
+        pages=pages,
+        full_text="\n\n".join(page["text"] for page in pages),
+    )
+    trail = payload["canonical_case"]["agibilita"]["verification_trail"]
+    assert trail["checked_scope_label"] == "Documento"
+    assert "checked_scope_id" not in trail
+    assert set(trail.keys()) == {
+        "checked_scope_label",
+        "checked_pages",
+        "checked_sections",
+        "key_evidence_found",
+        "reason_unresolved",
+        "verify_next",
+    }
+
+
+def test_agibilita_torino_non_verificabile_semantics_unchanged_after_trail_cleanup():
+    result, pages = _repo_fixture("torino_via_marchese_visconti")
+    payload = run_quality_verifier(
+        analysis_id="torino_agibilita_trail_cleanup_probe",
+        result=result,
+        pages=pages,
+        full_text="\n\n".join(page["text"] for page in pages),
+    )
+    root = payload["canonical_case"]["agibilita"]
+    assert root["status"] == "NON_VERIFICABILE"
+    assert root["verification_trail"]["checked_scope_label"] == "Documento"
+    assert root["verification_trail"]["reason_unresolved"] == "no decisive certificate or explicit same-scope statement found"
+    assert root["verification_trail"]["verify_next"]
+
+
+def test_agibilita_internal_diagnostics_still_preserved_separately():
+    result = {
+        "field_states": {},
+        "dati_certi_del_lotto": {},
+        "document_quality": {"status": "TEXT_OK"},
+        "semaforo_generale": {"status": "AMBER"},
+    }
+    pages = [
+        {
+            "page_number": 1,
+            "text": "LOTTO UNICO\nBene N° 1 - Appartamento\nL'immobile non risulta agibile.\nL'immobile risulta agibile.",
+        },
+    ]
+    payload = run_quality_verifier(
+        analysis_id="synthetic_agibilita_internal_diagnostics",
+        result=result,
+        pages=pages,
+        full_text="\n\n".join(page["text"] for page in pages),
+    )
+    internal = payload["scopes"]["bene:1"]["metadata"]["agibilita_internal"]
+    assert internal["raw_conflict_detected"] is True
+    assert internal["competing_evidence_ids"]
+    assert internal["winning_evidence_tier"] == 2
 
 
 def _silvabella_fixture():
@@ -129,6 +791,22 @@ def test_verifier_bridge_updates_legacy_result_for_routed_fields():
     assert "Costi espliciti" in result["section_9_legal_killers"]["top_items"][0]["killer"]
     assert math.isclose(result["money_box"]["verifier_costs_summary"]["explicit_total_eur"], 3521.94, rel_tol=0.0, abs_tol=0.01)
     assert result["summary_for_client"]["generation_mode"] == "deterministic_canonical_bundle"
+
+
+def test_verifier_payload_exposes_scope_registry_without_breaking_root_outputs():
+    result, pages = _silvabella_fixture()
+    payload = run_quality_verifier(
+        analysis_id="scope_registry_bridge",
+        result=result,
+        pages=pages,
+        full_text="\n\n".join(page["text"] for page in pages),
+    )
+    assert payload["canonical_case"]["pricing"]["selected_price"] == 45338.48
+    assert "document_root" in payload["scopes"]
+    root_scope = payload["scopes"]["document_root"]
+    assert root_scope["scope_type"] == "document_root"
+    assert root_scope["parent_scope_id"] is None
+    assert payload["evidence_ownership"] == {}
 
 
 def test_named_fixture_runner_for_existing_cases():

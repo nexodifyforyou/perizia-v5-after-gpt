@@ -8,6 +8,7 @@ from perizia_tools.section_router_tool import classify_section_type
 _LOT_RE = re.compile(r"\blotto\s*(?:n[°º.]?\s*)?(unico|\d+)\b", re.IGNORECASE)
 _BENE_RE = re.compile(r"\bbene\s*n[°º.]?\s*(\d+)\b", re.IGNORECASE)
 _BENE_HEADING_RE = re.compile(r"^(?:[•*\-]\s*)?bene\s*n[°º.]?\s*(\d+)\b", re.IGNORECASE)
+_INDEX_LINE_RE = re.compile(r"\.{5,}\s*\d+\s*$")
 
 
 def _normalize_lotto_id(token: str) -> str:
@@ -81,6 +82,8 @@ def run_structure_agent(state: RuntimeState) -> None:
         page_lotto_scope_id: str | None = None
         seen_page_lotto_scope_ids: set[str] = set()
         for line in lines:
+            if _INDEX_LINE_RE.search(line):
+                continue
             lot_match = _LOT_RE.search(line)
             if lot_match:
                 lot_token = lot_match.group(1)
@@ -100,8 +103,6 @@ def run_structure_agent(state: RuntimeState) -> None:
                 discovered_scopes.append({"scope_id": page_lotto_scope_id, "page": page_number, "label": label})
             bene_match = _BENE_HEADING_RE.search(line)
             if bene_match:
-                if len(seen_page_lotto_scope_ids) > 1:
-                    continue
                 bene_no = bene_match.group(1)
                 bene_scope_id = f"bene:{bene_no}"
                 parent_scope_id = page_lotto_scope_id or carry_lotto_scope_id

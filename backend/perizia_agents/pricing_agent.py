@@ -76,6 +76,10 @@ def _unique_explicit_layer(state: RuntimeState, patterns, *, confidence: float):
 def _direct_price_from_pages(state: RuntimeState):
     patterns = [
         re.compile(
+            r"prezzo\s+base\s+d[' ]asta[\s\S]{0,260}?€\.?\s*([0-9]{1,3}(?:\.[0-9]{3})*(?:,[0-9]{2})?)",
+            re.IGNORECASE | re.DOTALL,
+        ),
+        re.compile(
             r"prezzo\s+a\s+base\s+d[' ]asta[\s\S]{0,260}?€\.?\s*([0-9]{1,3}(?:\.[0-9]{3})*(?:,[0-9]{2})?)",
             re.IGNORECASE | re.DOTALL,
         ),
@@ -122,7 +126,16 @@ def _direct_adjusted_market_from_pages(state: RuntimeState):
             re.IGNORECASE | re.DOTALL,
         ),
     ]
-    return _unique_explicit_layer(state, patterns, confidence=0.95)
+    matches = _collect_page_amount_matches(state, patterns, confidence=0.95)
+    filtered = [row for row in matches if "subalterno" not in row["quote"].lower()]
+    preferred = filtered or matches
+    amount = _unique_amount([row["amount"] for row in preferred])
+    if amount is None:
+        return None
+    for row in preferred:
+        if round(float(row["amount"]), 2) == round(float(amount), 2):
+            return row
+    return None
 
 
 def _direct_gross_market_from_pages(state: RuntimeState):
@@ -143,12 +156,43 @@ def run_pricing_agent(state: RuntimeState) -> None:
     candidates = valuation_candidates(state.analysis_id)
     valid = [cand for cand in candidates if cand.valid]
     direct = _direct_price_from_pages(state)
+    direct_auction_matches = _collect_page_amount_matches(
+        state,
+        [
+            re.compile(
+                r"prezzo\s+base\s+d[' ]asta[\s\S]{0,260}?€\.?\s*([0-9]{1,3}(?:\.[0-9]{3})*(?:,[0-9]{2})?)",
+                re.IGNORECASE | re.DOTALL,
+            ),
+            re.compile(
+                r"prezzo\s+a\s+base\s+d[' ]asta[\s\S]{0,260}?€\.?\s*([0-9]{1,3}(?:\.[0-9]{3})*(?:,[0-9]{2})?)",
+                re.IGNORECASE | re.DOTALL,
+            ),
+        ],
+        confidence=0.99,
+    )
+    has_multiple_direct_auction_prices = len({round(float(row["amount"]), 2) for row in direct_auction_matches}) > 1
     direct_adjusted = _direct_adjusted_market_from_pages(state)
     direct_benchmark = _direct_gross_market_from_pages(state)
+    direct_benchmark_matches = _collect_page_amount_matches(
+        state,
+        [
+            re.compile(
+                r"valore\s+di\s+stima\s+del\s+bene[\s\S]{0,180}?€\.?\s*([0-9]{1,3}(?:\.[0-9]{3})*(?:,[0-9]{2})?)",
+                re.IGNORECASE | re.DOTALL,
+            ),
+            re.compile(
+                r"valore\s+complessivo\s*\(vc\)[\s\S]{0,120}?€\.?\s*([0-9]{1,3}(?:\.[0-9]{3})*(?:,[0-9]{2})?)",
+                re.IGNORECASE | re.DOTALL,
+            ),
+        ],
+        confidence=0.94,
+    )
     auction = [cand for cand in valid if cand.semantic_role == "auction_price"]
     net_values = [cand for cand in valid if cand.semantic_role == "net_valuation"]
     totals = [cand for cand in valid if cand.semantic_role == "valuation_total"]
-    has_multiple_auction_prices = _has_multiple_distinct_auction_prices(auction)
+    has_multiple_auction_prices = _has_multiple_distinct_auction_prices(auction) or has_multiple_direct_auction_prices
+    if direct and has_multiple_direct_auction_prices and "prezzo base" in direct["quote"].lower():
+        direct = None
     chosen = None if direct else _select_executable_price_candidate(
         auction,
         net_values,
@@ -184,7 +228,10 @@ def run_pricing_agent(state: RuntimeState) -> None:
             else []
         ) + (
             [{"value": "multiple_benchmark_values", "reason": "multi_lot_scalar_benchmark_suppressed", "evidence": []}]
-            if benchmark is None and any(str((cand.metadata or {}).get("normalized_ownership") or "") in {"lot_owned", "component_only"} for cand in totals)
+            if benchmark is None and (
+                any(str((cand.metadata or {}).get("normalized_ownership") or "") in {"lot_owned", "component_only"} for cand in totals)
+                or len({round(float(row["amount"]), 2) for row in direct_benchmark_matches}) > 1
+            )
             else []
         ),
         "guards": [
