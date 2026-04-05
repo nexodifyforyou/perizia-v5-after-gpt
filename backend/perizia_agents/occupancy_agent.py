@@ -231,6 +231,8 @@ def run_occupancy_agent(state: RuntimeState) -> None:
                 continue
             if not _has_tenure_signal(quote):
                 continue
+            if not _has_property_occupancy_anchor(quote):
+                continue
             confidence = _occupancy_confidence(quote, "OCCUPATO")
             candidates.append(
                 {
