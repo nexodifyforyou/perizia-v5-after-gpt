@@ -1,12 +1,16 @@
 import math
 import json
+import os
+import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from perizia_qa.fixture_runner import run_named_fixture
 from perizia_runtime.runtime import apply_verifier_to_result, run_quality_verifier
+from perizia_tools import valuation_table_tool
 
 
 def _repo_fixture(name: str):
@@ -22,6 +26,17 @@ def _repo_fixture(name: str):
         if isinstance(row, dict)
     ]
     return result, normalized_pages
+
+
+def _pricing_probe(name: str):
+    result, pages = _repo_fixture(name)
+    payload = run_quality_verifier(
+        analysis_id=name,
+        result=result,
+        pages=pages,
+        full_text="\n\n".join(page["text"] for page in pages),
+    )
+    return payload["canonical_case"]["pricing"]
 
 
 def _silvabella_fixture():
@@ -89,6 +104,7 @@ def test_verifier_catches_silvabella_failure_modes():
     canonical = payload["canonical_case"]
     assert canonical["rights"]["quota"]["value"] is None
     assert canonical["pricing"]["selected_price"] == 45338.48
+    assert canonical["pricing"]["adjusted_market_value"] == 53339.39
     invalid_reasons = {item["reason"] for item in canonical["pricing"]["invalid_candidates"]}
     assert "subalterno_number_contamination" in invalid_reasons
     assert canonical["occupancy"]["status"] == "LIBERO"
@@ -123,10 +139,7 @@ def test_named_fixture_runner_for_existing_cases():
 
 
 def test_verifier_emits_legal_attention_fallback_for_cancellable_only_cases():
-    for analysis_id, fixture_name in [
-        ("mantova", "mantova"),
-        ("multilot_69_2024", "multilot_69_2024"),
-    ]:
+    for analysis_id, fixture_name in [("mantova", "mantova")]:
         result, pages = _repo_fixture(fixture_name)
         payload = run_quality_verifier(
             analysis_id=analysis_id,
@@ -211,3 +224,308 @@ def test_tenure_signal_creates_nonfree_occupancy_with_cautious_opponibilita():
     assert canonical["occupancy"]["status"] == "OCCUPATO"
     assert canonical["occupancy"]["opponibilita"] == "LOCAZIONE DA VERIFICARE"
     assert canonical["priority"]["top_issue"]["code"] == "OCCUPANCY_RISK"
+
+
+def test_multi_lot_auction_prices_do_not_force_scalar_selected_price():
+    result = {
+        "field_states": {},
+        "dati_certi_del_lotto": {},
+        "document_quality": {"status": "TEXT_OK"},
+        "semaforo_generale": {"status": "AMBER"},
+    }
+    pages = [
+        {
+            "page_number": 1,
+            "text": (
+                "Schema riassuntivo. Lotto 1 - Prezzo base d'asta: € 64.198,00. "
+                "Lotto 2 - Prezzo base d'asta: € 84.000,00. "
+                "Lotto 3 - Prezzo base d'asta: € 224.268,00."
+            ),
+        },
+        {
+            "page_number": 2,
+            "text": (
+                "Lotto 1. Valore di stima del bene: € 80.248,00. "
+                "Lotto 2. Valore di stima del bene: € 105.000,00. "
+                "Lotto 3. Valore di stima del bene: € 280.336,00."
+            ),
+        },
+    ]
+    payload = run_quality_verifier(
+        analysis_id="synthetic_multi_lot_pricing_policy",
+        result=result,
+        pages=pages,
+        full_text="\n\n".join(page["text"] for page in pages),
+    )
+    canonical = payload["canonical_case"]
+    invalid_reasons = {item["reason"] for item in canonical["pricing"]["invalid_candidates"]}
+    assert canonical["pricing"]["selected_price"] is None
+    assert canonical["pricing"]["benchmark_value"] is None
+    assert "multi_lot_scalar_price_suppressed" in invalid_reasons
+    assert "multi_lot_scalar_benchmark_suppressed" in invalid_reasons
+
+
+def test_negative_agibilita_creates_real_issue_and_beats_legal_fallback():
+    result = {
+        "field_states": {},
+        "dati_certi_del_lotto": {},
+        "document_quality": {"status": "TEXT_OK"},
+        "semaforo_generale": {"status": "AMBER"},
+    }
+    pages = [
+        {
+            "page_number": 1,
+            "text": (
+                "FORMALITÀ DA CANCELLARE CON IL DECRETO DI TRASFERIMENTO. "
+                "Ipoteca volontaria iscritta a carico della procedura."
+            ),
+        },
+        {
+            "page_number": 2,
+            "text": (
+                "REGOLARITÀ EDILIZIA. L'immobile non risulta agibile. "
+                "Non risulta rilasciato il certificato di agibilità."
+            ),
+        },
+    ]
+    payload = run_quality_verifier(
+        analysis_id="synthetic_negative_agibilita_priority",
+        result=result,
+        pages=pages,
+        full_text="\n\n".join(page["text"] for page in pages),
+    )
+    canonical = payload["canonical_case"]
+    assert canonical["agibilita"]["status"] == "ASSENTE"
+    assert canonical["priority"]["top_issue"]["code"] == "AGIBILITA_NEGATIVE"
+    assert canonical["priority"]["top_issue"]["category"] == "agibilita"
+    assert canonical["summary_bundle"]["decision_summary_it"] != "Formalità da cancellare. Verifica che il decreto di trasferimento disponga la cancellazione delle formalità indicate."
+
+
+def test_valuation_candidates_classify_common_pricing_roles():
+    rows = [
+        {
+            "page": 1,
+            "amount_eur": 64198.0,
+            "quote": "Lotto 1 - Prezzo base d'asta: € 64.198,00",
+            "context": "Schema riassuntivo Lotto 1 - Prezzo base d'asta: € 64.198,00",
+        },
+        {
+            "page": 2,
+            "amount_eur": 80248.0,
+            "quote": "Valore di stima del bene: € 80.248,00",
+            "context": "L'immobile viene posto in vendita per il diritto di Proprietà (1/1) Valore di stima del bene: € 80.248,00",
+        },
+        {
+            "page": 3,
+            "amount_eur": 224268.0,
+            "quote": "Valore finale di stima: € 224.268,00",
+            "context": "Deprezzamenti Altro 20,00 % Valore finale di stima: € 224.268,00",
+        },
+    ]
+    with tempfile.TemporaryDirectory() as tmpdir:
+        runs_root = Path(tmpdir)
+        analysis_dir = runs_root / "synthetic_pricing_roles" / "candidates"
+        analysis_dir.mkdir(parents=True)
+        (analysis_dir / "candidates_money.json").write_text(json.dumps(rows), encoding="utf-8")
+        old_runs_root = valuation_table_tool.RUNS_ROOT
+        try:
+            valuation_table_tool.RUNS_ROOT = runs_root
+            candidates = valuation_table_tool.valuation_candidates("synthetic_pricing_roles")
+        finally:
+            valuation_table_tool.RUNS_ROOT = old_runs_root
+    by_role = {cand.semantic_role: cand for cand in candidates}
+    assert by_role["auction_price"].value == 64198.0
+    assert by_role["valuation_total"].value == 80248.0
+    assert by_role["net_valuation"].value == 224268.0
+
+
+def test_valuation_candidates_reject_table_ratio_contamination_from_totals():
+    rows = [
+        {
+            "page": 1,
+            "amount_eur": 1.0,
+            "quote": "Bene N° 1 ... € 129.312,00 1/1 € 129.312,00 Valore di stima: € 129.312,00",
+            "context": "Identificativo corpo Valore complessivo Quota invendita Totale Bene N° 1 ... € 129.312,00 1/1 € 129.312,00 Valore di stima: € 129.312,00",
+        },
+        {
+            "page": 1,
+            "amount_eur": 100.0,
+            "quote": "€ 129.312,00 100,00% € 129.312,00 Valore di stima: € 129.312,00",
+            "context": "Identificativo corpo Valore complessivo Quota invendita Totale ... 100,00% € 129.312,00 Valore di stima: € 129.312,00",
+        },
+        {
+            "page": 1,
+            "amount_eur": 129312.0,
+            "quote": "Valore di stima del bene: € 129.312,00",
+            "context": "L'immobile viene posto in vendita per il diritto di Proprietà (1/1) Valore di stima del bene: € 129.312,00",
+        },
+    ]
+    with tempfile.TemporaryDirectory() as tmpdir:
+        runs_root = Path(tmpdir)
+        analysis_dir = runs_root / "synthetic_ratio_noise" / "candidates"
+        analysis_dir.mkdir(parents=True)
+        (analysis_dir / "candidates_money.json").write_text(json.dumps(rows), encoding="utf-8")
+        old_runs_root = valuation_table_tool.RUNS_ROOT
+        try:
+            valuation_table_tool.RUNS_ROOT = runs_root
+            candidates = valuation_table_tool.valuation_candidates("synthetic_ratio_noise")
+        finally:
+            valuation_table_tool.RUNS_ROOT = old_runs_root
+    invalid_reasons = {cand.invalid_reason for cand in candidates if not cand.valid}
+    totals = [cand.value for cand in candidates if cand.valid and cand.semantic_role == "valuation_total"]
+    assert "valuation_table_ratio_contamination" in invalid_reasons
+    assert totals == [129312.0]
+
+
+def test_valuation_candidates_reject_unit_price_contamination_from_benchmark_totals():
+    rows = [
+        {
+            "page": 1,
+            "amount_eur": 1300.0,
+            "quote": "Valore unitario (Vu) € 1.300,00",
+            "context": "VALORI Valore unitario (Vu) € 1.300,00 Valore complessivo (VC) € 56.861,33",
+        },
+        {
+            "page": 1,
+            "amount_eur": 56861.33,
+            "quote": "Valore complessivo (VC) € 56.861,33",
+            "context": "VALORI Valore unitario (Vu) € 1.300,00 Valore complessivo (VC) € 56.861,33",
+        },
+    ]
+    with tempfile.TemporaryDirectory() as tmpdir:
+        runs_root = Path(tmpdir)
+        analysis_dir = runs_root / "synthetic_unit_price_noise" / "candidates"
+        analysis_dir.mkdir(parents=True)
+        (analysis_dir / "candidates_money.json").write_text(json.dumps(rows), encoding="utf-8")
+        old_runs_root = valuation_table_tool.RUNS_ROOT
+        try:
+            valuation_table_tool.RUNS_ROOT = runs_root
+            candidates = valuation_table_tool.valuation_candidates("synthetic_unit_price_noise")
+        finally:
+            valuation_table_tool.RUNS_ROOT = old_runs_root
+    invalid_reasons = {cand.invalid_reason for cand in candidates if not cand.valid}
+    totals = [cand.value for cand in candidates if cand.valid and cand.semantic_role == "valuation_total"]
+    assert "unit_price_contamination" in invalid_reasons
+    assert totals == [56861.33]
+
+
+def test_pricing_invariant_selected_price_requires_executable_evidence():
+    mantova = _pricing_probe("mantova")
+    multibene = _pricing_probe("multibene_1859886")
+    rmei = _pricing_probe("rmei_928_2022")
+    multilot = _pricing_probe("multilot_69_2024")
+    assert mantova["selected_price"] is None
+    assert multibene["selected_price"] == 391849.0
+    assert rmei["selected_price"] == 172000.0
+    assert multilot["selected_price"] is None
+
+
+def test_pricing_invariant_benchmark_only_carries_single_gross_valuation():
+    mantova = _pricing_probe("mantova")
+    silvabella_payload = run_quality_verifier(
+        analysis_id="analysis_8954c511ed4e",
+        result=_silvabella_fixture()[0],
+        pages=_silvabella_fixture()[1],
+        full_text="\n\n".join(page["text"] for page in _silvabella_fixture()[1]),
+    )
+    silvabella = silvabella_payload["canonical_case"]["pricing"]
+    multibene = _pricing_probe("multibene_1859886")
+    rmei = _pricing_probe("rmei_928_2022")
+    multilot = _pricing_probe("multilot_69_2024")
+    assert mantova["benchmark_value"] == 129312.0
+    assert silvabella["benchmark_value"] == 56861.33
+    assert multibene["benchmark_value"] == 419849.0
+    assert rmei["benchmark_value"] == 312708.0
+    assert multilot["benchmark_value"] is None
+
+
+def test_pricing_invariant_adjusted_market_value_requires_distinct_intermediate_layer():
+    mantova = _pricing_probe("mantova")
+    silvabella_payload = run_quality_verifier(
+        analysis_id="analysis_8954c511ed4e",
+        result=_silvabella_fixture()[0],
+        pages=_silvabella_fixture()[1],
+        full_text="\n\n".join(page["text"] for page in _silvabella_fixture()[1]),
+    )
+    silvabella = silvabella_payload["canonical_case"]["pricing"]
+    multilot = _pricing_probe("multilot_69_2024")
+    assert mantova["adjusted_market_value"] is None
+    assert silvabella["adjusted_market_value"] == 53339.39
+    assert multilot["adjusted_market_value"] is None
+
+
+def test_pricing_invariant_single_root_aggregate_benchmark_survives_component_values():
+    pricing = _pricing_probe("multibene_1859886")
+    assert pricing["benchmark_value"] == 419849.0
+
+
+def test_pricing_invariant_multi_lot_root_scalars_are_suppressed():
+    pricing = _pricing_probe("multilot_69_2024")
+    invalid_reasons = {item["reason"] for item in pricing["invalid_candidates"]}
+    assert pricing["selected_price"] is None
+    assert pricing["benchmark_value"] is None
+    assert "multi_lot_scalar_price_suppressed" in invalid_reasons
+    assert "multi_lot_scalar_benchmark_suppressed" in invalid_reasons
+
+
+def test_mantova_plain_stima_populates_benchmark_not_selected_price():
+    pricing = _pricing_probe("mantova")
+    assert pricing["selected_price"] is None
+    assert pricing["benchmark_value"] == 129312.0
+    assert pricing["adjusted_market_value"] is None
+    assert pricing["absurdity_guard_triggered"] is False
+
+
+def test_multibene_explicit_base_and_gross_stima_split_selected_from_benchmark():
+    pricing = _pricing_probe("multibene_1859886")
+    assert pricing["selected_price"] == 391849.0
+    assert pricing["benchmark_value"] == 419849.0
+    assert pricing["adjusted_market_value"] is None
+    assert pricing["absurdity_guard_triggered"] is False
+
+
+def test_rmei_explicit_base_and_gross_stima_split_selected_from_benchmark():
+    pricing = _pricing_probe("rmei_928_2022")
+    assert pricing["selected_price"] == 172000.0
+    assert pricing["benchmark_value"] == 312708.0
+    assert pricing["adjusted_market_value"] is None
+    assert pricing["absurdity_guard_triggered"] is False
+
+
+def test_multilot_document_root_selected_price_stays_null():
+    pricing = _pricing_probe("multilot_69_2024")
+    invalid_reasons = {item["reason"] for item in pricing["invalid_candidates"]}
+    assert pricing["selected_price"] is None
+    assert pricing["benchmark_value"] is None
+    assert pricing["adjusted_market_value"] is None
+    assert pricing["absurdity_guard_triggered"] is False
+    assert "multi_lot_scalar_price_suppressed" in invalid_reasons
+    assert "multi_lot_scalar_benchmark_suppressed" in invalid_reasons
+
+
+def test_torino_out_of_sample_pricing_layers_are_distinct_when_pdf_is_available():
+    pdf_path = Path("/home/syedtajmeelshah/Torino, Via Marchese Visconti 6_1.pdf")
+    if not pdf_path.exists():
+        return
+    raw = subprocess.run(["pdftotext", str(pdf_path), "-"], capture_output=True, text=True, check=True).stdout
+    pages = [
+        {"page_number": idx, "text": chunk}
+        for idx, chunk in enumerate(raw.split("\f"), start=1)
+        if chunk.strip()
+    ]
+    result = {
+        "field_states": {},
+        "dati_certi_del_lotto": {},
+        "document_quality": {"status": "TEXT_OK"},
+        "semaforo_generale": {"status": "AMBER"},
+    }
+    payload = run_quality_verifier(
+        analysis_id="torino_via_marchese_visconti_6_1",
+        result=result,
+        pages=pages,
+        full_text="\n\n".join(page["text"] for page in pages),
+    )
+    pricing = payload["canonical_case"]["pricing"]
+    assert pricing["benchmark_value"] == 43654.20
+    assert pricing["adjusted_market_value"] == 38404.20
+    assert pricing["selected_price"] == 38110.20

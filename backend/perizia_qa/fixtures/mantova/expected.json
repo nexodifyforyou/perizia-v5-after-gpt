@@ -5,7 +5,7 @@
   "quota": null,
   "pricing": {
     "selected_price": null,
-    "benchmark_value": null,
+    "benchmark_value": 129312.0,
     "absurdity_guard_triggered": false
   },
   "occupancy": {

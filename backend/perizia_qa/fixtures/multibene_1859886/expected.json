@@ -4,8 +4,8 @@
   "seed_semaforo_status": "AMBER",
   "quota": null,
   "pricing": {
-    "selected_price": null,
-    "benchmark_value": null,
+    "selected_price": 391849.0,
+    "benchmark_value": 419849.0,
     "absurdity_guard_triggered": false
   },
   "occupancy": {
