@@ -19,16 +19,60 @@ from perizia_agents.urbanistica_agent import run_urbanistica_agent
 from perizia_ingest.readability_gate import assess_document_readability
 from perizia_qa.comparators import compare_legacy_and_verifier
 from perizia_qa.invariants import run_invariants
-from perizia_runtime.evidence_mode import select_evidence_mode
+from perizia_runtime.evidence_mode import DEGRADED_TEXT, STOP_UNREADABLE, TEXT_FIRST, select_evidence_mode
 from perizia_runtime.pipeline import PeriziaPipeline
 from perizia_runtime.state import RuntimeState, to_dict
 from perizia_tools.pdf_text_tool import build_pdf_text_payload
+
+
+def _base_verifier_payload(*, analysis_id: str, readability: Dict[str, Any], evidence_mode: Dict[str, str]) -> Dict[str, Any]:
+    return {
+        "analysis_id": str(analysis_id or ""),
+        "readability_verdict": readability["readability_verdict"],
+        "document_quality_note": readability["document_quality_note"],
+        "evidence_mode": evidence_mode["evidence_mode"],
+        "evidence_mode_reason": evidence_mode["evidence_mode_reason"],
+        "surface_inventory_summary": readability["surface_inventory_summary"],
+        "surface_inventory_pages": readability["surface_inventory_pages"],
+        "surface_inventory_limitations": readability["limitations"],
+        "verifier_cautions": [],
+    }
+
+
+def _build_unreadable_payload(*, analysis_id: str, readability: Dict[str, Any], evidence_mode: Dict[str, str]) -> Dict[str, Any]:
+    payload_dict = _base_verifier_payload(analysis_id=analysis_id, readability=readability, evidence_mode=evidence_mode)
+    payload_dict.update(
+        {
+            "canonical_case": {},
+            "scopes": {},
+            "evidence_ownership": {},
+            "judgments": {},
+            "candidates": {},
+            "qa_checks": [],
+            "comparison": {},
+            "reasoning_status": "SUPPRESSED_UNREADABLE",
+        }
+    )
+    return payload_dict
+
+
+def _degraded_text_cautions() -> List[Dict[str, Any]]:
+    return [
+        {
+            "code": "degraded_text_sources",
+            "severity": "CAUTION",
+            "message": "Verifier reasoning ran on degraded extracted text surfaces; field-level conclusions may be less reliable.",
+        }
+    ]
 
 
 def run_quality_verifier(*, analysis_id: str, result: Dict[str, Any], pages: List[Dict[str, Any]], full_text: str) -> Dict[str, Any]:
     payload = build_pdf_text_payload(pages, full_text)
     readability = assess_document_readability(payload["pages"])
     evidence_mode = select_evidence_mode(readability["readability_verdict"])
+    if evidence_mode["evidence_mode"] == STOP_UNREADABLE:
+        return _build_unreadable_payload(analysis_id=analysis_id, readability=readability, evidence_mode=evidence_mode)
+
     state = RuntimeState(
         analysis_id=str(analysis_id or ""),
         result=copy.deepcopy(result or {}),
@@ -53,21 +97,19 @@ def run_quality_verifier(*, analysis_id: str, result: Dict[str, Any], pages: Lis
         ]
     )
     pipeline.run(state)
-    payload_dict = {
-        "analysis_id": state.analysis_id,
+    payload_dict = _base_verifier_payload(analysis_id=state.analysis_id, readability=readability, evidence_mode=evidence_mode)
+    payload_dict.update(
+        {
         "canonical_case": to_dict(state.canonical_case),
         "scopes": to_dict(state.scopes),
         "evidence_ownership": to_dict(state.evidence_ownership),
         "judgments": to_dict(state.judgments),
         "candidates": to_dict(state.candidates),
-        "readability_verdict": readability["readability_verdict"],
-        "document_quality_note": readability["document_quality_note"],
-        "evidence_mode": evidence_mode["evidence_mode"],
-        "evidence_mode_reason": evidence_mode["evidence_mode_reason"],
-        "surface_inventory_summary": readability["surface_inventory_summary"],
-        "surface_inventory_pages": readability["surface_inventory_pages"],
-        "surface_inventory_limitations": readability["limitations"],
-    }
+        "reasoning_status": "NORMAL" if evidence_mode["evidence_mode"] == TEXT_FIRST else "DEGRADED_TEXT_CAUTION",
+        }
+    )
+    if evidence_mode["evidence_mode"] == DEGRADED_TEXT:
+        payload_dict["verifier_cautions"] = _degraded_text_cautions()
     payload_dict["qa_checks"] = run_invariants(payload_dict)
     payload_dict["comparison"] = compare_legacy_and_verifier(result, payload_dict)
     return payload_dict
@@ -101,9 +143,14 @@ def apply_verifier_to_result(result: Dict[str, Any], verifier_payload: Dict[str,
     document_quality["document_quality_note"] = verifier_payload.get("document_quality_note")
     document_quality["evidence_mode"] = verifier_payload.get("evidence_mode")
     document_quality["evidence_mode_reason"] = verifier_payload.get("evidence_mode_reason")
+    document_quality["verifier_cautions"] = verifier_payload.get("verifier_cautions", [])
+    document_quality["reasoning_status"] = verifier_payload.get("reasoning_status")
     document_quality["surface_inventory_summary"] = verifier_payload.get("surface_inventory_summary", {})
     document_quality["surface_inventory_pages"] = verifier_payload.get("surface_inventory_pages", [])
     document_quality["surface_inventory_limitations"] = verifier_payload.get("surface_inventory_limitations", {})
+
+    if verifier_payload.get("reasoning_status") == "SUPPRESSED_UNREADABLE":
+        return
 
     dati = result.setdefault("dati_certi_del_lotto", {})
     quota = rights.get("quota", {}) if isinstance(rights.get("quota"), dict) else {}
