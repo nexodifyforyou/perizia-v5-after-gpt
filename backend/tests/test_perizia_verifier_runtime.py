@@ -885,7 +885,8 @@ def test_verifier_payload_exposes_scope_registry_without_breaking_root_outputs()
     root_scope = payload["scopes"]["document_root"]
     assert root_scope["scope_type"] == "document_root"
     assert root_scope["parent_scope_id"] is None
-    assert payload["evidence_ownership"] == {}
+    assert payload["canonical_case"]["occupancy"]["status"] == "LIBERO"
+    assert any(item["field_target"] == "occupancy" for item in payload["evidence_ownership"].values())
 
 
 def test_named_fixture_runner_for_existing_cases():
@@ -981,6 +982,93 @@ def test_tenure_signal_creates_nonfree_occupancy_with_cautious_opponibilita():
     assert canonical["occupancy"]["status"] == "OCCUPATO"
     assert canonical["occupancy"]["opponibilita"] == "LOCAZIONE DA VERIFICARE"
     assert canonical["priority"]["top_issue"]["code"] == "OCCUPANCY_RISK"
+
+
+def test_occupancy_writes_bene_scope_first_and_rolls_root_up_leaf_first():
+    result = {
+        "field_states": {},
+        "dati_certi_del_lotto": {},
+        "document_quality": {"status": "TEXT_OK"},
+        "semaforo_generale": {"status": "AMBER"},
+    }
+    pages = [
+        {
+            "page_number": 1,
+            "text": (
+                "LOTTO UNICO\n"
+                "Bene N° 1 - Appartamento\nL'immobile risulta libero.\n"
+                "Bene N° 2 - Garage\nL'immobile occupato da terzi."
+            ),
+        },
+    ]
+    payload = run_quality_verifier(
+        analysis_id="synthetic_occupancy_leaf_first_rollup",
+        result=result,
+        pages=pages,
+        full_text="\n\n".join(page["text"] for page in pages),
+    )
+    assert payload["scopes"]["bene:1"]["occupancy"]["status"] == "LIBERO"
+    assert payload["scopes"]["bene:2"]["occupancy"]["status"] == "OCCUPATO"
+    assert payload["canonical_case"]["occupancy"]["status"] == "NON_VERIFICABILE"
+    assert payload["canonical_case"]["occupancy"]["status"] != "CONFLITTO"
+    assert payload["scopes"]["document_root"]["metadata"]["occupancy_internal"]["unresolved_reason"] == "different_scopes_have_different_resolved_truth"
+
+
+def test_occupancy_same_scope_conflict_stays_internal_and_client_safe():
+    result = {
+        "field_states": {},
+        "dati_certi_del_lotto": {},
+        "document_quality": {"status": "TEXT_OK"},
+        "semaforo_generale": {"status": "AMBER"},
+    }
+    pages = [
+        {
+            "page_number": 1,
+            "text": (
+                "LOTTO UNICO\nBene N° 1 - Appartamento\n"
+                "L'immobile risulta libero.\n"
+                "L'immobile occupato da terzi."
+            ),
+        },
+    ]
+    payload = run_quality_verifier(
+        analysis_id="synthetic_occupancy_same_scope_conflict",
+        result=result,
+        pages=pages,
+        full_text="\n\n".join(page["text"] for page in pages),
+    )
+    assert payload["scopes"]["bene:1"]["occupancy"]["status"] == "OCCUPATO"
+    assert payload["scopes"]["bene:1"]["metadata"]["occupancy_internal"]["raw_conflict_detected"] is True
+    assert payload["canonical_case"]["occupancy"]["status"] == "OCCUPATO"
+    assert payload["canonical_case"]["occupancy"]["status"] != "CONFLITTO"
+
+
+def test_occupancy_universal_lotto_statement_inherits_to_child_beni():
+    result = {
+        "field_states": {},
+        "dati_certi_del_lotto": {},
+        "document_quality": {"status": "TEXT_OK"},
+        "semaforo_generale": {"status": "AMBER"},
+    }
+    pages = [
+        {
+            "page_number": 1,
+            "text": (
+                "LOTTO UNICO\nBene N° 1 - Appartamento\nBene N° 2 - Garage\n"
+                "Tutti i beni del lotto unico risultano liberi."
+            ),
+        },
+    ]
+    payload = run_quality_verifier(
+        analysis_id="synthetic_occupancy_universal_lotto_inheritance",
+        result=result,
+        pages=pages,
+        full_text="\n\n".join(page["text"] for page in pages),
+    )
+    assert payload["scopes"]["lotto:unico"]["occupancy"]["status"] == "LIBERO"
+    assert payload["scopes"]["bene:1"]["occupancy"]["status"] == "LIBERO"
+    assert payload["scopes"]["bene:2"]["occupancy"]["status"] == "LIBERO"
+    assert payload["canonical_case"]["occupancy"]["status"] == "LIBERO"
 
 
 def test_multi_lot_auction_prices_do_not_force_scalar_selected_price():
