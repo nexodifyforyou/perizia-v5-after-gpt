@@ -1071,6 +1071,187 @@ def test_occupancy_universal_lotto_statement_inherits_to_child_beni():
     assert payload["canonical_case"]["occupancy"]["status"] == "LIBERO"
 
 
+def test_urbanistica_regular_writes_smallest_scope_first_and_rolls_root_up():
+    result = {
+        "field_states": {},
+        "dati_certi_del_lotto": {},
+        "document_quality": {"status": "TEXT_OK"},
+        "semaforo_generale": {"status": "AMBER"},
+    }
+    pages = [
+        {
+            "page_number": 1,
+            "text": (
+                "LOTTO UNICO\n"
+                "Bene N° 1 - Appartamento\n"
+                "REGOLARITA EDILIZIA\n"
+                "L'immobile risulta regolare per la legge n° 47/1985.\n"
+                "Le unita immobiliari sono conformi a quanto depositato."
+            ),
+        },
+    ]
+    payload = run_quality_verifier(
+        analysis_id="synthetic_urbanistica_regolare",
+        result=result,
+        pages=pages,
+        full_text="\n\n".join(page["text"] for page in pages),
+    )
+    scoped = payload["scopes"]["bene:1"]["urbanistica"]["urbanistica_status"]
+    assert scoped["value"] == "REGOLARE"
+    assert payload["canonical_case"]["urbanistica"]["urbanistica_status"]["value"] == "REGOLARE"
+    assert payload["canonical_case"]["urbanistica"]["sanatoria_status"]["value"] == "NON_VERIFICABILE"
+
+
+def test_urbanistica_same_scope_difformita_beats_generic_regolare_wording():
+    result = {
+        "field_states": {},
+        "dati_certi_del_lotto": {},
+        "document_quality": {"status": "TEXT_OK"},
+        "semaforo_generale": {"status": "AMBER"},
+    }
+    pages = [
+        {
+            "page_number": 1,
+            "text": (
+                "LOTTO UNICO\n"
+                "Bene N° 1 - Ufficio\n"
+                "L'immobile risulta regolare per la legge n° 47/1985.\n"
+                "Durante il sopralluogo sono state riscontrate incongruenze nello stato di fatto attuale."
+            ),
+        },
+    ]
+    payload = run_quality_verifier(
+        analysis_id="synthetic_urbanistica_negative_wins",
+        result=result,
+        pages=pages,
+        full_text="\n\n".join(page["text"] for page in pages),
+    )
+    scoped = payload["scopes"]["bene:1"]["urbanistica"]["urbanistica_status"]
+    assert scoped["value"] == "DIFFORMITA_PRESENTE"
+    internal = payload["scopes"]["bene:1"]["metadata"]["urbanistica_internal"]["urbanistica_status"]
+    assert internal["raw_conflict_detected"] is True
+    assert internal["resolution_reason"] == "highest_tier_signal_wins"
+
+
+def test_urbanistica_universal_lotto_statement_inherits_to_child_beni():
+    result = {
+        "field_states": {},
+        "dati_certi_del_lotto": {},
+        "document_quality": {"status": "TEXT_OK"},
+        "semaforo_generale": {"status": "AMBER"},
+    }
+    pages = [
+        {
+            "page_number": 1,
+            "text": (
+                "LOTTO UNICO\n"
+                "Bene N° 1 - Appartamento\n"
+                "Bene N° 2 - Garage\n"
+                "Tutti i beni del lotto unico risultano regolari urbanisticamente."
+            ),
+        },
+    ]
+    payload = run_quality_verifier(
+        analysis_id="synthetic_urbanistica_lotto_inheritance",
+        result=result,
+        pages=pages,
+        full_text="\n\n".join(page["text"] for page in pages),
+    )
+    assert payload["scopes"]["lotto:unico"]["urbanistica"]["urbanistica_status"]["value"] == "REGOLARE"
+    assert payload["scopes"]["bene:1"]["urbanistica"]["urbanistica_status"]["value"] == "REGOLARE"
+    assert payload["scopes"]["bene:2"]["urbanistica"]["urbanistica_status"]["value"] == "REGOLARE"
+
+
+def test_urbanistica_root_rollup_stays_non_verificabile_when_leaf_truth_differs():
+    result = {
+        "field_states": {},
+        "dati_certi_del_lotto": {},
+        "document_quality": {"status": "TEXT_OK"},
+        "semaforo_generale": {"status": "AMBER"},
+    }
+    pages = [
+        {
+            "page_number": 1,
+            "text": (
+                "LOTTO UNICO\n"
+                "Bene N° 1 - Appartamento\n"
+                "L'immobile risulta regolare per la legge n° 47/1985.\n"
+                "Bene N° 2 - Garage\n"
+                "Durante il sopralluogo sono state riscontrate incongruenze nello stato di fatto attuale."
+            ),
+        },
+    ]
+    payload = run_quality_verifier(
+        analysis_id="synthetic_urbanistica_leaf_mixed",
+        result=result,
+        pages=pages,
+        full_text="\n\n".join(page["text"] for page in pages),
+    )
+    root = payload["canonical_case"]["urbanistica"]["urbanistica_status"]
+    assert root["value"] == "NON_VERIFICABILE"
+    assert root["verification_trail"]["reason_unresolved"] == "truth differs by scope"
+
+
+def test_urbanistica_sanatoria_condono_and_ripristino_stay_bounded_and_conservative():
+    result = {
+        "field_states": {},
+        "dati_certi_del_lotto": {},
+        "document_quality": {"status": "TEXT_OK"},
+        "semaforo_generale": {"status": "AMBER"},
+    }
+    pages = [
+        {
+            "page_number": 1,
+            "text": (
+                "LOTTO UNICO\n"
+                "Bene N° 1 - Garage\n"
+                "Le modifiche eseguite senza pratiche edilizie sono sanabili.\n"
+                "Domanda di condono edilizio presentata in data 12/03/1998.\n"
+                "Si rende necessaria la demolizione delle opere abusive.\n"
+                "Storico: vecchio riferimento a sanatoria in archivio."
+            ),
+        },
+    ]
+    payload = run_quality_verifier(
+        analysis_id="synthetic_urbanistica_bounded_fields",
+        result=result,
+        pages=pages,
+        full_text="\n\n".join(page["text"] for page in pages),
+    )
+    scoped = payload["scopes"]["bene:1"]["urbanistica"]
+    assert scoped["sanatoria_status"]["value"] == "SANABILE"
+    assert scoped["condono_status"]["value"] == "PRESENTE"
+    assert scoped["ripristino_or_demolition_signal"]["value"] == "YES"
+
+
+def test_verifier_bridge_updates_legacy_regolarita_urbanistica_from_new_root_truth():
+    result = {
+        "field_states": {},
+        "dati_certi_del_lotto": {},
+        "document_quality": {"status": "TEXT_OK"},
+        "semaforo_generale": {"status": "AMBER"},
+    }
+    pages = [
+        {
+            "page_number": 1,
+            "text": (
+                "LOTTO UNICO\n"
+                "Bene N° 1 - Appartamento\n"
+                "Durante il sopralluogo sono state riscontrate incongruenze nello stato di fatto attuale."
+            ),
+        },
+    ]
+    payload = run_quality_verifier(
+        analysis_id="synthetic_urbanistica_bridge",
+        result=result,
+        pages=pages,
+        full_text="\n\n".join(page["text"] for page in pages),
+    )
+    apply_verifier_to_result(result, payload)
+    assert result["field_states"]["regolarita_urbanistica"]["value"] == "PRESENTI DIFFORMITA"
+    assert result["field_states"]["regolarita_urbanistica"]["status"] == "FOUND"
+
+
 def test_quota_writes_bene_scope_first_and_root_stays_null_when_scopes_disagree():
     result = {
         "field_states": {},

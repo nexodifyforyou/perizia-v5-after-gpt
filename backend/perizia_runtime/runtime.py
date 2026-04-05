@@ -254,6 +254,7 @@ def apply_verifier_to_result(result: Dict[str, Any], verifier_payload: Dict[str,
     canonical = verifier_payload.get("canonical_case", {}) if isinstance(verifier_payload.get("canonical_case"), dict) else {}
     rights = canonical.get("rights", {}) if isinstance(canonical.get("rights"), dict) else {}
     occupancy = canonical.get("occupancy", {}) if isinstance(canonical.get("occupancy"), dict) else {}
+    urbanistica = canonical.get("urbanistica", {}) if isinstance(canonical.get("urbanistica"), dict) else {}
     legal = canonical.get("legal", {}) if isinstance(canonical.get("legal"), dict) else {}
     pricing = canonical.get("pricing", {}) if isinstance(canonical.get("pricing"), dict) else {}
     costs = canonical.get("costs", {}) if isinstance(canonical.get("costs"), dict) else {}
@@ -339,6 +340,26 @@ def apply_verifier_to_result(result: Dict[str, Any], verifier_payload: Dict[str,
         if is_degraded:
             _annotate_degraded_output(field_states["opponibilita_occupazione"])
             field_states["opponibilita_occupazione"]["resolver_meta"]["source_quality_note"] = DEGRADED_SOURCE_NOTE
+    urbanistica_status = urbanistica.get("urbanistica_status", {}) if isinstance(urbanistica.get("urbanistica_status"), dict) else {}
+    urbanistica_value = str(urbanistica_status.get("value") or "").strip().upper()
+    if urbanistica_value in {"REGOLARE", "DIFFORMITA_PRESENTE", "NON_VERIFICABILE"}:
+        display_value = {
+            "REGOLARE": "REGOLARE URBANISTICAMENTE",
+            "DIFFORMITA_PRESENTE": "PRESENTI DIFFORMITA",
+            "NON_VERIFICABILE": "DA VERIFICARE",
+        }[urbanistica_value]
+        field_states["regolarita_urbanistica"] = {
+            "value": display_value,
+            "status": "LOW_CONFIDENCE" if is_degraded or urbanistica_value == "NON_VERIFICABILE" else "FOUND",
+            "confidence": urbanistica_status.get("confidence", 0.0),
+            "evidence": urbanistica_status.get("evidence", []),
+            "searched_in": [] if urbanistica_value != "NON_VERIFICABILE" else list(urbanistica_status.get("evidence", [])),
+            "user_prompt_it": None,
+            "resolver_meta": {"resolver_version": "verifier_runtime_v1"},
+        }
+        if is_degraded:
+            _annotate_degraded_output(field_states["regolarita_urbanistica"])
+            field_states["regolarita_urbanistica"]["resolver_meta"]["source_quality_note"] = DEGRADED_SOURCE_NOTE
     section_legal = result.setdefault("section_9_legal_killers", {})
     top_items = []
     top_issue = priority.get("top_issue", {}) if isinstance(priority.get("top_issue"), dict) else {}
