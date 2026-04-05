@@ -84,15 +84,16 @@ def run_structure_agent(state: RuntimeState) -> None:
         for line in lines:
             if _INDEX_LINE_RE.search(line):
                 continue
-            lot_match = _LOT_RE.search(line)
-            if lot_match:
+            line_lotto_scope_ids: list[str] = []
+            for lot_match in _LOT_RE.finditer(line):
                 lot_token = lot_match.group(1)
-                page_lotto_scope_id = _normalize_lotto_id(lot_token)
-                seen_page_lotto_scope_ids.add(page_lotto_scope_id)
+                lot_scope_id = _normalize_lotto_id(lot_token)
+                line_lotto_scope_ids.append(lot_scope_id)
+                seen_page_lotto_scope_ids.add(lot_scope_id)
                 label = f"Lotto {'Unico' if str(lot_token).lower() == 'unico' else lot_token}"
                 _register_scope_detection(
                     state,
-                    scope_id=page_lotto_scope_id,
+                    scope_id=lot_scope_id,
                     scope_type="lotto",
                     parent_scope_id="document_root",
                     label=label,
@@ -100,7 +101,13 @@ def run_structure_agent(state: RuntimeState) -> None:
                     quote=line,
                     ownership_method="heading_match",
                 )
-                discovered_scopes.append({"scope_id": page_lotto_scope_id, "page": page_number, "label": label})
+                discovered_scopes.append({"scope_id": lot_scope_id, "page": page_number, "label": label})
+            if len(line_lotto_scope_ids) == 1:
+                page_lotto_scope_id = line_lotto_scope_ids[0]
+            elif len(line_lotto_scope_ids) > 1:
+                # Inline multi-lot summary lines should materialize all lot scopes,
+                # but they are too ambiguous to serve as bene-parent context.
+                page_lotto_scope_id = None
             bene_match = _BENE_HEADING_RE.search(line)
             if bene_match:
                 bene_no = bene_match.group(1)

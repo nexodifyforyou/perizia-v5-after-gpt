@@ -1110,6 +1110,20 @@ def test_multi_lot_auction_prices_do_not_force_scalar_selected_price():
     assert "multi_lot_scalar_benchmark_suppressed" in invalid_reasons
 
 
+def test_multilot_fixture_writes_scoped_pricing_before_root_suppression():
+    result, pages = _repo_fixture("multilot_69_2024")
+    payload = run_quality_verifier(
+        analysis_id="multilot_scoped_pricing_probe",
+        result=result,
+        pages=pages,
+        full_text="\n\n".join(page["text"] for page in pages),
+    )
+    assert payload["scopes"]["lotto:1"]["pricing"]["selected_price"] == 64198.0
+    assert payload["scopes"]["lotto:2"]["pricing"]["selected_price"] == 84000.0
+    assert payload["scopes"]["lotto:3"]["pricing"]["selected_price"] == 224268.0
+    assert payload["canonical_case"]["pricing"]["selected_price"] is None
+
+
 def test_negative_agibilita_creates_real_issue_and_beats_legal_fallback():
     result = {
         "field_states": {},
