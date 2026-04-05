@@ -12,24 +12,25 @@ _DATEISH_RE = re.compile(r"\b[0-3]?\d\s*/\s*[01]?\d(?:\s*/\s*\d{2,4})?\b")
 
 def quota_candidates(pages: List[Dict[str, Any]], result: Dict[str, Any]) -> List[Candidate]:
     out: List[Candidate] = []
-    seen = set()
+    seen_occurrences = set()
+    seen_legacy_values = set()
     for idx, page in enumerate(pages or [], start=1):
         text = str((page or {}).get("text") or "")
         page_number = int((page or {}).get("page_number") or (page or {}).get("page") or idx)
         for match in re.finditer(r"\b\d{1,3}\s*/\s*\d{1,3}\b", text):
             raw = match.group(0)
-            if _DATEISH_RE.fullmatch(raw):
-                continue
             start = max(0, match.start() - 80)
             end = min(len(text), match.end() + 80)
             quote = text[start:end].strip()
             low = quote.lower()
-            if not any(token in low for token in ("quota", "propriet", "usufrutto", "nuda propriet", "piena")):
+            has_rights_context = any(token in low for token in ("quota", "propriet", "usufrutto", "nuda propriet", "piena"))
+            if not has_rights_context:
                 continue
             fraction = parse_fraction(raw)
-            if not fraction or fraction in seen:
+            occurrence_key = (fraction, page_number, match.start())
+            if not fraction or occurrence_key in seen_occurrences:
                 continue
-            seen.add(fraction)
+            seen_occurrences.add(occurrence_key)
             out.append(
                 Candidate(
                     value=fraction,
@@ -46,7 +47,8 @@ def quota_candidates(pages: List[Dict[str, Any]], result: Dict[str, Any]) -> Lis
         if not isinstance(lot, dict):
             continue
         lot_quota = parse_fraction(str(lot.get("quota") or "")) or parse_fraction(str(lot.get("diritto_reale") or ""))
-        if lot_quota and lot_quota not in seen:
+        if lot_quota and lot_quota not in seen_legacy_values:
+            seen_legacy_values.add(lot_quota)
             quote = str(lot.get("diritto_reale") or lot.get("quota") or "").strip()
             ev = make_evidence(0, quote or lot_quota, "rights_fraction", ["quota", "diritto_reale"], 0.75, source="legacy_result")
             out.append(
@@ -61,4 +63,3 @@ def quota_candidates(pages: List[Dict[str, Any]], result: Dict[str, Any]) -> Lis
                 )
             )
     return out
-

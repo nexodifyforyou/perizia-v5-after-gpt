@@ -1071,6 +1071,68 @@ def test_occupancy_universal_lotto_statement_inherits_to_child_beni():
     assert payload["canonical_case"]["occupancy"]["status"] == "LIBERO"
 
 
+def test_quota_writes_bene_scope_first_and_root_stays_null_when_scopes_disagree():
+    result = {
+        "field_states": {},
+        "dati_certi_del_lotto": {},
+        "document_quality": {"status": "TEXT_OK"},
+        "semaforo_generale": {"status": "AMBER"},
+    }
+    pages = [
+        {
+            "page_number": 1,
+            "text": (
+                "LOTTO UNICO\n"
+                "Bene N° 1 - Appartamento\nTipologia del diritto 1/1 di piena proprietà.\n"
+                "Bene N° 2 - Garage\nTipologia del diritto 1/2 di nuda proprietà."
+            ),
+        },
+    ]
+    payload = run_quality_verifier(
+        analysis_id="synthetic_quota_leaf_first_rollup",
+        result=result,
+        pages=pages,
+        full_text="\n\n".join(page["text"] for page in pages),
+    )
+    assert payload["scopes"]["bene:1"]["catasto"]["quota"]["value"] == "1/1"
+    assert payload["scopes"]["bene:2"]["catasto"]["quota"]["value"] == "1/2"
+    assert payload["canonical_case"]["rights"]["quota"]["value"] is None
+    assert (
+        payload["scopes"]["document_root"]["metadata"]["rights_internal"]["quota"]["unresolved_reason"]
+        == "different_scopes_have_different_resolved_truth"
+    )
+
+
+def test_quota_universal_lotto_statement_inherits_to_child_beni_and_rolls_up_root():
+    result = {
+        "field_states": {},
+        "dati_certi_del_lotto": {},
+        "document_quality": {"status": "TEXT_OK"},
+        "semaforo_generale": {"status": "AMBER"},
+    }
+    pages = [
+        {
+            "page_number": 1,
+            "text": (
+                "LOTTO UNICO\n"
+                "Bene N° 1 - Appartamento\n"
+                "Bene N° 2 - Garage\n"
+                "Tutti i beni del lotto unico sono in piena proprietà per la quota di 1/1."
+            ),
+        },
+    ]
+    payload = run_quality_verifier(
+        analysis_id="synthetic_quota_universal_lotto_inheritance",
+        result=result,
+        pages=pages,
+        full_text="\n\n".join(page["text"] for page in pages),
+    )
+    assert payload["scopes"]["lotto:unico"]["catasto"]["quota"]["value"] == "1/1"
+    assert payload["scopes"]["bene:1"]["catasto"]["quota"]["value"] == "1/1"
+    assert payload["scopes"]["bene:2"]["catasto"]["quota"]["value"] == "1/1"
+    assert payload["canonical_case"]["rights"]["quota"]["value"] == "1/1"
+
+
 def test_multi_lot_auction_prices_do_not_force_scalar_selected_price():
     result = {
         "field_states": {},
