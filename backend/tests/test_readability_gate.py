@@ -89,10 +89,8 @@ def test_verifier_runtime_text_first_runs_normal_reasoning():
         {
             "page_number": 1,
             "text": (
-                "TRIBUNALE DI MILANO\nLOTTO UNICO\nBene N° 1 - Appartamento\n"
-                "Prezzo base d'asta Euro 129.312,00.\n"
-                "L'immobile risulta libero.\n"
-                "La descrizione del bene e i confini sono riportati nella perizia."
+                "TRIBUNALE DI MILANO\nLOTTO UNICO\nBene N° 1 - Appartamento\nL'immobile risulta agibile.\n"
+                "Prezzo base d'asta Euro 129.312,00.\nLa descrizione del bene e i confini sono riportati nella perizia."
             ),
         }
     ]
@@ -103,16 +101,22 @@ def test_verifier_runtime_text_first_runs_normal_reasoning():
         pages=pages,
         full_text="\n\n".join(page["text"] for page in pages),
     )
+    apply_verifier_to_result(result, payload)
 
     assert payload["readability_verdict"] == READABLE_DOCUMENT
     assert payload["evidence_mode"] == TEXT_FIRST
     assert payload["reasoning_status"] == "NORMAL"
     assert "document_root" in payload["scopes"]
-    assert payload["comparison"]["occupancy"]["verifier"] == "LIBERO"
+    assert payload["canonical_case"]["agibilita"]["status"] == "PRESENTE"
+    assert payload["canonical_case"]["agibilita"]["confidence"] == 0.9
     assert payload["verifier_cautions"] == []
+    assert payload["source_quality_note"] is None
+    assert payload["packaging_guards"] == []
+    assert "source_quality_note" not in payload["canonical_case"]["agibilita"]
+    assert result["document_quality"]["source_quality_note"] is None
 
 
-def test_verifier_runtime_degraded_text_includes_caution():
+def test_verifier_runtime_degraded_text_caps_packaged_confidence_and_adds_guards():
     result = {
         "field_states": {},
         "dati_certi_del_lotto": {},
@@ -123,9 +127,9 @@ def test_verifier_runtime_degraded_text_includes_caution():
         {
             "page_number": 1,
             "text": (
-                "LOTTO 1\n"
-                "Appartamento piano primo con soggiorno, cucina e camera. "
-                "Confini e consistenza risultano in parte leggibili.\n"
+                "LOTTO UNICO\n"
+                "Bene N° 1 - Appartamento\n"
+                "L'immobile risulta agibile.\n"
             ),
         },
         {
@@ -147,7 +151,21 @@ def test_verifier_runtime_degraded_text_includes_caution():
     assert payload["reasoning_status"] == "DEGRADED_TEXT_CAUTION"
     assert payload["verifier_cautions"][0]["code"] == "degraded_text_sources"
     assert "degraded" in payload["verifier_cautions"][0]["message"].lower()
+    assert payload["source_quality_note"]
+    assert payload["packaging_guards"] == ["degraded_source_text_only", "confidence_capped_due_to_extraction_quality"]
+    assert payload["canonical_case"]["agibilita"]["status"] == "PRESENTE"
+    assert payload["canonical_case"]["agibilita"]["confidence"] == 0.6
+    assert "degraded_source_text_only" in payload["canonical_case"]["agibilita"]["guards"]
+    assert payload["canonical_case"]["agibilita"]["source_quality_note"] == payload["source_quality_note"]
     assert result["document_quality"]["verifier_cautions"] == payload["verifier_cautions"]
+    assert result["document_quality"]["source_quality_note"] == payload["source_quality_note"]
+    assert result["field_states"]["opponibilita_occupazione"]["status"] == "LOW_CONFIDENCE"
+    assert result["field_states"]["opponibilita_occupazione"]["guards"] == [
+        "degraded_source_text_only",
+        "confidence_capped_due_to_extraction_quality",
+    ]
+    assert result["field_states"]["opponibilita_occupazione"]["source_quality_note"] == payload["source_quality_note"]
+    assert result["summary_for_client"]["source_quality_note"] == payload["source_quality_note"]
 
 
 def test_verifier_runtime_stop_unreadable_suppresses_reasoning():
