@@ -1289,6 +1289,10 @@ async def is_offline_qa_request(request: Request) -> bool:
         return False
     return True
 
+def _should_use_offline_fixture(request: Request) -> bool:
+    fixture_header = str(request.headers.get("X-OFFLINE-QA-FIXTURE", "")).strip()
+    return fixture_header == "1"
+
 def _load_offline_fixture() -> Dict[str, Any]:
     try:
         with open(OFFLINE_QA_FIXTURE_PATH, "r", encoding="utf-8") as f:
@@ -14299,9 +14303,13 @@ async def analyze_perizia(request: Request, file: UploadFile = File(...)):
     run_id = f"run_{uuid.uuid4().hex[:8]}"
     analysis_id = f"analysis_{uuid.uuid4().hex[:12]}"
     offline_qa = user.user_id == "offline_qa"
+    use_offline_fixture = offline_qa and _should_use_offline_fixture(request)
 
     async def run_pipeline():
-        logger.info(f"[{request_id}] pipeline_start analysis_id={analysis_id} offline_qa={offline_qa}")
+        logger.info(
+            f"[{request_id}] pipeline_start analysis_id={analysis_id} "
+            f"offline_qa={offline_qa} fixture_mode={use_offline_fixture}"
+        )
         extraction_payload = await asyncio.to_thread(_build_step1_extract_payload, contents)
 
         # Determine mime type
@@ -14312,7 +14320,7 @@ async def analyze_perizia(request: Request, file: UploadFile = File(...)):
                 mime_type = "image/jpeg"
 
         # Extraction stage (digital text first, OCR only if coverage is low)
-        if offline_qa:
+        if use_offline_fixture:
             logger.info(f"[{request_id}] offline_fixture_load path={OFFLINE_QA_FIXTURE_PATH}")
             fixture = _load_offline_fixture()
             pages = fixture.get("pages", [])
