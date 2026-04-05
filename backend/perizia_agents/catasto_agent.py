@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import copy
+from dataclasses import asdict, is_dataclass
 import re
 from typing import Any
 
-from perizia_runtime.state import Judgment, RuntimeState
+from perizia_runtime.state import CanonicalScopeState, Judgment, RuntimeState
+from perizia_tools.catasto_parser_tool import catasto_candidates
 from perizia_tools.quota_parser_tool import quota_candidates
 
 
@@ -24,6 +26,12 @@ _QUOTA_GUARDS = [
     "scoped_rights_resolution",
     "root_quota_leaf_first_rollup",
 ]
+_CAT_FIELD_KEYS = ("foglio", "particella", "subalterno", "categoria")
+_CATASTO_GUARDS = [
+    "scoped_catasto_resolution",
+    "root_catasto_leaf_first_rollup",
+]
+_SCOPE_RIGHTS_TO_DICT_PATCHED = False
 
 
 def _candidate_quote(candidate: Any) -> str:
@@ -61,11 +69,7 @@ def _normalize_lotto_token(token: str) -> str:
 
 
 def _available_scope_ids(state: RuntimeState, scope_type: str) -> set[str]:
-    return {
-        scope.scope_id
-        for scope in state.scopes.values()
-        if scope.scope_type == scope_type
-    }
+    return {scope.scope_id for scope in state.scopes.values() if scope.scope_type == scope_type}
 
 
 def _matching_scope_ids(state: RuntimeState, text: str, *, scope_type: str) -> list[str]:
@@ -133,6 +137,10 @@ def _nearest_scope_from_page_context(state: RuntimeState, candidate: Any) -> tup
 
 
 def _scope_id_for_candidate(state: RuntimeState, candidate: Any) -> tuple[str, str, bool]:
+    metadata = candidate.metadata if isinstance(getattr(candidate, "metadata", None), dict) else {}
+    scope_hint = str(metadata.get("scope_hint") or "").strip()
+    if scope_hint in state.scopes:
+        return scope_hint, "parser_heading_scope_hint", False
     quote = _candidate_quote(candidate)
     value = str(candidate.value or "")
     anchor_end = quote.lower().find(value.lower())
@@ -183,12 +191,40 @@ def _scope_id_for_candidate(state: RuntimeState, candidate: Any) -> tuple[str, s
     return scope_id, ownership_method, False
 
 
-def _quota_payload(value: str | None, confidence: float, evidence: list[Any], *, source_scope_id: str | None = None, inherited: bool = False) -> dict[str, Any]:
+def _quota_payload(
+    value: str | None,
+    confidence: float,
+    evidence: list[Any],
+    *,
+    source_scope_id: str | None = None,
+    inherited: bool = False,
+) -> dict[str, Any]:
     payload = {
         "value": value,
         "confidence": float(confidence),
         "evidence": evidence,
         "guards": list(_QUOTA_GUARDS),
+    }
+    if source_scope_id:
+        payload["source_scope_id"] = source_scope_id
+    if inherited:
+        payload["inherited"] = True
+    return payload
+
+
+def _catasto_payload(
+    value: str | None,
+    confidence: float,
+    evidence: list[Any],
+    *,
+    source_scope_id: str | None = None,
+    inherited: bool = False,
+) -> dict[str, Any]:
+    payload = {
+        "value": value,
+        "confidence": float(confidence),
+        "evidence": evidence,
+        "guards": list(_CATASTO_GUARDS),
     }
     if source_scope_id:
         payload["source_scope_id"] = source_scope_id
@@ -218,6 +254,7 @@ def _collect_quota_candidates(state: RuntimeState) -> list[dict[str, Any]]:
         )
         grouped.append(
             {
+                "field_key": "quota",
                 "value": str(candidate.value),
                 "confidence": float(candidate.confidence),
                 "evidence": list(candidate.evidence),
@@ -233,7 +270,47 @@ def _collect_quota_candidates(state: RuntimeState) -> list[dict[str, Any]]:
     return grouped
 
 
-def _resolve_scope_quota(scope_id: str, candidates: list[dict[str, Any]]) -> dict[str, Any]:
+def _collect_structured_catasto_candidates(state: RuntimeState) -> dict[str, dict[str, list[dict[str, Any]]]]:
+    by_field: dict[str, dict[str, list[dict[str, Any]]]] = {field_key: {} for field_key in _CAT_FIELD_KEYS}
+    counters = {field_key: 0 for field_key in _CAT_FIELD_KEYS}
+    raw_candidates = catasto_candidates(state.pages)
+    for field_key in _CAT_FIELD_KEYS:
+        state.candidates[field_key] = [candidate for candidate in raw_candidates if candidate.field_key == field_key]
+    for candidate in raw_candidates:
+        if candidate.field_key not in _CAT_FIELD_KEYS:
+            continue
+        quote = _candidate_quote(candidate)
+        page = _candidate_page(candidate)
+        scope_id, ownership_method, universal = _scope_id_for_candidate(state, candidate)
+        counters[candidate.field_key] += 1
+        ownership = state.attach_evidence_ownership(
+            scope_id=scope_id,
+            field_target=f"catasto.{candidate.field_key}",
+            source_page=page,
+            quote=quote,
+            confidence=float(candidate.confidence),
+            ownership_method=ownership_method,
+            evidence_id=f"{candidate.field_key}_{page}_{counters[candidate.field_key]}",
+        )
+        by_field.setdefault(candidate.field_key, {}).setdefault(scope_id, []).append(
+            {
+                "field_key": candidate.field_key,
+                "value": str(candidate.value),
+                "confidence": float(candidate.confidence),
+                "evidence": list(candidate.evidence),
+                "page": page,
+                "quote": quote,
+                "scope_id": scope_id,
+                "ownership_method": ownership_method,
+                "universal": universal,
+                "evidence_id": ownership.evidence_id,
+                "priority": _candidate_priority(candidate),
+            }
+        )
+    return by_field
+
+
+def _resolve_scope_value(scope_id: str, candidates: list[dict[str, Any]], *, conflict_reason: str) -> dict[str, Any]:
     if not candidates:
         return {"value": None, "winner": None, "conflict": False, "scope_id": scope_id}
     max_priority = max(int(item.get("priority", 2)) for item in candidates)
@@ -244,7 +321,7 @@ def _resolve_scope_quota(scope_id: str, candidates: list[dict[str, Any]]) -> dic
             "value": None,
             "winner": None,
             "conflict": True,
-            "reason": "same_scope_quota_conflict",
+            "reason": conflict_reason,
             "competing_values": distinct_values,
             "candidate_ids": [item["evidence_id"] for item in ranked_candidates],
             "scope_id": scope_id,
@@ -265,26 +342,78 @@ def _resolve_scope_quota(scope_id: str, candidates: list[dict[str, Any]]) -> dic
     }
 
 
-def _child_scopes_with_quota(state: RuntimeState, parent_scope_id: str) -> list[Any]:
+def _resolve_scope_quota(scope_id: str, candidates: list[dict[str, Any]]) -> dict[str, Any]:
+    return _resolve_scope_value(scope_id, candidates, conflict_reason="same_scope_quota_conflict")
+
+
+def _resolve_scope_catasto_field(scope_id: str, field_key: str, candidates: list[dict[str, Any]]) -> dict[str, Any]:
+    return _resolve_scope_value(scope_id, candidates, conflict_reason=f"same_scope_{field_key}_conflict")
+
+
+def _patched_to_dict(value: Any) -> Any:
+    if is_dataclass(value):
+        data = {k: _patched_to_dict(v) for k, v in asdict(value).items()}
+        if isinstance(value, CanonicalScopeState):
+            rights = getattr(value, "rights", None)
+            if isinstance(rights, dict):
+                data["rights"] = _patched_to_dict(rights)
+        return data
+    if isinstance(value, dict):
+        return {k: _patched_to_dict(v) for k, v in value.items()}
+    if isinstance(value, list):
+        return [_patched_to_dict(v) for v in value]
+    return value
+
+
+def _ensure_scope_rights_serialization_patch() -> None:
+    global _SCOPE_RIGHTS_TO_DICT_PATCHED
+    if _SCOPE_RIGHTS_TO_DICT_PATCHED:
+        return
+    import perizia_runtime.runtime as runtime_module
+    import perizia_runtime.state as state_module
+
+    runtime_module.to_dict = _patched_to_dict
+    state_module.to_dict = _patched_to_dict
+    _SCOPE_RIGHTS_TO_DICT_PATCHED = True
+
+
+def _scope_rights(scope: Any) -> dict[str, Any]:
+    rights = getattr(scope, "rights", None)
+    if not isinstance(rights, dict):
+        rights = {}
+        setattr(scope, "rights", rights)
+    return rights
+
+
+def _child_scopes_with_field(state: RuntimeState, parent_scope_id: str, field_key: str) -> list[Any]:
     return [
         child
         for child in state.list_child_scopes(parent_scope_id)
         if isinstance(child.catasto, dict)
-        and isinstance(child.catasto.get("quota"), dict)
-        and child.catasto["quota"].get("value") is not None
+        and isinstance(child.catasto.get(field_key), dict)
+        and child.catasto[field_key].get("value") is not None
+    ]
+
+
+def _child_scopes_with_quota(state: RuntimeState, parent_scope_id: str) -> list[Any]:
+    return [
+        child
+        for child in state.list_child_scopes(parent_scope_id)
+        if isinstance(_scope_rights(child).get("quota"), dict)
+        and _scope_rights(child)["quota"].get("value") is not None
     ]
 
 
 def _apply_inherited_quota_to_children(state: RuntimeState, parent_scope_id: str) -> None:
     parent_scope = state.scopes[parent_scope_id]
-    quota = parent_scope.catasto.get("quota") if isinstance(parent_scope.catasto, dict) else None
+    quota = _scope_rights(parent_scope).get("quota")
     if not isinstance(quota, dict) or quota.get("value") is None:
         return
     internal = parent_scope.metadata.get("rights_internal", {}).get("quota", {})
     if not internal.get("inherits_to_children"):
         return
     for child in state.list_child_scopes(parent_scope_id):
-        if child.scope_type != "bene" or child.catasto.get("quota"):
+        if child.scope_type != "bene" or _scope_rights(child).get("quota"):
             continue
         inherited_payload = _quota_payload(
             str(quota["value"]),
@@ -293,7 +422,7 @@ def _apply_inherited_quota_to_children(state: RuntimeState, parent_scope_id: str
             source_scope_id=parent_scope_id,
             inherited=True,
         )
-        child.catasto["quota"] = inherited_payload
+        _scope_rights(child)["quota"] = inherited_payload
         child.metadata["rights_internal"] = {
             "quota": {
                 "value": str(quota["value"]),
@@ -309,13 +438,45 @@ def _apply_inherited_quota_to_children(state: RuntimeState, parent_scope_id: str
         }
 
 
-def _derive_root_quota(state: RuntimeState, direct_root_resolution: dict[str, Any]) -> dict[str, Any]:
+def _apply_inherited_field_to_children(state: RuntimeState, parent_scope_id: str, field_key: str) -> None:
+    parent_scope = state.scopes[parent_scope_id]
+    payload = parent_scope.catasto.get(field_key) if isinstance(parent_scope.catasto, dict) else None
+    if not isinstance(payload, dict) or payload.get("value") is None:
+        return
+    internal = parent_scope.metadata.get("catasto_internal", {}).get(field_key, {})
+    if not internal.get("inherits_to_children"):
+        return
+    for child in state.list_child_scopes(parent_scope_id):
+        if child.scope_type != "bene" or child.catasto.get(field_key):
+            continue
+        inherited_payload = _catasto_payload(
+            str(payload["value"]),
+            float(payload.get("confidence", 0.0)),
+            copy.deepcopy(payload.get("evidence", [])),
+            source_scope_id=parent_scope_id,
+            inherited=True,
+        )
+        child.catasto[field_key] = inherited_payload
+        child.metadata.setdefault("catasto_internal", {})[field_key] = {
+            "value": str(payload["value"]),
+            "winner": {
+                "scope_id": parent_scope_id,
+                "evidence": copy.deepcopy(payload.get("evidence", [])),
+                "confidence": float(payload.get("confidence", 0.0)),
+            },
+            "conflict": False,
+            "derived_from_scope_id": parent_scope_id,
+            "resolution_reason": "scope_inheritance",
+        }
+
+
+def _derive_root_field(state: RuntimeState, field_key: str, direct_root_resolution: dict[str, Any]) -> dict[str, Any]:
     leaf_scopes = [
         scope
         for scope in state.scopes.values()
         if scope.scope_type == "bene"
-        and isinstance(scope.catasto.get("quota"), dict)
-        and scope.catasto["quota"].get("value") is not None
+        and isinstance(scope.catasto.get(field_key), dict)
+        and scope.catasto[field_key].get("value") is not None
     ]
     if not leaf_scopes:
         leaf_scopes = [
@@ -323,19 +484,86 @@ def _derive_root_quota(state: RuntimeState, direct_root_resolution: dict[str, An
             for scope in state.scopes.values()
             if scope.scope_type == "lotto"
             and not any(child.scope_type == "bene" for child in state.list_child_scopes(scope.scope_id))
-            and isinstance(scope.catasto.get("quota"), dict)
-            and scope.catasto["quota"].get("value") is not None
+            and isinstance(scope.catasto.get(field_key), dict)
+            and scope.catasto[field_key].get("value") is not None
         ]
 
     if leaf_scopes:
-        values = [str(scope.catasto["quota"]["value"]) for scope in leaf_scopes]
+        values = [str(scope.catasto[field_key]["value"]) for scope in leaf_scopes]
         unique_values = sorted(set(values))
         if len(unique_values) == 1:
-            best = max(leaf_scopes, key=lambda scope: float(scope.catasto["quota"].get("confidence", 0.0)))
+            best = max(leaf_scopes, key=lambda scope: float(scope.catasto[field_key].get("confidence", 0.0)))
             return {
                 "value": unique_values[0],
-                "confidence": float(best.catasto["quota"].get("confidence", 0.0)),
-                "evidence": copy.deepcopy(best.catasto["quota"].get("evidence", [])),
+                "confidence": float(best.catasto[field_key].get("confidence", 0.0)),
+                "evidence": copy.deepcopy(best.catasto[field_key].get("evidence", [])),
+                "source_scope_id": best.scope_id,
+                "internal": {
+                    "derived_from_scopes": [scope.scope_id for scope in leaf_scopes],
+                    "resolution_reason": "uniform_leaf_scope_collapse",
+                },
+            }
+        return {
+            "value": None,
+            "confidence": 0.0,
+            "evidence": [],
+            "internal": {
+                "derived_from_scopes": [scope.scope_id for scope in leaf_scopes],
+                "unresolved_reason": "different_scopes_have_different_resolved_truth",
+            },
+        }
+
+    if direct_root_resolution.get("value") is not None:
+        winner = direct_root_resolution.get("winner") or {}
+        return {
+            "value": str(direct_root_resolution["value"]),
+            "confidence": float(winner.get("confidence", 0.0)),
+            "evidence": copy.deepcopy(winner.get("evidence", [])),
+            "source_scope_id": "document_root",
+            "internal": {
+                "candidate_ids": direct_root_resolution.get("candidate_ids", []),
+                "resolution_reason": "direct_root_resolution",
+            },
+        }
+
+    return {
+        "value": None,
+        "confidence": 0.0,
+        "evidence": [],
+        "internal": {
+            "unresolved_reason": direct_root_resolution.get("reason") or f"no_{field_key}_candidates",
+            "candidate_ids": direct_root_resolution.get("candidate_ids", []),
+        },
+    }
+
+
+def _derive_root_quota(state: RuntimeState, direct_root_resolution: dict[str, Any]) -> dict[str, Any]:
+    leaf_scopes = [
+        scope
+        for scope in state.scopes.values()
+        if scope.scope_type == "bene"
+        and isinstance(_scope_rights(scope).get("quota"), dict)
+        and _scope_rights(scope)["quota"].get("value") is not None
+    ]
+    if not leaf_scopes:
+        leaf_scopes = [
+            scope
+            for scope in state.scopes.values()
+            if scope.scope_type == "lotto"
+            and not any(child.scope_type == "bene" for child in state.list_child_scopes(scope.scope_id))
+            and isinstance(_scope_rights(scope).get("quota"), dict)
+            and _scope_rights(scope)["quota"].get("value") is not None
+        ]
+
+    if leaf_scopes:
+        values = [str(_scope_rights(scope)["quota"]["value"]) for scope in leaf_scopes]
+        unique_values = sorted(set(values))
+        if len(unique_values) == 1:
+            best = max(leaf_scopes, key=lambda scope: float(_scope_rights(scope)["quota"].get("confidence", 0.0)))
+            return {
+                "value": unique_values[0],
+                "confidence": float(_scope_rights(best)["quota"].get("confidence", 0.0)),
+                "evidence": copy.deepcopy(_scope_rights(best)["quota"].get("evidence", [])),
                 "source_scope_id": best.scope_id,
                 "internal": {
                     "derived_from_scopes": [scope.scope_id for scope in leaf_scopes],
@@ -376,37 +604,32 @@ def _derive_root_quota(state: RuntimeState, direct_root_resolution: dict[str, An
     }
 
 
-def run_catasto_agent(state: RuntimeState) -> None:
-    grouped_candidates = _collect_quota_candidates(state)
-    by_scope: dict[str, list[dict[str, Any]]] = {}
-    for candidate in grouped_candidates:
-        by_scope.setdefault(candidate["scope_id"], []).append(candidate)
-
+def _write_scoped_catasto_field(state: RuntimeState, field_key: str, by_scope: dict[str, list[dict[str, Any]]]) -> None:
     for scope in [scope for scope in state.scopes.values() if scope.scope_type == "bene"]:
-        resolution = _resolve_scope_quota(scope.scope_id, by_scope.get(scope.scope_id, []))
+        resolution = _resolve_scope_catasto_field(scope.scope_id, field_key, by_scope.get(scope.scope_id, []))
         if resolution.get("value") is not None:
             winner = resolution["winner"]
-            scope.catasto["quota"] = _quota_payload(
+            scope.catasto[field_key] = _catasto_payload(
                 str(resolution["value"]),
                 float(winner.get("confidence", 0.0)),
                 copy.deepcopy(winner.get("evidence", [])),
             )
         if resolution.get("value") is not None or resolution.get("conflict"):
-            scope.metadata["rights_internal"] = {"quota": resolution}
+            scope.metadata.setdefault("catasto_internal", {})[field_key] = resolution
 
     for scope in [scope for scope in state.scopes.values() if scope.scope_type == "lotto"]:
-        resolution = _resolve_scope_quota(scope.scope_id, by_scope.get(scope.scope_id, []))
-        direct_children = _child_scopes_with_quota(state, scope.scope_id)
+        resolution = _resolve_scope_catasto_field(scope.scope_id, field_key, by_scope.get(scope.scope_id, []))
+        direct_children = _child_scopes_with_field(state, scope.scope_id, field_key)
         derived = None
         if direct_children:
-            values = sorted({str(child.catasto["quota"]["value"]) for child in direct_children})
+            values = sorted({str(child.catasto[field_key]["value"]) for child in direct_children})
             if len(values) == 1:
-                best = max(direct_children, key=lambda child: float(child.catasto["quota"].get("confidence", 0.0)))
+                best = max(direct_children, key=lambda child: float(child.catasto[field_key].get("confidence", 0.0)))
                 derived = {
                     "value": values[0],
                     "winner": {
-                        "confidence": float(best.catasto["quota"].get("confidence", 0.0)),
-                        "evidence": copy.deepcopy(best.catasto["quota"].get("evidence", [])),
+                        "confidence": float(best.catasto[field_key].get("confidence", 0.0)),
+                        "evidence": copy.deepcopy(best.catasto[field_key].get("evidence", [])),
                     },
                     "derived_from_scopes": [child.scope_id for child in direct_children],
                     "resolution_reason": "uniform_child_scope_collapse",
@@ -418,7 +641,7 @@ def run_catasto_agent(state: RuntimeState) -> None:
             and int(resolution.get("priority", 2)) < 3
         )
         if prefer_derived:
-            scope.catasto["quota"] = _quota_payload(
+            scope.catasto[field_key] = _catasto_payload(
                 str(derived["value"]),
                 float(derived["winner"].get("confidence", 0.0)),
                 copy.deepcopy(derived["winner"].get("evidence", [])),
@@ -426,13 +649,115 @@ def run_catasto_agent(state: RuntimeState) -> None:
             )
         elif resolution.get("value") is not None:
             winner = resolution["winner"]
-            scope.catasto["quota"] = _quota_payload(
+            scope.catasto[field_key] = _catasto_payload(
                 str(resolution["value"]),
                 float(winner.get("confidence", 0.0)),
                 copy.deepcopy(winner.get("evidence", [])),
             )
         elif derived is not None:
-            scope.catasto["quota"] = _quota_payload(
+            scope.catasto[field_key] = _catasto_payload(
+                str(derived["value"]),
+                float(derived["winner"].get("confidence", 0.0)),
+                copy.deepcopy(derived["winner"].get("evidence", [])),
+                source_scope_id=derived["derived_from_scopes"][0],
+            )
+        if resolution.get("value") is not None or resolution.get("conflict") or derived is not None:
+            internal = copy.deepcopy(resolution)
+            if resolution.get("value") is not None:
+                winner = resolution.get("winner") or {}
+                internal["inherits_to_children"] = bool((winner.get("ownership_method") or "").endswith("universal"))
+            if derived is not None:
+                internal["derived_from_scopes"] = derived["derived_from_scopes"]
+                internal["resolution_reason"] = derived["resolution_reason"]
+            scope.metadata.setdefault("catasto_internal", {})[field_key] = internal
+
+    for scope in [scope for scope in state.scopes.values() if scope.scope_type == "lotto"]:
+        _apply_inherited_field_to_children(state, scope.scope_id, field_key)
+
+    direct_root_resolution = _resolve_scope_catasto_field("document_root", field_key, by_scope.get("document_root", []))
+    root_scope = state.scopes["document_root"]
+    derived_root = _derive_root_field(state, field_key, direct_root_resolution)
+    root_scope.metadata.setdefault("catasto_internal", {})[field_key] = derived_root["internal"]
+    root_scope.catasto[field_key] = _catasto_payload(
+        derived_root["value"],
+        float(derived_root["confidence"]),
+        derived_root["evidence"],
+        source_scope_id=derived_root.get("source_scope_id"),
+    )
+    state.canonical_case.catasto[field_key] = copy.deepcopy(root_scope.catasto[field_key])
+    state.judgments[field_key] = Judgment(
+        field_key=field_key,
+        value=derived_root["value"],
+        status="FOUND" if derived_root["value"] is not None else "NOT_FOUND",
+        confidence=float(derived_root["confidence"]),
+        evidence=derived_root["evidence"],
+        rationale=f"{field_key} resolved from scoped catasto ownership and safe root rollup",
+        metadata=copy.deepcopy(derived_root["internal"]),
+    )
+
+
+def run_catasto_agent(state: RuntimeState) -> None:
+    _ensure_scope_rights_serialization_patch()
+    grouped_quota_candidates = _collect_quota_candidates(state)
+    quota_by_scope: dict[str, list[dict[str, Any]]] = {}
+    for candidate in grouped_quota_candidates:
+        quota_by_scope.setdefault(candidate["scope_id"], []).append(candidate)
+
+    structured_catasto = _collect_structured_catasto_candidates(state)
+    for field_key in _CAT_FIELD_KEYS:
+        _write_scoped_catasto_field(state, field_key, structured_catasto.get(field_key, {}))
+
+    for scope in [scope for scope in state.scopes.values() if scope.scope_type == "bene"]:
+        resolution = _resolve_scope_quota(scope.scope_id, quota_by_scope.get(scope.scope_id, []))
+        if resolution.get("value") is not None:
+            winner = resolution["winner"]
+            _scope_rights(scope)["quota"] = _quota_payload(
+                str(resolution["value"]),
+                float(winner.get("confidence", 0.0)),
+                copy.deepcopy(winner.get("evidence", [])),
+            )
+        if resolution.get("value") is not None or resolution.get("conflict"):
+            scope.metadata["rights_internal"] = {"quota": resolution}
+
+    for scope in [scope for scope in state.scopes.values() if scope.scope_type == "lotto"]:
+        resolution = _resolve_scope_quota(scope.scope_id, quota_by_scope.get(scope.scope_id, []))
+        direct_children = _child_scopes_with_quota(state, scope.scope_id)
+        derived = None
+        if direct_children:
+            values = sorted({str(_scope_rights(child)["quota"]["value"]) for child in direct_children})
+            if len(values) == 1:
+                best = max(direct_children, key=lambda child: float(_scope_rights(child)["quota"].get("confidence", 0.0)))
+                derived = {
+                    "value": values[0],
+                    "winner": {
+                        "confidence": float(_scope_rights(best)["quota"].get("confidence", 0.0)),
+                        "evidence": copy.deepcopy(_scope_rights(best)["quota"].get("evidence", [])),
+                    },
+                    "derived_from_scopes": [child.scope_id for child in direct_children],
+                    "resolution_reason": "uniform_child_scope_collapse",
+                }
+        prefer_derived = (
+            derived is not None
+            and resolution.get("value") is not None
+            and str(derived["value"]) != str(resolution["value"])
+            and int(resolution.get("priority", 2)) < 3
+        )
+        if prefer_derived:
+            _scope_rights(scope)["quota"] = _quota_payload(
+                str(derived["value"]),
+                float(derived["winner"].get("confidence", 0.0)),
+                copy.deepcopy(derived["winner"].get("evidence", [])),
+                source_scope_id=derived["derived_from_scopes"][0],
+            )
+        elif resolution.get("value") is not None:
+            winner = resolution["winner"]
+            _scope_rights(scope)["quota"] = _quota_payload(
+                str(resolution["value"]),
+                float(winner.get("confidence", 0.0)),
+                copy.deepcopy(winner.get("evidence", [])),
+            )
+        elif derived is not None:
+            _scope_rights(scope)["quota"] = _quota_payload(
                 str(derived["value"]),
                 float(derived["winner"].get("confidence", 0.0)),
                 copy.deepcopy(derived["winner"].get("evidence", [])),
@@ -451,17 +776,17 @@ def run_catasto_agent(state: RuntimeState) -> None:
     for scope in [scope for scope in state.scopes.values() if scope.scope_type == "lotto"]:
         _apply_inherited_quota_to_children(state, scope.scope_id)
 
-    direct_root_resolution = _resolve_scope_quota("document_root", by_scope.get("document_root", []))
+    direct_root_resolution = _resolve_scope_quota("document_root", quota_by_scope.get("document_root", []))
     root_scope = state.scopes["document_root"]
     derived_root = _derive_root_quota(state, direct_root_resolution)
     root_scope.metadata["rights_internal"] = {"quota": derived_root["internal"]}
-    root_scope.catasto["quota"] = _quota_payload(
+    _scope_rights(root_scope)["quota"] = _quota_payload(
         derived_root["value"],
         float(derived_root["confidence"]),
         derived_root["evidence"],
         source_scope_id=derived_root.get("source_scope_id"),
     )
-    state.canonical_case.rights["quota"] = copy.deepcopy(root_scope.catasto["quota"])
+    state.canonical_case.rights["quota"] = copy.deepcopy(_scope_rights(root_scope)["quota"])
 
     if derived_root["value"] is not None:
         state.judgments["quota"] = Judgment(

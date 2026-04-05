@@ -1094,8 +1094,10 @@ def test_quota_writes_bene_scope_first_and_root_stays_null_when_scopes_disagree(
         pages=pages,
         full_text="\n\n".join(page["text"] for page in pages),
     )
-    assert payload["scopes"]["bene:1"]["catasto"]["quota"]["value"] == "1/1"
-    assert payload["scopes"]["bene:2"]["catasto"]["quota"]["value"] == "1/2"
+    assert payload["scopes"]["bene:1"]["rights"]["quota"]["value"] == "1/1"
+    assert payload["scopes"]["bene:2"]["rights"]["quota"]["value"] == "1/2"
+    assert "quota" not in payload["scopes"]["bene:1"]["catasto"]
+    assert "quota" not in payload["scopes"]["bene:2"]["catasto"]
     assert payload["canonical_case"]["rights"]["quota"]["value"] is None
     assert (
         payload["scopes"]["document_root"]["metadata"]["rights_internal"]["quota"]["unresolved_reason"]
@@ -1127,9 +1129,10 @@ def test_quota_universal_lotto_statement_inherits_to_child_beni_and_rolls_up_roo
         pages=pages,
         full_text="\n\n".join(page["text"] for page in pages),
     )
-    assert payload["scopes"]["lotto:unico"]["catasto"]["quota"]["value"] == "1/1"
-    assert payload["scopes"]["bene:1"]["catasto"]["quota"]["value"] == "1/1"
-    assert payload["scopes"]["bene:2"]["catasto"]["quota"]["value"] == "1/1"
+    assert payload["scopes"]["lotto:unico"]["rights"]["quota"]["value"] == "1/1"
+    assert payload["scopes"]["bene:1"]["rights"]["quota"]["value"] == "1/1"
+    assert payload["scopes"]["bene:2"]["rights"]["quota"]["value"] == "1/1"
+    assert "quota" not in payload["scopes"]["lotto:unico"]["catasto"]
     assert payload["canonical_case"]["rights"]["quota"]["value"] == "1/1"
 
 
@@ -1170,10 +1173,70 @@ def test_multilot_fixture_keeps_primary_lot_quota_over_ancillary_shared_access_s
         pages=pages,
         full_text="\n\n".join(page["text"] for page in pages),
     )
-    assert payload["scopes"]["lotto:1"]["catasto"]["quota"]["value"] == "1/1"
-    assert payload["scopes"]["lotto:2"]["catasto"]["quota"]["value"] == "1/1"
-    assert payload["scopes"]["lotto:3"]["catasto"]["quota"]["value"] == "1/1"
+    assert payload["scopes"]["lotto:1"]["rights"]["quota"]["value"] == "1/1"
+    assert payload["scopes"]["lotto:2"]["rights"]["quota"]["value"] == "1/1"
+    assert payload["scopes"]["lotto:3"]["rights"]["quota"]["value"] == "1/1"
+    assert "quota" not in payload["scopes"]["lotto:1"]["catasto"]
     assert payload["canonical_case"]["rights"]["quota"]["value"] == "1/1"
+
+
+def test_multibene_fixture_writes_scoped_catasto_fields_per_bene():
+    result, pages = _repo_fixture("multibene_1859886")
+    payload = run_quality_verifier(
+        analysis_id="multibene_scoped_catasto_probe",
+        result=result,
+        pages=pages,
+        full_text="\n\n".join(page["text"] for page in pages),
+    )
+    assert payload["scopes"]["bene:1"]["catasto"]["foglio"]["value"] == "20"
+    assert payload["scopes"]["bene:1"]["catasto"]["particella"]["value"] == "433"
+    assert payload["scopes"]["bene:1"]["catasto"]["subalterno"]["value"] == "301"
+    assert payload["scopes"]["bene:1"]["catasto"]["categoria"]["value"] == "A/10"
+    assert payload["scopes"]["bene:4"]["catasto"]["particella"]["value"] == "600"
+    assert payload["scopes"]["bene:4"]["catasto"]["subalterno"]["value"] == "3"
+    assert payload["scopes"]["bene:4"]["catasto"]["categoria"]["value"] == "A/7"
+    assert payload["canonical_case"]["catasto"]["particella"]["value"] is None
+
+
+def test_multilot_fixture_writes_scoped_catasto_and_prefers_primary_over_ancillary_entries():
+    result, pages = _repo_fixture("multilot_69_2024")
+    payload = run_quality_verifier(
+        analysis_id="multilot_scoped_catasto_probe",
+        result=result,
+        pages=pages,
+        full_text="\n\n".join(page["text"] for page in pages),
+    )
+    assert payload["scopes"]["lotto:1"]["catasto"]["foglio"]["value"] == "18"
+    assert payload["scopes"]["lotto:1"]["catasto"]["particella"]["value"] == "465"
+    assert payload["scopes"]["lotto:1"]["catasto"]["categoria"]["value"] == "A/3"
+    lot2 = payload["scopes"]["lotto:2"]["catasto"]
+    lot3 = payload["scopes"]["lotto:3"]["catasto"]
+    primary_records = {
+        (lot2["particella"]["value"], lot2["subalterno"]["value"], lot2["categoria"]["value"]),
+        (lot3["particella"]["value"], lot3["subalterno"]["value"], lot3["categoria"]["value"]),
+    }
+    assert primary_records == {("1700", "5", "C/2"), ("94", "8", "F/3")}
+    assert lot2["categoria"]["value"] != "F/1"
+    assert lot3["categoria"]["value"] != "F/1"
+    assert payload["canonical_case"]["catasto"]["particella"]["value"] is None
+
+
+def test_rmei_fixture_collapses_single_scope_catasto_to_root():
+    result, pages = _repo_fixture("rmei_928_2022")
+    payload = run_quality_verifier(
+        analysis_id="rmei_scoped_catasto_probe",
+        result=result,
+        pages=pages,
+        full_text="\n\n".join(page["text"] for page in pages),
+    )
+    assert payload["scopes"]["bene:1"]["catasto"]["foglio"]["value"] == "242"
+    assert payload["scopes"]["bene:1"]["catasto"]["particella"]["value"] == "301"
+    assert payload["scopes"]["bene:1"]["catasto"]["subalterno"]["value"] == "516"
+    assert payload["scopes"]["bene:1"]["catasto"]["categoria"]["value"] == "A/2"
+    assert payload["canonical_case"]["catasto"]["foglio"]["value"] == "242"
+    assert payload["canonical_case"]["catasto"]["particella"]["value"] == "301"
+    assert payload["canonical_case"]["catasto"]["subalterno"]["value"] == "516"
+    assert payload["canonical_case"]["catasto"]["categoria"]["value"] == "A/2"
 
 
 def test_multi_lot_auction_prices_do_not_force_scalar_selected_price():
