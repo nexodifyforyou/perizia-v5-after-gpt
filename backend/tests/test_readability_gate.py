@@ -9,6 +9,12 @@ from perizia_ingest.readability_gate import (
     UNREADABLE_FROM_AVAILABLE_SURFACES,
     assess_document_readability,
 )
+from perizia_runtime.evidence_mode import (
+    DEGRADED_TEXT,
+    STOP_UNREADABLE,
+    TEXT_FIRST,
+    select_evidence_mode,
+)
 from perizia_runtime.runtime import apply_verifier_to_result, run_quality_verifier
 
 
@@ -66,6 +72,12 @@ def test_readability_gate_marks_effectively_empty_text_as_unreadable():
     assert payload["surface_inventory_summary"]["effectively_empty_pages"] == 2
 
 
+def test_evidence_mode_selection_matches_readability_verdicts():
+    assert select_evidence_mode(READABLE_DOCUMENT)["evidence_mode"] == TEXT_FIRST
+    assert select_evidence_mode(READABLE_BUT_EXTRACTION_BAD)["evidence_mode"] == DEGRADED_TEXT
+    assert select_evidence_mode(UNREADABLE_FROM_AVAILABLE_SURFACES)["evidence_mode"] == STOP_UNREADABLE
+
+
 def test_verifier_runtime_exposes_readability_fields_and_result_note():
     result = {
         "field_states": {},
@@ -89,6 +101,10 @@ def test_verifier_runtime_exposes_readability_fields_and_result_note():
     apply_verifier_to_result(result, payload)
 
     assert payload["readability_verdict"] == UNREADABLE_FROM_AVAILABLE_SURFACES
+    assert payload["evidence_mode"] == STOP_UNREADABLE
+    assert "stop" in payload["evidence_mode_reason"].lower()
     assert "surface_inventory_pages" in payload
     assert result["document_quality"]["readability_verdict"] == UNREADABLE_FROM_AVAILABLE_SURFACES
+    assert result["document_quality"]["evidence_mode"] == STOP_UNREADABLE
+    assert result["document_quality"]["evidence_mode_reason"] == payload["evidence_mode_reason"]
     assert "rendered page images were not inspected" in result["document_quality"]["document_quality_note"]

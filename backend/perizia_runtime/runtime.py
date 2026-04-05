@@ -19,6 +19,7 @@ from perizia_agents.urbanistica_agent import run_urbanistica_agent
 from perizia_ingest.readability_gate import assess_document_readability
 from perizia_qa.comparators import compare_legacy_and_verifier
 from perizia_qa.invariants import run_invariants
+from perizia_runtime.evidence_mode import select_evidence_mode
 from perizia_runtime.pipeline import PeriziaPipeline
 from perizia_runtime.state import RuntimeState, to_dict
 from perizia_tools.pdf_text_tool import build_pdf_text_payload
@@ -27,6 +28,7 @@ from perizia_tools.pdf_text_tool import build_pdf_text_payload
 def run_quality_verifier(*, analysis_id: str, result: Dict[str, Any], pages: List[Dict[str, Any]], full_text: str) -> Dict[str, Any]:
     payload = build_pdf_text_payload(pages, full_text)
     readability = assess_document_readability(payload["pages"])
+    evidence_mode = select_evidence_mode(readability["readability_verdict"])
     state = RuntimeState(
         analysis_id=str(analysis_id or ""),
         result=copy.deepcopy(result or {}),
@@ -60,6 +62,8 @@ def run_quality_verifier(*, analysis_id: str, result: Dict[str, Any], pages: Lis
         "candidates": to_dict(state.candidates),
         "readability_verdict": readability["readability_verdict"],
         "document_quality_note": readability["document_quality_note"],
+        "evidence_mode": evidence_mode["evidence_mode"],
+        "evidence_mode_reason": evidence_mode["evidence_mode_reason"],
         "surface_inventory_summary": readability["surface_inventory_summary"],
         "surface_inventory_pages": readability["surface_inventory_pages"],
         "surface_inventory_limitations": readability["limitations"],
@@ -95,6 +99,8 @@ def apply_verifier_to_result(result: Dict[str, Any], verifier_payload: Dict[str,
     document_quality = result.setdefault("document_quality", {})
     document_quality["readability_verdict"] = verifier_payload.get("readability_verdict")
     document_quality["document_quality_note"] = verifier_payload.get("document_quality_note")
+    document_quality["evidence_mode"] = verifier_payload.get("evidence_mode")
+    document_quality["evidence_mode_reason"] = verifier_payload.get("evidence_mode_reason")
     document_quality["surface_inventory_summary"] = verifier_payload.get("surface_inventory_summary", {})
     document_quality["surface_inventory_pages"] = verifier_payload.get("surface_inventory_pages", [])
     document_quality["surface_inventory_limitations"] = verifier_payload.get("surface_inventory_limitations", {})
