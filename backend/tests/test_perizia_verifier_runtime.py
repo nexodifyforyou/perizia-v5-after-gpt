@@ -1133,6 +1133,49 @@ def test_quota_universal_lotto_statement_inherits_to_child_beni_and_rolls_up_roo
     assert payload["canonical_case"]["rights"]["quota"]["value"] == "1/1"
 
 
+def test_quota_rejects_date_like_fragments_even_with_property_context():
+    result = {
+        "field_states": {},
+        "dati_certi_del_lotto": {},
+        "document_quality": {"status": "TEXT_OK"},
+        "semaforo_generale": {"status": "AMBER"},
+    }
+    pages = [
+        {
+            "page_number": 1,
+            "text": (
+                "LOTTO UNICO\n"
+                "Bene N° 1 - Appartamento\n"
+                "Diritti di piena proprietà per la quota di 1/1.\n"
+                "Atto in data 06/03/1997 relativo a proprietà confinante."
+            ),
+        },
+    ]
+    payload = run_quality_verifier(
+        analysis_id="synthetic_quota_date_like_rejection",
+        result=result,
+        pages=pages,
+        full_text="\n\n".join(page["text"] for page in pages),
+    )
+    values = [item["value"] for item in payload["candidates"]["quota"]]
+    assert "6/3" not in values
+    assert payload["canonical_case"]["rights"]["quota"]["value"] == "1/1"
+
+
+def test_multilot_fixture_keeps_primary_lot_quota_over_ancillary_shared_access_shares():
+    result, pages = _repo_fixture("multilot_69_2024")
+    payload = run_quality_verifier(
+        analysis_id="multilot_quota_primary_beats_ancillary_probe",
+        result=result,
+        pages=pages,
+        full_text="\n\n".join(page["text"] for page in pages),
+    )
+    assert payload["scopes"]["lotto:1"]["catasto"]["quota"]["value"] == "1/1"
+    assert payload["scopes"]["lotto:2"]["catasto"]["quota"]["value"] == "1/1"
+    assert payload["scopes"]["lotto:3"]["catasto"]["quota"]["value"] == "1/1"
+    assert payload["canonical_case"]["rights"]["quota"]["value"] == "1/1"
+
+
 def test_multi_lot_auction_prices_do_not_force_scalar_selected_price():
     result = {
         "field_states": {},

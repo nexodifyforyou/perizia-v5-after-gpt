@@ -38,6 +38,23 @@ def _candidate_page(candidate: Any) -> int:
     return 0
 
 
+def _candidate_priority(candidate: Any) -> int:
+    metadata = candidate.metadata if isinstance(getattr(candidate, "metadata", None), dict) else {}
+    try:
+        return int(metadata.get("priority", 2))
+    except Exception:
+        return 2
+
+
+def _candidate_match_start(candidate: Any) -> int | None:
+    metadata = candidate.metadata if isinstance(getattr(candidate, "metadata", None), dict) else {}
+    value = metadata.get("match_start")
+    try:
+        return int(value) if value is not None else None
+    except Exception:
+        return None
+
+
 def _normalize_lotto_token(token: str) -> str:
     low = str(token or "").strip().lower()
     return "unico" if low == "unico" else re.sub(r"\D+", "", low)
@@ -76,6 +93,43 @@ def _single_scope_fallback(state: RuntimeState) -> tuple[str, str]:
     if len(lotto_scope_ids) == 1:
         return lotto_scope_ids[0], "single_lotto_fallback"
     return "document_root", "document_root_fallback"
+
+
+def _nearest_scope_from_page_context(state: RuntimeState, candidate: Any) -> tuple[str, str, bool] | None:
+    page_number = _candidate_page(candidate)
+    anchor = _candidate_match_start(candidate)
+    if anchor is None:
+        return None
+    page_text = ""
+    for idx, page in enumerate(state.pages or [], start=1):
+        page_no = int((page or {}).get("page_number") or (page or {}).get("page") or idx)
+        if page_no == page_number:
+            page_text = str((page or {}).get("text") or "")
+            break
+    if not page_text:
+        return None
+
+    nearest: tuple[int, str, str] | None = None
+    for match in _BENE_REGEX.finditer(page_text):
+        scope_id = f"bene:{match.group(1)}"
+        if scope_id not in state.scopes:
+            continue
+        distance = anchor - match.start() if match.start() <= anchor else match.start() - anchor + 500
+        candidate_scope = (distance, scope_id, "page_context_bene_heading")
+        if nearest is None or candidate_scope < nearest:
+            nearest = candidate_scope
+    for match in _LOTTO_REGEX.finditer(page_text):
+        scope_id = f"lotto:{_normalize_lotto_token(match.group(1))}"
+        if scope_id not in state.scopes:
+            continue
+        distance = anchor - match.start() if match.start() <= anchor else match.start() - anchor + 500
+        candidate_scope = (distance, scope_id, "page_context_lotto_heading")
+        if nearest is None or candidate_scope < nearest:
+            nearest = candidate_scope
+    if nearest is None:
+        return None
+    _, scope_id, ownership_method = nearest
+    return scope_id, ownership_method, False
 
 
 def _scope_id_for_candidate(state: RuntimeState, candidate: Any) -> tuple[str, str, bool]:
@@ -122,6 +176,9 @@ def _scope_id_for_candidate(state: RuntimeState, candidate: Any) -> tuple[str, s
         return "document_root", "ambiguous_multi_bene_reference", False
     if len(lotto_scope_ids) == 1:
         return lotto_scope_ids[0], "explicit_lotto_universal" if universal else "explicit_lotto_quote", universal
+    page_context_match = _nearest_scope_from_page_context(state, candidate)
+    if page_context_match is not None:
+        return page_context_match
     scope_id, ownership_method = _single_scope_fallback(state)
     return scope_id, ownership_method, False
 
@@ -170,6 +227,7 @@ def _collect_quota_candidates(state: RuntimeState) -> list[dict[str, Any]]:
                 "ownership_method": ownership_method,
                 "universal": universal,
                 "evidence_id": ownership.evidence_id,
+                "priority": _candidate_priority(candidate),
             }
         )
     return grouped
@@ -178,7 +236,9 @@ def _collect_quota_candidates(state: RuntimeState) -> list[dict[str, Any]]:
 def _resolve_scope_quota(scope_id: str, candidates: list[dict[str, Any]]) -> dict[str, Any]:
     if not candidates:
         return {"value": None, "winner": None, "conflict": False, "scope_id": scope_id}
-    distinct_values = sorted({str(item["value"]) for item in candidates})
+    max_priority = max(int(item.get("priority", 2)) for item in candidates)
+    ranked_candidates = [item for item in candidates if int(item.get("priority", 2)) == max_priority]
+    distinct_values = sorted({str(item["value"]) for item in ranked_candidates})
     if len(distinct_values) > 1:
         return {
             "value": None,
@@ -186,11 +246,12 @@ def _resolve_scope_quota(scope_id: str, candidates: list[dict[str, Any]]) -> dic
             "conflict": True,
             "reason": "same_scope_quota_conflict",
             "competing_values": distinct_values,
-            "candidate_ids": [item["evidence_id"] for item in candidates],
+            "candidate_ids": [item["evidence_id"] for item in ranked_candidates],
             "scope_id": scope_id,
+            "priority": max_priority,
         }
     winner = sorted(
-        candidates,
+        ranked_candidates,
         key=lambda item: (float(item["confidence"]), -len(str(item["quote"] or "")), -int(item["page"])),
         reverse=True,
     )[0]
@@ -198,8 +259,9 @@ def _resolve_scope_quota(scope_id: str, candidates: list[dict[str, Any]]) -> dic
         "value": str(winner["value"]),
         "winner": winner,
         "conflict": False,
-        "candidate_ids": [item["evidence_id"] for item in candidates],
+        "candidate_ids": [item["evidence_id"] for item in ranked_candidates],
         "scope_id": scope_id,
+        "priority": max_priority,
     }
 
 
@@ -336,7 +398,7 @@ def run_catasto_agent(state: RuntimeState) -> None:
         resolution = _resolve_scope_quota(scope.scope_id, by_scope.get(scope.scope_id, []))
         direct_children = _child_scopes_with_quota(state, scope.scope_id)
         derived = None
-        if not resolution.get("conflict") and resolution.get("value") is None and direct_children:
+        if direct_children:
             values = sorted({str(child.catasto["quota"]["value"]) for child in direct_children})
             if len(values) == 1:
                 best = max(direct_children, key=lambda child: float(child.catasto["quota"].get("confidence", 0.0)))
@@ -349,7 +411,20 @@ def run_catasto_agent(state: RuntimeState) -> None:
                     "derived_from_scopes": [child.scope_id for child in direct_children],
                     "resolution_reason": "uniform_child_scope_collapse",
                 }
-        if resolution.get("value") is not None:
+        prefer_derived = (
+            derived is not None
+            and resolution.get("value") is not None
+            and str(derived["value"]) != str(resolution["value"])
+            and int(resolution.get("priority", 2)) < 3
+        )
+        if prefer_derived:
+            scope.catasto["quota"] = _quota_payload(
+                str(derived["value"]),
+                float(derived["winner"].get("confidence", 0.0)),
+                copy.deepcopy(derived["winner"].get("evidence", [])),
+                source_scope_id=derived["derived_from_scopes"][0],
+            )
+        elif resolution.get("value") is not None:
             winner = resolution["winner"]
             scope.catasto["quota"] = _quota_payload(
                 str(resolution["value"]),

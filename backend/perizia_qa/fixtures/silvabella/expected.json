@@ -2,7 +2,7 @@
   "fixture_name": "silvabella",
   "source_analysis_id": "analysis_8954c511ed4e",
   "seed_semaforo_status": "AMBER",
-  "quota": null,
+  "quota": "1/1",
   "pricing": {
     "selected_price": 45338.48,
     "benchmark_value": 56861.33,
