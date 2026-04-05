@@ -8,8 +8,11 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from perizia_qa.fixture_runner import run_named_fixture
 import perizia_agents.agibilita_agent as agibilita_agent
+import perizia_runtime.runtime as verifier_runtime_module
+from perizia_ingest.readability_gate import READABLE_BUT_EXTRACTION_BAD, READABLE_DOCUMENT, UNREADABLE_FROM_AVAILABLE_SURFACES
+from perizia_qa.fixture_runner import run_named_fixture
+from perizia_runtime.evidence_mode import DEGRADED_TEXT, STOP_UNREADABLE, TEXT_FIRST
 from perizia_runtime.runtime import apply_verifier_to_result, run_quality_verifier
 from perizia_runtime.state import RuntimeState
 from perizia_tools import valuation_table_tool
@@ -39,6 +42,12 @@ def _pricing_probe(name: str):
         full_text="\n\n".join(page["text"] for page in pages),
     )
     return payload["canonical_case"]["pricing"]
+
+
+def _force_readability_mode(monkeypatch, pages, verdict: str):
+    readability = verifier_runtime_module.assess_document_readability(pages)
+    readability["readability_verdict"] = verdict
+    monkeypatch.setattr(verifier_runtime_module, "assess_document_readability", lambda _: readability)
 
 
 def test_runtime_state_initializes_document_root_scope():
@@ -753,6 +762,76 @@ def _silvabella_fixture():
         "semaforo_generale": {"status": "AMBER"},
     }
     return result, pages
+
+
+def test_text_first_packaging_stays_clean_for_packaged_outputs(monkeypatch):
+    result, pages = _silvabella_fixture()
+    _force_readability_mode(monkeypatch, pages, READABLE_DOCUMENT)
+    payload = run_quality_verifier(
+        analysis_id="silvabella_text_first_packaging",
+        result=result,
+        pages=pages,
+        full_text="\n\n".join(page["text"] for page in pages),
+    )
+    packaged = json.loads(json.dumps(result))
+    apply_verifier_to_result(packaged, payload)
+
+    assert payload["evidence_mode"] == TEXT_FIRST
+    assert payload["source_quality_note"] is None
+    assert payload["packaging_guards"] == []
+    assert packaged["document_quality"]["source_quality_note"] is None
+    assert "packaging_guards" not in packaged
+    assert "guards" not in packaged["dati_certi_del_lotto"]["prezzo_base_asta_verifier"]
+    assert packaged["field_states"]["stato_occupativo"]["status"] == "FOUND"
+    assert packaged["field_states"]["stato_occupativo"]["confidence"] > 0.6
+
+
+def test_degraded_text_packaging_adds_guards_notes_and_caps_confidence(monkeypatch):
+    result, pages = _silvabella_fixture()
+    _force_readability_mode(monkeypatch, pages, READABLE_BUT_EXTRACTION_BAD)
+    payload = run_quality_verifier(
+        analysis_id="silvabella_degraded_text_packaging",
+        result=result,
+        pages=pages,
+        full_text="\n\n".join(page["text"] for page in pages),
+    )
+    packaged = json.loads(json.dumps(result))
+    apply_verifier_to_result(packaged, payload)
+
+    assert payload["evidence_mode"] == DEGRADED_TEXT
+    assert payload["reasoning_status"] == "DEGRADED_TEXT_CAUTION"
+    assert payload["source_quality_note"]
+    assert payload["packaging_guards"] == ["degraded_source_text_only", "confidence_capped_due_to_extraction_quality"]
+    assert payload["canonical_case"]["packaging_guards"] == ["degraded_source_text_only", "confidence_capped_due_to_extraction_quality"]
+    assert payload["canonical_case"]["occupancy"]["confidence"] == 0.6
+    assert packaged["source_quality_note"]
+    assert packaged["packaging_guards"] == ["degraded_source_text_only", "confidence_capped_due_to_extraction_quality"]
+    assert packaged["document_quality"]["source_quality_note"]
+    assert packaged["dati_certi_del_lotto"]["prezzo_base_asta_verifier"]["guards"] == ["degraded_source_text_only", "confidence_capped_due_to_extraction_quality"]
+    assert packaged["field_states"]["stato_occupativo"]["status"] == "LOW_CONFIDENCE"
+    assert packaged["field_states"]["stato_occupativo"]["confidence"] == 0.6
+    assert packaged["field_states"]["stato_occupativo"]["resolver_meta"]["source_quality_note"]
+
+
+def test_stop_unreadable_still_suppresses_normal_packaging(monkeypatch):
+    result, pages = _silvabella_fixture()
+    _force_readability_mode(monkeypatch, pages, UNREADABLE_FROM_AVAILABLE_SURFACES)
+    payload = run_quality_verifier(
+        analysis_id="silvabella_stop_unreadable_packaging",
+        result=result,
+        pages=pages,
+        full_text="\n\n".join(page["text"] for page in pages),
+    )
+    packaged = json.loads(json.dumps(result))
+    apply_verifier_to_result(packaged, payload)
+
+    assert payload["evidence_mode"] == STOP_UNREADABLE
+    assert payload["reasoning_status"] == "SUPPRESSED_UNREADABLE"
+    assert payload["canonical_case"] == {}
+    assert packaged["document_quality"]["reasoning_status"] == "SUPPRESSED_UNREADABLE"
+    assert packaged["field_states"] == {}
+    assert packaged["dati_certi_del_lotto"] == {}
+    assert "stato_occupativo" not in packaged
 
 
 def test_verifier_catches_silvabella_failure_modes():

@@ -25,6 +25,12 @@ from perizia_runtime.state import RuntimeState, to_dict
 from perizia_tools.pdf_text_tool import build_pdf_text_payload
 
 
+DEGRADED_SOURCE_GUARD = "degraded_source_text_only"
+CONFIDENCE_CAP_GUARD = "confidence_capped_due_to_extraction_quality"
+DEGRADED_SOURCE_NOTE = "Reasoning used degraded extracted text only; packaged confidence is capped and requires manual caution."
+DEGRADED_CONFIDENCE_CAP = 0.6
+
+
 def _base_verifier_payload(*, analysis_id: str, readability: Dict[str, Any], evidence_mode: Dict[str, str]) -> Dict[str, Any]:
     return {
         "analysis_id": str(analysis_id or ""),
@@ -32,6 +38,8 @@ def _base_verifier_payload(*, analysis_id: str, readability: Dict[str, Any], evi
         "document_quality_note": readability["document_quality_note"],
         "evidence_mode": evidence_mode["evidence_mode"],
         "evidence_mode_reason": evidence_mode["evidence_mode_reason"],
+        "source_quality_note": None,
+        "packaging_guards": [],
         "surface_inventory_summary": readability["surface_inventory_summary"],
         "surface_inventory_pages": readability["surface_inventory_pages"],
         "surface_inventory_limitations": readability["limitations"],
@@ -64,6 +72,100 @@ def _degraded_text_cautions() -> List[Dict[str, Any]]:
             "message": "Verifier reasoning ran on degraded extracted text surfaces; field-level conclusions may be less reliable.",
         }
     ]
+
+
+def _append_unique(values: List[Any], value: Any) -> None:
+    if value not in values:
+        values.append(value)
+
+
+def _cap_confidence(value: Any) -> Any:
+    if isinstance(value, (int, float)):
+        return min(float(value), DEGRADED_CONFIDENCE_CAP)
+    return value
+
+
+def _apply_degraded_confidence_caps(node: Any) -> None:
+    if isinstance(node, dict):
+        for key, value in list(node.items()):
+            if key in {"confidence", "resolver_confidence"}:
+                node[key] = _cap_confidence(value)
+            else:
+                _apply_degraded_confidence_caps(value)
+        return
+    if isinstance(node, list):
+        for item in node:
+            _apply_degraded_confidence_caps(item)
+
+
+def _annotate_degraded_container(container: Dict[str, Any]) -> None:
+    guards = container.get("guards")
+    if not isinstance(guards, list):
+        guards = []
+        container["guards"] = guards
+    _append_unique(guards, DEGRADED_SOURCE_GUARD)
+    _append_unique(guards, CONFIDENCE_CAP_GUARD)
+    container["source_quality_note"] = DEGRADED_SOURCE_NOTE
+
+
+def _annotate_degraded_output(container: Dict[str, Any], *, guards_key: str = "guards") -> None:
+    guards = container.get(guards_key)
+    if not isinstance(guards, list):
+        guards = []
+        container[guards_key] = guards
+    _append_unique(guards, DEGRADED_SOURCE_GUARD)
+    _append_unique(guards, CONFIDENCE_CAP_GUARD)
+    container["source_quality_note"] = DEGRADED_SOURCE_NOTE
+    _apply_degraded_confidence_caps(container)
+
+
+def _apply_degraded_packaging(payload_dict: Dict[str, Any]) -> None:
+    payload_dict["source_quality_note"] = DEGRADED_SOURCE_NOTE
+    packaging_guards = payload_dict.get("packaging_guards")
+    if not isinstance(packaging_guards, list):
+        packaging_guards = []
+        payload_dict["packaging_guards"] = packaging_guards
+    _append_unique(packaging_guards, DEGRADED_SOURCE_GUARD)
+    _append_unique(packaging_guards, CONFIDENCE_CAP_GUARD)
+
+    canonical = payload_dict.get("canonical_case")
+    if isinstance(canonical, dict):
+        canonical["source_quality_note"] = DEGRADED_SOURCE_NOTE
+        case_guards = canonical.get("packaging_guards")
+        if not isinstance(case_guards, list):
+            case_guards = []
+            canonical["packaging_guards"] = case_guards
+        _append_unique(case_guards, DEGRADED_SOURCE_GUARD)
+        _append_unique(case_guards, CONFIDENCE_CAP_GUARD)
+        for value in canonical.values():
+            if isinstance(value, dict):
+                _annotate_degraded_container(value)
+
+    scopes = payload_dict.get("scopes")
+    if isinstance(scopes, dict):
+        for scope in scopes.values():
+            if isinstance(scope, dict):
+                _annotate_degraded_container(scope)
+
+    judgments = payload_dict.get("judgments")
+    if isinstance(judgments, dict):
+        for judgment in judgments.values():
+            if isinstance(judgment, dict):
+                metadata = judgment.get("metadata")
+                if not isinstance(metadata, dict):
+                    metadata = {}
+                    judgment["metadata"] = metadata
+                metadata["source_quality_note"] = DEGRADED_SOURCE_NOTE
+                packaging_flags = metadata.get("packaging_guards")
+                if not isinstance(packaging_flags, list):
+                    packaging_flags = []
+                    metadata["packaging_guards"] = packaging_flags
+                _append_unique(packaging_flags, DEGRADED_SOURCE_GUARD)
+                _append_unique(packaging_flags, CONFIDENCE_CAP_GUARD)
+
+    _apply_degraded_confidence_caps(payload_dict.get("canonical_case"))
+    _apply_degraded_confidence_caps(payload_dict.get("scopes"))
+    _apply_degraded_confidence_caps(payload_dict.get("judgments"))
 
 
 def run_quality_verifier(*, analysis_id: str, result: Dict[str, Any], pages: List[Dict[str, Any]], full_text: str) -> Dict[str, Any]:
@@ -110,6 +212,7 @@ def run_quality_verifier(*, analysis_id: str, result: Dict[str, Any], pages: Lis
     )
     if evidence_mode["evidence_mode"] == DEGRADED_TEXT:
         payload_dict["verifier_cautions"] = _degraded_text_cautions()
+        _apply_degraded_packaging(payload_dict)
     payload_dict["qa_checks"] = run_invariants(payload_dict)
     payload_dict["comparison"] = compare_legacy_and_verifier(result, payload_dict)
     return payload_dict
@@ -123,6 +226,26 @@ def _legacy_money_costs_summary(costs: Dict[str, Any]) -> Dict[str, Any]:
         "explicit_items_count": len(items),
         "valuation_adjustments_count": len(costs.get("valuation_adjustments", []) if isinstance(costs.get("valuation_adjustments"), list) else []),
     }
+
+
+def _apply_degraded_result_packaging(result: Dict[str, Any]) -> None:
+    _annotate_degraded_output(result, guards_key="packaging_guards")
+
+    document_quality = result.get("document_quality")
+    if isinstance(document_quality, dict):
+        _annotate_degraded_output(document_quality, guards_key="packaging_guards")
+
+    section_legal = result.get("section_9_legal_killers")
+    if isinstance(section_legal, dict):
+        _annotate_degraded_output(section_legal, guards_key="packaging_guards")
+
+    summary = result.get("summary_for_client")
+    if isinstance(summary, dict):
+        _annotate_degraded_output(summary, guards_key="packaging_guards")
+
+    summary_bundle = result.get("summary_for_client_bundle")
+    if isinstance(summary_bundle, dict):
+        _annotate_degraded_output(summary_bundle)
 
 
 def apply_verifier_to_result(result: Dict[str, Any], verifier_payload: Dict[str, Any]) -> None:
@@ -143,6 +266,8 @@ def apply_verifier_to_result(result: Dict[str, Any], verifier_payload: Dict[str,
     document_quality["document_quality_note"] = verifier_payload.get("document_quality_note")
     document_quality["evidence_mode"] = verifier_payload.get("evidence_mode")
     document_quality["evidence_mode_reason"] = verifier_payload.get("evidence_mode_reason")
+    document_quality["source_quality_note"] = verifier_payload.get("source_quality_note")
+    document_quality["packaging_guards"] = verifier_payload.get("packaging_guards", [])
     document_quality["verifier_cautions"] = verifier_payload.get("verifier_cautions", [])
     document_quality["reasoning_status"] = verifier_payload.get("reasoning_status")
     document_quality["surface_inventory_summary"] = verifier_payload.get("surface_inventory_summary", {})
@@ -152,6 +277,9 @@ def apply_verifier_to_result(result: Dict[str, Any], verifier_payload: Dict[str,
     if verifier_payload.get("reasoning_status") == "SUPPRESSED_UNREADABLE":
         return
 
+    is_degraded = verifier_payload.get("evidence_mode") == DEGRADED_TEXT
+    if is_degraded:
+        _apply_degraded_result_packaging(result)
     dati = result.setdefault("dati_certi_del_lotto", {})
     quota = rights.get("quota", {}) if isinstance(rights.get("quota"), dict) else {}
     if quota.get("value"):
@@ -161,6 +289,8 @@ def apply_verifier_to_result(result: Dict[str, Any], verifier_payload: Dict[str,
             "evidence": quota.get("evidence", []),
             "source": "verifier_runtime",
         }
+        if is_degraded:
+            _annotate_degraded_output(dati["quota"])
         lots = result.get("lots", []) if isinstance(result.get("lots"), list) else []
         if lots and isinstance(lots[0], dict):
             lots[0]["quota"] = quota.get("value")
@@ -171,17 +301,22 @@ def apply_verifier_to_result(result: Dict[str, Any], verifier_payload: Dict[str,
             "confidence": ((verifier_payload.get("judgments") or {}).get("pricing") or {}).get("confidence"),
             "source": "verifier_runtime",
         }
+        if is_degraded:
+            _annotate_degraded_output(dati["prezzo_base_asta_verifier"])
     field_states = result.setdefault("field_states", {})
     if occupancy.get("status"):
         field_states["stato_occupativo"] = {
             "value": occupancy.get("status"),
-            "status": "FOUND",
+            "status": "LOW_CONFIDENCE" if is_degraded else "FOUND",
             "confidence": occupancy.get("confidence", 0.0),
             "evidence": occupancy.get("evidence", []),
             "searched_in": [],
             "user_prompt_it": None,
             "resolver_meta": {"resolver_version": "verifier_runtime_v1"},
         }
+        if is_degraded:
+            _annotate_degraded_output(field_states["stato_occupativo"])
+            field_states["stato_occupativo"]["resolver_meta"]["source_quality_note"] = DEGRADED_SOURCE_NOTE
         result["stato_occupativo"] = {
             "status": occupancy.get("status"),
             "status_it": occupancy.get("status"),
@@ -189,16 +324,21 @@ def apply_verifier_to_result(result: Dict[str, Any], verifier_payload: Dict[str,
             "title_opponible": occupancy.get("opponibilita") or "NON VERIFICABILE",
             "evidence": occupancy.get("evidence", []),
         }
+        if is_degraded:
+            _annotate_degraded_output(result["stato_occupativo"])
     if occupancy.get("opponibilita"):
         field_states["opponibilita_occupazione"] = {
             "value": occupancy.get("opponibilita"),
-            "status": "LOW_CONFIDENCE" if occupancy.get("opponibilita") == "NON VERIFICABILE" else "FOUND",
+            "status": "LOW_CONFIDENCE" if is_degraded or occupancy.get("opponibilita") == "NON VERIFICABILE" else "FOUND",
             "confidence": occupancy.get("confidence", 0.0),
             "evidence": occupancy.get("evidence", []),
             "searched_in": [],
             "user_prompt_it": None,
             "resolver_meta": {"resolver_version": "verifier_runtime_v1"},
         }
+        if is_degraded:
+            _annotate_degraded_output(field_states["opponibilita_occupazione"])
+            field_states["opponibilita_occupazione"]["resolver_meta"]["source_quality_note"] = DEGRADED_SOURCE_NOTE
     section_legal = result.setdefault("section_9_legal_killers", {})
     top_items = []
     top_issue = priority.get("top_issue", {}) if isinstance(priority.get("top_issue"), dict) else {}
@@ -228,12 +368,20 @@ def apply_verifier_to_result(result: Dict[str, Any], verifier_payload: Dict[str,
         )
     if top_items:
         section_legal["top_items"] = top_items[:3]
+        if is_degraded:
+            _annotate_degraded_output(section_legal, guards_key="packaging_guards")
     money_box = result.setdefault("money_box", {})
     money_box["verifier_costs_summary"] = _legacy_money_costs_summary(costs)
+    if is_degraded:
+        _annotate_degraded_output(money_box["verifier_costs_summary"])
     summary = result.setdefault("summary_for_client", {})
     summary["verifier_bundle"] = summary_bundle
     summary["summary_it"] = summary_bundle.get("decision_summary_it", summary.get("summary_it", ""))
     if summary_bundle.get("decision_summary_en"):
         summary["summary_en"] = summary_bundle.get("decision_summary_en")
     summary["generation_mode"] = "deterministic_canonical_bundle"
+    if is_degraded:
+        _annotate_degraded_output(summary, guards_key="packaging_guards")
     result["summary_for_client_bundle"] = summary_bundle
+    if is_degraded and isinstance(result.get("summary_for_client_bundle"), dict):
+        _annotate_degraded_output(result["summary_for_client_bundle"])
