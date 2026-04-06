@@ -215,6 +215,20 @@ def _candidate_scope_for_pricing(state: RuntimeState, candidate: Candidate) -> t
     return _single_scope_fallback(state)
 
 
+def _pricing_layer_for_candidate(state: RuntimeState, candidate: Candidate, scope_id: str) -> str | None:
+    source_role = str(candidate.semantic_role or "")
+    if source_role == "auction_price":
+        return "selected_price"
+    if source_role == "valuation_total":
+        return "benchmark_value"
+    if source_role == "net_valuation":
+        scope = state.scopes.get(scope_id)
+        if scope and scope.scope_type == "bene":
+            return "benchmark_value"
+        return "selected_price"
+    return None
+
+
 def _collect_table_layer_candidates(state: RuntimeState) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     layer_candidates: list[dict[str, Any]] = []
     invalid_candidates: list[dict[str, Any]] = []
@@ -229,17 +243,11 @@ def _collect_table_layer_candidates(state: RuntimeState) -> tuple[list[dict[str,
                 }
             )
             continue
-        layer = None
         source_role = str(candidate.semantic_role or "")
-        if source_role == "auction_price":
-            layer = "selected_price"
-        elif source_role == "net_valuation":
-            layer = "selected_price"
-        elif source_role == "valuation_total":
-            layer = "benchmark_value"
+        scope_id, ownership_method = _candidate_scope_for_pricing(state, candidate)
+        layer = _pricing_layer_for_candidate(state, candidate, scope_id)
         if not layer:
             continue
-        scope_id, ownership_method = _candidate_scope_for_pricing(state, candidate)
         index += 1
         layer_candidates.append(
             _make_layer_candidate(

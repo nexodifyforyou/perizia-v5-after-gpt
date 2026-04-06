@@ -123,8 +123,12 @@ def run_structure_agent(state: RuntimeState) -> None:
                     }
                     if len(known_lotto_scope_ids) > 1:
                         continue
-                    parent_scope_id = "document_root"
-                    ownership_method = "weak_document_root_fallback"
+                    if len(known_lotto_scope_ids) == 1:
+                        parent_scope_id = next(iter(known_lotto_scope_ids))
+                        ownership_method = "single_known_lotto_fallback"
+                    else:
+                        parent_scope_id = "document_root"
+                        ownership_method = "weak_document_root_fallback"
                 _register_scope_detection(
                     state,
                     scope_id=bene_scope_id,

@@ -173,6 +173,7 @@ def test_structure_agent_discovers_multi_bene_fixture_scopes():
     assert "bene:2" in bene_scope_ids
     assert "bene:3" in bene_scope_ids
     assert "bene:4" in bene_scope_ids
+    assert payload["scopes"]["bene:4"]["parent_scope_id"] == "lotto:unico"
 
 
 def test_structure_agent_parents_bene_to_lotto_when_structure_supports_it():
@@ -1701,6 +1702,9 @@ def test_multilot_fixture_writes_scoped_pricing_before_root_suppression():
     assert payload["scopes"]["lotto:1"]["pricing"]["selected_price"] == 64198.0
     assert payload["scopes"]["lotto:2"]["pricing"]["selected_price"] == 84000.0
     assert payload["scopes"]["lotto:3"]["pricing"]["selected_price"] == 224268.0
+    assert payload["scopes"]["bene:1"]["pricing"] == {}
+    assert payload["scopes"]["bene:2"]["pricing"] == {}
+    assert payload["scopes"]["bene:3"]["pricing"] == {}
     assert payload["canonical_case"]["pricing"]["selected_price"] is None
 
 
