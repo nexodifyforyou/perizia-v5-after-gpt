@@ -1,0 +1,16 @@
+{
+  "fixture_name": "multilot_69_2024",
+  "analysis_id": "multilot_69_2024",
+  "source_analysis_id": "analysis_7706b07675cf",
+  "file_name": "perizia_multilot_69_2024.pdf",
+  "source_kind": "mongo_analysis",
+  "pages_count": 81,
+  "tags": [
+    "multi_lot",
+    "occupancy_sensitive",
+    "legal_cancellable_formalities",
+    "urbanistica_difformita",
+    "noisy_numbers"
+  ],
+  "notes": "Three-lot case with mixed bene types and multiple lot prices."
+}

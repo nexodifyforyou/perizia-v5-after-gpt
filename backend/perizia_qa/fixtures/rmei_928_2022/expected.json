@@ -1,0 +1,42 @@
+{
+  "fixture_name": "rmei_928_2022",
+  "source_analysis_id": "analysis_ee5e53cf8e0d",
+  "seed_semaforo_status": "AMBER",
+  "quota": "1/1",
+  "pricing": {
+    "selected_price": 172000.0,
+    "benchmark_value": 312708.0,
+    "absurdity_guard_triggered": false
+  },
+  "occupancy": {
+    "status": "OCCUPATO",
+    "opponibilita": "NON VERIFICABILE",
+    "invalid_candidate_count": 0
+  },
+  "costs": {
+    "explicit_total": null,
+    "explicit_total_low_confidence": null,
+    "explicit_item_count": 0
+  },
+  "top_issue": {
+    "code": "OCCUPANCY_RISK",
+    "title_it": "Immobile occupato",
+    "category": "occupancy"
+  },
+  "summary_mentions_top_issue": true,
+  "summary_top_issue_it": "Immobile occupato",
+  "summary_decision_it": "Immobile occupato. Verifica titolo e tempi di liberazione.",
+  "legal_notes": {
+    "cancellable_count": 2,
+    "surviving_count": 0,
+    "background_count": 3
+  },
+  "tags": [
+    "single_lot",
+    "occupancy_sensitive",
+    "legal_cancellable_formalities",
+    "urbanistica_difformita",
+    "agibilita_conflict",
+    "noisy_numbers"
+  ]
+}

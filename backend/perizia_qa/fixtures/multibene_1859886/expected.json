@@ -1,0 +1,43 @@
+{
+  "fixture_name": "multibene_1859886",
+  "source_analysis_id": "analysis_0101a2e3eb2f",
+  "seed_semaforo_status": "AMBER",
+  "quota": null,
+  "pricing": {
+    "selected_price": 391849.0,
+    "benchmark_value": 419849.0,
+    "absurdity_guard_triggered": false
+  },
+  "occupancy": {
+    "status": "OCCUPATO",
+    "opponibilita": "NON VERIFICABILE",
+    "invalid_candidate_count": 5
+  },
+  "costs": {
+    "explicit_total": null,
+    "explicit_total_low_confidence": null,
+    "explicit_item_count": 0
+  },
+  "top_issue": {
+    "code": "OCCUPANCY_RISK",
+    "title_it": "Immobile occupato",
+    "category": "occupancy"
+  },
+  "summary_mentions_top_issue": true,
+  "summary_top_issue_it": "Immobile occupato",
+  "summary_decision_it": "Immobile occupato. Verifica titolo e tempi di liberazione.",
+  "legal_notes": {
+    "cancellable_count": 0,
+    "surviving_count": 0,
+    "background_count": 9
+  },
+  "tags": [
+    "single_lot",
+    "multi_bene",
+    "occupancy_sensitive",
+    "legal_cancellable_formalities",
+    "urbanistica_difformita",
+    "agibilita_conflict",
+    "noisy_numbers"
+  ]
+}

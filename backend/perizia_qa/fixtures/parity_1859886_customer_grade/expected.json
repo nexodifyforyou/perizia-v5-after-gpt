@@ -1,0 +1,44 @@
+{
+  "fixture_name": "parity_1859886_customer_grade",
+  "source_analysis_id": "analysis_1f30e9898c55",
+  "seed_semaforo_status": "AMBER",
+  "quota": null,
+  "pricing": {
+    "selected_price": null,
+    "benchmark_value": null,
+    "absurdity_guard_triggered": false
+  },
+  "occupancy": {
+    "status": "LIBERO",
+    "opponibilita": "NON VERIFICABILE",
+    "invalid_candidate_count": 0
+  },
+  "costs": {
+    "explicit_total": null,
+    "explicit_total_low_confidence": null,
+    "explicit_item_count": 0
+  },
+  "top_issue": {
+    "code": null,
+    "title_it": null,
+    "category": null
+  },
+  "summary_mentions_top_issue": false,
+  "summary_top_issue_it": "",
+  "summary_decision_it": "Verifica manualmente i punti critici prima dell'offerta.",
+  "legal_notes": {
+    "cancellable_count": 0,
+    "surviving_count": 0,
+    "background_count": 9
+  },
+  "tags": [
+    "single_lot",
+    "multi_bene",
+    "occupancy_sensitive",
+    "legal_cancellable_formalities",
+    "urbanistica_difformita",
+    "agibilita_conflict",
+    "noisy_numbers",
+    "print_alignment_sensitive"
+  ]
+}

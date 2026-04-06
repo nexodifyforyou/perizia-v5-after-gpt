@@ -223,6 +223,11 @@ def _canonical_issue_it_to_en(text: Any) -> str:
 
 
 def build_summary_for_client_bundle(result: Dict[str, Any]) -> Dict[str, Any]:
+    verifier_runtime = result.get("verifier_runtime", {}) if isinstance(result.get("verifier_runtime"), dict) else {}
+    canonical_case = verifier_runtime.get("canonical_case", {}) if isinstance(verifier_runtime.get("canonical_case"), dict) else {}
+    verifier_bundle = canonical_case.get("summary_bundle", {}) if isinstance(canonical_case.get("summary_bundle"), dict) else {}
+    if verifier_bundle:
+        return verifier_bundle
     decision = result.get("decision_rapida_client", {}) if isinstance(result.get("decision_rapida_client"), dict) else {}
     section2 = result.get("section_2_decisione_rapida", {}) if isinstance(result.get("section_2_decisione_rapida"), dict) else {}
     narrated = result.get("decision_rapida_narrated", {}) if isinstance(result.get("decision_rapida_narrated"), dict) else {}

@@ -1,0 +1,20 @@
+{
+  "fixture_name": "parity_1859886_customer_grade",
+  "analysis_id": "parity_1859886_customer_grade",
+  "source_analysis_id": "analysis_1f30e9898c55",
+  "file_name": "1859886_c_perizia.pdf",
+  "source_kind": "customer_grade_run",
+  "pages_count": 50,
+  "tags": [
+    "single_lot",
+    "multi_bene",
+    "occupancy_sensitive",
+    "legal_cancellable_formalities",
+    "urbanistica_difformita",
+    "agibilita_conflict",
+    "noisy_numbers",
+    "print_alignment_sensitive"
+  ],
+  "notes": "Same underlying document as 1859886, kept separately only for customer-grade parity coverage.",
+  "source_run_dir": "2026-03-09_011633_customer_grade"
+}

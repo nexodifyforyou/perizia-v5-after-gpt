@@ -1,0 +1,41 @@
+{
+  "fixture_name": "multilot_69_2024",
+  "source_analysis_id": "analysis_7706b07675cf",
+  "seed_semaforo_status": "AMBER",
+  "quota": "1/1",
+  "pricing": {
+    "selected_price": null,
+    "benchmark_value": null,
+    "absurdity_guard_triggered": false
+  },
+  "occupancy": {
+    "status": "LIBERO",
+    "opponibilita": "NON VERIFICABILE",
+    "invalid_candidate_count": 0
+  },
+  "costs": {
+    "explicit_total": null,
+    "explicit_total_low_confidence": null,
+    "explicit_item_count": 0
+  },
+  "top_issue": {
+    "code": "AGIBILITA_NEGATIVE",
+    "title_it": "Agibilità assente / non rilasciata",
+    "category": "agibilita"
+  },
+  "summary_mentions_top_issue": true,
+  "summary_top_issue_it": "Agibilità assente / non rilasciata",
+  "summary_decision_it": "Agibilità assente / non rilasciata. Verifica titoli edilizi, agibilità/abitabilità e costi necessari per la regolarizzazione.",
+  "legal_notes": {
+    "cancellable_count": 1,
+    "surviving_count": 0,
+    "background_count": 12
+  },
+  "tags": [
+    "multi_lot",
+    "occupancy_sensitive",
+    "legal_cancellable_formalities",
+    "urbanistica_difformita",
+    "noisy_numbers"
+  ]
+}

@@ -1,0 +1,17 @@
+{
+  "fixture_name": "rmei_928_2022",
+  "analysis_id": "rmei_928_2022",
+  "source_analysis_id": "analysis_ee5e53cf8e0d",
+  "file_name": "Perizia-RM-EI-928-2022-C-1.pdf",
+  "source_kind": "mongo_analysis",
+  "pages_count": 15,
+  "tags": [
+    "single_lot",
+    "occupancy_sensitive",
+    "legal_cancellable_formalities",
+    "urbanistica_difformita",
+    "agibilita_conflict",
+    "noisy_numbers"
+  ],
+  "notes": "Occupied by third parties without title, with agibilita and urbanistica pressure."
+}

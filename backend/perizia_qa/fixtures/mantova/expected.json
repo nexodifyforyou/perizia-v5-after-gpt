@@ -1,0 +1,39 @@
+{
+  "fixture_name": "mantova",
+  "source_analysis_id": "analysis_e449a53bb163",
+  "seed_semaforo_status": "AMBER",
+  "quota": null,
+  "pricing": {
+    "selected_price": null,
+    "benchmark_value": 129312.0,
+    "absurdity_guard_triggered": false
+  },
+  "occupancy": {
+    "status": "LIBERO",
+    "opponibilita": "NON VERIFICABILE",
+    "invalid_candidate_count": 0
+  },
+  "costs": {
+    "explicit_total": null,
+    "explicit_total_low_confidence": null,
+    "explicit_item_count": 0
+  },
+  "top_issue": {
+    "code": "LEGAL_CANCELLABLE_ATTENTION",
+    "title_it": "Formalità da cancellare (2)",
+    "category": "legal_background"
+  },
+  "summary_mentions_top_issue": true,
+  "summary_top_issue_it": "Formalità da cancellare (2)",
+  "summary_decision_it": "Formalità da cancellare (2). Verifica che il decreto di trasferimento disponga la cancellazione delle formalità indicate.",
+  "legal_notes": {
+    "cancellable_count": 2,
+    "surviving_count": 0,
+    "background_count": 1
+  },
+  "tags": [
+    "single_lot",
+    "legal_cancellable_formalities",
+    "agibilita_present"
+  ]
+}

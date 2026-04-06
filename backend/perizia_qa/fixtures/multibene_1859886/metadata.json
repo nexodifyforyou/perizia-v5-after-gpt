@@ -1,0 +1,18 @@
+{
+  "fixture_name": "multibene_1859886",
+  "analysis_id": "multibene_1859886",
+  "source_analysis_id": "analysis_0101a2e3eb2f",
+  "file_name": "1859886_c_perizia.pdf",
+  "source_kind": "mongo_analysis",
+  "pages_count": 50,
+  "tags": [
+    "single_lot",
+    "multi_bene",
+    "occupancy_sensitive",
+    "legal_cancellable_formalities",
+    "urbanistica_difformita",
+    "agibilita_conflict",
+    "noisy_numbers"
+  ],
+  "notes": "One lot containing four beni; useful for multi-bene coverage."
+}

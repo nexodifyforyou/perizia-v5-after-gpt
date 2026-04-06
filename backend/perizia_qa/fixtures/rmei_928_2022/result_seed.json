@@ -1,0 +1,1684 @@
+{
+  "report_header": {
+    "title": "NEXODIFY INTELLIGENCE | Auction Scan",
+    "procedure": {
+      "value": "Esecuzione Immobiliare 928/2022 R.G.E.",
+      "evidence": [
+        {
+          "page": 1,
+          "quote": "Esecuzione Immobiliare 928/2022 del R.G.E",
+          "start_offset": 137,
+          "end_offset": 183,
+          "bbox": null,
+          "offset_mode": "PAGE_LOCAL",
+          "page_text_hash": "27cf22a294c50d5a52db40bbbfbaeee87ceac82d61f4761e26ec0179f3fe89e3",
+          "search_hint": "Esecuzione Immobiliare 928/2022 del R.G.E"
+        }
+      ]
+    },
+    "lotto": {
+      "value": "Lotto Unico",
+      "evidence": [
+        {
+          "page": 14,
+          "quote": "LOTTO UNICO",
+          "search_hint": "LOTTO UNICO"
+        }
+      ]
+    },
+    "tribunale": {
+      "value": "TRIBUNALE DI ROMA",
+      "evidence": [
+        {
+          "page": 1,
+          "quote": "TRIBUNA LE DIROMA\nSEZIONEEE . II .\nPerizia dell'Esperto ex art. 568 c.p.c. Arch. Falcone Rosella, nell'Esecuzione Immobiliare 928/2022 del",
+          "start_offset": 13,
+          "end_offset": 98,
+          "bbox": null,
+          "offset_mode": "PAGE_LOCAL",
+          "page_text_hash": "27cf22a294c50d5a52db40bbbfbaeee87ceac82d61f4761e26ec0179f3fe89e3",
+          "search_hint": "TRIBUNA LE DIROMA SEZIONEEE . II . Perizia dell'Esperto ex art."
+        }
+      ]
+    },
+    "address": {
+      "value": "Roma (RM) - Via Angelo Messedaglia n. 6, scala B, interno 5B, piano 1 -2",
+      "evidence": [
+        {
+          "page": 14,
+          "quote": "Ubicazione: Roma (RM) - ViaAngelo Messedaglia n. 6, scala B, interno 5B, piano 1 -2",
+          "start_offset": 154,
+          "end_offset": 183,
+          "bbox": null,
+          "offset_mode": "PAGE_LOCAL",
+          "page_text_hash": "686f1b5daaec30689f6a4e96bbb56ab38a13c25c51ebe5c0ab6d2c39d2cf13a4",
+          "search_hint": "Ubicazione: Roma (RM) - ViaA"
+        }
+      ]
+    },
+    "is_multi_lot": false,
+    "generated_at": "2026-03-15T03:54:04.569168+00:00"
+  },
+  "section_9_legal_killers": {
+    "items": [
+      {
+        "killer": "Immobile non regolare ediliziamente",
+        "status": "ROSSO",
+        "status_it": "CRITICO",
+        "reason_it": "Criticità urbanistico-edilizia determinante",
+        "evidence": [
+          {
+            "page": 7,
+            "quote": "L'immobile non risulta regolare per la legge n° 47/1985. La costruzione è successiva al 01/09/1967.",
+            "search_hint": "immobile non risulta regolare",
+            "start_offset": 0,
+            "end_offset": 99,
+            "offset_mode": "PAGE_LOCAL",
+            "page_text_hash": "3a34b8ade0a72069345d8c30cf1a7dd666c7ce2fc12ef0f3250ab2b19c998024",
+            "bbox": null
+          }
+        ],
+        "decision_bucket": "REAL_BLOCKER",
+        "decision_score": 125
+      },
+      {
+        "killer": "Agibilità assente / non rilasciata",
+        "status": "ROSSO",
+        "status_it": "CRITICO",
+        "reason_it": "Agibilità/abitabilità assente o non rilasciata",
+        "evidence": [
+          {
+            "page": 7,
+            "quote": "Non risulta rilasciato il certificato di agibilità.",
+            "search_hint": "Non risulta rilasciato il certificato di agibilit",
+            "start_offset": 677,
+            "end_offset": 728,
+            "offset_mode": "PAGE_LOCAL",
+            "page_text_hash": "3a34b8ade0a72069345d8c30cf1a7dd666c7ce2fc12ef0f3250ab2b19c998024",
+            "bbox": null
+          }
+        ],
+        "decision_bucket": "REAL_BLOCKER",
+        "decision_score": 120
+      },
+      {
+        "killer": "Sanatoria / condono non perfezionati",
+        "status": "ROSSO",
+        "status_it": "CRITICO",
+        "reason_it": "Sanatoria/condono non perfezionati",
+        "evidence": [
+          {
+            "page": 8,
+            "quote": "La Concessione in Sanatoria non è stata ad oggi rilasciata, nè risulta l'emissione di un diniego da parte",
+            "search_hint": "Concessione in Sanatoria non è stata ad oggi rilasciat",
+            "start_offset": 11,
+            "end_offset": 116,
+            "offset_mode": "PAGE_LOCAL",
+            "page_text_hash": "41533ef6013a2a001fcd0e638a6f0cbe759e34f6e1f3bd961c9fa432cf437376",
+            "bbox": null
+          }
+        ],
+        "decision_bucket": "REAL_BLOCKER",
+        "decision_score": 118
+      },
+      {
+        "killer": "Uso residenziale non legittimato",
+        "status": "ROSSO",
+        "status_it": "CRITICO",
+        "reason_it": "Destinazione d'uso residenziale non legittimata",
+        "evidence": [
+          {
+            "page": 9,
+            "quote": "la destinazione d'uso attualmente legittimata non è quella residenziale, ma quella di cantina/locale",
+            "search_hint": "destinazione d'uso attualmente legittimata non è quella residenziale",
+            "start_offset": 1684,
+            "end_offset": 1784,
+            "offset_mode": "PAGE_LOCAL",
+            "page_text_hash": "66e9c8da0e60e4bdcecf2ba96145e41dc273c09605952e8512686f4b889e3165",
+            "bbox": null
+          }
+        ],
+        "decision_bucket": "REAL_BLOCKER",
+        "decision_score": 116
+      },
+      {
+        "killer": "Occupato da terzi senza titolo",
+        "status": "ROSSO",
+        "status_it": "CRITICO",
+        "reason_it": "Occupazione da terzi senza titolo opponibile",
+        "evidence": [
+          {
+            "page": 14,
+            "quote": "occupazione: Occupato da terzi senza titolo",
+            "search_hint": "Occupato da terzi senza titolo",
+            "start_offset": 0,
+            "end_offset": 43,
+            "offset_mode": "PAGE_LOCAL",
+            "page_text_hash": "686f1b5daaec30689f6a4e96bbb56ab38a13c25c51ebe5c0ab6d2c39d2cf13a4",
+            "bbox": null
+          }
+        ],
+        "decision_bucket": "REAL_BLOCKER",
+        "decision_score": 114
+      },
+      {
+        "killer": "Accertamento di conformità richiesto",
+        "status": "GIALLO",
+        "status_it": "ATTENZIONE",
+        "reason_it": "Rilevata criticita: Accertamento di conformità richiesto",
+        "evidence": [
+          {
+            "page": 8,
+            "quote": "e percorribile la strada dell’accertamento  di Conformità in quanto, come sopra rappresentato, l’unità immobiliare non è conforme  a quanto  indicato  nel Re",
+            "start_offset": 3593,
+            "end_offset": 3620,
+            "bbox": null,
+            "offset_mode": "PAGE_LOCAL",
+            "page_text_hash": "41533ef6013a2a001fcd0e638a6f0cbe759e34f6e1f3bd961c9fa432cf437376"
+          }
+        ],
+        "searched_in": null,
+        "decision_bucket": "RELEVANT_SECONDARY",
+        "decision_score": 70
+      },
+      {
+        "killer": "Servitù rilevata",
+        "status": "GIALLO",
+        "status_it": "ATTENZIONE",
+        "reason_it": "Rilevata criticita: Servitù rilevata",
+        "evidence": [
+          {
+            "page": 7,
+            "quote": "); con l'Atto di Costituzione Servitù del  09/04/1969 (All.10_Costituzione di servitù del 09 -04-1969) sono state vincolate a verde tutte le aree  in corrispo",
+            "start_offset": 1237,
+            "end_offset": 1265,
+            "bbox": null,
+            "offset_mode": "PAGE_LOCAL",
+            "page_text_hash": "3a34b8ade0a72069345d8c30cf1a7dd666c7ce2fc12ef0f3250ab2b19c998024"
+          }
+        ],
+        "searched_in": null,
+        "decision_bucket": "RELEVANT_SECONDARY",
+        "decision_score": 70
+      }
+    ],
+    "top_items": [
+      {
+        "killer": "Immobile non regolare ediliziamente",
+        "status": "ROSSO",
+        "status_it": "CRITICO",
+        "reason_it": "Criticità urbanistico-edilizia determinante",
+        "evidence": [
+          {
+            "page": 7,
+            "quote": "L'immobile non risulta regolare per la legge n° 47/1985. La costruzione è successiva al 01/09/1967.",
+            "search_hint": "immobile non risulta regolare",
+            "start_offset": 0,
+            "end_offset": 99,
+            "offset_mode": "PAGE_LOCAL",
+            "page_text_hash": "3a34b8ade0a72069345d8c30cf1a7dd666c7ce2fc12ef0f3250ab2b19c998024",
+            "bbox": null
+          }
+        ],
+        "decision_bucket": "REAL_BLOCKER",
+        "decision_score": 125
+      },
+      {
+        "killer": "Agibilità assente / non rilasciata",
+        "status": "ROSSO",
+        "status_it": "CRITICO",
+        "reason_it": "Agibilità/abitabilità assente o non rilasciata",
+        "evidence": [
+          {
+            "page": 7,
+            "quote": "Non risulta rilasciato il certificato di agibilità.",
+            "search_hint": "Non risulta rilasciato il certificato di agibilit",
+            "start_offset": 677,
+            "end_offset": 728,
+            "offset_mode": "PAGE_LOCAL",
+            "page_text_hash": "3a34b8ade0a72069345d8c30cf1a7dd666c7ce2fc12ef0f3250ab2b19c998024",
+            "bbox": null
+          }
+        ],
+        "decision_bucket": "REAL_BLOCKER",
+        "decision_score": 120
+      },
+      {
+        "killer": "Sanatoria / condono non perfezionati",
+        "status": "ROSSO",
+        "status_it": "CRITICO",
+        "reason_it": "Sanatoria/condono non perfezionati",
+        "evidence": [
+          {
+            "page": 8,
+            "quote": "La Concessione in Sanatoria non è stata ad oggi rilasciata, nè risulta l'emissione di un diniego da parte",
+            "search_hint": "Concessione in Sanatoria non è stata ad oggi rilasciat",
+            "start_offset": 11,
+            "end_offset": 116,
+            "offset_mode": "PAGE_LOCAL",
+            "page_text_hash": "41533ef6013a2a001fcd0e638a6f0cbe759e34f6e1f3bd961c9fa432cf437376",
+            "bbox": null
+          }
+        ],
+        "decision_bucket": "REAL_BLOCKER",
+        "decision_score": 118
+      },
+      {
+        "killer": "Uso residenziale non legittimato",
+        "status": "ROSSO",
+        "status_it": "CRITICO",
+        "reason_it": "Destinazione d'uso residenziale non legittimata",
+        "evidence": [
+          {
+            "page": 9,
+            "quote": "la destinazione d'uso attualmente legittimata non è quella residenziale, ma quella di cantina/locale",
+            "search_hint": "destinazione d'uso attualmente legittimata non è quella residenziale",
+            "start_offset": 1684,
+            "end_offset": 1784,
+            "offset_mode": "PAGE_LOCAL",
+            "page_text_hash": "66e9c8da0e60e4bdcecf2ba96145e41dc273c09605952e8512686f4b889e3165",
+            "bbox": null
+          }
+        ],
+        "decision_bucket": "REAL_BLOCKER",
+        "decision_score": 116
+      },
+      {
+        "killer": "Occupato da terzi senza titolo",
+        "status": "ROSSO",
+        "status_it": "CRITICO",
+        "reason_it": "Occupazione da terzi senza titolo opponibile",
+        "evidence": [
+          {
+            "page": 14,
+            "quote": "occupazione: Occupato da terzi senza titolo",
+            "search_hint": "Occupato da terzi senza titolo",
+            "start_offset": 0,
+            "end_offset": 43,
+            "offset_mode": "PAGE_LOCAL",
+            "page_text_hash": "686f1b5daaec30689f6a4e96bbb56ab38a13c25c51ebe5c0ab6d2c39d2cf13a4",
+            "bbox": null
+          }
+        ],
+        "decision_bucket": "REAL_BLOCKER",
+        "decision_score": 114
+      },
+      {
+        "killer": "Accertamento di conformità richiesto",
+        "status": "GIALLO",
+        "status_it": "ATTENZIONE",
+        "reason_it": "Rilevata criticita: Accertamento di conformità richiesto",
+        "evidence": [
+          {
+            "page": 8,
+            "quote": "e percorribile la strada dell’accertamento  di Conformità in quanto, come sopra rappresentato, l’unità immobiliare non è conforme  a quanto  indicato  nel Re",
+            "start_offset": 3593,
+            "end_offset": 3620,
+            "bbox": null,
+            "offset_mode": "PAGE_LOCAL",
+            "page_text_hash": "41533ef6013a2a001fcd0e638a6f0cbe759e34f6e1f3bd961c9fa432cf437376"
+          }
+        ],
+        "searched_in": null,
+        "decision_bucket": "RELEVANT_SECONDARY",
+        "decision_score": 70
+      },
+      {
+        "killer": "Servitù rilevata",
+        "status": "GIALLO",
+        "status_it": "ATTENZIONE",
+        "reason_it": "Rilevata criticita: Servitù rilevata",
+        "evidence": [
+          {
+            "page": 7,
+            "quote": "); con l'Atto di Costituzione Servitù del  09/04/1969 (All.10_Costituzione di servitù del 09 -04-1969) sono state vincolate a verde tutte le aree  in corrispo",
+            "start_offset": 1237,
+            "end_offset": 1265,
+            "bbox": null,
+            "offset_mode": "PAGE_LOCAL",
+            "page_text_hash": "3a34b8ade0a72069345d8c30cf1a7dd666c7ce2fc12ef0f3250ab2b19c998024"
+          }
+        ],
+        "searched_in": null,
+        "decision_bucket": "RELEVANT_SECONDARY",
+        "decision_score": 70
+      }
+    ]
+  },
+  "field_states": {
+    "tribunale": {
+      "value": "TRIBUNALE DI ROMA",
+      "status": "FOUND",
+      "confidence": 0.9,
+      "evidence": [
+        {
+          "page": 1,
+          "quote": "TRIBUNA LE DIROMA\nSEZIONEEE . II .\nPerizia dell'Esperto ex art. 568 c.p.c. Arch. Falcone Rosella, nell'Esecuzione Immobiliare 928/2022 del",
+          "start_offset": 13,
+          "end_offset": 98,
+          "bbox": null,
+          "offset_mode": "PAGE_LOCAL",
+          "page_text_hash": "27cf22a294c50d5a52db40bbbfbaeee87ceac82d61f4761e26ec0179f3fe89e3",
+          "search_hint": "TRIBUNA LE DIROMA SEZIONEEE . II . Perizia dell'Esperto ex art."
+        }
+      ],
+      "searched_in": [],
+      "user_prompt_it": null
+    },
+    "procedura": {
+      "value": "Esecuzione Immobiliare 928/2022 R.G.E.",
+      "status": "FOUND",
+      "confidence": 0.9,
+      "evidence": [
+        {
+          "page": 1,
+          "quote": "Esecuzione Immobiliare 928/2022 del R.G.E",
+          "start_offset": 137,
+          "end_offset": 183,
+          "bbox": null,
+          "offset_mode": "PAGE_LOCAL",
+          "page_text_hash": "27cf22a294c50d5a52db40bbbfbaeee87ceac82d61f4761e26ec0179f3fe89e3",
+          "search_hint": "Esecuzione Immobiliare 928/2022 del R.G.E"
+        }
+      ],
+      "searched_in": [],
+      "user_prompt_it": null
+    },
+    "lotto": {
+      "value": "Lotto Unico",
+      "status": "FOUND",
+      "confidence": 0.9,
+      "evidence": [
+        {
+          "page": 14,
+          "quote": "LOTTO UNICO",
+          "start_offset": 78,
+          "end_offset": 89,
+          "bbox": null,
+          "offset_mode": "PAGE_LOCAL",
+          "page_text_hash": "686f1b5daaec30689f6a4e96bbb56ab38a13c25c51ebe5c0ab6d2c39d2cf13a4",
+          "search_hint": "LOTTO UNICO"
+        }
+      ],
+      "searched_in": [],
+      "user_prompt_it": null
+    },
+    "address": {
+      "value": "Roma (RM) - Via Angelo Messedaglia n. 6, scala B, interno 5B, piano 1 -2",
+      "status": "FOUND",
+      "confidence": 0.9,
+      "evidence": [
+        {
+          "page": 14,
+          "quote": "Ubicazione: Roma (RM) - ViaAngelo Messedaglia n. 6, scala B, interno 5B, piano 1 -2",
+          "start_offset": 154,
+          "end_offset": 183,
+          "bbox": null,
+          "offset_mode": "PAGE_LOCAL",
+          "page_text_hash": "686f1b5daaec30689f6a4e96bbb56ab38a13c25c51ebe5c0ab6d2c39d2cf13a4",
+          "search_hint": "Ubicazione: Roma (RM) - ViaA"
+        }
+      ],
+      "searched_in": [],
+      "user_prompt_it": null
+    },
+    "prezzo_base_asta": {
+      "value": 172000.0,
+      "status": "FOUND",
+      "confidence": 0.9,
+      "evidence": [
+        {
+          "page": 14,
+          "quote": "Prezzo base d'asta: € 172.000,00",
+          "start_offset": 78,
+          "end_offset": 126,
+          "bbox": null,
+          "offset_mode": "PAGE_LOCAL",
+          "page_text_hash": "686f1b5daaec30689f6a4e96bbb56ab38a13c25c51ebe5c0ab6d2c39d2cf13a4",
+          "search_hint": "Prezzo base d'asta: € 172.000,00"
+        }
+      ],
+      "searched_in": [],
+      "user_prompt_it": null
+    },
+    "superficie": {
+      "value": "TBD",
+      "status": "FOUND",
+      "confidence": 0.9,
+      "evidence": [
+        {
+          "page": 4,
+          "quote": "Totale superficie convenzionale: 94,76 mq",
+          "search_hint": "Totale superficie convenzionale: 94,76 mq",
+          "start_offset": 0,
+          "end_offset": 41,
+          "offset_mode": "PAGE_LOCAL",
+          "page_text_hash": "6b36d16de767f31562a71866707fc088d79b840878fdcd14444f5c3096829558",
+          "bbox": null
+        }
+      ],
+      "searched_in": [],
+      "user_prompt_it": null
+    },
+    "diritto_reale": {
+      "value": "Proprietà 1/1",
+      "status": "FOUND",
+      "confidence": 0.9,
+      "evidence": [
+        {
+          "page": 14,
+          "quote": "Diritto reale: Proprietà",
+          "start_offset": 256,
+          "end_offset": 267,
+          "bbox": null,
+          "offset_mode": "PAGE_LOCAL",
+          "page_text_hash": "686f1b5daaec30689f6a4e96bbb56ab38a13c25c51ebe5c0ab6d2c39d2cf13a4",
+          "search_hint": "Diritto reale: Proprietà"
+        }
+      ],
+      "searched_in": [],
+      "user_prompt_it": null
+    },
+    "stato_occupativo": {
+      "value": "OCCUPATO DA TERZI SENZA TITOLO",
+      "status": "FOUND",
+      "confidence": 0.9,
+      "evidence": [
+        {
+          "page": 5,
+          "quote": "occupata da terzi con contratto di natura transitoria scaduto.",
+          "start_offset": 1774,
+          "end_offset": 1878,
+          "bbox": null,
+          "offset_mode": "PAGE_LOCAL",
+          "page_text_hash": "885a82a8971b0f906d4892de9a227a8a990883abf8f4988e115e0c56f6ba4c91",
+          "search_hint": "occupata da terzi con contratto di natura transitoria scaduto"
+        }
+      ],
+      "searched_in": [],
+      "user_prompt_it": null
+    },
+    "regolarita_urbanistica": {
+      "value": "PRESENTI DIFFORMITÀ",
+      "status": "FOUND",
+      "confidence": 0.9,
+      "evidence": [
+        {
+          "page": 9,
+          "quote": "18_Difformità rif.",
+          "start_offset": 341,
+          "end_offset": 444,
+          "bbox": null,
+          "offset_mode": "PAGE_LOCAL",
+          "page_text_hash": "66e9c8da0e60e4bdcecf2ba96145e41dc273c09605952e8512686f4b889e3165",
+          "search_hint": "Difformità"
+        }
+      ],
+      "searched_in": [],
+      "user_prompt_it": null
+    },
+    "conformita_catastale": {
+      "value": null,
+      "status": "NOT_FOUND",
+      "confidence": 0.0,
+      "evidence": [],
+      "searched_in": [
+        {
+          "page": 4,
+          "quote": "dal al\nDiritto di:\nProprieta' per 1/1 Catasto Fabbricati\nFg. 242, Part. 301, Sub. 516, Zc. 4\nCategoria A2\nCl.5, Cons. 5,5 vani",
+          "start_offset": 1210,
+          "end_offset": 1330,
+          "bbox": null,
+          "offset_mode": "PAGE_LOCAL",
+          "page_text_hash": "6b36d16de767f31562a71866707fc088d79b840878fdcd14444f5c3096829558"
+        },
+        {
+          "page": 5,
+          "quote": "I titolari catastali corrispondono a quelli reali (All.02_Visura storica Fg 242 Mapp. 301 Sub. 516;\nAll.04_Planimetria Fg 242 Mapp. 301 Sub. 516)\nDATI CATASTALI\nCatasto fabbricati (CF)",
+          "start_offset": 79,
+          "end_offset": 199,
+          "bbox": null,
+          "offset_mode": "PAGE_LOCAL",
+          "page_text_hash": "885a82a8971b0f906d4892de9a227a8a990883abf8f4988e115e0c56f6ba4c91"
+        },
+        {
+          "page": 8,
+          "quote": "dunque ad oggi legittimati dal punto di vista edilizio .\nDifformità edilizie e sanabilità degli interventi\nRispetto ai disegni allegati alla richiesta di Condono, si evidenzia che sono presenti alcune discrepanze",
+          "start_offset": 236,
+          "end_offset": 356,
+          "bbox": null,
+          "offset_mode": "PAGE_LOCAL",
+          "page_text_hash": "41533ef6013a2a001fcd0e638a6f0cbe759e34f6e1f3bd961c9fa432cf437376"
+        }
+      ],
+      "user_prompt_it": null
+    },
+    "spese_condominiali_arretrate": {
+      "value": null,
+      "status": "NOT_FOUND",
+      "confidence": 0.0,
+      "evidence": [],
+      "searched_in": [
+        {
+          "page": 1,
+          "quote": "Ricerca eseguita: spese condominiali, arretrate, arretrati, oneri condominiali, morosità. Nessuna occorrenza trovata nel documento.",
+          "start_offset": 0,
+          "end_offset": 0,
+          "bbox": null,
+          "offset_mode": "PAGE_LOCAL",
+          "page_text_hash": null
+        }
+      ],
+      "user_prompt_it": "Verifica le spese condominiali arretrate nella perizia o presso l'amministratore."
+    },
+    "ape": {
+      "value": null,
+      "status": "NOT_FOUND",
+      "confidence": 0.0,
+      "evidence": [],
+      "searched_in": [
+        {
+          "page": 8,
+          "quote": "La planimetria del progetto legittimato (All.08_Progetto n.50708 -1968 - Variante a Prog. n. 16566 -\n1967 ) inoltre, rappresenta un'intercapedine perimetrale, a protezione dell'umidità proveniente dai\nmuri controterra : nei disegni allegati alla domanda di sanatoria, e per quanto è stato possibile",
+          "start_offset": 841,
+          "end_offset": 961,
+          "bbox": null,
+          "offset_mode": "PAGE_LOCAL",
+          "page_text_hash": "41533ef6013a2a001fcd0e638a6f0cbe759e34f6e1f3bd961c9fa432cf437376"
+        },
+        {
+          "page": 9,
+          "quote": "9 di 15\nesistesse già una sorta di intercapedine e quale fosse la sua geometria né la quota di calpestìo\n(All.08_Progetto n.50708 -1968 - Variante a Prog. n. 16566 -1967) non è chiaro quindi cosa andrebbe",
+          "start_offset": 4,
+          "end_offset": 124,
+          "bbox": null,
+          "offset_mode": "PAGE_LOCAL",
+          "page_text_hash": "66e9c8da0e60e4bdcecf2ba96145e41dc273c09605952e8512686f4b889e3165"
+        }
+      ],
+      "user_prompt_it": null
+    },
+    "agibilita": {
+      "value": "ASSENTE",
+      "status": "FOUND",
+      "confidence": 0.9,
+      "evidence": [
+        {
+          "page": 7,
+          "quote": "Non risulta rilasciato il certificato di agibilità.",
+          "start_offset": 677,
+          "end_offset": 731,
+          "bbox": null,
+          "offset_mode": "PAGE_LOCAL",
+          "page_text_hash": "3a34b8ade0a72069345d8c30cf1a7dd666c7ce2fc12ef0f3250ab2b19c998024",
+          "search_hint": "Non risulta rilasciato il certificato di agibilità."
+        }
+      ],
+      "searched_in": [],
+      "user_prompt_it": null
+    },
+    "dati_asta": {
+      "value": null,
+      "status": "NOT_FOUND",
+      "confidence": 0.0,
+      "evidence": [],
+      "searched_in": [
+        {
+          "page": 3,
+          "quote": "Codice fiscale: **OMISSIS**\nL'immobile viene posto in vendita per i seguenti diritti:\n**Omissis** (Proprietà 1/1)\nNell’atto di compravendita , il Sig. **Omissis** dichiara di non essere coniugato.",
+          "start_offset": 1245,
+          "end_offset": 1365,
+          "bbox": null,
+          "offset_mode": "PAGE_LOCAL",
+          "page_text_hash": "c5719b5d7359a8fbf4ee57144f2e5a48325f1e8baadd3a2891cd6a7ed60d2369"
+        },
+        {
+          "page": 4,
+          "quote": "depositata nel fascicolo della procedura.\n(All.05_Atto di compravendita Notaio Bellelli rep 35910 del 20 -01-1998, All.06_Atto di conferimento in",
+          "start_offset": 242,
+          "end_offset": 362,
+          "bbox": null,
+          "offset_mode": "PAGE_LOCAL",
+          "page_text_hash": "6b36d16de767f31562a71866707fc088d79b840878fdcd14444f5c3096829558"
+        },
+        {
+          "page": 5,
+          "quote": "pavimentato ; mediante una scala esterna in ferro si accede al terrazzo, posto ad una quota superiore.\n(All.01_Report fotografico sopralluogo 02 -01-2024)\nSTATO DI OCCUPAZIONE",
+          "start_offset": 1651,
+          "end_offset": 1771,
+          "bbox": null,
+          "offset_mode": "PAGE_LOCAL",
+          "page_text_hash": "885a82a8971b0f906d4892de9a227a8a990883abf8f4988e115e0c56f6ba4c91"
+        }
+      ],
+      "user_prompt_it": null
+    },
+    "formalita_pregiudizievoli": {
+      "value": "PRESENTI FORMALITÀ",
+      "status": "FOUND",
+      "confidence": 0.9,
+      "evidence": [
+        {
+          "page": 3,
+          "quote": "I beni oggetto di pignoramento sono costituiti dai seguenti immobili:",
+          "start_offset": 350,
+          "end_offset": 421,
+          "bbox": null,
+          "offset_mode": "PAGE_LOCAL",
+          "page_text_hash": "c5719b5d7359a8fbf4ee57144f2e5a48325f1e8baadd3a2891cd6a7ed60d2369",
+          "search_hint": "I beni oggetto di pignoramento sono costituiti dai seguenti immobili:"
+        }
+      ],
+      "searched_in": [],
+      "user_prompt_it": null
+    }
+  },
+  "dati_certi_del_lotto": {
+    "prezzo_base_asta": {
+      "value": 172000.0,
+      "formatted": "€172,000",
+      "evidence": [
+        {
+          "page": 14,
+          "quote": "Prezzo base d'asta: € 172.000,00",
+          "start_offset": 78,
+          "end_offset": 126,
+          "bbox": null,
+          "offset_mode": "PAGE_LOCAL",
+          "page_text_hash": "686f1b5daaec30689f6a4e96bbb56ab38a13c25c51ebe5c0ab6d2c39d2cf13a4",
+          "search_hint": "Prezzo base d'asta: € 172.000,00"
+        }
+      ]
+    },
+    "superficie_catastale": {
+      "value": "TBD",
+      "evidence": [
+        {
+          "page": 4,
+          "quote": "Totale superficie convenzionale: 94,76 mq",
+          "search_hint": "Totale superficie convenzionale: 94,76 mq",
+          "start_offset": 0,
+          "end_offset": 41,
+          "offset_mode": "PAGE_LOCAL",
+          "page_text_hash": "6b36d16de767f31562a71866707fc088d79b840878fdcd14444f5c3096829558",
+          "bbox": null
+        }
+      ]
+    },
+    "catasto": {
+      "categoria": "NON SPECIFICATO IN PERIZIA",
+      "classe": "NON SPECIFICATO IN PERIZIA",
+      "vani": "NON SPECIFICATO IN PERIZIA"
+    },
+    "diritto_reale": {
+      "value": "Proprietà 1/1",
+      "evidence": [
+        {
+          "page": 14,
+          "quote": "Diritto reale: Proprietà",
+          "start_offset": 256,
+          "end_offset": 267,
+          "bbox": null,
+          "offset_mode": "PAGE_LOCAL",
+          "page_text_hash": "686f1b5daaec30689f6a4e96bbb56ab38a13c25c51ebe5c0ab6d2c39d2cf13a4",
+          "search_hint": "Diritto reale: Proprietà"
+        }
+      ]
+    }
+  },
+  "document_quality": {
+    "status": "TEXT_OK",
+    "reason": "Embedded text quality appears sufficient for deterministic extraction.",
+    "pages_total": 15,
+    "pages_needing_ocr": [
+      2
+    ],
+    "thresholds": {
+      "page_needs_ocr": {
+        "word_count_lt": 30,
+        "chars_non_ws_lt": 200,
+        "alpha_ratio_lt": 0.3,
+        "garbage_ratio_gt": 0.25,
+        "fail_flags": [
+          "word_extract_failed",
+          "text_extract_failed"
+        ]
+      },
+      "document_status": {
+        "needs_ocr_ratio_gte": 0.35,
+        "needs_ocr_ratio_gte_with_images": 0.2,
+        "avg_image_count_per_page_gte": 1.0,
+        "unreadable_ratio_gte": 0.75,
+        "unreadable_median_word_count_lt": 10,
+        "unreadable_avg_alpha_ratio_lt": 0.15
+      }
+    },
+    "metrics_summary": {
+      "needs_ocr_pages_ratio": 0.066667,
+      "avg_image_count_per_page": 2.0,
+      "median_word_count": 255,
+      "avg_alpha_ratio": 0.804655
+    },
+    "customer_message_it": "Documento leggibile in modo automatico con qualità accettabile.",
+    "customer_message_en": "Document appears machine-readable with acceptable quality."
+  },
+  "semaforo_generale": {
+    "status": "AMBER",
+    "status_it": "ATTENZIONE",
+    "status_en": "CAUTION",
+    "reason_it": "Analisi automatica parziale - revisione manuale raccomandata",
+    "reason_en": "Partial automatic analysis - manual review recommended",
+    "evidence": [],
+    "top_blockers": [
+      {
+        "key": "immobile_non_regolare_ediliziamente",
+        "label_it": "Immobile non regolare ediliziamente",
+        "status": "ROSSO",
+        "value": "Criticità urbanistico-edilizia determinante",
+        "evidence": [
+          {
+            "page": 7,
+            "quote": "L'immobile non risulta regolare per la legge n° 47/1985. La costruzione è successiva al 01/09/1967.",
+            "search_hint": "immobile non risulta regolare",
+            "start_offset": 0,
+            "end_offset": 99,
+            "offset_mode": "PAGE_LOCAL",
+            "page_text_hash": "3a34b8ade0a72069345d8c30cf1a7dd666c7ce2fc12ef0f3250ab2b19c998024",
+            "bbox": null
+          }
+        ],
+        "searched_in": []
+      },
+      {
+        "key": "occupato_da_terzi_senza_titolo",
+        "label_it": "Occupato da terzi senza titolo",
+        "status": "ROSSO",
+        "value": "Occupazione da terzi senza titolo opponibile",
+        "evidence": [
+          {
+            "page": 14,
+            "quote": "occupazione: Occupato da terzi senza titolo",
+            "search_hint": "Occupato da terzi senza titolo",
+            "start_offset": 0,
+            "end_offset": 43,
+            "offset_mode": "PAGE_LOCAL",
+            "page_text_hash": "686f1b5daaec30689f6a4e96bbb56ab38a13c25c51ebe5c0ab6d2c39d2cf13a4",
+            "bbox": null
+          }
+        ],
+        "searched_in": []
+      },
+      {
+        "key": "sanatoria_/_condono_non_perfezionati",
+        "label_it": "Sanatoria / condono non perfezionati",
+        "status": "ROSSO",
+        "value": "Sanatoria/condono non perfezionati",
+        "evidence": [
+          {
+            "page": 8,
+            "quote": "La Concessione in Sanatoria non è stata ad oggi rilasciata, nè risulta l'emissione di un diniego da parte",
+            "search_hint": "Concessione in Sanatoria non è stata ad oggi rilasciat",
+            "start_offset": 11,
+            "end_offset": 116,
+            "offset_mode": "PAGE_LOCAL",
+            "page_text_hash": "41533ef6013a2a001fcd0e638a6f0cbe759e34f6e1f3bd961c9fa432cf437376",
+            "bbox": null
+          }
+        ],
+        "searched_in": []
+      },
+      {
+        "key": "uso_residenziale_non_legittimato",
+        "label_it": "Uso residenziale non legittimato",
+        "status": "ROSSO",
+        "value": "Destinazione d'uso residenziale non legittimata",
+        "evidence": [
+          {
+            "page": 9,
+            "quote": "la destinazione d'uso attualmente legittimata non è quella residenziale, ma quella di cantina/locale",
+            "search_hint": "destinazione d'uso attualmente legittimata non è quella residenziale",
+            "start_offset": 1684,
+            "end_offset": 1784,
+            "offset_mode": "PAGE_LOCAL",
+            "page_text_hash": "66e9c8da0e60e4bdcecf2ba96145e41dc273c09605952e8512686f4b889e3165",
+            "bbox": null
+          }
+        ],
+        "searched_in": []
+      },
+      {
+        "key": "agibilità_assente_/_non_rilasciata",
+        "label_it": "Agibilità assente / non rilasciata",
+        "status": "ROSSO",
+        "value": "Agibilità/abitabilità assente o non rilasciata",
+        "evidence": [
+          {
+            "page": 7,
+            "quote": "Non risulta rilasciato il certificato di agibilità.",
+            "search_hint": "Non risulta rilasciato il certificato di agibilit",
+            "start_offset": 677,
+            "end_offset": 728,
+            "offset_mode": "PAGE_LOCAL",
+            "page_text_hash": "3a34b8ade0a72069345d8c30cf1a7dd666c7ce2fc12ef0f3250ab2b19c998024",
+            "bbox": null
+          }
+        ],
+        "searched_in": []
+      },
+      {
+        "key": "accertamento_di_conformità_richiesto",
+        "label_it": "Accertamento di conformità richiesto",
+        "status": "GIALLO",
+        "value": "Rilevata criticita: Accertamento di conformità richiesto",
+        "evidence": [
+          {
+            "page": 8,
+            "quote": "e percorribile la strada dell’accertamento  di Conformità in quanto, come sopra rappresentato, l’unità immobiliare non è conforme  a quanto  indicato  nel Re",
+            "start_offset": 3593,
+            "end_offset": 3620,
+            "bbox": null,
+            "offset_mode": "PAGE_LOCAL",
+            "page_text_hash": "41533ef6013a2a001fcd0e638a6f0cbe759e34f6e1f3bd961c9fa432cf437376"
+          }
+        ],
+        "searched_in": null
+      },
+      {
+        "key": "ape",
+        "label_it": "APE",
+        "status": "NOT_FOUND",
+        "value": "NON SPECIFICATO IN PERIZIA",
+        "evidence": [],
+        "searched_in": [
+          {
+            "page": 8,
+            "quote": "La planimetria del progetto legittimato (All.08_Progetto n.50708 -1968 - Variante a Prog. n. 16566 -\n1967 ) inoltre, rappresenta un'intercapedine perimetrale, a protezione dell'umidità proveniente dai\nmuri controterra : nei disegni allegati alla domanda di sanatoria, e per quanto è stato possibile",
+            "start_offset": 841,
+            "end_offset": 961,
+            "bbox": null,
+            "offset_mode": "PAGE_LOCAL",
+            "page_text_hash": "41533ef6013a2a001fcd0e638a6f0cbe759e34f6e1f3bd961c9fa432cf437376"
+          },
+          {
+            "page": 9,
+            "quote": "9 di 15\nesistesse già una sorta di intercapedine e quale fosse la sua geometria né la quota di calpestìo\n(All.08_Progetto n.50708 -1968 - Variante a Prog. n. 16566 -1967) non è chiaro quindi cosa andrebbe",
+            "start_offset": 4,
+            "end_offset": 124,
+            "bbox": null,
+            "offset_mode": "PAGE_LOCAL",
+            "page_text_hash": "66e9c8da0e60e4bdcecf2ba96145e41dc273c09605952e8512686f4b889e3165"
+          }
+        ]
+      },
+      {
+        "key": "conformita_catastale",
+        "label_it": "Conformità catastale",
+        "status": "NOT_FOUND",
+        "value": "NON SPECIFICATO IN PERIZIA",
+        "evidence": [],
+        "searched_in": [
+          {
+            "page": 4,
+            "quote": "dal al\nDiritto di:\nProprieta' per 1/1 Catasto Fabbricati\nFg. 242, Part. 301, Sub. 516, Zc. 4\nCategoria A2\nCl.5, Cons. 5,5 vani",
+            "start_offset": 1210,
+            "end_offset": 1330,
+            "bbox": null,
+            "offset_mode": "PAGE_LOCAL",
+            "page_text_hash": "6b36d16de767f31562a71866707fc088d79b840878fdcd14444f5c3096829558"
+          },
+          {
+            "page": 5,
+            "quote": "I titolari catastali corrispondono a quelli reali (All.02_Visura storica Fg 242 Mapp. 301 Sub. 516;\nAll.04_Planimetria Fg 242 Mapp. 301 Sub. 516)\nDATI CATASTALI\nCatasto fabbricati (CF)",
+            "start_offset": 79,
+            "end_offset": 199,
+            "bbox": null,
+            "offset_mode": "PAGE_LOCAL",
+            "page_text_hash": "885a82a8971b0f906d4892de9a227a8a990883abf8f4988e115e0c56f6ba4c91"
+          },
+          {
+            "page": 8,
+            "quote": "dunque ad oggi legittimati dal punto di vista edilizio .\nDifformità edilizie e sanabilità degli interventi\nRispetto ai disegni allegati alla richiesta di Condono, si evidenzia che sono presenti alcune discrepanze",
+            "start_offset": 236,
+            "end_offset": 356,
+            "bbox": null,
+            "offset_mode": "PAGE_LOCAL",
+            "page_text_hash": "41533ef6013a2a001fcd0e638a6f0cbe759e34f6e1f3bd961c9fa432cf437376"
+          }
+        ]
+      },
+      {
+        "key": "dati_asta",
+        "label_it": "Dati asta",
+        "status": "NOT_FOUND",
+        "value": "NON SPECIFICATO IN PERIZIA",
+        "evidence": [],
+        "searched_in": [
+          {
+            "page": 3,
+            "quote": "Codice fiscale: **OMISSIS**\nL'immobile viene posto in vendita per i seguenti diritti:\n**Omissis** (Proprietà 1/1)\nNell’atto di compravendita , il Sig. **Omissis** dichiara di non essere coniugato.",
+            "start_offset": 1245,
+            "end_offset": 1365,
+            "bbox": null,
+            "offset_mode": "PAGE_LOCAL",
+            "page_text_hash": "c5719b5d7359a8fbf4ee57144f2e5a48325f1e8baadd3a2891cd6a7ed60d2369"
+          },
+          {
+            "page": 4,
+            "quote": "depositata nel fascicolo della procedura.\n(All.05_Atto di compravendita Notaio Bellelli rep 35910 del 20 -01-1998, All.06_Atto di conferimento in",
+            "start_offset": 242,
+            "end_offset": 362,
+            "bbox": null,
+            "offset_mode": "PAGE_LOCAL",
+            "page_text_hash": "6b36d16de767f31562a71866707fc088d79b840878fdcd14444f5c3096829558"
+          },
+          {
+            "page": 5,
+            "quote": "pavimentato ; mediante una scala esterna in ferro si accede al terrazzo, posto ad una quota superiore.\n(All.01_Report fotografico sopralluogo 02 -01-2024)\nSTATO DI OCCUPAZIONE",
+            "start_offset": 1651,
+            "end_offset": 1771,
+            "bbox": null,
+            "offset_mode": "PAGE_LOCAL",
+            "page_text_hash": "885a82a8971b0f906d4892de9a227a8a990883abf8f4988e115e0c56f6ba4c91"
+          }
+        ]
+      }
+    ]
+  },
+  "summary_for_client": {
+    "summary_it": "La perizia descrive un'unità immobiliare residenziale a Roma, oggetto di esecuzione immobiliare. L'appartamento è situato nel quartiere Fleming e include un cortile e terrazzo. L'edificio presenta alcune problematiche di manutenzione come muffa e cattivo isolamento. L'immobile è attualmente occupato da terzi con un contratto scaduto. La documentazione risulta completa e non risultano eventi annotati a margine della trascrizione delle condizioni sospensive.",
+    "summary_en": "The report describes a residential unit in Rome, subject to foreclosure. The apartment is located in the Fleming district and includes a courtyard and terrace. The building has maintenance issues such as mold and poor insulation. The property is currently occupied by third parties under an expired contract. Documentation is complete, and there are no events noted on the suspension conditions' annotation.",
+    "disclaimer_it": "Documento informativo. Non costituisce consulenza legale. Consultare un professionista qualificato.",
+    "disclaimer_en": "Informational document. Not legal advice. Consult a qualified professional."
+  },
+  "lots": [
+    {
+      "lot_number": 1,
+      "prezzo_base_eur": "€ 172.000,00",
+      "prezzo_base_value": 172000.0,
+      "ubicazione": "Roma (RM) - Via Angelo Messedaglia n. 6, scala B, interno 5B, piano 1 -2",
+      "superficie_mq": 94.76,
+      "diritto_reale": "Proprietà 1/1",
+      "shared_rights_note": null,
+      "detail_scope": "LOT",
+      "evidence": {
+        "lotto": [],
+        "prezzo_base": [
+          {
+            "page": 13,
+            "quote": "Prezzo base d'asta: € 172.000,00",
+            "start_offset": 1030,
+            "end_offset": 1064,
+            "bbox": null,
+            "offset_mode": "PAGE_LOCAL",
+            "page_text_hash": "29fa1ab947023d96a1c208a7d1e60f5a06eca19e86e27d517d56d9750872cd26",
+            "search_hint": "Prezzo base d'asta: € 172.000,00"
+          }
+        ],
+        "ubicazione": [
+          {
+            "page": 14,
+            "quote": "Ubicazione: Roma (RM) - ViaAngelo Messedaglia n. 6, scala B, interno 5B, piano 1 -2",
+            "start_offset": 154,
+            "end_offset": 183,
+            "bbox": null,
+            "offset_mode": "PAGE_LOCAL",
+            "page_text_hash": "686f1b5daaec30689f6a4e96bbb56ab38a13c25c51ebe5c0ab6d2c39d2cf13a4",
+            "search_hint": "Ubicazione: Roma (RM) - ViaA"
+          }
+        ],
+        "superficie": [
+          {
+            "page": 4,
+            "quote": "Totale superficie convenzionale: 94,76 mq",
+            "start_offset": 911,
+            "end_offset": 956,
+            "bbox": null,
+            "offset_mode": "PAGE_LOCAL",
+            "page_text_hash": "6b36d16de767f31562a71866707fc088d79b840878fdcd14444f5c3096829558",
+            "search_hint": "superficie convenzionale: 94,76 mq"
+          }
+        ],
+        "diritto_reale": [
+          {
+            "page": 3,
+            "quote": "Proprietà 1/1)",
+            "start_offset": 1196,
+            "end_offset": 1228,
+            "bbox": null,
+            "offset_mode": "PAGE_LOCAL",
+            "page_text_hash": "c5719b5d7359a8fbf4ee57144f2e5a48325f1e8baadd3a2891cd6a7ed60d2369",
+            "search_hint": "Proprietà 1/1)"
+          }
+        ],
+        "shared_rights_note": [],
+        "tipologia": [
+          {
+            "page": 3,
+            "quote": "Bene N° 1 - Appartamento ubicato a Roma (RM) – Via Angelo Messedaglia n. 6, scala B, interno",
+            "start_offset": 424,
+            "end_offset": 518,
+            "bbox": null,
+            "offset_mode": "PAGE_LOCAL",
+            "page_text_hash": "c5719b5d7359a8fbf4ee57144f2e5a48325f1e8baadd3a2891cd6a7ed60d2369",
+            "search_hint": "Bene N° 1 - Appartamento ubicato a Roma (RM) – Via Angelo Messedaglia n. 6,"
+          }
+        ],
+        "valore_stima": [],
+        "deprezzamento": [
+          {
+            "page": 11,
+            "quote": "Deprezzamenti\nTipologia deprezzamento Valore Tipo\nRischio assunto per mancata garanzia vizi occulti 10,00 %",
+            "start_offset": 1487,
+            "end_offset": 1603,
+            "bbox": null,
+            "offset_mode": "PAGE_LOCAL",
+            "page_text_hash": "e100fb522d8ec7759a63abf2ad677951ced3d43290212f3fa427460b42708f09",
+            "search_hint": "Deprezzamenti Tipologia deprezzamento Valore Tipo Rischio assunto per mancata"
+          }
+        ]
+      },
+      "deprezzamento_percentuale": "10.00",
+      "tipologia": "immobile: Appartamento",
+      "valore_stima_eur": 312708,
+      "catasto": {
+        "consistenza": "Superficie",
+        "foglio": "242",
+        "particella": "301",
+        "sub": "516",
+        "categoria": "A2"
+      },
+      "beni": [
+        {
+          "bene_number": 1,
+          "tipologia": "Appartamento",
+          "short_location": "Appartamento Roma (RM) - ViaAngelo Messedaglia n. 6, scala B, interno 5B",
+          "piano": "1 - 2",
+          "superficie_mq": 94.76,
+          "valore_stima_eur": 312708,
+          "catasto": {
+            "consistenza": "Superficie",
+            "foglio": "242",
+            "particella": "301",
+            "sub": "516",
+            "categoria": "A2"
+          },
+          "note": [],
+          "ape": null,
+          "dichiarazioni_impianti": {
+            "elettrico": null,
+            "termico": null,
+            "idrico": null
+          },
+          "dichiarazioni": {
+            "dichiarazione_impianto_elettrico": null,
+            "dichiarazione_impianto_termico": null,
+            "dichiarazione_impianto_idrico": null
+          },
+          "stato_conservativo": {
+            "status_it": null,
+            "status_en": null,
+            "notes_it": null,
+            "evidence": []
+          },
+          "impianti": {
+            "elettrico": {
+              "status_it": null,
+              "status_en": null,
+              "notes_it": null,
+              "evidence": []
+            },
+            "idrico": {
+              "status_it": null,
+              "status_en": null,
+              "notes_it": null,
+              "evidence": []
+            },
+            "termico": {
+              "status_it": null,
+              "status_en": null,
+              "notes_it": null,
+              "evidence": []
+            }
+          },
+          "evidence": {
+            "tipologia": [
+              {
+                "page": 3,
+                "quote": "Bene N° 1 - Appartamento ubicato a Roma (RM) – Via Angelo Messedaglia n. 6, scala B, interno",
+                "start_offset": 424,
+                "end_offset": 518,
+                "bbox": null,
+                "offset_mode": "PAGE_LOCAL",
+                "page_text_hash": "c5719b5d7359a8fbf4ee57144f2e5a48325f1e8baadd3a2891cd6a7ed60d2369",
+                "search_hint": "Bene N° 1 - Appartamento ubicato a Roma (RM) – Via Angelo Messedaglia n. 6,"
+              }
+            ],
+            "location_piano": [
+              {
+                "page": 11,
+                "quote": "Bene N° 1 - Appartamento Roma (RM) - ViaAngelo Messedaglia n. 6, scala B, interno 5B, piano 1 -2 94,76 mq 3.300,00 €/mq € 312.708,00",
+                "search_hint": "Bene N° 1 - Appartamento Roma (RM) - ViaAngelo Messedaglia n. 6, scala B, interno 5B, piano 1 -2 94,76 mq 3.300,00 €/mq "
+              }
+            ],
+            "superficie": [
+              {
+                "page": 11,
+                "quote": "Bene N° 1 - Appartamento Roma (RM) - ViaAngelo Messedaglia n. 6, scala B, interno 5B, piano 1 -2 94,76 mq 3.300,00 €/mq € 312.708,00",
+                "search_hint": "Bene N° 1 - Appartamento Roma (RM) - ViaAngelo Messedaglia n. 6, scala B, interno 5B, piano 1 -2 94,76 mq 3.300,00 €/mq "
+              }
+            ],
+            "valore_stima": [
+              {
+                "page": 9,
+                "quote": "Valore di stima del bene: € 312.708,00 da cui vanno decurtati gli importi indicati nella tabella",
+                "start_offset": 3163,
+                "end_offset": 3261,
+                "bbox": null,
+                "offset_mode": "PAGE_LOCAL",
+                "page_text_hash": "66e9c8da0e60e4bdcecf2ba96145e41dc273c09605952e8512686f4b889e3165",
+                "search_hint": "Valore di stima del bene: € 312.708,00 da cui vanno decurtati gli importi"
+              }
+            ],
+            "catasto": [
+              {
+                "page": 14,
+                "quote": "Identificato al catasto Fabbricati - Fg. 242,",
+                "start_offset": 320,
+                "end_offset": 366,
+                "bbox": null,
+                "offset_mode": "PAGE_LOCAL",
+                "page_text_hash": "686f1b5daaec30689f6a4e96bbb56ab38a13c25c51ebe5c0ab6d2c39d2cf13a4",
+                "search_hint": "Identificato al catasto Fabbricati - Fg. 242,"
+              }
+            ],
+            "note": [],
+            "ape": [],
+            "dichiarazioni_impianti": {
+              "elettrico": [],
+              "termico": [],
+              "idrico": []
+            },
+            "dichiarazioni": {
+              "dichiarazione_impianto_elettrico": [],
+              "dichiarazione_impianto_termico": [],
+              "dichiarazione_impianto_idrico": []
+            },
+            "stato_conservativo": [],
+            "impianti": {
+              "elettrico": [],
+              "idrico": [],
+              "termico": []
+            }
+          }
+        }
+      ]
+    }
+  ],
+  "beni": [
+    {
+      "bene_number": 1,
+      "tipologia": "Appartamento",
+      "short_location": "Appartamento Roma (RM) - ViaAngelo Messedaglia n. 6, scala B, interno 5B",
+      "piano": "1 - 2",
+      "superficie_mq": 94.76,
+      "valore_stima_eur": 312708,
+      "catasto": {
+        "consistenza": "Superficie",
+        "foglio": "242",
+        "particella": "301",
+        "sub": "516",
+        "categoria": "A2"
+      },
+      "note": [],
+      "ape": null,
+      "dichiarazioni_impianti": {
+        "elettrico": null,
+        "termico": null,
+        "idrico": null
+      },
+      "dichiarazioni": {
+        "dichiarazione_impianto_elettrico": null,
+        "dichiarazione_impianto_termico": null,
+        "dichiarazione_impianto_idrico": null
+      },
+      "stato_conservativo": {
+        "status_it": null,
+        "status_en": null,
+        "notes_it": null,
+        "evidence": []
+      },
+      "impianti": {
+        "elettrico": {
+          "status_it": null,
+          "status_en": null,
+          "notes_it": null,
+          "evidence": []
+        },
+        "idrico": {
+          "status_it": null,
+          "status_en": null,
+          "notes_it": null,
+          "evidence": []
+        },
+        "termico": {
+          "status_it": null,
+          "status_en": null,
+          "notes_it": null,
+          "evidence": []
+        }
+      },
+      "evidence": {
+        "tipologia": [
+          {
+            "page": 3,
+            "quote": "Bene N° 1 - Appartamento ubicato a Roma (RM) – Via Angelo Messedaglia n. 6, scala B, interno",
+            "start_offset": 424,
+            "end_offset": 518,
+            "bbox": null,
+            "offset_mode": "PAGE_LOCAL",
+            "page_text_hash": "c5719b5d7359a8fbf4ee57144f2e5a48325f1e8baadd3a2891cd6a7ed60d2369",
+            "search_hint": "Bene N° 1 - Appartamento ubicato a Roma (RM) – Via Angelo Messedaglia n. 6,"
+          }
+        ],
+        "location_piano": [
+          {
+            "page": 11,
+            "quote": "Bene N° 1 - Appartamento Roma (RM) - ViaAngelo Messedaglia n. 6, scala B, interno 5B, piano 1 -2 94,76 mq 3.300,00 €/mq € 312.708,00",
+            "search_hint": "Bene N° 1 - Appartamento Roma (RM) - ViaAngelo Messedaglia n. 6, scala B, interno 5B, piano 1 -2 94,76 mq 3.300,00 €/mq "
+          }
+        ],
+        "superficie": [
+          {
+            "page": 11,
+            "quote": "Bene N° 1 - Appartamento Roma (RM) - ViaAngelo Messedaglia n. 6, scala B, interno 5B, piano 1 -2 94,76 mq 3.300,00 €/mq € 312.708,00",
+            "search_hint": "Bene N° 1 - Appartamento Roma (RM) - ViaAngelo Messedaglia n. 6, scala B, interno 5B, piano 1 -2 94,76 mq 3.300,00 €/mq "
+          }
+        ],
+        "valore_stima": [
+          {
+            "page": 9,
+            "quote": "Valore di stima del bene: € 312.708,00 da cui vanno decurtati gli importi indicati nella tabella",
+            "start_offset": 3163,
+            "end_offset": 3261,
+            "bbox": null,
+            "offset_mode": "PAGE_LOCAL",
+            "page_text_hash": "66e9c8da0e60e4bdcecf2ba96145e41dc273c09605952e8512686f4b889e3165",
+            "search_hint": "Valore di stima del bene: € 312.708,00 da cui vanno decurtati gli importi"
+          }
+        ],
+        "catasto": [
+          {
+            "page": 14,
+            "quote": "Identificato al catasto Fabbricati - Fg. 242,",
+            "start_offset": 320,
+            "end_offset": 366,
+            "bbox": null,
+            "offset_mode": "PAGE_LOCAL",
+            "page_text_hash": "686f1b5daaec30689f6a4e96bbb56ab38a13c25c51ebe5c0ab6d2c39d2cf13a4",
+            "search_hint": "Identificato al catasto Fabbricati - Fg. 242,"
+          }
+        ],
+        "note": [],
+        "ape": [],
+        "dichiarazioni_impianti": {
+          "elettrico": [],
+          "termico": [],
+          "idrico": []
+        },
+        "dichiarazioni": {
+          "dichiarazione_impianto_elettrico": [],
+          "dichiarazione_impianto_termico": [],
+          "dichiarazione_impianto_idrico": []
+        },
+        "stato_conservativo": [],
+        "impianti": {
+          "elettrico": [],
+          "idrico": [],
+          "termico": []
+        }
+      }
+    }
+  ],
+  "lots_count": 1,
+  "is_multi_lot": false,
+  "money_box": {
+    "items": [
+      {
+        "code": "QB_1",
+        "label_it": "Regolarizzazione edilizia / urbanistica da verificare",
+        "label_en": "Regolarizzazione edilizia / urbanistica da verificare",
+        "type": "QUALITATIVE",
+        "stima_euro": "NON_QUANTIFICATO",
+        "stima_nota": "Onere buyer-side segnalato dalla perizia ma non quantificato in modo difendibile",
+        "source": "PERIZIA_QUALITATIVE",
+        "evidence": []
+      },
+      {
+        "code": "QB_2",
+        "label_it": "Eventuali ripristini / problemi conservativi segnalati in perizia",
+        "label_en": "Eventuali ripristini / problemi conservativi segnalati in perizia",
+        "type": "QUALITATIVE",
+        "stima_euro": "NON_QUANTIFICATO",
+        "stima_nota": "Onere buyer-side segnalato dalla perizia ma non quantificato in modo difendibile",
+        "source": "PERIZIA_QUALITATIVE",
+        "evidence": []
+      },
+      {
+        "code": "QB_3",
+        "label_it": "Allineamento catastale da verificare",
+        "label_en": "Allineamento catastale da verificare",
+        "type": "QUALITATIVE",
+        "stima_euro": "NON_QUANTIFICATO",
+        "stima_nota": "Onere buyer-side segnalato dalla perizia ma non quantificato in modo difendibile",
+        "source": "PERIZIA_QUALITATIVE",
+        "evidence": []
+      },
+      {
+        "code": "QB_4",
+        "label_it": "Eventuali arretrati condominiali da verificare",
+        "label_en": "Eventuali arretrati condominiali da verificare",
+        "type": "QUALITATIVE",
+        "stima_euro": "NON_QUANTIFICATO",
+        "stima_nota": "Onere buyer-side segnalato dalla perizia ma non quantificato in modo difendibile",
+        "source": "PERIZIA_QUALITATIVE",
+        "evidence": []
+      },
+      {
+        "code": "QB_5",
+        "label_it": "Eventuali costi connessi alla liberazione dell'immobile",
+        "label_en": "Eventuali costi connessi alla liberazione dell'immobile",
+        "type": "QUALITATIVE",
+        "stima_euro": "NON_QUANTIFICATO",
+        "stima_nota": "Onere buyer-side segnalato dalla perizia ma non quantificato in modo difendibile",
+        "source": "PERIZIA_QUALITATIVE",
+        "evidence": []
+      },
+      {
+        "code": "QB_6",
+        "label_it": "Completamento lavori / messa in sicurezza e pratiche tecniche da verificare",
+        "label_en": "Completamento lavori / messa in sicurezza e pratiche tecniche da verificare",
+        "type": "QUALITATIVE",
+        "stima_euro": "NON_QUANTIFICATO",
+        "stima_nota": "Onere buyer-side segnalato dalla perizia ma non quantificato in modo difendibile",
+        "source": "LEGAL_KILLER_QUALITATIVE",
+        "evidence": [
+          {
+            "page": 7,
+            "quote": "Non risulta rilasciato il certificato di agibilità.",
+            "search_hint": "Non risulta rilasciato il certificato di agibilit",
+            "start_offset": 677,
+            "end_offset": 728,
+            "offset_mode": "PAGE_LOCAL",
+            "page_text_hash": "3a34b8ade0a72069345d8c30cf1a7dd666c7ce2fc12ef0f3250ab2b19c998024",
+            "bbox": null
+          }
+        ]
+      },
+      {
+        "code": "QB_7",
+        "label_it": "Completamento o perfezionamento sanatoria / condono da verificare",
+        "label_en": "Completamento o perfezionamento sanatoria / condono da verificare",
+        "type": "QUALITATIVE",
+        "stima_euro": "NON_QUANTIFICATO",
+        "stima_nota": "Onere buyer-side segnalato dalla perizia ma non quantificato in modo difendibile",
+        "source": "LEGAL_KILLER_QUALITATIVE",
+        "evidence": [
+          {
+            "page": 8,
+            "quote": "La Concessione in Sanatoria non è stata ad oggi rilasciata, nè risulta l'emissione di un diniego da parte",
+            "search_hint": "Concessione in Sanatoria non è stata ad oggi rilasciat",
+            "start_offset": 11,
+            "end_offset": 116,
+            "offset_mode": "PAGE_LOCAL",
+            "page_text_hash": "41533ef6013a2a001fcd0e638a6f0cbe759e34f6e1f3bd961c9fa432cf437376",
+            "bbox": null
+          }
+        ]
+      },
+      {
+        "code": "QB_8",
+        "label_it": "Verifica conseguenze della destinazione d'uso non legittimata",
+        "label_en": "Verifica conseguenze della destinazione d'uso non legittimata",
+        "type": "QUALITATIVE",
+        "stima_euro": "NON_QUANTIFICATO",
+        "stima_nota": "Onere buyer-side segnalato dalla perizia ma non quantificato in modo difendibile",
+        "source": "LEGAL_KILLER_QUALITATIVE",
+        "evidence": [
+          {
+            "page": 9,
+            "quote": "la destinazione d'uso attualmente legittimata non è quella residenziale, ma quella di cantina/locale",
+            "search_hint": "destinazione d'uso attualmente legittimata non è quella residenziale",
+            "start_offset": 1684,
+            "end_offset": 1784,
+            "offset_mode": "PAGE_LOCAL",
+            "page_text_hash": "66e9c8da0e60e4bdcecf2ba96145e41dc273c09605952e8512686f4b889e3165",
+            "bbox": null
+          }
+        ]
+      },
+      {
+        "code": "S3C01",
+        "label_it": "Costo rilevato da perizia",
+        "label_en": "Cost extracted from appraisal",
+        "type": "ESTIMATE",
+        "stima_euro": 172000.0,
+        "stima_nota": "Deterministic candidate-based cost",
+        "fonte_perizia": {
+          "value": "Perizia",
+          "evidence": [
+            {
+              "page": 11,
+              "quote": "rsa destinazione d'uso legittimata 30,00 % Valore finale di stima: € 172.000,00 (arrotondato) Assolto il proprio mandato, il sottoscritto Esperto e",
+              "search_hint": "rsa destinazione d'uso legittimata 30,00 % Valore finale di stima: € 172.000,00"
+            }
+          ]
+        },
+        "action_required_it": "Verifica documentale",
+        "action_required_en": "Document check",
+        "source": "step3_candidates",
+        "candidate_ids": [
+          "m_000011"
+        ]
+      },
+      {
+        "code": "S3C02",
+        "label_it": "Costo rilevato da perizia",
+        "label_en": "Cost extracted from appraisal",
+        "type": "ESTIMATE",
+        "stima_euro": 312708.0,
+        "stima_nota": "Deterministic candidate-based cost",
+        "fonte_perizia": {
+          "value": "Perizia",
+          "evidence": [
+            {
+              "page": 11,
+              "quote": ".300,00 €/mq € 312.708,00 100,00% € 312.708,00 Valore di stima: € 312.708,00 Valore di stima: € 312.708,00 Deprezzamenti Tipologia deprezzam",
+              "search_hint": ".300,00 €/mq € 312.708,00 100,00% € 312.708,00 Valore di stima: € 312.708,00"
+            }
+          ]
+        },
+        "action_required_it": "Verifica documentale",
+        "action_required_en": "Document check",
+        "source": "step3_candidates",
+        "candidate_ids": [
+          "m_000012"
+        ]
+      },
+      {
+        "code": "S3C03",
+        "label_it": "Costo rilevato da perizia",
+        "label_en": "Cost extracted from appraisal",
+        "type": "ESTIMATE",
+        "stima_euro": 312708.0,
+        "stima_nota": "Deterministic candidate-based cost",
+        "fonte_perizia": {
+          "value": "Perizia",
+          "evidence": [
+            {
+              "page": 11,
+              "quote": "00% € 312.708,00 Valore di stima: € 312.708,00 Valore di stima: € 312.708,00 Deprezzamenti Tipologia deprezzamento Valore Tipo Rischio ass",
+              "search_hint": "00% € 312.708,00 Valore di stima: € 312.708,00 Valore di stima: € 312.708,00"
+            }
+          ]
+        },
+        "action_required_it": "Verifica documentale",
+        "action_required_en": "Document check",
+        "source": "step3_candidates",
+        "candidate_ids": [
+          "m_000013"
+        ]
+      }
+    ],
+    "total_extra_costs": {
+      "range": {
+        "min": "TBD",
+        "max": "TBD"
+      },
+      "max_is_open": true,
+      "note": "TBD because one or more cost items are unspecified"
+    },
+    "policy": "CONSERVATIVE",
+    "qualitative_burdens": [
+      {
+        "code": "QB_1",
+        "label_it": "Regolarizzazione edilizia / urbanistica da verificare",
+        "label_en": "Regolarizzazione edilizia / urbanistica da verificare",
+        "type": "QUALITATIVE",
+        "stima_euro": "NON_QUANTIFICATO",
+        "stima_nota": "Onere buyer-side segnalato dalla perizia ma non quantificato in modo difendibile",
+        "source": "PERIZIA_QUALITATIVE",
+        "evidence": []
+      },
+      {
+        "code": "QB_2",
+        "label_it": "Eventuali ripristini / problemi conservativi segnalati in perizia",
+        "label_en": "Eventuali ripristini / problemi conservativi segnalati in perizia",
+        "type": "QUALITATIVE",
+        "stima_euro": "NON_QUANTIFICATO",
+        "stima_nota": "Onere buyer-side segnalato dalla perizia ma non quantificato in modo difendibile",
+        "source": "PERIZIA_QUALITATIVE",
+        "evidence": []
+      },
+      {
+        "code": "QB_3",
+        "label_it": "Allineamento catastale da verificare",
+        "label_en": "Allineamento catastale da verificare",
+        "type": "QUALITATIVE",
+        "stima_euro": "NON_QUANTIFICATO",
+        "stima_nota": "Onere buyer-side segnalato dalla perizia ma non quantificato in modo difendibile",
+        "source": "PERIZIA_QUALITATIVE",
+        "evidence": []
+      },
+      {
+        "code": "QB_4",
+        "label_it": "Eventuali arretrati condominiali da verificare",
+        "label_en": "Eventuali arretrati condominiali da verificare",
+        "type": "QUALITATIVE",
+        "stima_euro": "NON_QUANTIFICATO",
+        "stima_nota": "Onere buyer-side segnalato dalla perizia ma non quantificato in modo difendibile",
+        "source": "PERIZIA_QUALITATIVE",
+        "evidence": []
+      },
+      {
+        "code": "QB_5",
+        "label_it": "Eventuali costi connessi alla liberazione dell'immobile",
+        "label_en": "Eventuali costi connessi alla liberazione dell'immobile",
+        "type": "QUALITATIVE",
+        "stima_euro": "NON_QUANTIFICATO",
+        "stima_nota": "Onere buyer-side segnalato dalla perizia ma non quantificato in modo difendibile",
+        "source": "PERIZIA_QUALITATIVE",
+        "evidence": []
+      },
+      {
+        "code": "QB_6",
+        "label_it": "Completamento lavori / messa in sicurezza e pratiche tecniche da verificare",
+        "label_en": "Completamento lavori / messa in sicurezza e pratiche tecniche da verificare",
+        "type": "QUALITATIVE",
+        "stima_euro": "NON_QUANTIFICATO",
+        "stima_nota": "Onere buyer-side segnalato dalla perizia ma non quantificato in modo difendibile",
+        "source": "LEGAL_KILLER_QUALITATIVE",
+        "evidence": [
+          {
+            "page": 7,
+            "quote": "Non risulta rilasciato il certificato di agibilità.",
+            "search_hint": "Non risulta rilasciato il certificato di agibilit",
+            "start_offset": 677,
+            "end_offset": 728,
+            "offset_mode": "PAGE_LOCAL",
+            "page_text_hash": "3a34b8ade0a72069345d8c30cf1a7dd666c7ce2fc12ef0f3250ab2b19c998024",
+            "bbox": null
+          }
+        ]
+      },
+      {
+        "code": "QB_7",
+        "label_it": "Completamento o perfezionamento sanatoria / condono da verificare",
+        "label_en": "Completamento o perfezionamento sanatoria / condono da verificare",
+        "type": "QUALITATIVE",
+        "stima_euro": "NON_QUANTIFICATO",
+        "stima_nota": "Onere buyer-side segnalato dalla perizia ma non quantificato in modo difendibile",
+        "source": "LEGAL_KILLER_QUALITATIVE",
+        "evidence": [
+          {
+            "page": 8,
+            "quote": "La Concessione in Sanatoria non è stata ad oggi rilasciata, nè risulta l'emissione di un diniego da parte",
+            "search_hint": "Concessione in Sanatoria non è stata ad oggi rilasciat",
+            "start_offset": 11,
+            "end_offset": 116,
+            "offset_mode": "PAGE_LOCAL",
+            "page_text_hash": "41533ef6013a2a001fcd0e638a6f0cbe759e34f6e1f3bd961c9fa432cf437376",
+            "bbox": null
+          }
+        ]
+      },
+      {
+        "code": "QB_8",
+        "label_it": "Verifica conseguenze della destinazione d'uso non legittimata",
+        "label_en": "Verifica conseguenze della destinazione d'uso non legittimata",
+        "type": "QUALITATIVE",
+        "stima_euro": "NON_QUANTIFICATO",
+        "stima_nota": "Onere buyer-side segnalato dalla perizia ma non quantificato in modo difendibile",
+        "source": "LEGAL_KILLER_QUALITATIVE",
+        "evidence": [
+          {
+            "page": 9,
+            "quote": "la destinazione d'uso attualmente legittimata non è quella residenziale, ma quella di cantina/locale",
+            "search_hint": "destinazione d'uso attualmente legittimata non è quella residenziale",
+            "start_offset": 1684,
+            "end_offset": 1784,
+            "offset_mode": "PAGE_LOCAL",
+            "page_text_hash": "66e9c8da0e60e4bdcecf2ba96145e41dc273c09605952e8512686f4b889e3165",
+            "bbox": null
+          }
+        ]
+      }
+    ]
+  },
+  "formalita": {
+    "ipoteca": {
+      "status": "UNKNOWN",
+      "evidence": []
+    },
+    "pignoramento": {
+      "status": "UNKNOWN",
+      "evidence": []
+    },
+    "cancellazione_decreto": {
+      "status": "UNKNOWN",
+      "evidence": []
+    },
+    "summary_it": "PRESENTI FORMALITÀ",
+    "summary_evidence": [
+      {
+        "page": 3,
+        "quote": "I beni oggetto di pignoramento sono costituiti dai seguenti immobili:",
+        "start_offset": 350,
+        "end_offset": 421,
+        "bbox": null,
+        "offset_mode": "PAGE_LOCAL",
+        "page_text_hash": "c5719b5d7359a8fbf4ee57144f2e5a48325f1e8baadd3a2891cd6a7ed60d2369",
+        "search_hint": "I beni oggetto di pignoramento sono costituiti dai seguenti immobili:"
+      }
+    ]
+  }
+}

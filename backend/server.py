@@ -33,6 +33,7 @@ from section_builder import build_estratto_quality
 from evidence_utils import normalize_evidence_quote
 from narrator import build_decisione_rapida_narration, build_deterministic_summary_for_client, build_summary_for_client_bundle
 from cost_market_ranges import market_range_for_item
+from perizia_runtime.runtime import apply_verifier_to_result, run_quality_verifier
 
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
@@ -1287,6 +1288,10 @@ async def is_offline_qa_request(request: Request) -> bool:
         await _audit_offline_qa_rejection(request, "OFFLINE_QA_TOKEN_INVALID")
         return False
     return True
+
+def _should_use_offline_fixture(request: Request) -> bool:
+    fixture_header = str(request.headers.get("X-OFFLINE-QA-FIXTURE", "")).strip()
+    return fixture_header == "1"
 
 def _load_offline_fixture() -> Dict[str, Any]:
     try:
@@ -14298,9 +14303,13 @@ async def analyze_perizia(request: Request, file: UploadFile = File(...)):
     run_id = f"run_{uuid.uuid4().hex[:8]}"
     analysis_id = f"analysis_{uuid.uuid4().hex[:12]}"
     offline_qa = user.user_id == "offline_qa"
+    use_offline_fixture = offline_qa and _should_use_offline_fixture(request)
 
     async def run_pipeline():
-        logger.info(f"[{request_id}] pipeline_start analysis_id={analysis_id} offline_qa={offline_qa}")
+        logger.info(
+            f"[{request_id}] pipeline_start analysis_id={analysis_id} "
+            f"offline_qa={offline_qa} fixture_mode={use_offline_fixture}"
+        )
         extraction_payload = await asyncio.to_thread(_build_step1_extract_payload, contents)
 
         # Determine mime type
@@ -14311,7 +14320,7 @@ async def analyze_perizia(request: Request, file: UploadFile = File(...)):
                 mime_type = "image/jpeg"
 
         # Extraction stage (digital text first, OCR only if coverage is low)
-        if offline_qa:
+        if use_offline_fixture:
             logger.info(f"[{request_id}] offline_fixture_load path={OFFLINE_QA_FIXTURE_PATH}")
             fixture = _load_offline_fixture()
             pages = fixture.get("pages", [])
@@ -14492,6 +14501,21 @@ async def analyze_perizia(request: Request, file: UploadFile = File(...)):
                 "error": "section_builder_failed",
             },
         }
+    try:
+        verifier_payload = run_quality_verifier(
+            analysis_id=analysis_id,
+            result=result,
+            pages=pages,
+            full_text=full_text,
+        )
+        apply_verifier_to_result(result, verifier_payload)
+        debug_obj["verifier_runtime"] = {
+            "qa_checks": verifier_payload.get("qa_checks", []),
+            "comparison": verifier_payload.get("comparison", {}),
+        }
+    except Exception as e:
+        logger.exception(f"[{request_id}] verifier_runtime_failed analysis_id={analysis_id} err={e}")
+        debug_obj["verifier_runtime"] = {"error": "verifier_runtime_failed", "message": str(e)[:240]}
     _sanitize_lot_conservative_outputs(result)
     result["panoramica_contract"] = _build_panoramica_contract(result, pages)
     result["user_messages"] = _build_user_messages(result, extraction_payload, analysis_id=analysis_id)
