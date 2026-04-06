@@ -1294,6 +1294,105 @@ def test_urbanistica_unscoped_summary_noise_does_not_write_document_root_truth_i
     assert payload["canonical_case"]["urbanistica"]["urbanistica_status"]["value"] == "DIFFORMITA_PRESENTE"
 
 
+def test_legal_burdens_write_smallest_scope_first_and_roll_root_up():
+    result = {
+        "field_states": {},
+        "dati_certi_del_lotto": {},
+        "document_quality": {"status": "TEXT_OK"},
+        "semaforo_generale": {"status": "AMBER"},
+    }
+    pages = [
+        {
+            "page_number": 1,
+            "text": (
+                "LOTTO UNICO\n"
+                "Bene N° 1 - Appartamento\n"
+                "Non sono presenti vincoli pregiudizievoli sul bene.\n"
+                "Non risultano servitù a carico dell'immobile.\n"
+                "Il contratto è opponibile alla procedura esecutiva."
+            ),
+        },
+    ]
+    payload = run_quality_verifier(
+        analysis_id="synthetic_legal_burdens_single_scope",
+        result=result,
+        pages=pages,
+        full_text="\n\n".join(page["text"] for page in pages),
+    )
+    scoped = payload["scopes"]["bene:1"]["legal"]
+    assert scoped["vincoli_status"]["value"] == "ASSENTE"
+    assert scoped["servitu_status"]["value"] == "ASSENTE"
+    assert scoped["opponibilita_status"]["value"] == "OPPONIBILE"
+    assert payload["canonical_case"]["legal"]["vincoli_status"]["value"] == "ASSENTE"
+    assert payload["canonical_case"]["legal"]["servitu_status"]["value"] == "ASSENTE"
+    assert payload["canonical_case"]["legal"]["opponibilita_status"]["value"] == "OPPONIBILE"
+
+
+def test_legal_burdens_root_rollup_stays_non_verificabile_when_leaf_truth_differs():
+    result = {
+        "field_states": {},
+        "dati_certi_del_lotto": {},
+        "document_quality": {"status": "TEXT_OK"},
+        "semaforo_generale": {"status": "AMBER"},
+    }
+    pages = [
+        {
+            "page_number": 1,
+            "text": (
+                "LOTTO UNICO\n"
+                "Bene N° 1 - Appartamento\n"
+                "Non sono presenti vincoli sul bene.\n"
+                "Bene N° 2 - Garage\n"
+                "Il bene è gravato da vincolo paesaggistico."
+            ),
+        },
+    ]
+    payload = run_quality_verifier(
+        analysis_id="synthetic_legal_burdens_leaf_mixed",
+        result=result,
+        pages=pages,
+        full_text="\n\n".join(page["text"] for page in pages),
+    )
+    assert payload["scopes"]["bene:1"]["legal"]["vincoli_status"]["value"] == "ASSENTE"
+    assert payload["scopes"]["bene:2"]["legal"]["vincoli_status"]["value"] == "PRESENTE"
+    root = payload["canonical_case"]["legal"]["vincoli_status"]
+    assert root["value"] == "NON_VERIFICABILE"
+    assert root["verification_trail"]["reason_unresolved"] == "truth differs by scope"
+
+
+def test_legal_burdens_universal_lotto_statement_inherits_and_da_verificare_stays_cautious():
+    result = {
+        "field_states": {},
+        "dati_certi_del_lotto": {},
+        "document_quality": {"status": "TEXT_OK"},
+        "semaforo_generale": {"status": "AMBER"},
+    }
+    pages = [
+        {
+            "page_number": 1,
+            "text": (
+                "LOTTO UNICO\n"
+                "Bene N° 1 - Appartamento\n"
+                "Bene N° 2 - Garage\n"
+                "Tutti i beni del lotto unico sono liberi da servitù.\n"
+                "Bene N° 1 - Appartamento\n"
+                "Opponibilità del titolo da verificare."
+            ),
+        },
+    ]
+    payload = run_quality_verifier(
+        analysis_id="synthetic_legal_burdens_lotto_inheritance",
+        result=result,
+        pages=pages,
+        full_text="\n\n".join(page["text"] for page in pages),
+    )
+    assert payload["scopes"]["lotto:unico"]["legal"]["servitu_status"]["value"] == "ASSENTE"
+    assert payload["scopes"]["bene:1"]["legal"]["servitu_status"]["value"] == "ASSENTE"
+    assert payload["scopes"]["bene:2"]["legal"]["servitu_status"]["value"] == "ASSENTE"
+    assert payload["scopes"]["bene:1"]["legal"]["opponibilita_status"]["value"] == "DA_VERIFICARE"
+    assert payload["canonical_case"]["legal"]["opponibilita_status"]["value"] == "NON_VERIFICABILE"
+
+
 def test_verifier_bridge_updates_legacy_regolarita_urbanistica_from_new_root_truth():
     result = {
         "field_states": {},
