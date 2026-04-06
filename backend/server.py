@@ -1699,11 +1699,13 @@ def _normalize_procedura_value(value: Optional[str]) -> Optional[str]:
     if not value:
         return value
     cleaned = _normalize_headline_text(str(value))
+    if re.fullmatch(r"(r\.?\s*g\.?\s*e\.?|procedura|esecuzione\s+immobiliare)", cleaned, re.I):
+        return None
     match = re.search(r"\b(\d{1,6}/\d{2,4})\b", cleaned)
     if not match:
         return cleaned
     proc_num = match.group(1)
-    if re.search(r"esecuzione\s+immobiliare", cleaned, re.I):
+    if re.search(r"(esecuzione|espropriazioni?)\s+immobiliar", cleaned, re.I):
         return f"Esecuzione Immobiliare {proc_num} R.G.E."
     if re.search(r"R\.?\s*G\.?\s*E\.?", cleaned, re.I):
         return f"R.G.E. {proc_num}"
@@ -2159,6 +2161,7 @@ def _extract_procedura_state(pages: List[Dict[str, Any]]) -> Dict[str, Any]:
         re.compile(r"(R\.?\s*G\.?\s*E\.?\s*\d+\s*/\s*\d+)", re.I),
         re.compile(r"(Esecuzione\s+Immobiliare\s+(?:n\.?\s*)?\d+\s*/\s*\d+)", re.I),
         re.compile(r"(Procedura\s+(?:n\.?\s*)?\d+\s*/\s*\d+)", re.I),
+        re.compile(r"(Espropriazioni?\s+Immobiliari\s+\d+\s*/\s*\d+)", re.I),
     ]
     fallback_patterns = [
         re.compile(r"R\.?\s*G\.?\s*E\.?", re.I),
@@ -2204,9 +2207,11 @@ def _extract_procedura_state(pages: List[Dict[str, Any]]) -> Dict[str, Any]:
                             anchor_hint=match.group(0),
                         )
                     )
-                    value = _normalize_procedura_value(match.group(0))
-                    status = "LOW_CONFIDENCE"
-                    break
+                    normalized_value = _normalize_procedura_value(match.group(0))
+                    if normalized_value:
+                        value = normalized_value
+                        status = "LOW_CONFIDENCE"
+                        break
             if status == "LOW_CONFIDENCE":
                 break
 
@@ -5101,7 +5106,7 @@ def _translated_cost_burden_label(text: str) -> Optional[str]:
         return "Regolarizzazione edilizia / urbanistica da verificare"
     if any(token in normalized for token in ("sanatoria / condono non perfezionati", "sanatoria", "condono")):
         return "Completamento o perfezionamento sanatoria / condono da verificare"
-    if any(token in normalized for token in ("spese condominiali arretrate", "oneri condominiali arretrati", "morosita condominiale", "morosità condominiale", "debito condominiale", "insoluti condominiali", "quote condominiali non pagate", "arretrati verso il condominio", "spese condominiali pregresse", "rate scadute condominiali")):
+    if any(token in normalized for token in ("spese condominiali arretrate", "oneri condominiali arretrati", "morosita condominiale", "morosità condominiale", "debito condominiale", "insoluti condominiali", "quote condominiali non pagate", "arretrati verso il condominio", "spese condominiali pregresse", "rate scadute condominiali", "spese condominiali scadute", "scadute ed insolute", "insolute alla data della perizia")):
         return "Spese condominiali arretrate da verificare"
     if any(token in normalized for token in ("uso residenziale non legittimato", "destinazione d'uso")):
         return "Verifica conseguenze della destinazione d'uso non legittimata"
@@ -5124,7 +5129,7 @@ def _money_box_code_for_text(text: str) -> Optional[str]:
         return None
     if any(token in normalized for token in ("formalita da cancellare", "cancellazione formalita", "cancellazione ipoteca", "spese di cancellazione", "oneri di cancellazione", "formalita pregiudizievoli da cancellare")):
         return "G"
-    if any(token in normalized for token in ("spese condominiali arretrate", "oneri condominiali arretrati", "morosita condominiale", "morosità condominiale", "debito condominiale", "insoluti condominiali", "quote condominiali non pagate", "arretrati verso il condominio", "spese condominiali pregresse", "rate scadute condominiali")):
+    if any(token in normalized for token in ("spese condominiali arretrate", "oneri condominiali arretrati", "morosita condominiale", "morosità condominiale", "debito condominiale", "insoluti condominiali", "quote condominiali non pagate", "arretrati verso il condominio", "spese condominiali pregresse", "rate scadute condominiali", "spese condominiali scadute", "scadute ed insolute", "insolute alla data della perizia")):
         return "E"
     if any(token in normalized for token in ("liberazione immobile", "rilascio immobile", "costi di liberazione", "spese per liberazione", "oneri per rilascio", "costi connessi alla liberazione", "spese per sgombero", "sgombero")):
         return "H"
@@ -5421,6 +5426,7 @@ def _sanitize_money_box_for_customer(result: Dict[str, Any]) -> None:
         if not isinstance(item, dict):
             continue
         code = str(item.get("code") or item.get("voce") or "").strip().upper()
+        source = str(item.get("source") or "").strip().upper()
         fonte = item.get("fonte_perizia", {}) if isinstance(item.get("fonte_perizia"), dict) else {}
         evidence = _normalize_contract_evidence_list(fonte.get("evidence", []), max_items=2)
         if not evidence:
@@ -5446,6 +5452,12 @@ def _sanitize_money_box_for_customer(result: Dict[str, Any]) -> None:
             if isinstance(supported_amount, float) and supported_amount > 0:
                 item["stima_euro"] = int(round(supported_amount))
                 supported_numeric_total += supported_amount
+            elif source == "VERIFIER_RUNTIME":
+                existing_supported_amount = _as_float_or_none(item.get("stima_euro"))
+                if isinstance(existing_supported_amount, float) and existing_supported_amount > 0:
+                    supported_numeric_total += existing_supported_amount
+                    if str(item.get("type") or "").upper() in {"", "TBD", "QUALITATIVE"}:
+                        item["type"] = "ESTIMATE"
             elif _as_float_or_none(item.get("stima_euro")) is not None:
                 item["stima_euro"] = "TBD"
                 if str(item.get("type") or "").upper() not in {"INFO_ONLY"}:
@@ -6017,10 +6029,12 @@ def _ensure_lot_contract(lot: Dict[str, Any], lot_number: int) -> Dict[str, Any]
     lot_obj.setdefault("superficie_catastale", None)
     lot_obj.setdefault("diritto_reale", "TBD")
     lot_obj.setdefault("quota", None)
+    lot_obj.setdefault("occupancy_status", None)
+    lot_obj.setdefault("stato_occupativo", None)
     lot_obj.setdefault("shared_rights_note", None)
     lot_obj.setdefault("detail_scope", "LOT")
     evidence = lot_obj.get("evidence") if isinstance(lot_obj.get("evidence"), dict) else {}
-    for key in ("lotto", "prezzo_base", "ubicazione", "superficie", "superficie_catastale", "diritto_reale", "quota", "shared_rights_note", "tipologia", "valore_stima", "deprezzamento"):
+    for key in ("lotto", "prezzo_base", "ubicazione", "superficie", "superficie_catastale", "diritto_reale", "quota", "occupancy_status", "shared_rights_note", "tipologia", "valore_stima", "deprezzamento"):
         if not isinstance(evidence.get(key), list):
             evidence[key] = []
     lot_obj["evidence"] = evidence
@@ -6180,6 +6194,61 @@ def _extract_lot_risk_notes(section_pages: List[Dict[str, Any]]) -> List[str]:
         if any(re.search(pat, low, re.I) for pat in patterns):
             notes.append(label)
     return notes
+
+
+def _normalize_lot_occupancy_value(text: str) -> Optional[str]:
+    normalized = _normalize_signal_text(text)
+    if not normalized:
+        return None
+    if re.search(r"occupat[oa]\s+dal\s+debitore", normalized, re.I):
+        return "OCCUPATO DAL DEBITORE"
+    if re.search(r"occupat[oa]\s+da\s+terzi", normalized, re.I):
+        return "OCCUPATO DA TERZI"
+    if re.search(r"(locat[oa]|conduttore|contratto\s+di\s+locazione)", normalized, re.I):
+        return "LOCATO"
+    if re.search(r"(non\s+occupat[oa]|liber[oa]|libero|disponibile)", normalized, re.I):
+        return "LIBERO"
+    return None
+
+
+def _extract_lot_occupancy(section_pages: List[Dict[str, Any]]) -> Dict[str, Any]:
+    if not isinstance(section_pages, list) or not section_pages:
+        return {}
+    patterns = [
+        re.compile(r"(stato\s+occupativo[^\n]{0,120})", re.I),
+        re.compile(r"((?:attualmente\s+l['’]|l['’])?immobile[^\n]{0,120}occupat[oa][^\n]{0,120})", re.I),
+        re.compile(r"((?:occupat[oa]\s+dal\s+debitore|occupat[oa]\s+da\s+terzi|liber[oa]|non\s+occupat[oa]|locat[oa])[^\n]{0,120})", re.I),
+    ]
+    best_candidate: Optional[Tuple[str, Dict[str, Any]]] = None
+    for page_obj in section_pages:
+        text = str(page_obj.get("text", "") or "")
+        page_num = _get_page_number(page_obj)
+        if not text or page_num <= 0:
+            continue
+        for pattern in patterns:
+            for match in pattern.finditer(text):
+                line_start, line_end = _line_bounds(text, match.start(), match.end())
+                evidence = _build_evidence(
+                    text,
+                    page_num,
+                    line_start,
+                    line_end,
+                    field_key="occupancy_status",
+                    anchor_hint=match.group(0),
+                )
+                quote = str(evidence.get("quote") or "")
+                if not quote.strip() or _is_toc_like_quote(quote):
+                    continue
+                normalized_value = _normalize_lot_occupancy_value(quote)
+                if not normalized_value:
+                    continue
+                if normalized_value == "OCCUPATO DAL DEBITORE":
+                    return {"occupancy_status": normalized_value, "occupancy_evidence": [evidence]}
+                if best_candidate is None:
+                    best_candidate = (normalized_value, evidence)
+    if best_candidate:
+        return {"occupancy_status": best_candidate[0], "occupancy_evidence": [best_candidate[1]]}
+    return {}
 
 
 def _select_best_address_candidate(candidates: List[Tuple[str, Dict[str, Any]]]) -> Optional[Tuple[str, Dict[str, Any]]]:
@@ -6396,6 +6465,9 @@ def _build_lots_overview(lots: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
             "comune": _normalize_headline_text(str(raw_lot.get("comune", "") or "")) or None,
             "ubicazione": _normalize_headline_text(str(raw_lot.get("ubicazione", "") or "")) or None,
             "tipologia": _normalize_headline_text(str(raw_lot.get("tipologia", "") or "")) or None,
+            "diritto": _normalize_headline_text(str(raw_lot.get("diritto_reale", "") or "")) or None,
+            "quota": _normalize_headline_text(str(raw_lot.get("quota", "") or "")) or None,
+            "occupazione": _normalize_headline_text(str(raw_lot.get("occupancy_status") or raw_lot.get("stato_occupativo") or "")) or None,
             "valore_stima_eur": int(round(stima)) if isinstance(stima, (int, float)) else None,
             "deprezzamento_percent": round(float(dep_pct), 2) if isinstance(dep_pct, (int, float)) else None,
             "deprezzamento_eur": int(round(dep_value)) if isinstance(dep_value, (int, float)) else None,
@@ -6680,6 +6752,7 @@ def _sanitize_lot_conservative_outputs(result: Dict[str, Any]) -> None:
         item for item in money_box.get("items", [])
         if isinstance(item, dict) and (
             str(item.get("source") or "").upper() == "PERIZIA_QUALITATIVE"
+            or str(item.get("source") or "").upper() == "VERIFIER_RUNTIME"
             or str(item.get("code") or "").strip().upper().startswith("LOT_")
             or bool(_normalize_contract_evidence_list(item.get("evidence", []), max_items=2))
             or bool(
@@ -6690,15 +6763,153 @@ def _sanitize_lot_conservative_outputs(result: Dict[str, Any]) -> None:
             )
         )
     ]
-    money_box["qualitative_burdens"] = copy.deepcopy(money_box["items"])
+    qualitative_burdens = []
+    explicit_total = 0.0
+    for item in money_box["items"]:
+        if not isinstance(item, dict):
+            continue
+        amount = _as_float_or_none(item.get("stima_euro"))
+        evidence = _normalize_contract_evidence_list(item.get("evidence", []), max_items=2)
+        if not evidence:
+            evidence = _normalize_contract_evidence_list(
+                ((item.get("fonte_perizia") or {}).get("evidence", [])),
+                max_items=2,
+            )
+        quote_blob = " ".join(
+            [
+                str(item.get("label_it") or item.get("label") or item.get("voce") or ""),
+                str(item.get("stima_nota") or ""),
+            ] + [str(ev.get("quote") or "") for ev in evidence]
+        )
+        if isinstance(amount, float) and amount > 0 and evidence and _is_buyer_burden_quote(quote_blob):
+            explicit_total += amount
+            continue
+        qualitative_burdens.append(copy.deepcopy(item))
+    money_box["qualitative_burdens"] = qualitative_burdens
     money_box.pop("total_extra_costs_range", None)
-    money_box["total_extra_costs"] = {
-        "min": "NON_QUANTIFICATO_IN_PERIZIA",
-        "max": "NON_QUANTIFICATO_IN_PERIZIA",
-        "nota": "Costi extra non quantificati in perizia; mantenuti solo oneri qualitativi buyer-borne",
-    }
+    if explicit_total > 0:
+        explicit_total_int = int(round(explicit_total))
+        money_box["total_extra_costs"] = {
+            "range": {"min": explicit_total_int, "max": explicit_total_int},
+            "max_is_open": False,
+            "note": "Document-backed quantified buyer burdens only; qualitative burdens remain excluded from the numeric total",
+        }
+    else:
+        money_box["total_extra_costs"] = {
+            "min": "NON_QUANTIFICATO_IN_PERIZIA",
+            "max": "NON_QUANTIFICATO_IN_PERIZIA",
+            "nota": "Costi extra non quantificati in perizia; mantenuti solo oneri qualitativi buyer-borne",
+        }
     result["money_box"] = money_box
     result["section_3_money_box"] = copy.deepcopy(money_box)
+
+
+def _focused_cost_evidence_for_amount(evidence_list: List[Dict[str, Any]], amount: float) -> List[Dict[str, Any]]:
+    normalized = _normalize_contract_evidence_list(evidence_list, max_items=2)
+    if not normalized:
+        return []
+    rounded_amount = round(float(amount), 2)
+    amount_variants = {
+        f"{rounded_amount:,.2f}".replace(",", "X").replace(".", ",").replace("X", "."),
+        f"{rounded_amount:.2f}",
+        f"{rounded_amount:.2f}".replace(".", ","),
+        str(int(round(rounded_amount))) if abs(rounded_amount - round(rounded_amount)) < 0.01 else "",
+    }
+    amount_variants = {variant for variant in amount_variants if variant}
+    for ev in normalized:
+        if not isinstance(ev, dict):
+            continue
+        quote = str(ev.get("quote") or "")
+        for variant in amount_variants:
+            idx = quote.find(variant)
+            if idx < 0:
+                continue
+            focused = copy.deepcopy(ev)
+            snippet_start = max(0, idx - 70)
+            snippet_end = min(len(quote), idx + len(variant) + 70)
+            focused["quote"] = " ".join(quote[snippet_start:snippet_end].split())
+            return [focused]
+    return normalized[:1]
+
+
+def _merge_verifier_explicit_cost_items(result: Dict[str, Any]) -> None:
+    if not isinstance(result, dict):
+        return
+    verifier_runtime = result.get("verifier_runtime") if isinstance(result.get("verifier_runtime"), dict) else {}
+    canonical_case = verifier_runtime.get("canonical_case") if isinstance(verifier_runtime.get("canonical_case"), dict) else {}
+    costs = canonical_case.get("costs") if isinstance(canonical_case.get("costs"), dict) else {}
+    raw_items = costs.get("explicit_buyer_costs") if isinstance(costs.get("explicit_buyer_costs"), list) else []
+    if not raw_items:
+        return
+
+    def _normalized_verifier_item(raw_item: Dict[str, Any], idx: int) -> Optional[Dict[str, Any]]:
+        amount = _as_float_or_none(raw_item.get("amount_eur"))
+        if amount is None:
+            amount = _as_float_or_none(raw_item.get("amount"))
+        if amount is None or amount <= 0:
+            return None
+        evidence = _focused_cost_evidence_for_amount(raw_item.get("evidence", []), amount)
+        if not evidence:
+            return None
+        text_blob = " ".join(
+            [str(raw_item.get("label") or ""), str(raw_item.get("label_it") or "")]
+            + [str(ev.get("quote") or "") for ev in evidence]
+        )
+        if not _is_buyer_burden_quote(text_blob):
+            return None
+        label_it = _translated_cost_burden_label(text_blob) or "Costo buyer-side esplicito da perizia"
+        mapped_code = _money_box_code_for_text(text_blob) or f"VR_COST_{idx:02d}"
+        lot_match = re.search(r"\blotto\s+(\d+)\b", text_blob, re.I)
+        lot_number = int(lot_match.group(1)) if lot_match else None
+        return {
+            "code": mapped_code,
+            "lot_number": lot_number,
+            "label_it": label_it,
+            "label_en": label_it,
+            "type": "ESTIMATE",
+            "stima_euro": float(amount),
+            "stima_nota": "Costo buyer-side esplicito rilevato nella perizia",
+            "source": "VERIFIER_RUNTIME",
+            "evidence": copy.deepcopy(evidence),
+            "fonte_perizia": {
+                "value": "Perizia",
+                "evidence": copy.deepcopy(evidence),
+            },
+        }
+
+    verifier_items = []
+    for idx, raw_item in enumerate(raw_items, start=1):
+        if not isinstance(raw_item, dict):
+            continue
+        normalized_item = _normalized_verifier_item(raw_item, idx)
+        if normalized_item:
+            verifier_items.append(normalized_item)
+    if not verifier_items:
+        return
+
+    for box_key in ("money_box", "section_3_money_box"):
+        box = result.get(box_key) if isinstance(result.get(box_key), dict) else None
+        if not isinstance(box, dict):
+            continue
+        existing_items = box.get("items") if isinstance(box.get("items"), list) else []
+        existing_keys = {
+            (
+                _normalize_signal_text(item.get("label_it") or item.get("label") or item.get("voce") or ""),
+                round(float(_as_float_or_none(item.get("stima_euro")) or 0.0), 2),
+            )
+            for item in existing_items if isinstance(item, dict)
+        }
+        for item in verifier_items:
+            key = (
+                _normalize_signal_text(item.get("label_it") or ""),
+                round(float(_as_float_or_none(item.get("stima_euro")) or 0.0), 2),
+            )
+            if key in existing_keys:
+                continue
+            existing_items.append(copy.deepcopy(item))
+            existing_keys.add(key)
+        box["items"] = existing_items
+        result[box_key] = box
 
 
 def _augment_legal_killers_from_lots(legal_killers_items: List[Dict[str, Any]], lots: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
@@ -6921,6 +7132,14 @@ def _refresh_customer_facing_result_on_read(
 
     safe_pages = pages if isinstance(pages, list) and pages else [{"page_number": 1, "text": ""}]
 
+    lots = result.get("lots")
+    if isinstance(lots, list) and lots:
+        result["lots"] = _enrich_lots_from_sections(
+            lots,
+            safe_pages,
+            beni=result.get("beni") if isinstance(result.get("beni"), list) else None,
+        )
+
     _apply_headline_field_states(result, safe_pages)
     _apply_decision_field_states(result, safe_pages)
     _apply_headline_overrides(result, headline_overrides or {})
@@ -6934,6 +7153,7 @@ def _refresh_customer_facing_result_on_read(
     _recompute_semaforo_status(result)
     _synthesize_decisione_rapida(result, states)
 
+    _merge_verifier_explicit_cost_items(result)
     _apply_market_ranges_to_money_box(result)
     _sanitize_lot_conservative_outputs(result)
     _normalize_evidence_offsets(result, safe_pages)
@@ -7023,6 +7243,13 @@ def _enrich_lots_from_sections(
         if identity.get("shared_rights_note"):
             lot["shared_rights_note"] = _normalize_headline_text(str(identity.get("shared_rights_note") or ""))
             lot["evidence"]["shared_rights_note"] = identity.get("shared_rights_evidence", []) or lot["evidence"]["shared_rights_note"]
+        occupancy = _extract_lot_occupancy(lot_pages or normalized_pages)
+        if occupancy.get("occupancy_status"):
+            current_occupancy = _normalize_headline_text(str(lot.get("occupancy_status") or lot.get("stato_occupativo") or ""))
+            if current_occupancy in {"", "TBD", "NON SPECIFICATO IN PERIZIA"}:
+                lot["occupancy_status"] = occupancy["occupancy_status"]
+                lot["stato_occupativo"] = occupancy["occupancy_status"]
+                lot["evidence"]["occupancy_status"] = occupancy.get("occupancy_evidence", []) or lot["evidence"]["occupancy_status"]
 
         context_pages = schema_pages or lot_pages or normalized_pages
         price_ev = _find_regex_in_specific_pages(
@@ -14656,6 +14883,7 @@ async def analyze_perizia(request: Request, file: UploadFile = File(...)):
             full_text=full_text,
         )
         apply_verifier_to_result(result, verifier_payload)
+        _merge_verifier_explicit_cost_items(result)
         debug_obj["verifier_runtime"] = {
             "qa_checks": verifier_payload.get("qa_checks", []),
             "comparison": verifier_payload.get("comparison", {}),
