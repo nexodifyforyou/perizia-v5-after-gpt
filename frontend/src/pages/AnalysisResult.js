@@ -1405,7 +1405,16 @@ const AnalysisResult = () => {
       ),
       quotaValue
     );
-    const statoOccupativoValue = safeRender(pickFirstNonEmpty(sourceBene?.occupancy_status, sourceBene?.stato_occupativo, sourceBene?.occupazione_status, sourceBene?.occupazione, occupativo?.status_it, occupativo?.status), '').trim();
+    const statoOccupativoValue = getRichFieldDisplayValue(
+      'stato_occupativo',
+      occupativo,
+      sourceBene?.occupancy_status,
+      sourceBene?.stato_occupativo,
+      sourceBene?.occupazione_status,
+      sourceBene?.occupazione,
+      occupativo?.status_it,
+      occupativo?.status
+    );
     const urbanisticaValue = getRichFieldDisplayValue(
       'regolarita_urbanistica',
       abusi?.conformita_urbanistica,
@@ -1723,8 +1732,8 @@ const AnalysisResult = () => {
             {
               key: 'stato_occupativo',
               label: 'Stato occupativo',
-              value: normalizeDettagliValue(lot?.occupancy_status || lot?.stato_occupativo),
-              evidence: mergeEvidence(lotEvidence?.occupancy_status)
+              value: getRichFieldDisplayValue('stato_occupativo', occupativo, lot?.occupancy_status, lot?.stato_occupativo),
+              evidence: mergeEvidence(lotEvidence?.occupancy_status, getFieldEvidence('stato_occupativo', occupativo))
             },
             {
               key: 'catasto',
@@ -2183,7 +2192,9 @@ const AnalysisResult = () => {
     background_note: 'Nota di sfondo'
   };
   const occupancyDisplayTruth = normalizeComparableText(getRichFieldDisplayValue('stato_occupativo', occupativo, occupativo?.status_it, occupativo?.status));
-  const agibilitaDisplayTruth = normalizeComparableText(pickFirstNonEmpty(fieldStates?.agibilita?.value, fieldStates?.agibilita?.status_it, abusi?.agibilita?.status, abusi?.agibilita));
+  const agibilitaDisplayTruth = normalizeComparableText(
+    getRichFieldDisplayValue('agibilita', abusi?.agibilita, fieldStates?.agibilita?.status_it, abusi?.agibilita?.status, abusi?.agibilita)
+  );
   const hasPositiveOccupancyTruth = /(libero|non occupato|disponibile)/.test(occupancyDisplayTruth)
     && !/(occupato da terzi|locato|opponibil|detent|debitore occupa)/.test(occupancyDisplayTruth);
   const hasPositiveAgibilitaTruth = /(presente|rilasciat|agibil|abitabil)/.test(agibilitaDisplayTruth)
@@ -2444,6 +2455,57 @@ const AnalysisResult = () => {
         : item.kind === 'caution_watch'
           ? redFlagKindLabels.unresolved_conflict
           : redFlagKindLabels.coverage_gap
+    });
+  });
+
+  const hasTechnicalRedFlagLike = (patterns) => {
+    return redFlagGroups.technical.some((item) => {
+      const text = normalizeComparableText(`${safeRender(item?.label, '')} ${safeRender(item?.explanation, '')}`);
+      return patterns.some((pattern) => text.includes(pattern));
+    });
+  };
+
+  [
+    {
+      key: 'tech_urbanistica',
+      fieldKey: 'regolarita_urbanistica',
+      label: 'Conformità urbanistica',
+      legacyValue: abusi?.conformita_urbanistica,
+      severity: 'RED',
+      matchers: ['urbanistic', 'difform', 'abus', 'regolarita urbanistica'],
+      isRisky: (text) => /(difform|abus|irregolar|non conform|da sanare|non regolar)/.test(text)
+    },
+    {
+      key: 'tech_catasto',
+      fieldKey: 'conformita_catastale',
+      label: 'Conformità catastale',
+      legacyValue: abusi?.conformita_catastale,
+      severity: 'RED',
+      matchers: ['catastal', 'difform', 'mancata corrispondenza', 'conformita catastale'],
+      isRisky: (text) => /(difform|irregolar|non conform|mancata corrispondenza|incongruenz)/.test(text)
+    },
+    {
+      key: 'tech_agibilita',
+      fieldKey: 'agibilita',
+      label: 'Agibilità / Abitabilità',
+      legacyValue: abusi?.agibilita,
+      severity: 'AMBER',
+      matchers: ['agibil', 'abitabil'],
+      isRisky: (text) => /(non|assen|manc|irregolar)/.test(text) && /(agibil|abitabil|presente|rilasciat)/.test(text)
+    }
+  ].forEach(({ key, fieldKey, label, legacyValue, severity, matchers, isRisky }) => {
+    const state = getFieldState(fieldKey);
+    const displayValue = getRichFieldDisplayValue(fieldKey, legacyValue);
+    const normalizedDisplay = normalizeComparableText(displayValue);
+    if (!state || state.status === 'NOT_FOUND' || !displayValue || !isRisky(normalizedDisplay)) return;
+    if (hasTechnicalRedFlagLike(matchers)) return;
+    addRedFlag('technical', {
+      key,
+      label,
+      explanation: displayValue,
+      severity,
+      evidence: getFieldEvidence(fieldKey, legacyValue),
+      kindLabel: redFlagKindLabels.confirmed_risk
     });
   });
 
@@ -3216,8 +3278,8 @@ const AnalysisResult = () => {
               />
               <PanoramicaDataValueCard
                 label="Stato Occupativo" 
-                value={normalizeOverviewValue(occupativo.status_it || occupativo.status)}
-                evidence={getEvidence(occupativo)}
+                value={getSurfaceDisplayValue('stato_occupativo', occupativo, occupativo?.status_it, occupativo?.status)}
+                evidence={getFieldEvidence('stato_occupativo', occupativo)}
               />
               <PanoramicaDataValueCard
                 label="Conformità Urbanistica" 
@@ -3226,13 +3288,13 @@ const AnalysisResult = () => {
               />
               <PanoramicaDataValueCard
                 label="Conformità Catastale" 
-                value={normalizeOverviewValue(abusi.conformita_catastale?.status)}
-                evidence={getEvidence(abusi.conformita_catastale)}
+                value={getSurfaceDisplayValue('conformita_catastale', abusi?.conformita_catastale, abusi?.conformita_catastale?.status)}
+                evidence={getFieldEvidence('conformita_catastale', abusi?.conformita_catastale)}
               />
               <PanoramicaDataValueCard
                 label="Agibilità/Abitabilità" 
-                value={normalizeOverviewValue(abusi.agibilita?.status)}
-                evidence={getEvidence(abusi.agibilita)}
+                value={getSurfaceDisplayValue('agibilita', abusi?.agibilita, abusi?.agibilita?.status)}
+                evidence={getFieldEvidence('agibilita', abusi?.agibilita)}
               />
               <PanoramicaDataValueCard
                 label="APE (Certificato Energetico)" 
@@ -3242,12 +3304,12 @@ const AnalysisResult = () => {
               <PanoramicaDataValueCard
                 label="Diritto Reale" 
                 value={splitQuotaFromDiritto(getRichFieldDisplayValue('diritto_reale', null, dati.diritto_reale?.value || dati.diritto_reale), getRichFieldDisplayValue('quota', null, dati?.quota?.value || dati?.quota))}
-                evidence={getEvidence(dati.diritto_reale)}
+                evidence={getFieldEvidence('diritto_reale', dati.diritto_reale)}
               />
               <PanoramicaDataValueCard
                 label="Quota"
                 value={getSurfaceDisplayValue('quota', dati?.quota, dati?.quota?.value, dati?.quota)}
-                evidence={getEvidence(dati?.quota)}
+                evidence={getFieldEvidence('quota', dati?.quota)}
               />
             </div>
 

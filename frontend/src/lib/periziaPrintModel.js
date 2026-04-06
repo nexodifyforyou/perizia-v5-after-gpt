@@ -387,6 +387,7 @@ const buildCostBuckets = (result) => {
 
 const buildLegalItems = (result) => {
   const fieldStates = result.field_states || {};
+  const abusi = result.section_5_abusi_conformita?.conformita_urbanistica ? result.section_5_abusi_conformita : (result.abusi_edilizi_conformita || {});
   const section9 = Array.isArray(result.section_9_legal_killers?.top_items) && result.section_9_legal_killers.top_items.length > 0
     ? result.section_9_legal_killers.top_items
     : (Array.isArray(result.section_9_legal_killers?.items) ? result.section_9_legal_killers.items : []);
@@ -445,9 +446,9 @@ const buildLegalItems = (result) => {
     });
   };
 
-  pushItem('urbanistica', 'Regolarita urbanistica', fieldStates.regolarita_urbanistica?.status, fieldStates.regolarita_urbanistica?.value, fieldStates.regolarita_urbanistica?.evidence);
-  pushItem('catasto', 'Conformita catastale', fieldStates.conformita_catastale?.status, fieldStates.conformita_catastale?.value, fieldStates.conformita_catastale?.evidence);
-  pushItem('agibilita', 'Agibilita', fieldStates.agibilita?.status, fieldStates.agibilita?.value, fieldStates.agibilita?.evidence);
+  pushItem('urbanistica', 'Regolarita urbanistica', fieldStates.regolarita_urbanistica?.status, getRichDisplayValue(fieldStates.regolarita_urbanistica, abusi?.conformita_urbanistica), fieldStates.regolarita_urbanistica?.evidence);
+  pushItem('catasto', 'Conformita catastale', fieldStates.conformita_catastale?.status, getRichDisplayValue(fieldStates.conformita_catastale, abusi?.conformita_catastale), fieldStates.conformita_catastale?.evidence);
+  pushItem('agibilita', 'Agibilita', fieldStates.agibilita?.status, getRichDisplayValue(fieldStates.agibilita, abusi?.agibilita), fieldStates.agibilita?.evidence);
   pushItem('occupazione', 'Stato occupativo', fieldStates.stato_occupativo?.status, fieldStates.stato_occupativo?.value, fieldStates.stato_occupativo?.evidence);
   pushItem('opponibilita', 'Opponibilita occupazione', fieldStates.opponibilita_occupazione?.status, fieldStates.opponibilita_occupazione?.value, fieldStates.opponibilita_occupazione?.evidence);
   pushItem('delivery-timeline', 'Tempistica liberazione', fieldStates.delivery_timeline?.status, fieldStates.delivery_timeline?.value, fieldStates.delivery_timeline?.evidence);
@@ -521,7 +522,7 @@ const buildDetails = (result) => {
           { label: 'Quota', value: safeRender(lot?.quota, ''), evidence: getPrimaryEvidence(evidenceObj?.quota, evidenceObj?.diritto_reale) },
           { label: 'Diritti condivisi', value: sharedRightsNote, evidence: getPrimaryEvidence(evidenceObj?.note) },
           { label: 'Prezzo base', value: safeRender(lot?.prezzo_base_eur, ''), evidence: getPrimaryEvidence(evidenceObj?.prezzo_base) },
-          { label: 'Stato occupativo', value: safeRender(lot?.occupancy_status || lot?.stato_occupativo, ''), evidence: getPrimaryEvidence(evidenceObj?.occupancy_status) },
+          { label: 'Stato occupativo', value: safeRender(getRichDisplayValue(fieldStates.stato_occupativo, occupativo, lot?.occupancy_status, lot?.stato_occupativo), ''), evidence: getPrimaryEvidence(evidenceObj?.occupancy_status) },
           { label: 'Catasto', value: formatCatastoCompact(lot?.catasto) || safeRender(lot?.catasto, ''), evidence: getPrimaryEvidence(evidenceObj?.catasto) },
           { label: 'Stato conservativo', value: safeRender(lot?.stato_conservativo, ''), evidence: getPrimaryEvidence(evidenceObj?.stato_conservativo) },
           { label: 'Rischi principali', value: Array.isArray(lot?.risk_notes) ? lot.risk_notes.map((note) => safeRender(note, '')).filter(Boolean).slice(0, 3).join(' | ') : '', evidence: getPrimaryEvidence(evidenceObj?.note) },
@@ -581,8 +582,9 @@ const buildDetails = (result) => {
     .sort((a, b) => (a.bene_number || 0) - (b.bene_number || 0))
     .map((bene, index) => {
       const evidenceObj = bene?.evidence && typeof bene.evidence === 'object' ? bene.evidence : {};
-      const occupazioneValue = pickFirstNonEmpty(
-        getFieldStateValue(fieldStates.stato_occupativo),
+      const occupazioneValue = getRichDisplayValue(
+        fieldStates.stato_occupativo,
+        occupativo,
         bene?.occupancy_status,
         bene?.stato_occupativo,
         bene?.occupazione_status,
@@ -624,8 +626,8 @@ const buildDetails = (result) => {
         : [];
       const agibilitaDetail = buildAgibilitaDetail(bene, abusi, fieldStates);
       const detailRows = [
-        { label: 'Diritto reale', value: dirittoReale, evidence: [] },
-        { label: 'Quota', value: quota, evidence: [] },
+        { label: 'Diritto reale', value: dirittoReale, evidence: getPrimaryEvidence(getFieldStateEvidence(fieldStates.diritto_reale, result.dati_certi_del_lotto?.diritto_reale), result.section_4_dati_certi?.diritto_reale) },
+        { label: 'Quota', value: quota, evidence: getPrimaryEvidence(getFieldStateEvidence(fieldStates.quota, result.dati_certi_del_lotto?.quota), result.section_4_dati_certi?.quota) },
         { label: 'Stato occupativo', value: safeRender(occupazioneValue, ''), evidence: getPrimaryEvidence(evidenceObj?.occupancy_status, getFieldStateEvidence(fieldStates.stato_occupativo, occupativo)) },
         { label: 'Catasto', value: catastoValue, evidence: catastoEvidence },
         { label: 'Urbanistica', value: safeRender(urbanisticaValue, ''), evidence: getPrimaryEvidence(evidenceObj?.urbanistica, getFieldStateEvidence(fieldStates.regolarita_urbanistica, abusi?.conformita_urbanistica)) },
