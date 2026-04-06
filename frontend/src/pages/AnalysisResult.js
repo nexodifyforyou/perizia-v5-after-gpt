@@ -2737,12 +2737,13 @@ const AnalysisResult = () => {
     );
   };
 
-  const HeadlineFieldCard = ({ label, fieldKey, value, evidence }) => {
+  const HeadlineFieldCard = ({ label, fieldKey, value, evidence, preferValueWhenPresent = false, suppressVerificationUi = false }) => {
     const status = getHeadlineStatus(fieldKey);
-    const displayValue = getHeadlineDisplayValue(fieldKey, value);
+    const hasPreferredValue = preferValueWhenPresent && value !== undefined && value !== null && value !== '';
+    const displayValue = hasPreferredValue ? safeRender(value, 'Non specificato in perizia') : getHeadlineDisplayValue(fieldKey, value);
     const hasEvidence = evidence && Array.isArray(evidence) && evidence.length > 0;
     const pages = hasEvidence ? [...new Set(evidence.map(e => e.page).filter(Boolean))].sort((a, b) => a - b) : [];
-    const needsVerification = isNeedsVerification(status);
+    const needsVerification = !suppressVerificationUi && isNeedsVerification(status);
     const isConfirmed = status === 'USER_PROVIDED';
 
     return (
@@ -2783,7 +2784,7 @@ const AnalysisResult = () => {
             "{evidence[0].quote.substring(0, 150)}{evidence[0].quote.length > 150 ? '...' : ''}"
           </p>
         )}
-        <MissingStateRationale fieldKey={fieldKey} forceMissing={!hasEvidence && needsVerification} />
+        {!suppressVerificationUi && <MissingStateRationale fieldKey={fieldKey} forceMissing={!hasEvidence && needsVerification} />}
       </div>
     );
   };
@@ -3610,6 +3611,8 @@ const AnalysisResult = () => {
                   fieldKey="lotto"
                   value={caseHeader.lotto?.value || caseHeader.lotto}
                   evidence={getEvidence(caseHeader.lotto)}
+                  preferValueWhenPresent
+                  suppressVerificationUi
                 />
                 <HeadlineFieldCard
                   label="Tribunale"
