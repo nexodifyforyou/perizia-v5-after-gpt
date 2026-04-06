@@ -1704,6 +1704,66 @@ def test_multilot_fixture_writes_scoped_pricing_before_root_suppression():
     assert payload["canonical_case"]["pricing"]["selected_price"] is None
 
 
+def test_pricing_explicit_lotto_price_does_not_drift_to_neighbor_bene_scope():
+    result = {
+        "field_states": {},
+        "dati_certi_del_lotto": {},
+        "document_quality": {"status": "TEXT_OK"},
+        "semaforo_generale": {"status": "AMBER"},
+    }
+    pages = [
+        {
+            "page_number": 1,
+            "text": (
+                "LOTTO 1\n"
+                "Bene N° 1 - Appartamento\n"
+                "Descrizione del bene.\n"
+                "LOTTO 2 - PREZZO BASE D'ASTA: € 84.000,00\n"
+                "Bene N° 2 - Garage\n"
+            ),
+        },
+    ]
+    payload = run_quality_verifier(
+        analysis_id="synthetic_pricing_lotto_anchor_stability",
+        result=result,
+        pages=pages,
+        full_text="\n\n".join(page["text"] for page in pages),
+    )
+    assert payload["scopes"]["lotto:2"]["pricing"]["selected_price"] == 84000.0
+    assert payload["scopes"]["bene:1"]["pricing"] == {}
+    assert payload["scopes"]["bene:2"]["pricing"] == {}
+
+
+def test_pricing_toc_style_lot_line_does_not_attach_to_previous_bene_heading():
+    result = {
+        "field_states": {},
+        "dati_certi_del_lotto": {},
+        "document_quality": {"status": "TEXT_OK"},
+        "semaforo_generale": {"status": "AMBER"},
+    }
+    pages = [
+        {
+            "page_number": 1,
+            "text": (
+                "LOTTO UNICO\n"
+                "Bene N° 4 - Villetta ................................ 45\n"
+                "Lotto Unico - Prezzo base d'asta: € 391.849,00 ................................ 45\n"
+            ),
+        },
+    ]
+    payload = run_quality_verifier(
+        analysis_id="synthetic_pricing_toc_lotto_scope",
+        result=result,
+        pages=pages,
+        full_text="\n\n".join(page["text"] for page in pages),
+    )
+    assert payload["scopes"]["lotto:unico"]["pricing"]["selected_price"] == 391849.0
+    assert not any(
+        scope.get("scope_type") == "bene" and scope.get("pricing")
+        for scope in payload["scopes"].values()
+    )
+
+
 def test_negative_agibilita_creates_real_issue_and_beats_legal_fallback():
     result = {
         "field_states": {},

@@ -110,30 +110,46 @@ def _scope_id_from_text(state: RuntimeState, text: str) -> tuple[str, str]:
     return _single_scope_fallback(state)
 
 
+def _nearest_preceding_local_scope_match(
+    state: RuntimeState,
+    text: str,
+    *,
+    anchor_pos: int,
+    window: int = 220,
+) -> tuple[str | None, str | None]:
+    start = max(0, anchor_pos - window)
+    local = text[start:anchor_pos]
+    nearest: tuple[int, int, str, str] | None = None
+
+    for match in _LOTTO_REGEX.finditer(local):
+        scope_id = f"lotto:{_normalize_lotto_token(match.group(1))}"
+        if scope_id not in state.scopes:
+            continue
+        distance = abs((start + match.start()) - anchor_pos)
+        candidate = (distance, 0, scope_id, "nearest_preceding_lotto_local_match")
+        if nearest is None or candidate < nearest:
+            nearest = candidate
+
+    for match in _BENE_REGEX.finditer(local):
+        scope_id = f"bene:{match.group(1)}"
+        if scope_id not in state.scopes:
+            continue
+        distance = abs((start + match.start()) - anchor_pos)
+        candidate = (distance, 1, scope_id, "nearest_preceding_bene_local_match")
+        if nearest is None or candidate < nearest:
+            nearest = candidate
+
+    if nearest is None:
+        return None, None
+    return nearest[2], nearest[3]
+
+
 def _scope_id_for_local_match(state: RuntimeState, text: str, start: int, end: int) -> tuple[str, str]:
-    before = text[:end]
-    bene_matches = list(_BENE_REGEX.finditer(before))
-    if bene_matches:
-        scope_id = f"bene:{bene_matches[-1].group(1)}"
-        if scope_id in state.scopes:
-            return scope_id, "explicit_bene_local_match"
-    lot_matches = list(_LOTTO_REGEX.finditer(before))
-    if lot_matches:
-        scope_id = f"lotto:{_normalize_lotto_token(lot_matches[-1].group(1))}"
-        if scope_id in state.scopes:
-            return scope_id, "explicit_lotto_local_match"
-    after = text[start:]
-    next_bene = _BENE_REGEX.search(after)
-    if next_bene:
-        scope_id = f"bene:{next_bene.group(1)}"
-        if scope_id in state.scopes:
-            return scope_id, "forward_bene_local_match"
-    next_lot = _LOTTO_REGEX.search(after)
-    if next_lot:
-        scope_id = f"lotto:{_normalize_lotto_token(next_lot.group(1))}"
-        if scope_id in state.scopes:
-            return scope_id, "forward_lotto_local_match"
-    return _scope_id_from_text(state, text[max(0, start - 120):min(len(text), end + 120)])
+    anchor_pos = max(0, start)
+    nearest_scope_id, nearest_method = _nearest_preceding_local_scope_match(state, text, anchor_pos=anchor_pos)
+    if nearest_scope_id and nearest_method:
+        return nearest_scope_id, nearest_method
+    return _scope_id_from_text(state, text[max(0, start - 120):end])
 
 
 def _candidate_page(candidate: Candidate) -> int:
