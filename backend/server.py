@@ -5217,6 +5217,23 @@ def _extract_money_box_supported_amount(item: Dict[str, Any], code: str, evidenc
 
 def _apply_money_box_canonical_supplements(result: Dict[str, Any], items: List[Dict[str, Any]]) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
     canonical_items = [copy.deepcopy(item) for item in items if isinstance(item, dict) and len(str(item.get("code") or item.get("voce") or "").strip().upper()) == 1]
+    preserved_noncanonical_items = [
+        copy.deepcopy(item)
+        for item in items
+        if isinstance(item, dict)
+        and len(str(item.get("code") or item.get("voce") or "").strip().upper()) != 1
+        and (
+            str(item.get("source") or "").upper() == "PERIZIA_QUALITATIVE"
+            or str(item.get("code") or "").strip().upper().startswith("LOT_")
+            or bool(_normalize_contract_evidence_list(item.get("evidence", []), max_items=2))
+            or bool(
+                _normalize_contract_evidence_list(
+                    (item.get("fonte_perizia") or {}).get("evidence", []),
+                    max_items=2,
+                )
+            )
+        )
+    ]
     item_map: Dict[str, Dict[str, Any]] = {
         str(item.get("code") or item.get("voce") or "").strip().upper(): item
         for item in canonical_items
@@ -5310,7 +5327,7 @@ def _apply_money_box_canonical_supplements(result: Dict[str, Any], items: List[D
                     }
                 )
 
-    return canonical_items, qualitative_burdens
+    return canonical_items + preserved_noncanonical_items, qualitative_burdens
 
 
 def _build_conservative_cost_burdens(result: Dict[str, Any], items: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
@@ -6166,6 +6183,16 @@ def _extract_lot_risk_notes(section_pages: List[Dict[str, Any]]) -> List[str]:
 
 
 def _select_best_address_candidate(candidates: List[Tuple[str, Dict[str, Any]]]) -> Optional[Tuple[str, Dict[str, Any]]]:
+    def _looks_like_specific_address(value: str) -> bool:
+        low = str(value or "").lower()
+        if any(token in low for token in (" via ", " viale ", " corso ", " piazza ", " contrada ", " località ", " localita ", " strada ", " vicolo ", " lungomare ", " largo ")):
+            return True
+        if re.search(r"\bvia\b|\bviale\b|\bcorso\b|\bpiazza\b|\bcontrada\b|\bstrada\b|\bvicolo\b", low):
+            return True
+        if re.search(r"\b(?:n\.?\s*\d+|snc|numero civico)\b", low):
+            return True
+        return False
+
     ranked: List[Tuple[int, str, Dict[str, Any]]] = []
     for raw_value, ev in candidates:
         value = _normalize_address_value(raw_value) or _normalize_headline_text(raw_value)
@@ -6173,6 +6200,21 @@ def _select_best_address_candidate(candidates: List[Tuple[str, Dict[str, Any]]])
             continue
         value = re.sub(r"\.{2,}\s*\d+\s*$", "", value).strip(" ,.;-")
         if _is_toc_like_line(value) or _is_toc_like_quote(value):
+            continue
+        low = value.lower()
+        if (
+            not _looks_like_specific_address(value)
+            and any(
+                marker in low
+                for marker in (
+                    "ubicazione dell'immobile",
+                    "valore commerciale dei beni",
+                    "caratteristiche e peculiarità della zona",
+                    "facilità di raggiungimento",
+                    "stato di",
+                )
+            )
+        ):
             continue
         m_common = re.search(
             r"Comune\s+di\s+([^\(,\n]+)\s*\(([A-Z]{2})\)[^\n]{0,120}?\bvia\b\s+(?:della\s+|del\s+|di\s+)?([A-Za-zÀ-ÿ' ]+?)\s+(snc|senza\s+numero\s+civico)",
@@ -6185,11 +6227,12 @@ def _select_best_address_candidate(candidates: List[Tuple[str, Dict[str, Any]]])
             street = _normalize_headline_text(m_common.group(3))
             value = f"{comune} ({prov}) - via {street} senza numero civico"
         score = len(value)
-        low = value.lower()
         if "numero civico" in low or "n.c." in low or "snc" in low:
             score += 40
         if "comune di" in low or "(pt)" in low or "(mn)" in low:
             score += 15
+        if _looks_like_specific_address(value):
+            score += 30
         ranked.append((score, value, ev))
     if not ranked:
         return None
@@ -6201,6 +6244,7 @@ def _extract_lot_identity_and_rights(lot_pages: List[Dict[str, Any]], lot_num: i
     address_candidates: List[Tuple[str, Dict[str, Any]]] = []
     right_candidates: List[Tuple[str, Dict[str, Any]]] = []
     shared_candidates: List[Tuple[str, Dict[str, Any]]] = []
+    quota_candidates: List[Tuple[str, Dict[str, Any]]] = []
     early_pages = [p for p in lot_pages[:5] if isinstance(p, dict)]
 
     for page_obj in early_pages:
@@ -6210,6 +6254,15 @@ def _extract_lot_identity_and_rights(lot_pages: List[Dict[str, Any]], lot_num: i
             continue
 
         for m in re.finditer(rf"Bene\s+N[°º]?\s*{lot_num}\s*-\s*[^\n]*?ubicat[oa]\s+a\s+([^\n]+)", text, re.I):
+            line_start, line_end = _line_bounds(text, m.start(), m.end())
+            ev = _build_evidence(text, page_num, line_start, line_end, field_key="ubicazione", anchor_hint=m.group(0))
+            address_candidates.append((m.group(1).strip(), ev))
+
+        for m in re.finditer(
+            r"(?:^|\n)\s*[A-Za-zÀ-ÿ][A-Za-zÀ-ÿ/'’\-\s]{0,40}\s+a\s+([A-ZÀ-ÿ][^\n,]{3,160}?)\s*,\s*della\s+superficie",
+            text,
+            re.I,
+        ):
             line_start, line_end = _line_bounds(text, m.start(), m.end())
             ev = _build_evidence(text, page_num, line_start, line_end, field_key="ubicazione", anchor_hint=m.group(0))
             address_candidates.append((m.group(1).strip(), ev))
@@ -6239,11 +6292,72 @@ def _extract_lot_identity_and_rights(lot_pages: List[Dict[str, Any]], lot_num: i
             ev = _build_evidence(text, page_num, line_start, line_end, field_key="shared_rights_note", anchor_hint=m.group(0))
             shared_candidates.append(("Accesso tramite stradella privata e corte comune", ev))
 
+        ownership_lines: List[Tuple[str, Dict[str, Any]]] = []
+        for line in text.splitlines():
+            line_clean = line.strip()
+            if not line_clean:
+                continue
+            if not re.search(r"\b\d+/\d+\s+di\s+", line_clean, re.I):
+                continue
+            if not re.search(r"\b(?:piena|nuda)\s+propriet[àa]|\busufrutto\b|\bcompropriet[àa]\b", line_clean, re.I):
+                continue
+            start_idx = text.find(line)
+            if start_idx < 0:
+                continue
+            ev = _build_evidence(
+                text,
+                page_num,
+                start_idx,
+                start_idx + len(line),
+                field_key="diritto_reale",
+                anchor_hint=line_clean,
+            )
+            ownership_lines.append((line_clean, ev))
+
+        if ownership_lines:
+            summaries: List[str] = []
+            quota_parts: List[str] = []
+            ownership_evidence: List[Dict[str, Any]] = []
+            for raw_line, ev in ownership_lines[:4]:
+                m = re.search(
+                    r"(?P<quota>\d+/\d+)\s+di\s+(?P<right>(?:piena|nuda)\s+propriet[àa]|\busufrutto\b|\bcompropriet[àa]\b)",
+                    raw_line,
+                    re.I,
+                )
+                if m:
+                    quota_value = m.group("quota")
+                    right_label = _normalize_headline_text(m.group("right"))
+                    summaries.append(f"{right_label} {quota_value}")
+                    quota_parts.append(quota_value)
+                else:
+                    summaries.append(_normalize_headline_text(raw_line))
+                ownership_evidence.append(ev)
+            if summaries:
+                right_candidates.append((" + ".join(summaries), ownership_evidence[0]))
+            if quota_parts:
+                quota_candidates.append((" + ".join(quota_parts), ownership_evidence[0]))
+
     out: Dict[str, Any] = {}
     best_address = _select_best_address_candidate(address_candidates)
     if best_address:
         out["ubicazione"] = best_address[0]
         out["ubicazione_evidence"] = [best_address[1]]
+    elif early_pages:
+        for page_obj in early_pages:
+            text = str(page_obj.get("text", "") or "")
+            page_num = _get_page_number(page_obj)
+            for m in re.finditer(
+                r"(?:^|\n)\s*(?:[A-Z]?\s*)?(?:appartamento|aappartamento|cantina|acantina|garage|box\s+auto|locale|magazzino|terreno|fabbricato|porzione|ufficio|negozio|autorimessa)\s+a\s+([^\n,]{3,160}?)\s*,\s*della\s+superficie",
+                text,
+                re.I,
+            ):
+                line_start, line_end = _line_bounds(text, m.start(), m.end())
+                ev = _build_evidence(text, page_num, line_start, line_end, field_key="ubicazione", anchor_hint=m.group(0))
+                out["ubicazione"] = _normalize_headline_text(m.group(1))
+                out["ubicazione_evidence"] = [ev]
+                break
+            if out.get("ubicazione"):
+                break
     if right_candidates:
         out["diritto_reale"] = right_candidates[0][0]
         out["diritto_reale_evidence"] = [right_candidates[0][1]]
@@ -6256,6 +6370,9 @@ def _extract_lot_identity_and_rights(lot_pages: List[Dict[str, Any]], lot_num: i
         else:
             out["diritto_reale"] = shared_text
             out["diritto_reale_evidence"] = [shared_candidates[0][1]]
+    if quota_candidates:
+        out["quota"] = quota_candidates[0][0]
+        out["quota_evidence"] = [quota_candidates[0][1]]
     return out
 
 
@@ -6561,7 +6678,17 @@ def _sanitize_lot_conservative_outputs(result: Dict[str, Any]) -> None:
     money_box["lots"] = rebuilt_rows
     money_box["items"] = [
         item for item in money_box.get("items", [])
-        if isinstance(item, dict) and str(item.get("source") or "").upper() == "PERIZIA_QUALITATIVE"
+        if isinstance(item, dict) and (
+            str(item.get("source") or "").upper() == "PERIZIA_QUALITATIVE"
+            or str(item.get("code") or "").strip().upper().startswith("LOT_")
+            or bool(_normalize_contract_evidence_list(item.get("evidence", []), max_items=2))
+            or bool(
+                _normalize_contract_evidence_list(
+                    (item.get("fonte_perizia") or {}).get("evidence", []),
+                    max_items=2,
+                )
+            )
+        )
     ]
     money_box["qualitative_burdens"] = copy.deepcopy(money_box["items"])
     money_box.pop("total_extra_costs_range", None)
@@ -6887,6 +7014,12 @@ def _enrich_lots_from_sections(
             if candidate_right and (current_right in {"", "TBD", "NON SPECIFICATO IN PERIZIA"} or "quota" in candidate_right.lower()):
                 lot["diritto_reale"] = candidate_right
                 lot["evidence"]["diritto_reale"] = identity.get("diritto_reale_evidence", []) or lot["evidence"]["diritto_reale"]
+        if identity.get("quota"):
+            current_quota = _normalize_headline_text(str(lot.get("quota") or ""))
+            candidate_quota = _normalize_headline_text(str(identity.get("quota") or ""))
+            if candidate_quota and current_quota in {"", "TBD", "NON SPECIFICATO IN PERIZIA"}:
+                lot["quota"] = candidate_quota
+                lot["evidence"]["quota"] = identity.get("quota_evidence", []) or lot["evidence"]["quota"]
         if identity.get("shared_rights_note"):
             lot["shared_rights_note"] = _normalize_headline_text(str(identity.get("shared_rights_note") or ""))
             lot["evidence"]["shared_rights_note"] = identity.get("shared_rights_evidence", []) or lot["evidence"]["shared_rights_note"]
@@ -6909,6 +7042,20 @@ def _enrich_lots_from_sections(
             price_ev = _find_regex_in_specific_pages(
                 lot_pages or normalized_pages,
                 r"Prezzo\s+base\s+d['’]?asta[:\s]*€?\s*([0-9]{1,3}(?:[.\s][0-9]{3})*(?:,[0-9]{2})?)",
+                re.I,
+                field_key="prezzo_base_asta",
+            )
+        if not price_ev:
+            price_ev = _find_regex_in_specific_pages(
+                lot_pages or normalized_pages,
+                r"Valore\s+di\s+vendita\s+giudiziaria[\s\S]{0,140}?€\.?\s*([0-9]{1,3}(?:[.\s][0-9]{3})*(?:,[0-9]{2})?)",
+                re.I,
+                field_key="prezzo_base_asta",
+            )
+        if not price_ev:
+            price_ev = _find_regex_in_specific_pages(
+                lot_pages or normalized_pages,
+                r"(?:Valore\s+finale|FJV)[\s\S]{0,120}?€\.?\s*([0-9]{1,3}(?:[.\s][0-9]{3})*(?:,[0-9]{2})?)",
                 re.I,
                 field_key="prezzo_base_asta",
             )
