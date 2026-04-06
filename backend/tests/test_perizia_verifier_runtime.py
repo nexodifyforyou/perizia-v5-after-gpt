@@ -1393,6 +1393,68 @@ def test_legal_burdens_universal_lotto_statement_inherits_and_da_verificare_stay
     assert payload["canonical_case"]["legal"]["opponibilita_status"]["value"] == "NON_VERIFICABILE"
 
 
+def test_legal_burdens_explicit_instrument_beats_generic_negative_subcategory_wording():
+    result = {
+        "field_states": {},
+        "dati_certi_del_lotto": {},
+        "document_quality": {"status": "TEXT_OK"},
+        "semaforo_generale": {"status": "AMBER"},
+    }
+    pages = [
+        {
+            "page_number": 1,
+            "text": (
+                "LOTTO UNICO\n"
+                "Bene N° 1 - Appartamento\n"
+                "Non sono presenti vincoli artistici, storici o alberghieri.\n"
+                "Con l'Atto d'obbligo del 09/04/1969 è stata vincolata la destinazione d'uso dei locali.\n"
+                "Con l'Atto di Costituzione Servitù del 09/04/1969 sono state vincolate a verde tutte le aree.\n"
+            ),
+        },
+    ]
+    payload = run_quality_verifier(
+        analysis_id="synthetic_legal_burdens_explicit_instrument",
+        result=result,
+        pages=pages,
+        full_text="\n\n".join(page["text"] for page in pages),
+    )
+    scoped = payload["scopes"]["bene:1"]["legal"]
+    assert scoped["vincoli_status"]["value"] == "PRESENTE"
+    assert scoped["vincoli_status"]["source_scope_id"] == "bene:1"
+    assert scoped["servitu_status"]["value"] == "PRESENTE"
+    assert scoped["servitu_status"]["source_scope_id"] == "bene:1"
+
+
+def test_legal_burdens_generic_boilerplate_does_not_create_decisive_servitu_truth():
+    result = {
+        "field_states": {},
+        "dati_certi_del_lotto": {},
+        "document_quality": {"status": "TEXT_OK"},
+        "semaforo_generale": {"status": "AMBER"},
+    }
+    pages = [
+        {
+            "page_number": 1,
+            "text": (
+                "LOTTO UNICO\n"
+                "Bene N° 1 - Appartamento\n"
+                "Il valore commerciale tiene conto di eventuali vincoli e servitù passive o attive.\n"
+                "Bene N° 2 - Garage\n"
+                "Atto di Costituzione Servitù del 06/03/1997.\n"
+            ),
+        },
+    ]
+    payload = run_quality_verifier(
+        analysis_id="synthetic_legal_burdens_generic_boilerplate",
+        result=result,
+        pages=pages,
+        full_text="\n\n".join(page["text"] for page in pages),
+    )
+    assert payload["scopes"]["bene:1"]["legal"] == {}
+    assert payload["scopes"]["bene:2"]["legal"]["servitu_status"]["value"] == "PRESENTE"
+    assert payload["canonical_case"]["legal"]["servitu_status"]["value"] == "NON_VERIFICABILE"
+
+
 def test_verifier_bridge_updates_legacy_regolarita_urbanistica_from_new_root_truth():
     result = {
         "field_states": {},

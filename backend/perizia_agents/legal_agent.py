@@ -17,6 +17,34 @@ _AMBIGUOUS_RE = re.compile(
     re.IGNORECASE,
 )
 _HISTORICAL_RE = re.compile(r"\b(?:storic\w+|pregress\w+|in\s+passato|gi[aà]\s+estint\w+)\b", re.IGNORECASE)
+_WEAK_BURDEN_BOILERPLATE_RE = re.compile(
+    r"\b(?:"
+    r"eventual\w+\s+vincol\w+\s+e\s+servit[ùu]\w*|"
+    r"usi,\s*diritti,\s*ragioni\s+e\s+servit[ùu]\w*\s+attiv\w+\s+e\s+passiv\w+|"
+    r"servit[ùu]\w*\s+attiv\w+\s+e\s+passiv\w+,\s+comunque\s+costituite|"
+    r"nascenti\s+dallo\s+stato\s+dei\s+luoghi|"
+    r"vincol\w+\s+derivant\w+\s+da\s+diritti\s+personal\w+\s+di\s+godimento"
+    r")\b",
+    re.IGNORECASE,
+)
+_VINCOLO_ACT_RE = re.compile(
+    r"\b(?:"
+    r"atto\s+di\s+vincolo|"
+    r"atto\s+d['’]obbligo|"
+    r"[èe]\s+stata\s+vincolat\w+|"
+    r"sono\s+state\s+vincolat\w+"
+    r")\b",
+    re.IGNORECASE,
+)
+_SERVITU_ACT_RE = re.compile(
+    r"\b(?:"
+    r"atto\s+di\s+costituzione\s+servit[ùu]\w*|"
+    r"costituit\w+\s+servit[ùu]\w*|"
+    r"servit[ùu]\s+di\s+(?:passo|attraversamento)|"
+    r"servit[ùu]\s+passiv\w+"
+    r")\b",
+    re.IGNORECASE,
+)
 
 _UNIVERSAL_SCOPE_MARKERS = [
     "tutti i beni",
@@ -277,6 +305,10 @@ def _verification_trail(
 
 
 def _detect_vincoli_status(line: str) -> tuple[str, int, float, str] | None:
+    if _WEAK_BURDEN_BOILERPLATE_RE.search(line):
+        return None
+    if _VINCOLO_ACT_RE.search(line):
+        return "PRESENTE", 4, 0.97, "explicit_vincolo_instrument"
     ambiguous = bool(_AMBIGUOUS_RE.search(line) or _HISTORICAL_RE.search(line))
     has_present = bool(_VINCOLI_PRESENTE_RE.search(line))
     has_absent = bool(_VINCOLI_ASSENTE_RE.search(line))
@@ -290,6 +322,10 @@ def _detect_vincoli_status(line: str) -> tuple[str, int, float, str] | None:
 
 
 def _detect_servitu_status(line: str) -> tuple[str, int, float, str] | None:
+    if _WEAK_BURDEN_BOILERPLATE_RE.search(line):
+        return None
+    if _SERVITU_ACT_RE.search(line):
+        return "PRESENTE", 4, 0.97, "explicit_servitu_instrument"
     ambiguous = bool(_AMBIGUOUS_RE.search(line) or _HISTORICAL_RE.search(line))
     has_present = bool(_SERVITU_PRESENTE_RE.search(line))
     has_absent = bool(_SERVITU_ASSENTE_RE.search(line))
