@@ -498,6 +498,9 @@ const buildSharedRightsNote = (lot) => {
 const buildDetails = (result) => {
   const detailScope = safeRender(result.detail_scope, '').toUpperCase();
   const lots = Array.isArray(result.lots) ? result.lots : [];
+  const fieldStates = result.field_states || {};
+  const abusi = result.section_5_abusi_conformita?.conformita_urbanistica ? result.section_5_abusi_conformita : (result.abusi_edilizi_conformita || {});
+  const occupativo = result.section_6_stato_occupativo?.status ? result.section_6_stato_occupativo : (result.stato_occupativo || {});
   if (detailScope === 'LOT_FIRST' && lots.length > 1) {
     return lots.map((lot, index) => {
       const evidenceObj = lot?.evidence && typeof lot.evidence === 'object' ? lot.evidence : {};
@@ -536,9 +539,6 @@ const buildDetails = (result) => {
   const panoramicaContract = result.panoramica_contract || {};
   const contractBeni = Array.isArray(panoramicaContract.lot_composition) ? panoramicaContract.lot_composition : [];
   const sourceBeni = Array.isArray(result.beni) ? result.beni : (Array.isArray(result.lots?.[0]?.beni) ? result.lots[0].beni : []);
-  const fieldStates = result.field_states || {};
-  const abusi = result.section_5_abusi_conformita?.conformita_urbanistica ? result.section_5_abusi_conformita : (result.abusi_edilizi_conformita || {});
-  const occupativo = result.section_6_stato_occupativo?.status ? result.section_6_stato_occupativo : (result.stato_occupativo || {});
   const quota = safeRender(
     pickFirstNonEmpty(
       getFieldStateValue(fieldStates.quota),
