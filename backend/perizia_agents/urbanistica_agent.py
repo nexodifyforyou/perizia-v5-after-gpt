@@ -16,6 +16,18 @@ _AMBIGUOUS_RE = re.compile(
     r"\b(?:da\s+verificare|da\s+accertare|potrebbe|sarebbe|si\s+consiglia\s+di\s+verificare|possibilit[aà]|presumibilmente)\b",
     re.IGNORECASE,
 )
+_CONDITIONAL_SANATORIA_RE = re.compile(
+    r"\b(?:"
+    r"qualora|"
+    r"in\s+caso\s+di|"
+    r"resterebbe|"
+    r"si\s+tratterebbe|"
+    r"potrebbe|"
+    r"eventuale|"
+    r"ancora\s+apert\w+"
+    r")\b",
+    re.IGNORECASE,
+)
 
 _UNIVERSAL_SCOPE_MARKERS = [
     "tutti i beni",
@@ -66,6 +78,8 @@ _URBANISTICA_POSITIVE_RE = re.compile(
 )
 _URBANISTICA_NEGATIVE_RE = re.compile(
     r"\b(?:"
+    r"non\s+risulta\s+regolare|"
+    r"non\s+risultan\w+\s+regolar\w+|"
     r"riscontrat\w+\s+incongruenz\w+|"
     r"difformit\w+|"
     r"abusi?\s+ediliz\w+\s+present\w*|"
@@ -75,13 +89,22 @@ _URBANISTICA_NEGATIVE_RE = re.compile(
     r")\b",
     re.IGNORECASE,
 )
-_SANATORIA_POSITIVE_RE = re.compile(r"\bsanabil\w+\b", re.IGNORECASE)
+_SANATORIA_POSITIVE_RE = re.compile(
+    r"\b(?:"
+    r"(?:sono|risultan\w+|e)\s+sanabil\w+|"
+    r"modifiche?\s+[^\n]{0,80}\s+sono\s+sanabil\w+|"
+    r"opere?\s+[^\n]{0,80}\s+sono\s+sanabil\w+|"
+    r"interventi?\s+[^\n]{0,80}\s+sono\s+sanabil\w+"
+    r")\b",
+    re.IGNORECASE,
+)
 _SANATORIA_NEGATIVE_RE = re.compile(r"\b(?:non\s+sanabil\w+|insanabil\w+)\b", re.IGNORECASE)
 _CONDONO_PRESENTE_RE = re.compile(
     r"\b(?:"
     r"domanda\s+di\s+condon\w+|"
     r"istanza\s+di\s+condon\w+|"
     r"pratica\s+di\s+condon\w+|"
+    r"condon\w+\s*n[°º.]?\s*[\d/.-]+[^\n]{0,80}(?:ancora\s+apert\w*|apert\w*|in\s+itinere|pendente)|"
     r"condon\w+[^\n]{0,30}(?:presentat\w*|pendente|rilasciat\w*)|"
     r"oggetto\s+di\s+condon\w+"
     r")\b",
@@ -175,6 +198,13 @@ def _descendant_bene_scope_ids(state: RuntimeState, scope_id: str) -> list[str]:
     return descendants
 
 
+def _single_descendant_bene_scope_id(state: RuntimeState, scope_id: str) -> str | None:
+    descendants = sorted(_descendant_bene_scope_ids(state, scope_id))
+    if len(descendants) == 1:
+        return descendants[0]
+    return None
+
+
 def _scope_label(state: RuntimeState, scope_id: str) -> str:
     if scope_id in _SCOPE_LABELS:
         return _SCOPE_LABELS[scope_id]
@@ -218,14 +248,25 @@ def _assign_scope(
             return lotto_scope_ids[0], "explicit_lotto_universal", True
         return None, "ambiguous_multi_bene_reference", False
     if len(lotto_scope_ids) == 1:
+        if not universal:
+            single_bene_scope_id = _single_descendant_bene_scope_id(state, lotto_scope_ids[0])
+            if single_bene_scope_id:
+                return single_bene_scope_id, "explicit_lotto_single_bene_section", False
         return lotto_scope_ids[0], "explicit_lotto_universal" if universal else "explicit_lotto", universal
     if universal and active_lotto_scope_id:
         return active_lotto_scope_id, "active_lotto_universal", True
     if active_bene_scope_id:
         return active_bene_scope_id, "active_bene_section", False
-    if active_lotto_scope_id and universal:
-        return active_lotto_scope_id, "active_lotto_universal", True
+    if active_lotto_scope_id:
+        if universal:
+            return active_lotto_scope_id, "active_lotto_universal", True
+        single_bene_scope_id = _single_descendant_bene_scope_id(state, active_lotto_scope_id)
+        if single_bene_scope_id:
+            return single_bene_scope_id, "active_lotto_single_bene_section", False
+        return active_lotto_scope_id, "active_lotto_section", False
     scope_id, method = _smallest_fallback_scope_id(state)
+    if scope_id == "document_root" and (_available_scopes(state, "bene") or _available_scopes(state, "lotto")):
+        return None, "unresolved_unscoped_multi_scope_statement", False
     return scope_id, method, False
 
 
@@ -298,7 +339,10 @@ def _detect_urbanistica_status(line: str) -> tuple[str, int, float, str] | None:
 
 
 def _detect_sanatoria_status(line: str) -> tuple[str, int, float, str] | None:
-    ambiguous = bool(_AMBIGUOUS_RE.search(line))
+    low = str(line or "").lower()
+    if "sanabilità degli interventi" in low or "sanabilita degli interventi" in low:
+        return None
+    ambiguous = bool(_AMBIGUOUS_RE.search(line) or _CONDITIONAL_SANATORIA_RE.search(line))
     if _SANATORIA_NEGATIVE_RE.search(line) and not ambiguous:
         return "NON_SANABILE", 3, 0.95, "explicit_non_sanabile"
     if _SANATORIA_POSITIVE_RE.search(line) and not ambiguous:
@@ -338,10 +382,12 @@ def _collect_hits(state: RuntimeState) -> dict[str, list[dict[str, Any]]]:
         active_bene_scope_id: str | None = None
         active_lotto_line: str | None = None
         active_bene_line: str | None = None
+        previous_line: str | None = None
         for raw_line in text.splitlines():
             line = raw_line.strip()
             if not line or _TOC_DOTS_RE.search(line):
                 continue
+            line_with_previous = f"{previous_line}\n{line}" if previous_line else line
 
             lotto_matches = _matching_scope_ids(state, line, scope_type="lotto")
             bene_matches = _matching_scope_ids(state, line, scope_type="bene")
@@ -352,21 +398,27 @@ def _collect_hits(state: RuntimeState) -> dict[str, list[dict[str, Any]]]:
                 active_bene_scope_id = bene_matches[0]
                 active_bene_line = line
 
+            detection_inputs = {
+                "urbanistica_status": line,
+                "sanatoria_status": line,
+                "condono_status": line_with_previous,
+                "ripristino_or_demolition_signal": line_with_previous,
+            }
             detections = {
                 "urbanistica_status": _detect_urbanistica_status(line),
                 "sanatoria_status": _detect_sanatoria_status(line),
-                "condono_status": _detect_condono_status(line),
-                "ripristino_or_demolition_signal": _detect_ripristino_signal(line),
+                "condono_status": _detect_condono_status(line_with_previous),
+                "ripristino_or_demolition_signal": _detect_ripristino_signal(line_with_previous),
             }
             for field_key, detection in detections.items():
                 if detection is None:
                     continue
                 value, tier, confidence, signal = detection
                 quote = _line_context_quote(
-                    line=line,
+                    line=detection_inputs[field_key],
                     active_lotto_line=active_lotto_line,
                     active_bene_line=active_bene_line,
-                    include_active_bene_line=not _is_universal_scope_statement(line),
+                    include_active_bene_line=not _is_universal_scope_statement(detection_inputs[field_key]),
                 )
                 scope_id, ownership_method, universal = _assign_scope(
                     state,
@@ -421,6 +473,7 @@ def _collect_hits(state: RuntimeState) -> dict[str, list[dict[str, Any]]]:
                         "confidence": confidence,
                     }
                 )
+            previous_line = line
     return collected
 
 

@@ -1224,6 +1224,76 @@ def test_urbanistica_sanatoria_condono_and_ripristino_stay_bounded_and_conservat
     assert scoped["ripristino_or_demolition_signal"]["value"] == "YES"
 
 
+def test_urbanistica_open_condono_does_not_force_sanabile_from_conditional_wording():
+    result = {
+        "field_states": {},
+        "dati_certi_del_lotto": {},
+        "document_quality": {"status": "TEXT_OK"},
+        "semaforo_generale": {"status": "AMBER"},
+    }
+    pages = [
+        {
+            "page_number": 1,
+            "text": (
+                "LOTTO UNICO\n"
+                "Bene N° 1 - Appartamento\n"
+                "L'immobile non risulta regolare per la legge n° 47/1985.\n"
+                "La Concessione in Sanatoria non è stata ad oggi rilasciata.\n"
+                "In merito alla sanabilita degli interventi realizzati senza titolo, essendo ancora aperta la Domanda di Condono n. 40689/86 del 17/03/1986 si tratterebbe di dare impulso all'istruttoria.\n"
+                "Resterebbe quindi aperta la strada del ripristino."
+            ),
+        },
+    ]
+    payload = run_quality_verifier(
+        analysis_id="synthetic_urbanistica_open_condono_conditional_sanatoria",
+        result=result,
+        pages=pages,
+        full_text="\n\n".join(page["text"] for page in pages),
+    )
+    scoped = payload["scopes"]["bene:1"]["urbanistica"]
+    assert scoped["urbanistica_status"]["value"] == "DIFFORMITA_PRESENTE"
+    assert scoped["condono_status"]["value"] == "PRESENTE"
+    assert "sanatoria_status" not in scoped
+    assert payload["canonical_case"]["urbanistica"]["sanatoria_status"]["value"] == "NON_VERIFICABILE"
+
+
+def test_urbanistica_unscoped_summary_noise_does_not_write_document_root_truth_in_multi_scope_docs():
+    result = {
+        "field_states": {},
+        "dati_certi_del_lotto": {},
+        "document_quality": {"status": "TEXT_OK"},
+        "semaforo_generale": {"status": "AMBER"},
+    }
+    pages = [
+        {
+            "page_number": 1,
+            "text": (
+                "LOTTO 1\n"
+                "Bene N° 1 - Appartamento\n"
+                "L'immobile non risulta regolare per la legge n° 47/1985.\n"
+                "LOTTO 2\n"
+                "Bene N° 2 - Magazzino\n"
+                "L'immobile non risulta regolare per la legge n° 47/1985.\n"
+                "LOTTO 3\n"
+                "Bene N° 3 - Deposito\n"
+                "L'immobile non risulta regolare per la legge n° 47/1985.\n"
+                "all'assenza di garanzia per vizi, mancanza di qualità e/o difformità della cosa venduta."
+            ),
+        },
+    ]
+    payload = run_quality_verifier(
+        analysis_id="synthetic_urbanistica_unscoped_summary_noise",
+        result=result,
+        pages=pages,
+        full_text="\n\n".join(page["text"] for page in pages),
+    )
+    assert payload["scopes"]["bene:1"]["urbanistica"]["urbanistica_status"]["value"] == "DIFFORMITA_PRESENTE"
+    assert payload["scopes"]["bene:2"]["urbanistica"]["urbanistica_status"]["value"] == "DIFFORMITA_PRESENTE"
+    assert payload["scopes"]["bene:3"]["urbanistica"]["urbanistica_status"]["value"] == "DIFFORMITA_PRESENTE"
+    assert payload["scopes"]["document_root"]["urbanistica"] == {}
+    assert payload["canonical_case"]["urbanistica"]["urbanistica_status"]["value"] == "DIFFORMITA_PRESENTE"
+
+
 def test_verifier_bridge_updates_legacy_regolarita_urbanistica_from_new_root_truth():
     result = {
         "field_states": {},
