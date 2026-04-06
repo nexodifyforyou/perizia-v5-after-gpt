@@ -1609,6 +1609,8 @@ def test_multibene_fixture_writes_scoped_catasto_fields_per_bene():
     assert payload["scopes"]["bene:4"]["catasto"]["subalterno"]["value"] == "3"
     assert payload["scopes"]["bene:4"]["catasto"]["categoria"]["value"] == "A/7"
     assert payload["canonical_case"]["catasto"]["particella"]["value"] is None
+    assert payload["canonical_case"]["rights"]["quota"]["source_scope_id"] == "rollup_from_children"
+    assert payload["canonical_case"]["catasto"]["foglio"]["source_scope_id"] == "rollup_from_children"
 
 
 def test_multilot_fixture_writes_scoped_catasto_and_prefers_primary_over_ancillary_entries():
@@ -1650,6 +1652,8 @@ def test_rmei_fixture_collapses_single_scope_catasto_to_root():
     assert payload["canonical_case"]["catasto"]["particella"]["value"] == "301"
     assert payload["canonical_case"]["catasto"]["subalterno"]["value"] == "516"
     assert payload["canonical_case"]["catasto"]["categoria"]["value"] == "A/2"
+    assert payload["canonical_case"]["rights"]["quota"]["source_scope_id"] == "rollup_from_children"
+    assert payload["canonical_case"]["catasto"]["foglio"]["source_scope_id"] == "rollup_from_children"
 
 
 def test_multi_lot_auction_prices_do_not_force_scalar_selected_price():

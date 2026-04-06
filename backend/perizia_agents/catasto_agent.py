@@ -497,7 +497,7 @@ def _derive_root_field(state: RuntimeState, field_key: str, direct_root_resoluti
                 "value": unique_values[0],
                 "confidence": float(best.catasto[field_key].get("confidence", 0.0)),
                 "evidence": copy.deepcopy(best.catasto[field_key].get("evidence", [])),
-                "source_scope_id": best.scope_id,
+                "source_scope_id": "rollup_from_children",
                 "internal": {
                     "derived_from_scopes": [scope.scope_id for scope in leaf_scopes],
                     "resolution_reason": "uniform_leaf_scope_collapse",
@@ -564,7 +564,7 @@ def _derive_root_quota(state: RuntimeState, direct_root_resolution: dict[str, An
                 "value": unique_values[0],
                 "confidence": float(_scope_rights(best)["quota"].get("confidence", 0.0)),
                 "evidence": copy.deepcopy(_scope_rights(best)["quota"].get("evidence", [])),
-                "source_scope_id": best.scope_id,
+                "source_scope_id": "rollup_from_children",
                 "internal": {
                     "derived_from_scopes": [scope.scope_id for scope in leaf_scopes],
                     "resolution_reason": "uniform_leaf_scope_collapse",
