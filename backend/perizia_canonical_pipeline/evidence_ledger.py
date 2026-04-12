@@ -12,6 +12,7 @@ from .cadastral_candidate_pack import build_cadastral_candidate_pack
 from .location_candidate_pack import build_location_candidate_pack
 from .rights_candidate_pack import build_rights_candidate_pack
 from .occupancy_candidate_pack import build_occupancy_candidate_pack
+from .valuation_candidate_pack import build_valuation_candidate_pack
 
 
 def _make_packet_id(field_type: str, lot_id: str, page: int, line_index: Optional[int]) -> str:
@@ -87,7 +88,7 @@ def build_evidence_ledger(case_key: str) -> Dict[str, object]:
         "winner": winner,
         "global_quality_tier": quality,
         "status": "OK",
-        "field_scope": "CADASTRAL_LOCATION_RIGHTS_OCCUPANCY_FIELD_SHELL",
+        "field_scope": "CADASTRAL_LOCATION_RIGHTS_OCCUPANCY_VALUATION_FIELD_SHELL",
         "packets": [],
         "scope_zones": {
             "global_pre_lot_zone": scope.get("global_pre_lot_zone"),
@@ -720,10 +721,6 @@ def build_evidence_ledger(case_key: str) -> Dict[str, object]:
             },
         })
 
-    out["packets"] = (
-        packets + bene_packets + cadastral_packets
-        + location_packets + rights_packets + occupancy_packets
-    )
     out["coverage"]["occupancy_packet_count"] = len(occupancy_packets)
     out["coverage"]["occupancy_fields_present"] = sorted(
         {p["field_type"] for p in occupancy_packets}
@@ -736,6 +733,151 @@ def build_evidence_ledger(case_key: str) -> Dict[str, object]:
                 else f"lot:{p['lot_id']}"
             )
             for p in occupancy_packets
+        }
+    )
+
+    # --- valuation candidates ---
+    # Same pattern as occupancy: group by (lot_id, bene_key, field_type) WITHOUT attr.
+    # Conflict → VALUATION_SCOPE_FIELD_CONFLICT blocked zone; agreement → ACTIVE packet.
+    _VAL_ATTR_PRIORITY = {
+        "CONFIRMED": 0,
+        "ATTRIBUTED_BY_SCOPE": 1,
+        # Local preceding-context lot attribution — reliable inline evidence.
+        "LOT_LOCAL_CONTEXT_OVERRIDE": 1,
+        "LOT_LEVEL_ONLY": 2,
+        "LOT_LEVEL_ONLY_PRE_BENE_CONTEXT": 3,
+    }
+    _VAL_LEDGER_SAFE_ATTRIBUTIONS = set(_VAL_ATTR_PRIORITY.keys())
+
+    val_pack = build_valuation_candidate_pack(case_key)
+
+    for w in (val_pack.get("warnings") or []):
+        if w not in out["warnings"]:
+            out["warnings"].append(w)
+
+    for blk in (val_pack.get("blocked_or_ambiguous") or []):
+        # Skip MULTI_VALUE_UNRESOLVED entries — they are already surfaced via
+        # VALUATION_SCOPE_FIELD_CONFLICT below when candidate values diverge.
+        if blk.get("type") == "VALUATION_MULTI_VALUE_UNRESOLVED":
+            continue
+        out["blocked_zones"].append({
+            "type": blk.get("type", "VALUATION_BLOCKED_OR_AMBIGUOUS"),
+            "reason": "Valuation candidate pack marked this evidence as blocked or ambiguous.",
+            "source": "valuation_candidate_pack.blocked_or_ambiguous",
+            "valuation_ambiguity": blk,
+        })
+
+    # Only ACTIVE candidates with safe attributions are eligible for ledger packets.
+    grouped_val: Dict[tuple, List[Dict[str, object]]] = {}
+    for cand in (val_pack.get("candidates") or []):
+        if cand.get("candidate_status") != "ACTIVE":
+            continue
+        attr = cand.get("attribution", "")
+        if attr not in _VAL_LEDGER_SAFE_ATTRIBUTIONS:
+            continue
+        lot_id = cand.get("lot_id") or "unknown"
+        bene_key = cand.get("bene_id") or "lot"
+        field_type = cand["field_type"]
+        key = (lot_id, bene_key, field_type)
+        grouped_val.setdefault(key, []).append(cand)
+
+    valuation_packets: List[Dict[str, object]] = []
+    for (lot_id, bene_key, field_type), candidates_for_field in sorted(
+        grouped_val.items(),
+        key=lambda item: (item[0][0], item[0][1], item[0][2]),
+    ):
+        ordered_val = sorted(candidates_for_field, key=_candidate_sort_key)
+        # Case-insensitive distinct values (matches pack-level dedup behaviour).
+        distinct_values_norm = sorted({str(c.get("extracted_value", "")).strip().lower()
+                                       for c in ordered_val})
+        all_attrs = sorted({c.get("attribution", "") for c in ordered_val})
+        best_attr = min(all_attrs, key=lambda a: _VAL_ATTR_PRIORITY.get(a, 99))
+
+        if len(distinct_values_norm) > 1:
+            out["blocked_zones"].append({
+                "type": "VALUATION_SCOPE_FIELD_CONFLICT",
+                "reason": (
+                    "Multiple distinct valuation candidate values exist for the same "
+                    "scope and field across one or more attribution tiers; "
+                    "no active winner packet was emitted."
+                ),
+                "field_type": field_type,
+                "lot_id": lot_id,
+                "bene_id": None if bene_key == "lot" else bene_key,
+                "scope_attributions": all_attrs,
+                "distinct_values": sorted({str(c.get("extracted_value", ""))
+                                           for c in ordered_val}),
+                "candidate_count": len(ordered_val),
+                "candidates": [
+                    {
+                        "candidate_id": c.get("candidate_id"),
+                        "field_type": c.get("field_type"),
+                        "extracted_value": c.get("extracted_value"),
+                        "page": c.get("page"),
+                        "line_index": c.get("line_index"),
+                        "line_quote": c.get("quote"),
+                        "attribution": c.get("attribution"),
+                        "lot_id": c.get("lot_id"),
+                        "bene_id": c.get("bene_id"),
+                        "composite_key": c.get("composite_key"),
+                        "source_type": c.get("source_type"),
+                    }
+                    for c in ordered_val
+                ],
+            })
+            continue
+
+        cand = ordered_val[0]
+        bene_id_val = None if bene_key == "lot" else bene_key
+        valuation_packets.append({
+            "packet_id": (
+                f"{field_type}::{lot_id}::{bene_key}"
+                f"::p{cand['page']}::l{cand['line_index']}"
+            ),
+            "field_type": field_type,
+            "lot_id": lot_id,
+            "bene_id": bene_id_val,
+            "corpo_id": None,
+            "scope_certainty": best_attr,
+            "scope_basis": cand.get("scope_basis") or f"lot:{lot_id}",
+            "page": cand["page"],
+            "line_index": cand["line_index"],
+            "quote": cand.get("quote"),
+            "context_window": cand.get("context_window"),
+            "extracted_value": cand["extracted_value"],
+            "extraction_method": cand.get("extraction_method", "REGEX_VAL_INLINE"),
+            "confidence": (
+                1.0 if best_attr == "CONFIRMED" else 0.9
+            ),
+            "status": "ACTIVE",
+            "source_refs": {
+                "candidate_id": cand.get("candidate_id"),
+                "source_type": cand.get("source_type"),
+                "duplicate_candidate_ids": [
+                    other.get("candidate_id")
+                    for other in ordered_val[1:]
+                    if other.get("candidate_id")
+                ],
+            },
+        })
+
+    out["packets"] = (
+        packets + bene_packets + cadastral_packets
+        + location_packets + rights_packets + occupancy_packets
+        + valuation_packets
+    )
+    out["coverage"]["valuation_packet_count"] = len(valuation_packets)
+    out["coverage"]["valuation_fields_present"] = sorted(
+        {p["field_type"] for p in valuation_packets}
+    )
+    out["coverage"]["valuation_scope_keys"] = sorted(
+        {
+            (
+                f"{p['lot_id']}/{p['bene_id']}"
+                if p["bene_id"]
+                else f"lot:{p['lot_id']}"
+            )
+            for p in valuation_packets
         }
     )
 
@@ -783,6 +925,9 @@ def main() -> None:
         "occupancy_packet_count": out["coverage"]["occupancy_packet_count"],
         "occupancy_fields_present": out["coverage"]["occupancy_fields_present"],
         "occupancy_scope_keys": out["coverage"]["occupancy_scope_keys"],
+        "valuation_packet_count": out["coverage"]["valuation_packet_count"],
+        "valuation_fields_present": out["coverage"]["valuation_fields_present"],
+        "valuation_scope_keys": out["coverage"]["valuation_scope_keys"],
         "blocked_zone_count": len(out["blocked_zones"]),
     }, ensure_ascii=False, indent=2))
 
