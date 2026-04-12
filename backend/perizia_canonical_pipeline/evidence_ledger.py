@@ -9,6 +9,7 @@ from .runner import build_context
 from .corpus_registry import load_cases, list_case_keys
 from .bene_header_spine import build_bene_header_spine
 from .cadastral_candidate_pack import build_cadastral_candidate_pack
+from .location_candidate_pack import build_location_candidate_pack
 
 
 def _make_packet_id(field_type: str, lot_id: str, page: int, line_index: Optional[int]) -> str:
@@ -29,6 +30,22 @@ def _candidate_sort_key(cand: Dict[str, object]) -> Tuple[int, int, str]:
         line_index if isinstance(line_index, int) else 999999,
         str(cand.get("candidate_id") or ""),
     )
+
+
+def _location_candidate_ref(cand: Dict[str, object]) -> Dict[str, object]:
+    return {
+        "candidate_id": cand.get("candidate_id"),
+        "field_type": cand.get("field_type"),
+        "extracted_value": cand.get("extracted_value"),
+        "page": cand.get("page"),
+        "line_index": cand.get("line_index"),
+        "line_quote": cand.get("quote"),
+        "attribution": cand.get("attribution"),
+        "lot_id": cand.get("lot_id"),
+        "bene_id": cand.get("bene_id"),
+        "composite_key": cand.get("composite_key"),
+        "source_type": cand.get("source_type"),
+    }
 
 
 def _cadastral_candidate_ref(cand: Dict[str, object]) -> Dict[str, object]:
@@ -68,7 +85,7 @@ def build_evidence_ledger(case_key: str) -> Dict[str, object]:
         "winner": winner,
         "global_quality_tier": quality,
         "status": "OK",
-        "field_scope": "CADASTRAL_FIELD_SHELL",
+        "field_scope": "CADASTRAL_LOCATION_FIELD_SHELL",
         "packets": [],
         "scope_zones": {
             "global_pre_lot_zone": scope.get("global_pre_lot_zone"),
@@ -84,6 +101,9 @@ def build_evidence_ledger(case_key: str) -> Dict[str, object]:
             "benes_with_header_packets": [],
             "cadastral_packet_count": 0,
             "cadastral_fields_present": [],
+            "location_packet_count": 0,
+            "location_fields_present": [],
+            "location_scope_keys": [],
         },
         "warnings": list(scope.get("warnings", []) or []),
         "source_artifacts": {
@@ -310,6 +330,135 @@ def build_evidence_ledger(case_key: str) -> Dict[str, object]:
         {p["field_type"] for p in cadastral_packets}
     )
 
+    # --- location candidates ---
+    # Mirror the cadastral approach: group by (lot_id, bene_key, field_type, attr),
+    # emit a single ACTIVE packet when all candidates agree on one value, or
+    # emit a LOCATION_SCOPE_FIELD_CONFLICT blocked zone when they disagree.
+    _LOC_ATTR_PRIORITY = {
+        "CONFIRMED": 0,
+        "CONFIRMED_BY_SINGLE_LOT_BENE_HEADER": 0,
+        "BENE_HEADER_CONFIRMED_BY_SINGLE_LOT": 0,
+        "ATTRIBUTED_BY_SCOPE": 1,
+        "BENE_HEADER_ATTRIBUTED_BY_SCOPE": 1,
+        "LOT_LEVEL_ONLY": 2,
+        "LOT_LEVEL_ONLY_PRE_BENE_CONTEXT": 3,
+    }
+    _LOC_LEDGER_SAFE_ATTRIBUTIONS = set(_LOC_ATTR_PRIORITY.keys())
+
+    loc_pack = build_location_candidate_pack(case_key)
+
+    # Propagate location warnings (e.g. ATTRIBUTED_BY_SCOPE bene header warnings)
+    for w in (loc_pack.get("warnings") or []):
+        if w not in out["warnings"]:
+            out["warnings"].append(w)
+
+    # Forward blocked/ambiguous entries from the location pack into blocked_zones
+    for blk in (loc_pack.get("blocked_or_ambiguous") or []):
+        out["blocked_zones"].append({
+            "type": blk.get("type", "LOCATION_BLOCKED_OR_AMBIGUOUS"),
+            "reason": "Location candidate pack marked this evidence as blocked or ambiguous.",
+            "source": "location_candidate_pack.blocked_or_ambiguous",
+            "location_ambiguity": blk,
+        })
+
+    # Group by (lot_id, bene_key, field_type) — intentionally WITHOUT attr so that
+    # candidates from different attribution tiers for the same scope/field are tested
+    # together.  If they disagree on value the whole group is blocked; if they agree
+    # a single ACTIVE packet is emitted using the best (highest-priority) attr present.
+    grouped_loc: Dict[tuple, List[Dict[str, object]]] = {}
+    for cand in (loc_pack.get("candidates") or []):
+        attr = cand.get("attribution", "")
+        if attr not in _LOC_LEDGER_SAFE_ATTRIBUTIONS:
+            continue
+        lot_id = cand.get("lot_id") or "unknown"
+        bene_key = cand.get("bene_id") or "lot"
+        field_type = cand["field_type"]
+        key = (lot_id, bene_key, field_type)
+        grouped_loc.setdefault(key, []).append(cand)
+
+    location_packets: List[Dict[str, object]] = []
+    for (lot_id, bene_key, field_type), candidates_for_field in sorted(
+        grouped_loc.items(),
+        key=lambda item: (item[0][0], item[0][1], item[0][2]),
+    ):
+        ordered_loc = sorted(candidates_for_field, key=_candidate_sort_key)
+        distinct_values = sorted({str(c.get("extracted_value")) for c in ordered_loc})
+        all_attrs = sorted({c.get("attribution", "") for c in ordered_loc})
+        # Best attribution = lowest priority number across the group
+        best_attr = min(all_attrs, key=lambda a: _LOC_ATTR_PRIORITY.get(a, 99))
+
+        if len(distinct_values) > 1:
+            out["blocked_zones"].append({
+                "type": "LOCATION_SCOPE_FIELD_CONFLICT",
+                "reason": (
+                    "Multiple distinct location candidate values exist for the same "
+                    "scope and field across one or more attribution tiers; "
+                    "no active winner packet was emitted."
+                ),
+                "field_type": field_type,
+                "lot_id": lot_id,
+                "bene_id": None if bene_key == "lot" else bene_key,
+                "scope_attributions": all_attrs,
+                "distinct_values": distinct_values,
+                "candidate_count": len(ordered_loc),
+                "candidates": [_location_candidate_ref(c) for c in ordered_loc],
+            })
+            continue
+
+        cand = ordered_loc[0]
+        bene_id_val = None if bene_key == "lot" else bene_key
+        location_packets.append({
+            "packet_id": (
+                f"{field_type}::{lot_id}::{bene_key}"
+                f"::p{cand['page']}::l{cand['line_index']}"
+            ),
+            "field_type": field_type,
+            "lot_id": lot_id,
+            "bene_id": bene_id_val,
+            "corpo_id": None,
+            "scope_certainty": best_attr,
+            "scope_basis": cand.get("scope_basis") or f"lot:{lot_id}",
+            "page": cand["page"],
+            "line_index": cand["line_index"],
+            "quote": cand.get("quote"),
+            "context_window": cand.get("context_window"),
+            "extracted_value": cand["extracted_value"],
+            "extraction_method": cand.get("extraction_method", "REGEX_LOC_INLINE"),
+            "confidence": (
+                1.0 if best_attr in (
+                    "CONFIRMED", "BENE_HEADER_CONFIRMED_BY_SINGLE_LOT",
+                    "CONFIRMED_BY_SINGLE_LOT_BENE_HEADER",
+                ) else 0.9
+            ),
+            "status": "ACTIVE",
+            "source_refs": {
+                "sibling_fields": cand.get("sibling_fields"),
+                "candidate_id": cand.get("candidate_id"),
+                "source_type": cand.get("source_type"),
+                "duplicate_candidate_ids": [
+                    other.get("candidate_id")
+                    for other in ordered_loc[1:]
+                    if other.get("candidate_id")
+                ],
+            },
+        })
+
+    out["packets"] = packets + bene_packets + cadastral_packets + location_packets
+    out["coverage"]["location_packet_count"] = len(location_packets)
+    out["coverage"]["location_fields_present"] = sorted(
+        {p["field_type"] for p in location_packets}
+    )
+    out["coverage"]["location_scope_keys"] = sorted(
+        {
+            (
+                f"{p['lot_id']}/{p['bene_id']}"
+                if p["bene_id"]
+                else f"lot:{p['lot_id']}"
+            )
+            for p in location_packets
+        }
+    )
+
     # --- blocked zones for structural ambiguities ---
     same_page_collisions = scope.get("same_page_collisions", []) or []
     for collision in same_page_collisions:
@@ -345,6 +494,9 @@ def main() -> None:
         "bene_header_packets_count": out["coverage"]["bene_header_packets_count"],
         "cadastral_packet_count": out["coverage"]["cadastral_packet_count"],
         "cadastral_fields_present": out["coverage"]["cadastral_fields_present"],
+        "location_packet_count": out["coverage"]["location_packet_count"],
+        "location_fields_present": out["coverage"]["location_fields_present"],
+        "location_scope_keys": out["coverage"]["location_scope_keys"],
         "blocked_zone_count": len(out["blocked_zones"]),
     }, ensure_ascii=False, indent=2))
 
