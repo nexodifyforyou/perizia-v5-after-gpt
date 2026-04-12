@@ -10,6 +10,7 @@ from .corpus_registry import load_cases, list_case_keys
 from .bene_header_spine import build_bene_header_spine
 from .cadastral_candidate_pack import build_cadastral_candidate_pack
 from .location_candidate_pack import build_location_candidate_pack
+from .rights_candidate_pack import build_rights_candidate_pack
 
 
 def _make_packet_id(field_type: str, lot_id: str, page: int, line_index: Optional[int]) -> str:
@@ -85,7 +86,7 @@ def build_evidence_ledger(case_key: str) -> Dict[str, object]:
         "winner": winner,
         "global_quality_tier": quality,
         "status": "OK",
-        "field_scope": "CADASTRAL_LOCATION_FIELD_SHELL",
+        "field_scope": "CADASTRAL_LOCATION_RIGHTS_FIELD_SHELL",
         "packets": [],
         "scope_zones": {
             "global_pre_lot_zone": scope.get("global_pre_lot_zone"),
@@ -104,6 +105,9 @@ def build_evidence_ledger(case_key: str) -> Dict[str, object]:
             "location_packet_count": 0,
             "location_fields_present": [],
             "location_scope_keys": [],
+            "rights_packet_count": 0,
+            "rights_fields_present": [],
+            "rights_scope_keys": [],
         },
         "warnings": list(scope.get("warnings", []) or []),
         "source_artifacts": {
@@ -443,7 +447,6 @@ def build_evidence_ledger(case_key: str) -> Dict[str, object]:
             },
         })
 
-    out["packets"] = packets + bene_packets + cadastral_packets + location_packets
     out["coverage"]["location_packet_count"] = len(location_packets)
     out["coverage"]["location_fields_present"] = sorted(
         {p["field_type"] for p in location_packets}
@@ -456,6 +459,137 @@ def build_evidence_ledger(case_key: str) -> Dict[str, object]:
                 else f"lot:{p['lot_id']}"
             )
             for p in location_packets
+        }
+    )
+
+    # --- rights candidates ---
+    # Same pattern as location: group by (lot_id, bene_key, field_type) WITHOUT attr so
+    # candidates from different attribution tiers for the same scope/field are tested
+    # together.  Conflict → RIGHTS_SCOPE_FIELD_CONFLICT blocked zone; agreement → ACTIVE.
+    _RTS_ATTR_PRIORITY = {
+        "CONFIRMED": 0,
+        "ATTRIBUTED_BY_SCOPE": 1,
+        "LOT_LEVEL_ONLY": 2,
+        "LOT_LEVEL_ONLY_PRE_BENE_CONTEXT": 3,
+    }
+    _RTS_LEDGER_SAFE_ATTRIBUTIONS = set(_RTS_ATTR_PRIORITY.keys())
+
+    rts_pack = build_rights_candidate_pack(case_key)
+
+    for w in (rts_pack.get("warnings") or []):
+        if w not in out["warnings"]:
+            out["warnings"].append(w)
+
+    for blk in (rts_pack.get("blocked_or_ambiguous") or []):
+        out["blocked_zones"].append({
+            "type": blk.get("type", "RIGHTS_BLOCKED_OR_AMBIGUOUS"),
+            "reason": "Rights candidate pack marked this evidence as blocked or ambiguous.",
+            "source": "rights_candidate_pack.blocked_or_ambiguous",
+            "rights_ambiguity": blk,
+        })
+
+    grouped_rts: Dict[tuple, List[Dict[str, object]]] = {}
+    for cand in (rts_pack.get("candidates") or []):
+        attr = cand.get("attribution", "")
+        if attr not in _RTS_LEDGER_SAFE_ATTRIBUTIONS:
+            continue
+        lot_id = cand.get("lot_id") or "unknown"
+        bene_key = cand.get("bene_id") or "lot"
+        field_type = cand["field_type"]
+        key = (lot_id, bene_key, field_type)
+        grouped_rts.setdefault(key, []).append(cand)
+
+    rights_packets: List[Dict[str, object]] = []
+    for (lot_id, bene_key, field_type), candidates_for_field in sorted(
+        grouped_rts.items(),
+        key=lambda item: (item[0][0], item[0][1], item[0][2]),
+    ):
+        ordered_rts = sorted(candidates_for_field, key=_candidate_sort_key)
+        distinct_values = sorted({str(c.get("extracted_value")) for c in ordered_rts})
+        all_attrs = sorted({c.get("attribution", "") for c in ordered_rts})
+        best_attr = min(all_attrs, key=lambda a: _RTS_ATTR_PRIORITY.get(a, 99))
+
+        if len(distinct_values) > 1:
+            out["blocked_zones"].append({
+                "type": "RIGHTS_SCOPE_FIELD_CONFLICT",
+                "reason": (
+                    "Multiple distinct rights candidate values exist for the same "
+                    "scope and field across one or more attribution tiers; "
+                    "no active winner packet was emitted."
+                ),
+                "field_type": field_type,
+                "lot_id": lot_id,
+                "bene_id": None if bene_key == "lot" else bene_key,
+                "scope_attributions": all_attrs,
+                "distinct_values": distinct_values,
+                "candidate_count": len(ordered_rts),
+                "candidates": [
+                    {
+                        "candidate_id": c.get("candidate_id"),
+                        "field_type": c.get("field_type"),
+                        "extracted_value": c.get("extracted_value"),
+                        "page": c.get("page"),
+                        "line_index": c.get("line_index"),
+                        "line_quote": c.get("quote"),
+                        "attribution": c.get("attribution"),
+                        "lot_id": c.get("lot_id"),
+                        "bene_id": c.get("bene_id"),
+                        "composite_key": c.get("composite_key"),
+                        "source_type": c.get("source_type"),
+                    }
+                    for c in ordered_rts
+                ],
+            })
+            continue
+
+        cand = ordered_rts[0]
+        bene_id_val = None if bene_key == "lot" else bene_key
+        rights_packets.append({
+            "packet_id": (
+                f"{field_type}::{lot_id}::{bene_key}"
+                f"::p{cand['page']}::l{cand['line_index']}"
+            ),
+            "field_type": field_type,
+            "lot_id": lot_id,
+            "bene_id": bene_id_val,
+            "corpo_id": None,
+            "scope_certainty": best_attr,
+            "scope_basis": cand.get("scope_basis") or f"lot:{lot_id}",
+            "page": cand["page"],
+            "line_index": cand["line_index"],
+            "quote": cand.get("quote"),
+            "context_window": cand.get("context_window"),
+            "extracted_value": cand["extracted_value"],
+            "extraction_method": cand.get("extraction_method", "REGEX_RIGHTS_INLINE"),
+            "confidence": (
+                1.0 if best_attr == "CONFIRMED" else 0.9
+            ),
+            "status": "ACTIVE",
+            "source_refs": {
+                "sibling_fields": cand.get("sibling_fields"),
+                "candidate_id": cand.get("candidate_id"),
+                "source_type": cand.get("source_type"),
+                "duplicate_candidate_ids": [
+                    other.get("candidate_id")
+                    for other in ordered_rts[1:]
+                    if other.get("candidate_id")
+                ],
+            },
+        })
+
+    out["packets"] = packets + bene_packets + cadastral_packets + location_packets + rights_packets
+    out["coverage"]["rights_packet_count"] = len(rights_packets)
+    out["coverage"]["rights_fields_present"] = sorted(
+        {p["field_type"] for p in rights_packets}
+    )
+    out["coverage"]["rights_scope_keys"] = sorted(
+        {
+            (
+                f"{p['lot_id']}/{p['bene_id']}"
+                if p["bene_id"]
+                else f"lot:{p['lot_id']}"
+            )
+            for p in rights_packets
         }
     )
 
@@ -497,6 +631,9 @@ def main() -> None:
         "location_packet_count": out["coverage"]["location_packet_count"],
         "location_fields_present": out["coverage"]["location_fields_present"],
         "location_scope_keys": out["coverage"]["location_scope_keys"],
+        "rights_packet_count": out["coverage"]["rights_packet_count"],
+        "rights_fields_present": out["coverage"]["rights_fields_present"],
+        "rights_scope_keys": out["coverage"]["rights_scope_keys"],
         "blocked_zone_count": len(out["blocked_zones"]),
     }, ensure_ascii=False, indent=2))
 
