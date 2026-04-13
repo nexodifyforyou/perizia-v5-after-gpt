@@ -28,6 +28,17 @@ PROVIDER = "openai"
 DEFAULT_MODEL = "gpt-4o-mini"
 CHAT_COMPLETIONS_URL = "https://api.openai.com/v1/chat/completions"
 ALLOWED_OUTCOMES = {"resolved", "unresolved_explained", "upgraded_context"}
+GENERIC_EXPLANATION_PATTERNS = [
+    "the system found conflicting evidence",
+    "the value could not be resolved safely",
+    "the document contains ambiguity",
+    "no fixed value is shown due to conflicting information",
+    "il sistema ha trovato evidenze contrastanti",
+    "il valore non può essere risolto in modo sicuro",
+    "il documento contiene ambiguità",
+    "non viene mostrato un valore fisso",
+    "caso lasciato irrisolto",
+]
 
 
 class LLMResolutionUnavailable(RuntimeError):
@@ -235,6 +246,214 @@ def _evidence_page_warnings(issue: Dict, supporting_evidence: List[Dict]) -> Lis
     return warnings
 
 
+def _optional_text(value: object) -> Optional[str]:
+    if value is None:
+        return None
+    text = str(value).strip()
+    return text or None
+
+
+def _field_label(issue: Dict) -> str:
+    labels = {
+        "impianto_idrico_status": "impianto idrico",
+        "impianto_elettrico_status": "impianto elettrico",
+        "impianto_riscaldamento_status": "impianto di riscaldamento",
+        "impianto_gas_status": "impianto gas",
+        "impianto_ascensore_status": "impianto ascensore",
+        "valuation_market_raw": "valore di mercato",
+        "cost_sanatoria_raw": "costi o indicazioni di sanatoria",
+        "cost_regolarizzazione_raw": "costi o indicazioni di regolarizzazione",
+        "occupancy": "stato di occupazione",
+    }
+    field_type = str(issue.get("field_type") or issue.get("field_family") or "campo")
+    return labels.get(field_type, field_type.replace("_raw", "").replace("_status", "").replace("_", " "))
+
+
+def _scope_label(issue: Dict) -> str:
+    parts: List[str] = []
+    lot_id = issue.get("lot_id")
+    bene_id = issue.get("bene_id")
+    if lot_id not in {None, ""}:
+        parts.append(f"Lotto {lot_id}")
+    if bene_id not in {None, ""}:
+        parts.append(f"Bene {bene_id}")
+    if parts:
+        return ", ".join(parts)
+    scope = (issue.get("scope_metadata") or {}).get("scope_key")
+    if scope:
+        return f"scope {scope}"
+    pages = issue.get("source_pages") or []
+    if pages:
+        label = "pagina" if len(pages) == 1 else "pagine"
+        return f"la finestra di {label} {', '.join(str(p) for p in pages)}"
+    return "la finestra locale del documento"
+
+
+def _short_quote(text: object, max_len: int = 140) -> Optional[str]:
+    quote = _optional_text(text)
+    if not quote:
+        return None
+    quote = re.sub(r"\s+", " ", quote)
+    if len(quote) > max_len:
+        quote = quote[: max_len - 1].rstrip() + "…"
+    return quote
+
+
+def _issue_quotes(issue: Dict, limit: int = 2) -> List[str]:
+    quotes: List[str] = []
+    for quote in issue.get("shell_quotes") or []:
+        short = _short_quote(quote)
+        if short and any(marker in short for marker in ["cross-lot scope guard", "Schema riassuntivo page"]):
+            continue
+        if short and short not in quotes:
+            quotes.append(short)
+    for candidate in issue.get("supporting_candidates") or []:
+        short = _short_quote(candidate.get("quote"))
+        if short and short not in quotes:
+            quotes.append(short)
+    for blocked in issue.get("supporting_blocked_entries") or []:
+        for candidate in blocked.get("candidates") or []:
+            short = _short_quote(candidate.get("quote"))
+            if short and short not in quotes:
+                quotes.append(short)
+    if not quotes:
+        field_words = [w for w in _field_label(issue).split() if len(w) > 3]
+        best_short: Optional[str] = None
+        for window in issue.get("local_text_windows") or []:
+            for line in str(window.get("text") or "").splitlines():
+                short = _short_quote(line)
+                if short and field_words and all(word.casefold() in short.casefold() for word in field_words):
+                    quotes.append(short)
+                    break
+                if short and not best_short and any(word.casefold() in short.casefold() for word in field_words):
+                    best_short = short
+            if quotes:
+                break
+        if not quotes and best_short:
+            quotes.append(best_short)
+    return quotes[:limit]
+
+
+def _quote_phrase(quotes: List[str]) -> str:
+    if not quotes:
+        return "gli estratti forniti non riportano una formulazione locale abbastanza selettiva"
+    if len(quotes) == 1:
+        return f'“{quotes[0]}”'
+    return " e ".join(f'“{quote}”' for quote in quotes)
+
+
+def _values_phrase(issue: Dict) -> str:
+    values = sorted(_candidate_values(issue))
+    if not values:
+        return "nessun valore candidato normalizzabile"
+    if len(values) == 1:
+        return values[0]
+    return " / ".join(values)
+
+
+def _is_generic_explanation(text: str) -> bool:
+    norm = _normalize_for_match(text)
+    return any(pattern in norm for pattern in GENERIC_EXPLANATION_PATTERNS)
+
+
+def _explanation_has_case_shape(issue: Dict, text: str, outcome: str, resolved_value: object) -> bool:
+    norm = _normalize_for_match(text)
+    if not norm or _is_generic_explanation(text):
+        return False
+    field = _field_label(issue)
+    if _normalize_for_match(field) not in norm:
+        return False
+    lot_id = issue.get("lot_id")
+    bene_id = issue.get("bene_id")
+    if lot_id not in {None, ""} and _normalize_for_match(f"Lotto {lot_id}") not in norm:
+        return False
+    if bene_id not in {None, ""} and _normalize_for_match(f"Bene {bene_id}") not in norm:
+        return False
+    quotes = _issue_quotes(issue)
+    values = sorted(_candidate_values(issue))
+    has_evidence = any(_normalize_for_match(value) in norm for value in values)
+    has_evidence = has_evidence or any(_normalize_for_match(quote) in norm for quote in quotes)
+    if outcome == "resolved" and resolved_value is not None:
+        has_evidence = has_evidence and _normalize_for_match(str(resolved_value)) in norm
+    return has_evidence
+
+
+def _evidence_shaped_explanation(issue: Dict, raw_resolution: Dict, outcome: str, resolved_value: object) -> str:
+    scope = _scope_label(issue)
+    field = _field_label(issue)
+    quotes = _issue_quotes(issue)
+    evidence = _quote_phrase(quotes)
+    values = _values_phrase(issue)
+    issue_type = issue.get("issue_type")
+
+    if outcome == "resolved":
+        alternatives = raw_resolution.get("rejected_alternatives")
+        if isinstance(alternatives, list) and alternatives:
+            rejected = "; ".join(
+                f"{alt.get('value')}: {alt.get('reason')}"
+                for alt in alternatives[:2]
+                if isinstance(alt, dict) and alt.get("value") and alt.get("reason")
+            )
+            if rejected:
+                return (
+                    f"Per {scope}, il valore “{resolved_value}” è usato per {field} perché il passaggio {evidence} "
+                    f"lo sostiene più direttamente delle alternative scartate ({rejected})."
+                )
+        return (
+            f"Per {scope}, il valore “{resolved_value}” è usato per {field} perché il passaggio {evidence} "
+            "lo collega direttamente allo scope del pacchetto e non lascia un'alternativa più forte."
+        )
+
+    if outcome == "upgraded_context":
+        if not _candidate_values(issue):
+            return (
+                f"Per {scope}, il documento dà contesto su {field} con il passaggio {evidence}. "
+                f"Il contenuto conta perché spiega la condizione da mostrare all'utente, ma resta contesto: "
+                f"il problema {issue_type} è raggruppato e non separa un valore finale normalizzato per il singolo campo."
+            )
+        return (
+            f"Per {scope}, il documento dà contesto su {field} con il passaggio {evidence}. "
+            f"Il contenuto è rilevante per interpretare {values}, ma resta contesto perché il problema {issue_type} "
+            "non isola un valore finale normalizzato per il singolo campo."
+        )
+
+    if not _candidate_values(issue):
+        return (
+            f"Per {scope}, {field} resta irrisolto: il documento riporta {evidence}, "
+            f"ma quel passaggio è un rinvio o contesto locale senza valore candidato normalizzabile. "
+            f"Il problema {issue_type} non attribuisce un dato finale a un lotto o bene specifico, "
+            "quindi il campo resta aperto invece di inventare uno stato."
+        )
+
+    return (
+        f"Per {scope}, {field} resta irrisolto: il documento riporta {evidence}, cioè valori o indicazioni concorrenti "
+        f"({values}). Il problema {issue_type} non chiarisce quale formulazione valga come dato finale per questo scope, "
+        f"quindi il campo resta aperto invece di scegliere tra {values}."
+    )
+
+
+def _fallback_why_not_resolved(issue: Dict, raw_resolution: Dict, outcome: str) -> str:
+    explanation = _optional_text(raw_resolution.get("user_visible_explanation"))
+    if explanation:
+        return explanation
+
+    if outcome == "upgraded_context":
+        return "Il pacchetto contiene contesto utile, ma non un valore normalizzato sicuro."
+
+    issue_type = issue.get("issue_type") or "issue"
+    field_type = issue.get("field_type") or issue.get("field_family") or "campo"
+    values = sorted(_candidate_values(issue))
+    if values:
+        return (
+            f"Il pacchetto {issue_type} per {field_type} contiene valori concorrenti "
+            f"({', '.join(values)}) senza evidenza abbastanza forte per scegliere un valore finale."
+        )
+    return (
+        f"Il pacchetto {issue_type} per {field_type} non contiene evidenza abbastanza forte "
+        "per emettere un valore finale."
+    )
+
+
 def _validate_resolution(issue: Dict, raw_resolution: Dict, provider: str, model: str) -> Dict:
     warnings: List[str] = []
     outcome = raw_resolution.get("llm_outcome")
@@ -272,13 +491,14 @@ def _validate_resolution(issue: Dict, raw_resolution: Dict, provider: str, model
     else:
         resolved_value_type = None
 
-    why_not_resolved = raw_resolution.get("why_not_resolved")
+    why_not_resolved = _optional_text(raw_resolution.get("why_not_resolved"))
     if outcome in {"unresolved_explained", "upgraded_context"} and not why_not_resolved:
-        why_not_resolved = (
-            "Il pacchetto non contiene evidenza abbastanza forte per emettere un valore fisso."
-            if outcome == "unresolved_explained"
-            else "Il pacchetto contiene contesto utile, ma non un valore normalizzato sicuro."
-        )
+        warnings.append(f"{outcome} response omitted why_not_resolved; populated from bounded issue packet.")
+        why_not_resolved = _fallback_why_not_resolved(issue, raw_resolution, outcome)
+    user_visible_explanation = _optional_text(raw_resolution.get("user_visible_explanation"))
+    if not user_visible_explanation or not _explanation_has_case_shape(issue, user_visible_explanation, outcome, resolved_value):
+        warnings.append("user_visible_explanation was missing or too generic; populated from bounded issue packet.")
+        user_visible_explanation = _evidence_shaped_explanation(issue, raw_resolution, outcome, resolved_value)
 
     resolution = {
         "issue_id": issue["issue_id"],
@@ -286,7 +506,7 @@ def _validate_resolution(issue: Dict, raw_resolution: Dict, provider: str, model
         "resolved_value": resolved_value,
         "resolved_value_type": resolved_value_type,
         "confidence_band": raw_resolution.get("confidence_band") if raw_resolution.get("confidence_band") in {"high", "medium", "low"} else "low",
-        "user_visible_explanation": str(raw_resolution.get("user_visible_explanation") or "").strip(),
+        "user_visible_explanation": user_visible_explanation,
         "supporting_evidence": supporting_evidence,
         "rejected_alternatives": raw_resolution.get("rejected_alternatives") if isinstance(raw_resolution.get("rejected_alternatives"), list) else [],
         "why_not_resolved": why_not_resolved if outcome in {"unresolved_explained", "upgraded_context"} else None,
@@ -297,9 +517,6 @@ def _validate_resolution(issue: Dict, raw_resolution: Dict, provider: str, model
     }
     if warnings:
         resolution["validation_warnings"] = warnings
-        resolution["needs_human_review"] = True
-    if not resolution["user_visible_explanation"]:
-        resolution["user_visible_explanation"] = "Caso lasciato irrisolto: il pacchetto non contiene evidenza sufficiente per mostrare un valore certo."
         resolution["needs_human_review"] = True
     if resolution["llm_outcome"] == "upgraded_context" and not resolution["why_not_resolved"]:
         resolution["why_not_resolved"] = "Contesto utile, ma non valore finale normalizzabile."

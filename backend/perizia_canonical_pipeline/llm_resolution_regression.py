@@ -10,6 +10,7 @@ from typing import Dict, List, Optional
 
 from .corpus_registry import list_case_keys
 from .llm_resolution_pack import build_llm_resolution_pack
+from .llm_resolution_schema_sweep import scan_llm_resolution_pack_artifacts
 
 
 DEFAULT_SCENARIOS = [
@@ -71,6 +72,14 @@ def run_regression(name: Optional[str] = None) -> List[Dict]:
         rows.append(_scenario_summary(scenario, out))
     fp = Path("/srv/perizia/_qa/canonical_pipeline/llm_resolution_regression_summary.json")
     fp.write_text(json.dumps(rows, ensure_ascii=False, indent=2), encoding="utf-8")
+    sweep = scan_llm_resolution_pack_artifacts()
+    sweep_fp = Path("/srv/perizia/_qa/canonical_pipeline/llm_resolution_schema_sweep_summary.json")
+    sweep_fp.write_text(json.dumps(sweep, ensure_ascii=False, indent=2), encoding="utf-8")
+    if sweep["violation_count"]:
+        raise AssertionError(
+            "LLM resolution schema sweep failed: "
+            + json.dumps(sweep["violation_counts"], ensure_ascii=False)
+        )
     return rows
 
 
