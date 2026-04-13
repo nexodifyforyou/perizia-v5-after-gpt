@@ -14,6 +14,7 @@ from .rights_candidate_pack import build_rights_candidate_pack
 from .occupancy_candidate_pack import build_occupancy_candidate_pack
 from .valuation_candidate_pack import build_valuation_candidate_pack
 from .cost_candidate_pack import build_cost_candidate_pack
+from .impianti_candidate_pack import build_impianti_candidate_pack
 
 
 def _make_packet_id(field_type: str, lot_id: str, page: int, line_index: Optional[int]) -> str:
@@ -89,7 +90,7 @@ def build_evidence_ledger(case_key: str) -> Dict[str, object]:
         "winner": winner,
         "global_quality_tier": quality,
         "status": "OK",
-        "field_scope": "CADASTRAL_LOCATION_RIGHTS_OCCUPANCY_VALUATION_COST_FIELD_SHELL",
+        "field_scope": "CADASTRAL_LOCATION_RIGHTS_OCCUPANCY_VALUATION_COST_IMPIANTI_FIELD_SHELL",
         "packets": [],
         "scope_zones": {
             "global_pre_lot_zone": scope.get("global_pre_lot_zone"),
@@ -118,6 +119,10 @@ def build_evidence_ledger(case_key: str) -> Dict[str, object]:
             "cost_fields_present": [],
             "cost_scope_keys": [],
             "cost_context_count": 0,
+            "impianti_packet_count": 0,
+            "impianti_fields_present": [],
+            "impianti_scope_keys": [],
+            "impianti_context_count": 0,
         },
         "warnings": list(scope.get("warnings", []) or []),
         "source_artifacts": {
@@ -1056,11 +1061,6 @@ def build_evidence_ledger(case_key: str) -> Dict[str, object]:
             },
         })
 
-    out["packets"] = (
-        packets + bene_packets + cadastral_packets
-        + location_packets + rights_packets + occupancy_packets
-        + valuation_packets + cost_packets + cost_context_packets
-    )
     out["coverage"]["cost_packet_count"] = len(cost_packets)
     out["coverage"]["cost_fields_present"] = sorted(
         {p["field_type"] for p in cost_packets}
@@ -1076,6 +1076,194 @@ def build_evidence_ledger(case_key: str) -> Dict[str, object]:
         }
     )
     out["coverage"]["cost_context_count"] = len(cost_context_packets)
+
+    # --- impianti / utilities candidates ---
+    # Per-system ACTIVE candidates: group by (lot_id, bene_key, field_type).
+    #   - 1 distinct value → ACTIVE packet
+    #   - Multiple distinct values → IMPIANTI_SCOPE_FIELD_CONFLICT (blocked)
+    # Context-only candidates: forwarded individually (no conflict check).
+    _IMP_ATTR_PRIORITY = {
+        "CONFIRMED": 0,
+        "ATTRIBUTED_BY_SCOPE": 1,
+        "BENE_LOCAL_CONTEXT_OVERRIDE": 1,
+        "LOT_LOCAL_CONTEXT_OVERRIDE": 1,
+        "LOT_LEVEL_ONLY": 2,
+        "LOT_LEVEL_ONLY_PRE_BENE_CONTEXT": 3,
+    }
+    _IMP_SAFE_ATTRIBUTIONS = set(_IMP_ATTR_PRIORITY.keys())
+
+    imp_pack = build_impianti_candidate_pack(case_key)
+
+    for w in (imp_pack.get("warnings") or []):
+        if w not in out["warnings"]:
+            out["warnings"].append(w)
+
+    for blk in (imp_pack.get("blocked_or_ambiguous") or []):
+        btype = blk.get("type", "IMPIANTI_BLOCKED_OR_AMBIGUOUS")
+        out["blocked_zones"].append({
+            "type": btype,
+            "reason": "Impianti candidate pack marked this evidence as blocked or ambiguous.",
+            "source": "impianti_candidate_pack.blocked_or_ambiguous",
+            "impianti_ambiguity": blk,
+        })
+
+    # Split by candidate_status
+    imp_active: List[Dict[str, object]] = []
+    imp_context: List[Dict[str, object]] = []
+
+    for cand in (imp_pack.get("candidates") or []):
+        cstatus = cand.get("candidate_status", "")
+        if cstatus == "ACTIVE":
+            attr = cand.get("attribution", "")
+            if attr in _IMP_SAFE_ATTRIBUTIONS:
+                imp_active.append(cand)
+        elif cstatus == "CONTEXT_ONLY":
+            imp_context.append(cand)
+
+    # Group active per-system by (lot_id, bene_key, field_type)
+    grouped_imp: Dict[tuple, List[Dict[str, object]]] = {}
+    for cand in imp_active:
+        lot_id = cand.get("lot_id") or "unknown"
+        bene_key = cand.get("bene_id") or "lot"
+        field_type = cand["field_type"]
+        key = (lot_id, bene_key, field_type)
+        grouped_imp.setdefault(key, []).append(cand)
+
+    impianti_packets: List[Dict[str, object]] = []
+    for (lot_id, bene_key, field_type), candidates_for_field in sorted(
+        grouped_imp.items(),
+        key=lambda item: (item[0][0], item[0][1], item[0][2]),
+    ):
+        ordered_imp = sorted(
+            candidates_for_field,
+            key=lambda c: (
+                c.get("page") if isinstance(c.get("page"), int) else 999999,
+                c.get("line_index") if isinstance(c.get("line_index"), int) else 999999,
+            ),
+        )
+        distinct_values_norm = sorted({
+            str(c.get("extracted_value", "")).strip().lower()
+            for c in ordered_imp
+        })
+        all_attrs = sorted({c.get("attribution", "") for c in ordered_imp})
+        best_attr = min(all_attrs, key=lambda a: _IMP_ATTR_PRIORITY.get(a, 99))
+
+        if len(distinct_values_norm) > 1:
+            out["blocked_zones"].append({
+                "type": "IMPIANTI_SCOPE_FIELD_CONFLICT",
+                "reason": (
+                    "Multiple distinct impianti candidate values for same scope "
+                    "and field_type; no active winner packet emitted."
+                ),
+                "field_type": field_type,
+                "lot_id": lot_id,
+                "bene_id": None if bene_key == "lot" else bene_key,
+                "scope_attributions": all_attrs,
+                "distinct_values": sorted({
+                    str(c.get("extracted_value", "")) for c in ordered_imp
+                }),
+                "candidate_count": len(ordered_imp),
+                "candidates": [
+                    {
+                        "candidate_id": c.get("candidate_id"),
+                        "field_type": c.get("field_type"),
+                        "extracted_value": c.get("extracted_value"),
+                        "page": c.get("page"),
+                        "line_index": c.get("line_index"),
+                        "quote": c.get("quote"),
+                        "attribution": c.get("attribution"),
+                        "lot_id": c.get("lot_id"),
+                        "bene_id": c.get("bene_id"),
+                    }
+                    for c in ordered_imp
+                ],
+            })
+            continue
+
+        cand = ordered_imp[0]
+        bene_id_val = None if bene_key == "lot" else bene_key
+        impianti_packets.append({
+            "packet_id": (
+                f"{field_type}::{lot_id}::{bene_key}"
+                f"::p{cand['page']}::l{cand['line_index']}"
+            ),
+            "field_type": field_type,
+            "lot_id": lot_id,
+            "bene_id": bene_id_val,
+            "corpo_id": None,
+            "scope_certainty": best_attr,
+            "scope_basis": cand.get("scope_basis") or f"lot:{lot_id}",
+            "page": cand["page"],
+            "line_index": cand["line_index"],
+            "quote": cand.get("quote"),
+            "context_window": cand.get("context_window"),
+            "extracted_value": cand["extracted_value"],
+            "extraction_method": cand.get("extraction_method", "REGEX_IMPIANTI_PER_SYS_STATUS"),
+            "confidence": 1.0 if best_attr in ("CONFIRMED", "ATTRIBUTED_BY_SCOPE") else 0.85,
+            "status": "ACTIVE",
+            "source_refs": {
+                "candidate_id": cand.get("candidate_id"),
+                "duplicate_candidate_ids": [
+                    other.get("candidate_id")
+                    for other in ordered_imp[1:]
+                    if other.get("candidate_id")
+                ],
+            },
+        })
+
+    # Context-only impianti items → individual context packets (no conflict check)
+    impianti_context_packets: List[Dict[str, object]] = []
+    for cand in imp_context:
+        lot_id = cand.get("lot_id") or "unknown"
+        bene_key = cand.get("bene_id") or "lot"
+        field_type = cand["field_type"]
+        bene_id_val = None if bene_key == "lot" else bene_key
+        impianti_context_packets.append({
+            "packet_id": (
+                f"{field_type}::{lot_id}::{bene_key}"
+                f"::p{cand['page']}::l{cand['line_index']}"
+            ),
+            "field_type": field_type,
+            "lot_id": lot_id,
+            "bene_id": bene_id_val,
+            "corpo_id": None,
+            "scope_certainty": cand.get("attribution", "LOT_LEVEL_ONLY"),
+            "scope_basis": cand.get("scope_basis") or f"lot:{lot_id}",
+            "page": cand["page"],
+            "line_index": cand["line_index"],
+            "quote": cand.get("quote"),
+            "context_window": cand.get("context_window"),
+            "extracted_value": cand.get("extracted_value"),
+            "is_context_only": True,
+            "extraction_method": cand.get("extraction_method", "REGEX_IMPIANTI_CONTEXT"),
+            "confidence": 0.8,
+            "status": "CONTEXT_ONLY",
+            "source_refs": {
+                "candidate_id": cand.get("candidate_id"),
+            },
+        })
+
+    out["packets"] = (
+        packets + bene_packets + cadastral_packets
+        + location_packets + rights_packets + occupancy_packets
+        + valuation_packets + cost_packets + cost_context_packets
+        + impianti_packets + impianti_context_packets
+    )
+    out["coverage"]["impianti_packet_count"] = len(impianti_packets)
+    out["coverage"]["impianti_fields_present"] = sorted(
+        {p["field_type"] for p in impianti_packets}
+    )
+    out["coverage"]["impianti_scope_keys"] = sorted(
+        {
+            (
+                f"{p['lot_id']}/{p['bene_id']}"
+                if p["bene_id"]
+                else f"lot:{p['lot_id']}"
+            )
+            for p in impianti_packets
+        }
+    )
+    out["coverage"]["impianti_context_count"] = len(impianti_context_packets)
 
     # --- blocked zones for structural ambiguities ---
     same_page_collisions = scope.get("same_page_collisions", []) or []
@@ -1128,6 +1316,10 @@ def main() -> None:
         "cost_fields_present": out["coverage"]["cost_fields_present"],
         "cost_scope_keys": out["coverage"]["cost_scope_keys"],
         "cost_context_count": out["coverage"]["cost_context_count"],
+        "impianti_packet_count": out["coverage"]["impianti_packet_count"],
+        "impianti_fields_present": out["coverage"]["impianti_fields_present"],
+        "impianti_scope_keys": out["coverage"]["impianti_scope_keys"],
+        "impianti_context_count": out["coverage"]["impianti_context_count"],
         "blocked_zone_count": len(out["blocked_zones"]),
     }, ensure_ascii=False, indent=2))
 
