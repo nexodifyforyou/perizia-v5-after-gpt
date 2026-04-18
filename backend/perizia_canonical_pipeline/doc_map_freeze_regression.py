@@ -240,6 +240,16 @@ def _regression_checks(doc_map: Dict[str, Any]) -> List[str]:
                     f"scope={sk} field={ft}"
                 )
 
+    # grouped_llm_explanations: any entry must carry user_visible_explanation
+    for g in doc_map.get("grouped_llm_explanations") or []:
+        if not isinstance(g, dict):
+            continue
+        if not g.get("user_visible_explanation"):
+            errors.append(
+                f"grouped_llm_explanation entry has no user_visible_explanation: "
+                f"scope={g.get('scope_key')} field_type={g.get('field_type')}"
+            )
+
     if case_key == "mantova_1859886":
         bad = (
             fields.get("bene:unico/4", {})
@@ -295,6 +305,7 @@ def main() -> None:
         state_counts = _count_states(doc_map.get("fields", {}))
         cs = doc_map.get("case_summary", {})
 
+        grouped_explanations = doc_map.get("grouped_llm_explanations") or []
         rows.append({
             "case_key": case_key,
             "freeze_status": doc_map.get("freeze_status"),
@@ -309,6 +320,16 @@ def main() -> None:
             "unresolved_count": len(doc_map.get("unresolved_items", [])),
             "context_count": len(doc_map.get("context_items", [])),
             "blocked_count": len(doc_map.get("blocked_items", [])),
+            "grouped_llm_explanations_count": len(grouped_explanations),
+            "grouped_llm_explanations_sample": [
+                {
+                    "scope_key": g.get("scope_key"),
+                    "field_type": g.get("field_type"),
+                    "llm_outcome": g.get("llm_outcome"),
+                    "user_visible_explanation": (g.get("user_visible_explanation") or "")[:120],
+                }
+                for g in grouped_explanations[:3]
+            ],
             "regression_errors": errors,
             "warnings": doc_map.get("warnings", []),
             "artifact": str(out_path),

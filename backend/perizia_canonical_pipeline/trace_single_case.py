@@ -186,6 +186,19 @@ def _artifact_summary(stage_name: str, artifact_data: Any) -> Dict[str, Any]:
 
     if stage_name == "doc_map_freeze":
         summary["state_counts"] = _field_state_counts(data)
+        grouped = data.get("grouped_llm_explanations")
+        if isinstance(grouped, list):
+            summary["grouped_llm_explanations_count"] = len(grouped)
+            if grouped:
+                summary["grouped_llm_explanations_sample"] = [
+                    {
+                        "scope_key": g.get("scope_key"),
+                        "field_type": g.get("field_type"),
+                        "llm_outcome": g.get("llm_outcome"),
+                        "user_visible_explanation": (g.get("user_visible_explanation") or "")[:120],
+                    }
+                    for g in grouped[:3]
+                ]
     if "coverage" in data and isinstance(data["coverage"], dict):
         summary["coverage"] = data["coverage"]
     if "summary" in data and isinstance(data["summary"], dict):
@@ -392,6 +405,38 @@ def _build_llm_call_trace(
             "llm_error": record.get("error"),
             "post_guard_result_after_freeze": _find_freeze_entry_by_issue(doc_map, str(issue_id)),
         })
+
+    # Grouped LLM explanations from doc_map — surfaced as bounded contextual outputs.
+    # These are family-level/scope-ambiguity resolutions that do not map to a single
+    # field slot.  They appear here so they are visible in the final analysis trace,
+    # not silently stored only in doc_map.json.
+    for grouped in doc_map.get("grouped_llm_explanations") or []:
+        if not isinstance(grouped, dict):
+            continue
+        rows.append({
+            "source_stage": "grouped_llm_explanation",
+            "issue_id": grouped.get("issue_id"),
+            "issue_type": "GROUPED_FAMILY_LEVEL",
+            "target_scope": grouped.get("scope_key"),
+            "family": grouped.get("field_type"),
+            "field": grouped.get("field_type"),
+            "evidence": [],
+            "structured_payload_sent": None,
+            "structured_llm_response": {
+                "llm_outcome": grouped.get("llm_outcome"),
+                "user_visible_explanation": grouped.get("user_visible_explanation"),
+                "why_not_resolved": grouped.get("why_not_resolved"),
+                "confidence_band": grouped.get("confidence_band"),
+                "needs_human_review": grouped.get("needs_human_review"),
+                "lot_id": grouped.get("lot_id"),
+                "bene_id": grouped.get("bene_id"),
+            },
+            "llm_attempted": True,
+            "llm_succeeded": True,
+            "llm_error": None,
+            "post_guard_result_after_freeze": None,
+        })
+
     return rows
 
 
@@ -500,6 +545,7 @@ def _write_report(
     ])
     for row in llm_rows:
         result = row.get("post_guard_result_after_freeze") or {}
+        resp = row.get("structured_llm_response") or {}
         lines.extend([
             f"### {row.get('source_stage')} / {row.get('issue_id')}",
             "",
@@ -509,11 +555,14 @@ def _write_report(
             f"- LLM attempted: {'yes' if row.get('llm_attempted') else 'no'}",
             f"- LLM succeeded: {'yes' if row.get('llm_succeeded') else 'no'}",
             f"- LLM error: {row.get('llm_error') or 'none'}",
-            f"- LLM outcome: {(row.get('structured_llm_response') or {}).get('llm_outcome')}",
+            f"- LLM outcome: {resp.get('llm_outcome')}",
             f"- Freeze result: {result.get('state')} value={result.get('value')!r}",
             f"- Evidence items: {len(row.get('evidence') or [])}",
-            "",
         ])
+        if row.get("source_stage") == "grouped_llm_explanation":
+            expl = resp.get("user_visible_explanation") or ""
+            lines.append(f"- Explanation (grouped/contextual): {expl[:300]}")
+        lines.append("")
     out_path.write_text("\n".join(lines), encoding="utf-8")
 
 

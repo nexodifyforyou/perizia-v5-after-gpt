@@ -418,6 +418,20 @@ def _scope_guard_failure(
                 + "."
             )
         if not has_target:
+            # Secondary fallback: evidence page within canonical lot page range is
+            # sufficient proof of scope when no conflicting lot anchor was found.
+            # Handles the common case where the cue page is mid-section and doesn't
+            # repeat the "LOTTO N" heading that appears on the section start page.
+            scope_entry = _scope_entry(scope_index, scope_key)
+            if scope_entry:
+                s_start = scope_entry.get("first_header_page") or scope_entry.get("start_page")
+                s_end = scope_entry.get("end_page")
+                s_quote = str(scope_entry.get("first_header_quote") or "")
+                if s_start and s_end and s_quote and any(
+                    s_start <= p <= s_end for p in support_pages
+                ):
+                    has_target = True
+        if not has_target:
             return (
                 "Scope guard rejected missing-slot resolution: no explicit or canonical "
                 f"target Lotto {target} anchor was found in the supporting evidence."
@@ -1387,11 +1401,16 @@ def freeze_case(case_key: str) -> Dict[str, Any]:
 
     # ---- 5. Resolution map: issue_id → resolution ----
     resolution_map: Dict[str, Any] = {}
+    _resolution_pack_issue_by_id: Dict[str, Any] = {}
     if resolution_pack:
         for res in resolution_pack.get("resolutions", []):
             iid = res.get("issue_id")
             if iid:
                 resolution_map[iid] = res
+        for iss in resolution_pack.get("issues", []):
+            iid = iss.get("issue_id")
+            if iid:
+                _resolution_pack_issue_by_id[iid] = iss
 
     # ---- 6. Declared scope registry ----
     # "document" is always valid (unscoped catch-all).
@@ -1484,6 +1503,53 @@ def freeze_case(case_key: str) -> Dict[str, Any]:
 
                 fields.setdefault(sk, {}).setdefault(family, {})[ft] = entry
 
+        # ---- Grouped llm_resolution_pack outputs (Fix A) ----
+        # Resolutions whose field_type is a family name (e.g. "location") are
+        # silently dropped by _build_field_map because _infer_family returns "other".
+        # Collect them here without inventing scope or fabricating field values.
+        grouped_llm_explanations: List[Dict[str, Any]] = []
+        _grouped_declared_lot_keys: Set[str] = {
+            sk for sk in declared_scopes if sk.startswith("lot:")
+        }
+        if resolution_pack:
+            for res in resolution_pack.get("resolutions", []):
+                iid = res.get("issue_id")
+                if not iid:
+                    continue
+                iss = _resolution_pack_issue_by_id.get(iid)
+                if not iss:
+                    continue
+                ft = iss.get("field_type", "")
+                if _infer_family(ft) != "other":
+                    continue  # handled by normal field-map path
+                raw_sk = _scope_key(iss.get("lot_id"), iss.get("bene_id"))
+                sk = _resolve_scope(
+                    raw_sk, declared_scopes, _grouped_declared_lot_keys,
+                    warnings, f"grouped_llm issue {iid}",
+                )
+                if sk is None:
+                    continue
+                lot_id_hint = iss.get("lot_id")
+                bene_id_hint = iss.get("bene_id")
+                scope_key_hint = (
+                    iss.get("scope_metadata", {}).get("scope_key")
+                    if isinstance(iss.get("scope_metadata"), dict)
+                    else None
+                ) or sk
+                grouped_llm_explanations.append({
+                    "issue_id": iid,
+                    "scope_key": sk,
+                    "scope_key_hint": scope_key_hint,
+                    "lot_id": lot_id_hint,
+                    "bene_id": bene_id_hint,
+                    "field_type": ft,
+                    "llm_outcome": res.get("llm_outcome"),
+                    "user_visible_explanation": res.get("user_visible_explanation"),
+                    "why_not_resolved": res.get("why_not_resolved"),
+                    "confidence_band": res.get("confidence_band"),
+                    "needs_human_review": res.get("needs_human_review"),
+                })
+
         freeze_status = _determine_freeze_status(
             fields=fields,
             unresolved_items=unresolved_items,
@@ -1529,6 +1595,7 @@ def freeze_case(case_key: str) -> Dict[str, Any]:
         "unresolved_items": unresolved_items,
         "context_items": context_items,
         "blocked_items": blocked_items,
+        "grouped_llm_explanations": grouped_llm_explanations if not is_unreadable else [],
         "source_artifacts": source_artifacts,
         "warnings": warnings,
     }
