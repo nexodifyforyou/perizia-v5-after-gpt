@@ -24,8 +24,8 @@ from .doc_map_freeze import run_freeze
 from .evidence_ledger import build_evidence_ledger
 from .extract import extract_case
 from .impianti_candidate_pack import build_impianti_candidate_pack
-from .llm_clarification_issue_pack import build_clarification_issue_pack, select_issues
-from .llm_resolution_pack import LLMResolutionUnavailable, build_llm_resolution_pack
+from .llm_clarification_issue_pack import build_clarification_issue_pack
+from .llm_resolution_pack import LLMResolutionUnavailable, build_llm_resolution_pack, select_prioritized_issues
 from .location_candidate_pack import build_location_candidate_pack
 from .lot_header_spine import build_spine as build_lot_header_spine
 from .lot_scope_map import build_lot_scope_map
@@ -608,7 +608,7 @@ def run_trace(case_key: str, output_dir: Optional[Path] = None) -> Dict[str, Pat
                 error = f"{type(exc).__name__}: {exc}"
             if error:
                 issue_pack = _read_json(ctx.artifact_dir / "clarification_issue_pack.json") or {}
-                selected = select_issues(issue_pack, limit=1)
+                selected = select_prioritized_issues(issue_pack)
                 for issue in selected:
                     failed_llm_trace_rows.append({
                         "source_stage": "llm_resolution_pack",

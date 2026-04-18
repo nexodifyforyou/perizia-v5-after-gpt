@@ -22,17 +22,34 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Set
 
 from .corpus_registry import list_case_keys
-from .llm_clarification_issue_pack import build_clarification_issue_pack, select_issues
+from .llm_clarification_issue_pack import build_clarification_issue_pack
 from .runner import build_context
 
 
 PROVIDER = "openai"
 DEFAULT_MODEL = "gpt-4o-mini"
+DEFAULT_ISSUE_LIMIT = 8
 CHAT_COMPLETIONS_URL = "https://api.openai.com/v1/chat/completions"
 MAX_OPENAI_RETRIES = 2
 DEFAULT_RETRY_DELAY_SECONDS = 1.0
 MAX_RETRY_DELAY_SECONDS = 8.0
 ALLOWED_OUTCOMES = {"resolved", "unresolved_explained", "upgraded_context"}
+FAMILY_PRIORITY = {
+    "valuation": 0,
+    "occupancy": 1,
+    "rights": 2,
+    "cadastral": 3,
+    "cost": 4,
+    "location": 5,
+}
+ISSUE_TYPE_PRIORITY = {
+    "SCOPE_AMBIGUITY": 0,
+    "FIELD_CONFLICT": 1,
+    "GROUPED_CONTEXT_NEEDS_EXPLANATION": 2,
+    "TABLE_RECAP_DUPLICATE_UNCLEAR": 3,
+    "SUSPICIOUS_SILENCE": 4,
+    "OCR_VARIANT_COLLISION": 5,
+}
 GENERIC_EXPLANATION_PATTERNS = [
     "the system found conflicting evidence",
     "the value could not be resolved safely",
@@ -463,6 +480,15 @@ def _issue_quotes(issue: Dict, limit: int = 2) -> List[str]:
                 break
         if not quotes and best_short:
             quotes.append(best_short)
+    if not quotes:
+        for window in issue.get("local_text_windows") or []:
+            for line in str(window.get("text") or "").splitlines():
+                short = _short_quote(line)
+                if short and not re.fullmatch(r"\d+\s+di\s+\d+", short, flags=re.IGNORECASE):
+                    quotes.append(short)
+                    break
+            if quotes:
+                break
     return quotes[:limit]
 
 
@@ -671,20 +697,85 @@ def resolve_single_issue(
     return _validate_resolution(issue, raw, PROVIDER, model)
 
 
+def _has_resolution_evidence(issue: Dict) -> bool:
+    return bool(
+        issue.get("candidate_values")
+        or issue.get("blocked_values")
+        or issue.get("supporting_candidates")
+        or issue.get("supporting_blocked_entries")
+        or issue.get("local_text_windows")
+        or issue.get("shell_quotes")
+    )
+
+
+def _priority_key(indexed_issue: tuple[int, Dict]) -> tuple[int, int, int, int, int, str]:
+    original_index, issue = indexed_issue
+    family = str(issue.get("field_family") or "")
+    issue_type = str(issue.get("issue_type") or "")
+    has_values = bool(issue.get("candidate_values") or issue.get("blocked_values"))
+    primary_issue_bucket = 0 if issue_type in {
+        "SCOPE_AMBIGUITY",
+        "FIELD_CONFLICT",
+        "GROUPED_CONTEXT_NEEDS_EXPLANATION",
+    } else 1
+    return (
+        primary_issue_bucket,
+        FAMILY_PRIORITY.get(family, 99),
+        ISSUE_TYPE_PRIORITY.get(issue_type, 99),
+        0 if has_values else 1,
+        original_index,
+        str(issue.get("issue_id") or ""),
+    )
+
+
+def select_prioritized_issues(
+    pack: Dict[str, object],
+    *,
+    issue_type: Optional[str] = None,
+    field_family: Optional[str] = None,
+    field_type: Optional[str] = None,
+    limit: int = DEFAULT_ISSUE_LIMIT,
+) -> List[Dict]:
+    """
+    Select a bounded material batch for the LLM clarification layer.
+
+    Explicit filters still narrow the candidate set, but the default path no
+    longer sends only the first packet in artifact order.
+    """
+    if limit < 1:
+        raise ValueError("limit must be >= 1")
+
+    indexed: List[tuple[int, Dict]] = []
+    for original_index, issue in enumerate(pack.get("issues", [])):
+        if issue_type and issue.get("issue_type") != issue_type:
+            continue
+        if field_family and issue.get("field_family") != field_family:
+            continue
+        if field_type and issue.get("field_type") != field_type:
+            continue
+        if issue.get("needs_llm") is False:
+            continue
+        if not _has_resolution_evidence(issue):
+            continue
+        indexed.append((original_index, issue))
+
+    return [issue for _, issue in sorted(indexed, key=_priority_key)[:limit]]
+
+
 def build_llm_resolution_pack(
     case_key: str,
     *,
     issue_type: Optional[str] = None,
     field_family: Optional[str] = None,
     field_type: Optional[str] = None,
-    limit: int = 1,
+    limit: int = DEFAULT_ISSUE_LIMIT,
 ) -> Dict[str, object]:
     config = discover_openai_config()
     if not config["key_found"]:
         raise LLMResolutionUnavailable("OPENAI_API_KEY missing")
     ctx = build_context(case_key)
     issue_pack = build_clarification_issue_pack(case_key)
-    selected = select_issues(
+    selected = select_prioritized_issues(
         issue_pack,
         issue_type=issue_type,
         field_family=field_family,
@@ -724,7 +815,7 @@ def main() -> None:
     parser.add_argument("--issue-type", choices=sorted({"FIELD_CONFLICT", "SUSPICIOUS_SILENCE", "SCOPE_AMBIGUITY", "GROUPED_CONTEXT_NEEDS_EXPLANATION", "OCR_VARIANT_COLLISION", "TABLE_RECAP_DUPLICATE_UNCLEAR"}))
     parser.add_argument("--field-family")
     parser.add_argument("--field-type")
-    parser.add_argument("--limit", type=int, default=1)
+    parser.add_argument("--limit", type=int, default=DEFAULT_ISSUE_LIMIT)
     args = parser.parse_args()
     out = build_llm_resolution_pack(
         args.case,
