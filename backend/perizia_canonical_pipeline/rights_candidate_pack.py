@@ -165,6 +165,24 @@ def _determine_rights_scope(page: int, winner: str, lut: Dict) -> Dict:
     return result
 
 
+def _scope_for_local_bene(scope_info: Dict, local_bene_id: Optional[str], lut: Dict) -> Dict:
+    if not local_bene_id:
+        return scope_info
+    lot_id = scope_info.get("lot_id")
+    if not lot_id:
+        return scope_info
+    for bs in lut["bene_by_lot"].get(str(lot_id), []):
+        if str(bs.get("bene_id")) == str(local_bene_id):
+            return {
+                "attribution": "CONFIRMED",
+                "blocked": False,
+                "lot_id": str(lot_id),
+                "bene_id": str(bs.get("bene_id")),
+                "composite_key": str(bs.get("composite_key")),
+            }
+    return scope_info
+
+
 # ---------------------------------------------------------------------------
 # Procedural context exclusion
 # ---------------------------------------------------------------------------
@@ -409,15 +427,19 @@ def build_rights_candidate_pack(case_key: str) -> Dict:
                 method = f"BODY_{pname}_WINDOW"
                 quote = m.group(0)[:300]
                 ctx_win = norm_win[m.start():][:400]
+                local_lot_id, local_bene_id = _nearest_local_headers(lines, line_idx)
+                effective_scope = _scope_for_local_bene(scope_info, local_bene_id, lut)
+                effective_blocked = effective_scope["blocked"]
+                effective_attribution = effective_scope["attribution"]
 
-                if is_blocked:
+                if effective_blocked:
                     extra = {ft: fv for ft, fv in fields}
                     _emit_blocked(
-                        attribution,
+                        effective_attribution,
                         page, line_idx, line_s, norm_win[:300],
                         method,
-                        scope_info["lot_id"], scope_info["bene_id"],
-                        reason=f"Rights match found but scope attribution is {attribution}.",
+                        effective_scope["lot_id"], effective_scope["bene_id"],
+                        reason=f"Rights match found but scope attribution is {effective_attribution}.",
                         extra=extra,
                     )
                 else:
@@ -429,18 +451,15 @@ def build_rights_candidate_pack(case_key: str) -> Dict:
                     # rights text belongs to a different lot/bene than the
                     # page-level scope assigned — block it.
                     # ---------------------------------------------------------
-                    local_lot_id, local_bene_id = _nearest_local_headers(
-                        lines, line_idx
-                    )
-                    attributed_lot = (scope_info.get("lot_id") or "").lower()
-                    attributed_bene = scope_info.get("bene_id")
+                    attributed_lot = (effective_scope.get("lot_id") or "").lower()
+                    attributed_bene = effective_scope.get("bene_id")
                     mismatch_reason: Optional[str] = None
 
                     if local_lot_id is not None and local_lot_id != attributed_lot:
                         mismatch_reason = (
                             f"Local explicit lot header 'LOTTO {local_lot_id.upper()}' "
                             f"disagrees with attributed lot_id "
-                            f"'{scope_info.get('lot_id')}'."
+                            f"'{effective_scope.get('lot_id')}'."
                         )
                     elif (
                         local_bene_id is not None
@@ -456,7 +475,7 @@ def build_rights_candidate_pack(case_key: str) -> Dict:
                         extra_mm: Dict = {
                             "local_lot_id": local_lot_id,
                             "local_bene_id": local_bene_id,
-                            "attributed_lot_id": scope_info.get("lot_id"),
+                            "attributed_lot_id": effective_scope.get("lot_id"),
                             "attributed_bene_id": str(attributed_bene)
                             if attributed_bene is not None else None,
                         }
@@ -465,21 +484,21 @@ def build_rights_candidate_pack(case_key: str) -> Dict:
                             "RIGHTS_LOCAL_SCOPE_HEADER_MISMATCH",
                             page, line_idx, line_s, norm_win[:300],
                             method,
-                            scope_info["lot_id"], scope_info["bene_id"],
+                            effective_scope["lot_id"], effective_scope["bene_id"],
                             reason=mismatch_reason,
                             extra=extra_mm,
                         )
                     else:
                         scope_basis = (
                             f"Rights trigger on p{page}:l{line_idx}; "
-                            f"scope attribution: {attribution}."
+                            f"scope attribution: {effective_attribution}."
                         )
                         _emit_active(
                             fields, page, line_idx, quote, ctx_win,
                             method,
-                            scope_info["lot_id"], scope_info["bene_id"],
-                            scope_info["composite_key"],
-                            attribution, scope_basis,
+                            effective_scope["lot_id"], effective_scope["bene_id"],
+                            effective_scope["composite_key"],
+                            effective_attribution, scope_basis,
                         )
                 break  # Only one pattern per line
 

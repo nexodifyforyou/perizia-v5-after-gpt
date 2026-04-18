@@ -40,6 +40,13 @@ FRAGMENT_MAPPALE_PAT = re.compile(
     r"(?:[,\s]+(?:Categoria|Categ\.?|Cat\.?)\s+([\w/]+))?",
     re.IGNORECASE,
 )
+CADAT_TABLE_ROW_PAT = re.compile(
+    r"^\s*[A-Z]\s+(\d+)\s+(\d+)\s+(\d+)\s+([A-Z]\s*/?\s*\d+)\b",
+    re.IGNORECASE,
+)
+LOCAL_BENE_HEADER_PAT = re.compile(r"\bBene\s+N[°\.]\s*([0-9]+)", re.IGNORECASE)
+ACCASTAMENTO_PRECEDENTE_PAT = re.compile(r"\bAccatastamento\s+precedente\b", re.IGNORECASE)
+ACCASTAMENTO_ATTUALE_PAT = re.compile(r"\bAccatastamento\s+attuale\b", re.IGNORECASE)
 
 
 # ---------------------------------------------------------------------------
@@ -176,6 +183,67 @@ def _determine_scope(
     return _r("ATTRIBUTED_BY_SCOPE", blocked=False, lot_id=matched_lot, bene_id=bene_id, ck=ck)
 
 
+def _normalize_categoria(value: Optional[str]) -> Optional[str]:
+    if not value:
+        return value
+    compact = re.sub(r"\s+", "", value).upper()
+    m = re.match(r"^([A-Z])/?(\d+)$", compact)
+    if m:
+        return f"{m.group(1)}/{m.group(2)}"
+    return compact
+
+
+def _nearest_local_bene_id(lines: List[str], line_idx: int, lookback: int = 16) -> Optional[str]:
+    start = max(0, line_idx - lookback)
+    for raw_line in reversed(lines[start : line_idx + 1]):
+        m = LOCAL_BENE_HEADER_PAT.search(raw_line)
+        if m:
+            return m.group(1).strip()
+    return None
+
+
+def _scope_for_local_bene(scope_info: Dict, local_bene_id: Optional[str], lut: Dict) -> Dict:
+    if not local_bene_id:
+        return scope_info
+    lot_id = scope_info.get("lot_id")
+    if not lot_id:
+        return scope_info
+    for bs in lut["bene_by_lot"].get(str(lot_id), []):
+        if str(bs.get("bene_id")) == str(local_bene_id):
+            return {
+                "attribution": "CONFIRMED",
+                "blocked": False,
+                "lot_id": str(lot_id),
+                "bene_id": str(bs.get("bene_id")),
+                "composite_key": str(bs.get("composite_key")),
+            }
+    return scope_info
+
+
+def _is_accatastamento_precedente_context(lines: List[str], line_idx: int, lookback: int = 14) -> bool:
+    start = max(0, line_idx - lookback)
+    for raw_line in reversed(lines[start : line_idx + 1]):
+        if ACCASTAMENTO_ATTUALE_PAT.search(raw_line):
+            return False
+        if ACCASTAMENTO_PRECEDENTE_PAT.search(raw_line):
+            return True
+        if LOCAL_BENE_HEADER_PAT.search(raw_line):
+            return False
+    return False
+
+
+def _table_row_cadastral_match(line: str) -> Optional[Dict[str, Optional[str]]]:
+    m = CADAT_TABLE_ROW_PAT.search(line)
+    if not m:
+        return None
+    return {
+        "foglio": m.group(1),
+        "mappale": m.group(2),
+        "subalterno": m.group(3),
+        "categoria": _normalize_categoria(m.group(4)),
+    }
+
+
 def _make_candidate_id(
     field_type: str,
     lot_id: Optional[str],
@@ -301,7 +369,21 @@ def build_cadastral_candidate_pack(case_key: str) -> Dict[str, object]:
         scope_info = _determine_scope(page, winner, lut)
 
         for line_idx, line in enumerate(lines):
+            local_bene_id = _nearest_local_bene_id(lines, line_idx)
+            effective_scope = _scope_for_local_bene(scope_info, local_bene_id, lut)
+            skip_previous_local = (
+                local_bene_id is not None
+                and _is_accatastamento_precedente_context(lines, line_idx)
+            )
             matches = CADAT_PAT.findall(line)
+            table_match = _table_row_cadastral_match(line)
+            if not matches and table_match:
+                matches = [(
+                    table_match["foglio"],
+                    table_match["mappale"],
+                    table_match["subalterno"] or "",
+                    table_match["categoria"] or "",
+                )]
             fragmented_matches: List[Dict[str, Optional[str]]] = []
             fragmented_quote = ""
             if not matches and FOGLIO_ANCHOR_PAT.search(line):
@@ -320,28 +402,30 @@ def build_cadastral_candidate_pack(case_key: str) -> Dict[str, object]:
                             "line_quote": fragmented_quote,
                             "match_count": len(fragmented_matches),
                             "matches": fragmented_matches,
-                            "scope_attribution": scope_info["attribution"],
-                            "lot_id": scope_info["lot_id"],
-                            "bene_id": scope_info["bene_id"],
-                            "composite_key": scope_info["composite_key"],
+                            "scope_attribution": effective_scope["attribution"],
+                            "lot_id": effective_scope["lot_id"],
+                            "bene_id": effective_scope["bene_id"],
+                            "composite_key": effective_scope["composite_key"],
                             "extraction_method": "REGEX_CADAT_FRAGMENTED",
                         })
                         continue
 
                     match = fragmented_matches[0]
-                    if scope_info["blocked"]:
+                    if skip_previous_local:
+                        continue
+                    if effective_scope["blocked"]:
                         blocked_or_ambiguous.append({
-                            "type": scope_info["attribution"],
+                            "type": effective_scope["attribution"],
                             "page": page,
                             "line_index": line_idx,
                             "line_quote": fragmented_quote,
                             "foglio": match["foglio"],
                             "mappale": match["mappale"],
                             "subalterno": match["subalterno"],
-                            "categoria": match["categoria"],
-                            "lot_id": scope_info["lot_id"],
-                            "bene_id": scope_info["bene_id"],
-                            "composite_key": scope_info["composite_key"],
+                            "categoria": _normalize_categoria(match["categoria"]),
+                            "lot_id": effective_scope["lot_id"],
+                            "bene_id": effective_scope["bene_id"],
+                            "composite_key": effective_scope["composite_key"],
                             "extraction_method": "REGEX_CADAT_FRAGMENTED",
                         })
                         continue
@@ -350,14 +434,14 @@ def build_cadastral_candidate_pack(case_key: str) -> Dict[str, object]:
                         ("cadastral_foglio", match["foglio"]),
                         ("cadastral_mappale", match["mappale"]),
                         ("cadastral_subalterno", match["subalterno"]),
-                        ("cadastral_categoria", match["categoria"]),
+                        ("cadastral_categoria", _normalize_categoria(match["categoria"])),
                     ]
                     for field_idx, (field_type, value) in enumerate(field_values):
                         if not value:
                             continue
                         candidates.append({
                             "candidate_id": _make_candidate_id(
-                                field_type, scope_info["lot_id"], scope_info["bene_id"],
+                                field_type, effective_scope["lot_id"], effective_scope["bene_id"],
                                 page, line_idx, field_idx,
                             ),
                             "field_type": field_type,
@@ -365,10 +449,10 @@ def build_cadastral_candidate_pack(case_key: str) -> Dict[str, object]:
                             "page": page,
                             "line_index": line_idx,
                             "line_quote": fragmented_quote,
-                            "lot_id": scope_info["lot_id"],
-                            "bene_id": scope_info["bene_id"],
-                            "composite_key": scope_info["composite_key"],
-                            "scope_attribution": scope_info["attribution"],
+                            "lot_id": effective_scope["lot_id"],
+                            "bene_id": effective_scope["bene_id"],
+                            "composite_key": effective_scope["composite_key"],
+                            "scope_attribution": effective_scope["attribution"],
                             "extraction_method": "REGEX_CADAT_FRAGMENTED",
                             "sibling_fields": {
                                 ft: fv
@@ -407,19 +491,22 @@ def build_cadastral_candidate_pack(case_key: str) -> Dict[str, object]:
             m = matches[0]
             foglio, mappale, sub, cat = m[0], m[1], m[2] or None, m[3] or None
 
-            if scope_info["blocked"]:
+            if skip_previous_local:
+                continue
+
+            if effective_scope["blocked"]:
                 blocked_or_ambiguous.append({
-                    "type": scope_info["attribution"],
+                    "type": effective_scope["attribution"],
                     "page": page,
                     "line_index": line_idx,
                     "line_quote": line[:300],
                     "foglio": foglio,
                     "mappale": mappale,
                     "subalterno": sub,
-                    "categoria": cat,
-                    "lot_id": scope_info["lot_id"],
-                    "bene_id": scope_info["bene_id"],
-                    "composite_key": scope_info["composite_key"],
+                    "categoria": _normalize_categoria(cat),
+                    "lot_id": effective_scope["lot_id"],
+                    "bene_id": effective_scope["bene_id"],
+                    "composite_key": effective_scope["composite_key"],
                 })
                 continue
 
@@ -428,14 +515,14 @@ def build_cadastral_candidate_pack(case_key: str) -> Dict[str, object]:
                 ("cadastral_foglio", foglio),
                 ("cadastral_mappale", mappale),
                 ("cadastral_subalterno", sub),
-                ("cadastral_categoria", cat),
+                ("cadastral_categoria", _normalize_categoria(cat)),
             ]
             for field_idx, (field_type, value) in enumerate(field_values):
                 if not value:
                     continue
                 candidates.append({
                     "candidate_id": _make_candidate_id(
-                        field_type, scope_info["lot_id"], scope_info["bene_id"],
+                        field_type, effective_scope["lot_id"], effective_scope["bene_id"],
                         page, line_idx, field_idx,
                     ),
                     "field_type": field_type,
@@ -443,11 +530,11 @@ def build_cadastral_candidate_pack(case_key: str) -> Dict[str, object]:
                     "page": page,
                     "line_index": line_idx,
                     "line_quote": line[:300],
-                    "lot_id": scope_info["lot_id"],
-                    "bene_id": scope_info["bene_id"],
-                    "composite_key": scope_info["composite_key"],
-                    "scope_attribution": scope_info["attribution"],
-                    "extraction_method": "REGEX_CADAT_INLINE",
+                    "lot_id": effective_scope["lot_id"],
+                    "bene_id": effective_scope["bene_id"],
+                    "composite_key": effective_scope["composite_key"],
+                    "scope_attribution": effective_scope["attribution"],
+                    "extraction_method": "REGEX_CADAT_TABLE_ROW" if table_match else "REGEX_CADAT_INLINE",
                     "sibling_fields": {
                         ft: fv
                         for ft, fv in field_values

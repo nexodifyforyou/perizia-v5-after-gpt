@@ -69,6 +69,11 @@ _AMOUNT_ONLY_LINE_PAT = re.compile(
     re.IGNORECASE,
 )
 
+_SUFFIX_AMOUNT_PAT = re.compile(
+    r"\b(\d+(?:[\s.]+\d{3})*(?:,\d{1,2})?)\s*€",
+    re.IGNORECASE,
+)
+
 
 def _extract_amount_inline(line: str) -> Optional[str]:
     """Return raw matched amount token (including € prefix) or None."""
@@ -76,6 +81,13 @@ def _extract_amount_inline(line: str) -> Optional[str]:
     if not m:
         return None
     return m.group(0).strip()
+
+
+def _extract_suffix_amount_inline(line: str) -> Optional[str]:
+    m = _SUFFIX_AMOUNT_PAT.search(line)
+    if not m:
+        return None
+    return f"€ {m.group(1).strip()}"
 
 
 # ---------------------------------------------------------------------------
@@ -461,6 +473,25 @@ _DEPR_WINDOW_PAT = re.compile(
     re.IGNORECASE,
 )
 
+_DEPR_REGOLAR_TABLE_ROW_PAT = re.compile(
+    r"\bOneri\s+di\s+regolarizzazione\s+urbanistica\b",
+    re.IGNORECASE,
+)
+
+_DEPR_TABLE_HEADER_PAT = re.compile(
+    r"\bTipologia\s+deprezzamento\b.*\bValore\b.*\bTipo\b",
+    re.IGNORECASE,
+)
+
+
+def _is_explicit_depr_regolar_table_row(lines: List[str], trigger_idx: int) -> bool:
+    if not _DEPR_REGOLAR_TABLE_ROW_PAT.search(lines[trigger_idx]):
+        return False
+    if not _extract_suffix_amount_inline(lines[trigger_idx]):
+        return False
+    start = max(0, trigger_idx - 6)
+    return any(_DEPR_TABLE_HEADER_PAT.search(line) for line in lines[start:trigger_idx])
+
 
 def _is_in_depr_window(lines: List[str], trigger_idx: int, window: int = 8) -> bool:
     """
@@ -845,6 +876,159 @@ def build_cost_candidate_pack(case_key: str) -> Dict[str, object]:
 
             # Basic line-level exclusions
             if _DOT_LEADER_PAT.search(line):
+                continue
+
+            if _is_explicit_depr_regolar_table_row(lines, i):
+                amount_raw = _extract_suffix_amount_inline(line)
+                context_win = _make_context_window(lines, i)
+                match_counter += 1
+
+                if is_schema_page:
+                    blocked_or_ambiguous.append({
+                        "type": "COST_SUMMARY_DUPLICATE_UNSAFE",
+                        "reason": (
+                            "Explicit depreciation-table regolarizzazione row found "
+                            "on SCHEMA RIASSUNTIVO page; treated as non-authoritative "
+                            "summary duplicate."
+                        ),
+                        "field_type": "cost_regolarizzazione_raw",
+                        "page": page,
+                        "line_index": i,
+                        "quote": stripped,
+                        "extracted_value": amount_raw,
+                    })
+                    continue
+
+                if is_recap_page:
+                    blocked_or_ambiguous.append({
+                        "type": "COST_SUMMARY_DUPLICATE_UNSAFE",
+                        "reason": (
+                            "Explicit depreciation-table regolarizzazione row found "
+                            "on RIEPILOGO BANDO D'ASTA recap page; treated as "
+                            "non-authoritative auction-summary duplicate."
+                        ),
+                        "field_type": "cost_regolarizzazione_raw",
+                        "page": page,
+                        "line_index": i,
+                        "quote": stripped,
+                        "extracted_value": amount_raw,
+                    })
+                    continue
+
+                scope_result = _cadat_determine_scope(page, winner, lut)
+                attr = scope_result.get("attribution", "CADASTRAL_SCOPE_AMBIGUOUS")
+                lot_id = scope_result.get("lot_id")
+                bene_id = scope_result.get("bene_id")
+                is_blocked = scope_result.get("blocked", False)
+
+                if is_blocked:
+                    block_type = _CADAT_TO_COST_BLOCK.get(attr, "COST_SCOPE_FIELD_CONFLICT")
+                    blocked_or_ambiguous.append({
+                        "type": block_type,
+                        "reason": f"Page {page} falls in blocked geometric zone: {attr}.",
+                        "field_type": "cost_regolarizzazione_raw",
+                        "page": page,
+                        "line_index": i,
+                        "quote": stripped,
+                        "extracted_value": amount_raw,
+                        "scope_attribution": attr,
+                    })
+                    continue
+
+                if attr == "LOT_LEVEL_ONLY_PRE_BENE_CONTEXT":
+                    blocked_or_ambiguous.append({
+                        "type": "COST_IN_PRE_BENE_CONTEXT",
+                        "reason": (
+                            "Explicit depreciation-table regolarizzazione row falls in "
+                            "pre-bene context; blocked to avoid lot-level contamination."
+                        ),
+                        "field_type": "cost_regolarizzazione_raw",
+                        "page": page,
+                        "line_index": i,
+                        "quote": stripped,
+                        "extracted_value": amount_raw,
+                        "lot_id": lot_id,
+                        "scope_attribution": attr,
+                    })
+                    continue
+
+                if bene_id is not None:
+                    blocked_or_ambiguous.append({
+                        "type": "COST_BENE_SCOPED_DEPREZZAMENTO_TABLE_NOT_PROMOTABLE",
+                        "reason": (
+                            "Explicit depreciation-table regolarizzazione row resolved "
+                            "to a bene scope; not promoted to lot-level cost."
+                        ),
+                        "field_type": "cost_regolarizzazione_raw",
+                        "page": page,
+                        "line_index": i,
+                        "quote": stripped,
+                        "extracted_value": amount_raw,
+                        "lot_id": lot_id,
+                        "bene_id": bene_id,
+                        "scope_attribution": attr,
+                    })
+                    continue
+
+                local_lot_override = False
+                if (
+                    winner in ("H2_EXPLICIT_MULTI_LOT", "H4_CANDIDATE_MULTI_LOT_MULTI_BENE")
+                    and lot_id is not None
+                    and known_lot_ids
+                ):
+                    local_lot = _find_local_lot_in_context(lines, i, known_lot_ids)
+                    if local_lot is not None and local_lot != str(lot_id).strip().lower():
+                        lot_id = local_lot
+                        attr = "LOT_LOCAL_CONTEXT_OVERRIDE"
+                        local_lot_override = True
+
+                if not local_lot_override:
+                    mismatch_lot = _check_local_lot_mismatch(page, i, lot_id or "", hg_lookup, winner)
+                    if mismatch_lot is not None:
+                        blocked_or_ambiguous.append({
+                            "type": "COST_LOCAL_SCOPE_HEADER_MISMATCH",
+                            "reason": (
+                                f"A HEADER_GRADE lot-label signal for lot '{mismatch_lot}' appears "
+                                f"before line {i} on page {page}, which falls in lot '{lot_id}' "
+                                "by page-scope geometry. Cross-lot attribution is not safe."
+                            ),
+                            "field_type": "cost_regolarizzazione_raw",
+                            "page": page,
+                            "line_index": i,
+                            "quote": stripped,
+                            "extracted_value": amount_raw,
+                            "page_scope_lot_id": lot_id,
+                            "conflicting_lot_label": mismatch_lot,
+                        })
+                        continue
+
+                cid = _make_candidate_id(
+                    "cost_regolarizzazione_raw", lot_id, None, page, i, match_counter
+                )
+                candidates.append({
+                    "candidate_id": cid,
+                    "field_type": "cost_regolarizzazione_raw",
+                    "is_quantified": True,
+                    "extracted_value": amount_raw,
+                    "raw_amount_str": amount_raw,
+                    "page": page,
+                    "line_index": i,
+                    "quote": stripped,
+                    "context_window": context_win,
+                    "extraction_method": "REGEX_COST_DEPREZZAMENTO_REGOLARIZZAZIONE_TABLE",
+                    "lot_id": lot_id,
+                    "bene_id": None,
+                    "corpo_id": None,
+                    "attribution": attr,
+                    "scope_basis": (
+                        "Explicit lot-level deprezzamento table row "
+                        f"'{stripped}' on p{page}l{i}; scope={attr}; lot={lot_id}."
+                    ),
+                    "candidate_status": "ACTIVE",
+                    "amount_line_offset": 0,
+                    "source_trigger_field_type": "cost_regolarizzazione_raw",
+                    "description_subline": None,
+                })
                 continue
 
             # -------------------------------------------------------------------

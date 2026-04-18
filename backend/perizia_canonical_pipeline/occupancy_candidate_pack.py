@@ -226,7 +226,7 @@ def _extract_title_raw(status_raw: str) -> Optional[str]:
 # ---------------------------------------------------------------------------
 
 _LOCAL_LOT_HEADER_PAT = re.compile(r"^\s*LOTTO\s+(\S+)\s*$", re.IGNORECASE)
-_LOCAL_BENE_HEADER_PAT = re.compile(r"\bBene\s+N[°\.]\s*([0-9]+)", re.IGNORECASE)
+_LOCAL_BENE_HEADER_PAT = re.compile(r"\bBene\s+N\s*[°\.]\s*([0-9]+)", re.IGNORECASE)
 
 
 def _nearest_local_headers(
@@ -255,7 +255,22 @@ _BENE_HEADING_FORWARD_PAT = re.compile(r"\bBENE\s+N[°\.]\s*[0-9]+\b", re.IGNORE
 # Line-start-anchored bene section header — used in the wider backward-lookback guard.
 # The anchor prevents matching inline prose like "il successivo bene n. 3".
 _BENE_SECTION_HEADER_WIDE_PAT = re.compile(
-    r"^\s*Bene\s+N[°\.]\s*([0-9]+)\b", re.IGNORECASE
+    r"^\s*Bene\s+N\s*[°\.]\s*([0-9]+)\b", re.IGNORECASE
+)
+
+_LOCAL_BENE_OCC_STOP_PAT = re.compile(
+    r"^\s*(?:"
+    r"Bene\s+N\s*[°\.]"
+    r"|LOTTO\s+\S+"
+    r"|PROVENIENZE\s+VENTENNALI"
+    r"|FORMALIT"
+    r"|VINCOLI"
+    r"|STIMA"
+    r"|VALORE"
+    r"|CONFORMIT"
+    r"|Allegato\s+n"
+    r")",
+    re.IGNORECASE,
 )
 
 # Lot-transition: a line that begins a new LOTTO section (schema or narrative).
@@ -351,6 +366,47 @@ def _determine_occ_scope(page: int, winner: str, lut: Dict) -> Dict:
     result = dict(_cadat_determine_scope(page, winner, lut))
     result["attribution"] = _CADAT_TO_OCC_ATTR.get(result["attribution"], result["attribution"])
     return result
+
+
+def _scope_for_local_bene(scope_info: Dict, local_bene_id: Optional[str], lut: Dict) -> Dict:
+    if not local_bene_id:
+        return scope_info
+    lot_id = scope_info.get("lot_id")
+    if not lot_id:
+        return scope_info
+    for bs in lut["bene_by_lot"].get(str(lot_id), []):
+        if str(bs.get("bene_id")) == str(local_bene_id):
+            return {
+                "attribution": "CONFIRMED",
+                "blocked": False,
+                "lot_id": str(lot_id),
+                "bene_id": str(bs.get("bene_id")),
+                "composite_key": str(bs.get("composite_key")),
+            }
+    return scope_info
+
+
+def _collect_local_bene_occupancy_lines(lines: List[str], header_idx: int) -> List[str]:
+    values: List[str] = []
+    for raw in lines[header_idx + 1 : min(len(lines), header_idx + 10)]:
+        stripped = raw.strip()
+        if not stripped:
+            continue
+        if _LOCAL_BENE_OCC_STOP_PAT.match(stripped):
+            break
+        m = OCC_PAT_OCCUPATO_DA.search(stripped)
+        if m:
+            status = _normalize_redaction(_normalize(m.group(1)))
+            status = re.sub(r"\s+\.", ".", status).strip()
+            values.append(status)
+    return values
+
+
+def _material_occupancy_key(value: str) -> str:
+    value = _normalize_redaction(value)
+    value = re.sub(r"\s+", " ", value).strip().lower()
+    value = re.sub(r"\s+\.", ".", value)
+    return value
 
 
 # ---------------------------------------------------------------------------
@@ -561,6 +617,47 @@ def build_occupancy_candidate_pack(case_key: str) -> Dict:
             line_s = line.strip()
             if not line_s:
                 continue
+
+            local_bene_match = _BENE_SECTION_HEADER_WIDE_PAT.match(line_s)
+            if local_bene_match:
+                local_status_parts = _collect_local_bene_occupancy_lines(lines, line_idx)
+                if local_status_parts:
+                    local_scope = _scope_for_local_bene(
+                        scope_info, local_bene_match.group(1).strip(), lut
+                    )
+                    if local_scope.get("blocked"):
+                        _emit_blocked(
+                            local_scope.get("attribution", "OCCUPANCY_SCOPE_AMBIGUOUS"),
+                            page, line_idx, line_s,
+                            _normalize(_join_window(lines, line_idx, 8)),
+                            "OCC_LOCAL_BENE_OCCUPATO_DA",
+                            local_scope.get("lot_id"), local_scope.get("bene_id"),
+                            reason=(
+                                "Local Bene occupancy block found but scope attribution "
+                                f"is {local_scope.get('attribution')}."
+                            ),
+                            extra={"occupancy_status_raw": " ".join(local_status_parts)},
+                        )
+                    else:
+                        status_raw = _normalize(" ".join(local_status_parts))
+                        title_raw = _extract_title_raw(status_raw)
+                        fields: List[Tuple[str, str]] = [("occupancy_status_raw", status_raw)]
+                        if title_raw:
+                            fields.append(("occupancy_title_raw", title_raw))
+                        scope_basis = (
+                            f"Explicit local Bene N° {local_bene_match.group(1).strip()} "
+                            f"occupancy block on p{page}:l{line_idx}; "
+                            f"scope attribution: {local_scope.get('attribution')}."
+                        )
+                        _emit_active(
+                            fields, page, line_idx, line_s,
+                            _normalize(_join_window(lines, line_idx, 8)),
+                            "OCC_LOCAL_BENE_OCCUPATO_DA",
+                            local_scope.get("lot_id"), local_scope.get("bene_id"),
+                            local_scope.get("composite_key"),
+                            local_scope.get("attribution", "CONFIRMED"),
+                            scope_basis,
+                        )
 
             # Only trigger on lines containing "stato di occupazione" or
             # "stato di possesso dell'immobile"
@@ -860,6 +957,81 @@ def build_occupancy_candidate_pack(case_key: str) -> Dict:
                 scope_info["composite_key"],
                 attribution, scope_basis,
             )
+
+    # -----------------------------------------------------------------------
+    # Lot-level rollup: when every declared bene under a lot has the same
+    # explicit occupancy status, emit a lot-level deterministic candidate.
+    # This preserves the existing bare-section guard: lot evidence is derived
+    # only from complete, uniform bene evidence.
+    # -----------------------------------------------------------------------
+
+    active_bene_status: Dict[str, Dict[str, List[Dict]]] = {}
+    for cand in candidates:
+        if cand.get("candidate_status") != "ACTIVE":
+            continue
+        if cand.get("field_type") != "occupancy_status_raw":
+            continue
+        if not cand.get("lot_id") or not cand.get("bene_id"):
+            continue
+        lot_key = str(cand["lot_id"])
+        bene_key = str(cand["bene_id"])
+        active_bene_status.setdefault(lot_key, {}).setdefault(bene_key, []).append(cand)
+
+    for lot_id, bene_scopes in sorted(lut["bene_by_lot"].items()):
+        if not bene_scopes:
+            continue
+        declared_bene_ids = [str(bs.get("bene_id")) for bs in bene_scopes]
+        per_bene = active_bene_status.get(str(lot_id), {})
+        if any(bid not in per_bene for bid in declared_bene_ids):
+            continue
+
+        bene_values: Dict[str, str] = {}
+        representative: Optional[Dict] = None
+        complete = True
+        for bene_id in declared_bene_ids:
+            vals = {
+                _material_occupancy_key(str(c.get("extracted_value", "")))
+                for c in per_bene.get(bene_id, [])
+                if c.get("extracted_value")
+            }
+            if len(vals) != 1:
+                complete = False
+                break
+            chosen = next(iter(vals))
+            bene_values[bene_id] = chosen
+            if representative is None:
+                representative = per_bene[bene_id][0]
+
+        if not complete or len(set(bene_values.values())) != 1 or representative is None:
+            continue
+
+        status_raw = str(representative.get("extracted_value", "")).strip()
+        evidence_pages = sorted({
+            int(c["page"])
+            for bid in declared_bene_ids
+            for c in per_bene[bid]
+            if isinstance(c.get("page"), int)
+        })
+        evidence_line = int(representative.get("line_index", 0))
+        evidence_page = int(representative.get("page", 0))
+        scope_basis = (
+            "Uniform occupancy rollup across declared bene scopes "
+            f"for lot:{lot_id}: {', '.join(declared_bene_ids)}; "
+            f"evidence pages: {', '.join(str(p) for p in evidence_pages)}."
+        )
+        _emit_active(
+            [("occupancy_status_raw", status_raw)],
+            evidence_page,
+            evidence_line,
+            f"Uniform bene occupancy rollup: {status_raw}",
+            scope_basis,
+            "OCC_BENE_UNIFORM_ROLLUP",
+            str(lot_id),
+            None,
+            None,
+            "CONFIRMED",
+            scope_basis,
+        )
 
     # -----------------------------------------------------------------------
     # Post-processing: intra-scope conflict detection
