@@ -504,6 +504,22 @@ def _build_synthetic_issue(
         if len(local_text_windows) >= 3:
             break
 
+    # For lot-scoped issues in multi-lot docs, ensure the lot section's first page
+    # (which carries the "LOTTO N" heading) is included even when the cue hit is on
+    # a later page.  Without it the scope guard cannot find the lot anchor and
+    # rejects an otherwise correct high-confidence resolution.
+    if lot_id is not None and bene_id is None and scope_pages:
+        anchor_page = scope_pages[0]
+        if anchor_page not in seen_pages:
+            page_text = raw_pages_idx.get(anchor_page, "")
+            if page_text:
+                local_text_windows.append({
+                    "window_type": "lot_anchor_context",
+                    "page": anchor_page,
+                    "anchor_line_index": None,
+                    "text": page_text[:1200],
+                })
+
     # If still no windows, include the first scope page even without a cue hit
     if not local_text_windows:
         for pg in scope_pages[:2]:
