@@ -14881,6 +14881,7 @@ async def analyze_perizia(request: Request, file: UploadFile = File(...)):
             result=result,
             pages=pages,
             full_text=full_text,
+            pdf_sha256=input_sha256,
         )
         apply_verifier_to_result(result, verifier_payload)
         _merge_verifier_explicit_cost_items(result)

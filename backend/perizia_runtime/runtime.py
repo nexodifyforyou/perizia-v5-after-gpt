@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import copy
-from typing import Any, Dict, List
+import json
+from pathlib import Path
+from typing import Any, Dict, List, Optional
 
 from perizia_agents.agibilita_agent import run_agibilita_agent
 from perizia_agents.alignment_agent import run_alignment_agent
@@ -23,6 +25,40 @@ from perizia_runtime.evidence_mode import DEGRADED_TEXT, STOP_UNREADABLE, TEXT_F
 from perizia_runtime.pipeline import PeriziaPipeline
 from perizia_runtime.state import RuntimeState, to_dict
 from perizia_tools.pdf_text_tool import build_pdf_text_payload
+
+
+_CORPUS_REGISTRY_PATH = Path("/srv/perizia/_qa/canonical_pipeline/working_corpus_registry.json")
+_CORPUS_ARTIFACT_ROOT = Path("/srv/perizia/_qa/canonical_pipeline/runs")
+
+
+def _load_freeze_grouped_explanations(pdf_sha256: Optional[str]) -> List[Dict[str, Any]]:
+    """
+    Look up the corpus registry by PDF sha256 and return grouped_llm_explanations
+    from the corresponding doc_map.json freeze artifact.
+
+    Returns empty list on any failure (missing registry, no match, missing artifact).
+    Never raises — this is a best-effort enrichment.
+    """
+    if not pdf_sha256:
+        return []
+    try:
+        registry = json.loads(_CORPUS_REGISTRY_PATH.read_text(encoding="utf-8"))
+        case_key = next(
+            (r["case_key"] for r in registry if r.get("sha256") == pdf_sha256),
+            None,
+        )
+        if not case_key:
+            return []
+        doc_map_path = _CORPUS_ARTIFACT_ROOT / case_key / "artifacts" / "doc_map.json"
+        if not doc_map_path.exists():
+            return []
+        doc_map = json.loads(doc_map_path.read_text(encoding="utf-8"))
+        return [
+            g for g in (doc_map.get("grouped_llm_explanations") or [])
+            if isinstance(g, dict)
+        ]
+    except Exception:
+        return []
 
 
 DEGRADED_SOURCE_GUARD = "degraded_source_text_only"
@@ -168,7 +204,7 @@ def _apply_degraded_packaging(payload_dict: Dict[str, Any]) -> None:
     _apply_degraded_confidence_caps(payload_dict.get("judgments"))
 
 
-def run_quality_verifier(*, analysis_id: str, result: Dict[str, Any], pages: List[Dict[str, Any]], full_text: str) -> Dict[str, Any]:
+def run_quality_verifier(*, analysis_id: str, result: Dict[str, Any], pages: List[Dict[str, Any]], full_text: str, pdf_sha256: Optional[str] = None) -> Dict[str, Any]:
     payload = build_pdf_text_payload(pages, full_text)
     readability = assess_document_readability(payload["pages"])
     evidence_mode = select_evidence_mode(readability["readability_verdict"])
@@ -210,6 +246,9 @@ def run_quality_verifier(*, analysis_id: str, result: Dict[str, Any], pages: Lis
         "reasoning_status": "NORMAL" if evidence_mode["evidence_mode"] == TEXT_FIRST else "DEGRADED_TEXT_CAUTION",
         }
     )
+    freeze_grouped = _load_freeze_grouped_explanations(pdf_sha256)
+    if freeze_grouped:
+        payload_dict["canonical_case"]["grouped_llm_explanations"] = freeze_grouped
     if evidence_mode["evidence_mode"] == DEGRADED_TEXT:
         payload_dict["verifier_cautions"] = _degraded_text_cautions()
         _apply_degraded_packaging(payload_dict)
@@ -262,6 +301,9 @@ def apply_verifier_to_result(result: Dict[str, Any], verifier_payload: Dict[str,
     summary_bundle = canonical.get("summary_bundle", {}) if isinstance(canonical.get("summary_bundle"), dict) else {}
 
     result["verifier_runtime"] = verifier_payload
+    freeze_grouped = canonical.get("grouped_llm_explanations")
+    if isinstance(freeze_grouped, list) and freeze_grouped:
+        result["canonical_freeze_explanations"] = freeze_grouped
     document_quality = result.setdefault("document_quality", {})
     document_quality["readability_verdict"] = verifier_payload.get("readability_verdict")
     document_quality["document_quality_note"] = verifier_payload.get("document_quality_note")
