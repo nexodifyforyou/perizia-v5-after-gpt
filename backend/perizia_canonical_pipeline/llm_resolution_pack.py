@@ -12,12 +12,14 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import random
 import re
 import ssl
+import time
 import urllib.error
 import urllib.request
 from pathlib import Path
-from typing import Dict, List, Optional, Set
+from typing import Any, Dict, List, Optional, Set
 
 from .corpus_registry import list_case_keys
 from .llm_clarification_issue_pack import build_clarification_issue_pack, select_issues
@@ -27,6 +29,9 @@ from .runner import build_context
 PROVIDER = "openai"
 DEFAULT_MODEL = "gpt-4o-mini"
 CHAT_COMPLETIONS_URL = "https://api.openai.com/v1/chat/completions"
+MAX_OPENAI_RETRIES = 2
+DEFAULT_RETRY_DELAY_SECONDS = 1.0
+MAX_RETRY_DELAY_SECONDS = 8.0
 ALLOWED_OUTCOMES = {"resolved", "unresolved_explained", "upgraded_context"}
 GENERIC_EXPLANATION_PATTERNS = [
     "the system found conflicting evidence",
@@ -42,7 +47,48 @@ GENERIC_EXPLANATION_PATTERNS = [
 
 
 class LLMResolutionUnavailable(RuntimeError):
-    pass
+    def __init__(
+        self,
+        message: str,
+        *,
+        status_code: Optional[int] = None,
+        error_type: Optional[str] = None,
+        retry_after: Optional[float] = None,
+        retryable: bool = False,
+        detail: Optional[str] = None,
+    ) -> None:
+        self.status_code = status_code
+        self.error_type = error_type
+        self.retry_after = retry_after
+        self.retryable = retryable
+        self.detail = detail
+        super().__init__(self._format_message(message))
+
+    def _format_message(self, message: str) -> str:
+        parts = [message]
+        if self.error_type:
+            parts.append(f"type={self.error_type}")
+        if self.retry_after is not None:
+            parts.append(f"retry_after={self.retry_after:g}")
+        parts.append(f"retryable={str(self.retryable).lower()}")
+        if self.detail:
+            cleaned = re.sub(r"\s+", " ", self.detail).strip()
+            if cleaned:
+                parts.append(f"detail={cleaned[:300]}")
+        return " ".join(parts)
+
+    def to_error_details(self) -> Dict[str, Any]:
+        return {
+            "status_code": self.status_code,
+            "error_type": self.error_type,
+            "retry_after": self.retry_after,
+            "retryable": self.retryable,
+            "detail": self.detail,
+        }
+
+    @property
+    def hard_provider_failure(self) -> bool:
+        return self.status_code in {400, 401, 403, 404, 429} and not self.retryable
 
 
 def _load_dotenv_value(path: Path, name: str) -> Optional[str]:
@@ -165,7 +211,82 @@ def _user_prompt(issue: Dict) -> str:
     )
 
 
-def _call_openai_json(api_key: str, model: str, issue: Dict, timeout_seconds: int = 45) -> Dict:
+def _parse_retry_after(value: Optional[str]) -> Optional[float]:
+    if not value:
+        return None
+    try:
+        delay = float(value)
+    except ValueError:
+        return None
+    if delay < 0:
+        return None
+    return delay
+
+
+def _openai_error_from_body(text: str) -> Dict[str, Optional[str]]:
+    if not text:
+        return {"error_type": None, "detail": None}
+    try:
+        payload = json.loads(text)
+    except json.JSONDecodeError:
+        return {"error_type": None, "detail": text.strip() or None}
+    error = payload.get("error") if isinstance(payload, dict) else None
+    if not isinstance(error, dict):
+        return {"error_type": None, "detail": text.strip() or None}
+    detail = error.get("message") or error.get("detail") or text.strip() or None
+    error_type = error.get("type") or error.get("code")
+    return {
+        "error_type": str(error_type) if error_type else None,
+        "detail": str(detail) if detail else None,
+    }
+
+
+def _is_hard_quota_error(status_code: int, error_type: Optional[str], detail: Optional[str]) -> bool:
+    haystack = " ".join(part for part in [error_type, detail] if part).casefold()
+    hard_markers = (
+        "insufficient_quota",
+        "billing",
+        "quota exhausted",
+        "exceeded your current quota",
+        "check your plan and billing",
+    )
+    return status_code == 429 and any(marker in haystack for marker in hard_markers)
+
+
+def _build_http_error(exc: urllib.error.HTTPError) -> LLMResolutionUnavailable:
+    try:
+        body_text = exc.read().decode("utf-8", errors="replace")
+    except Exception:
+        body_text = ""
+    parsed = _openai_error_from_body(body_text)
+    retry_after = _parse_retry_after(exc.headers.get("Retry-After") if exc.headers else None)
+    status_code = int(exc.code)
+    error_type = parsed.get("error_type")
+    detail = parsed.get("detail")
+
+    if status_code == 429 and not _is_hard_quota_error(status_code, error_type, detail):
+        retryable = True
+    else:
+        retryable = False
+
+    return LLMResolutionUnavailable(
+        f"OpenAI HTTP error status={status_code}",
+        status_code=status_code,
+        error_type=error_type,
+        retry_after=retry_after,
+        retryable=retryable,
+        detail=detail,
+    )
+
+
+def _retry_delay(exc: LLMResolutionUnavailable, attempt_index: int) -> float:
+    if exc.retry_after is not None:
+        return min(exc.retry_after, MAX_RETRY_DELAY_SECONDS)
+    base = DEFAULT_RETRY_DELAY_SECONDS * (2 ** max(attempt_index - 1, 0))
+    return min(base + random.uniform(0, 0.25), MAX_RETRY_DELAY_SECONDS)
+
+
+def _call_openai_json_once(api_key: str, model: str, issue: Dict, timeout_seconds: int = 45) -> Dict:
     body = {
         "model": model,
         "temperature": 0,
@@ -187,11 +308,22 @@ def _call_openai_json(api_key: str, model: str, issue: Dict, timeout_seconds: in
         with urllib.request.urlopen(req, timeout=timeout_seconds, context=ssl.create_default_context()) as resp:
             payload = json.loads(resp.read().decode("utf-8"))
     except urllib.error.HTTPError as exc:
-        raise LLMResolutionUnavailable(f"OpenAI HTTP error status={exc.code}") from exc
+        raise _build_http_error(exc) from exc
     except Exception as exc:
         raise LLMResolutionUnavailable(f"OpenAI request failed type={type(exc).__name__}") from exc
     content = payload["choices"][0]["message"]["content"]
     return _json_from_response(content)
+
+
+def _call_openai_json(api_key: str, model: str, issue: Dict, timeout_seconds: int = 45) -> Dict:
+    for attempt_index in range(MAX_OPENAI_RETRIES + 1):
+        try:
+            return _call_openai_json_once(api_key, model, issue, timeout_seconds=timeout_seconds)
+        except LLMResolutionUnavailable as exc:
+            if not exc.retryable or attempt_index >= MAX_OPENAI_RETRIES:
+                raise
+            time.sleep(_retry_delay(exc, attempt_index + 1))
+    raise LLMResolutionUnavailable("OpenAI request failed after retry loop")
 
 
 def _all_evidence_text(issue: Dict) -> str:
@@ -521,6 +653,22 @@ def _validate_resolution(issue: Dict, raw_resolution: Dict, provider: str, model
     if resolution["llm_outcome"] == "upgraded_context" and not resolution["why_not_resolved"]:
         resolution["why_not_resolved"] = "Contesto utile, ma non valore finale normalizzabile."
     return resolution
+
+
+def resolve_single_issue(
+    issue: Dict,
+    api_key: str,
+    model: str,
+) -> Dict:
+    """
+    Run bounded LLM clarification for a single pre-built issue packet.
+
+    Returns a validated resolution dict (same schema as llm_resolution_pack resolutions).
+    Raises LLMResolutionUnavailable or an HTTP/network exception on failure.
+    Intended for use by the missing-slot escalation path in doc_map_freeze.
+    """
+    raw = _call_openai_json(api_key, model, issue)
+    return _validate_resolution(issue, raw, PROVIDER, model)
 
 
 def build_llm_resolution_pack(
