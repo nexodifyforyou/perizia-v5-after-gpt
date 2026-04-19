@@ -14,6 +14,7 @@ _PROPERTY_OCCUPANCY_ANCHORS = [
     "stato occupativo",
     "occupazione dell'immobile",
     "occupazione del bene",
+    "oggetto di pignoramento",
     "immobile",
     "bene",
     "unità",
@@ -114,7 +115,9 @@ def _has_property_occupancy_anchor(quote: str) -> bool:
 
 
 def _has_valid_free_occupancy_anchor(quote: str) -> bool:
-    low = quote.lower()
+    # Normalize internal whitespace: PDF extraction can introduce multiple spaces
+    # within phrases (e.g. "risulta  LIBERO" instead of "risulta LIBERO").
+    low = re.sub(r"\s+", " ", quote.lower())
     return (
         any(marker in low for marker in _STRONG_FREE_OCCUPANCY_PHRASES)
         or ("nessuno" in low and _has_property_occupancy_anchor(quote))
@@ -122,7 +125,14 @@ def _has_valid_free_occupancy_anchor(quote: str) -> bool:
     )
 
 
+_NON_OPPONIBILE_RE = re.compile(r"\bnon\s+opponibil[ei]\b", re.IGNORECASE)
+
+
 def _infer_opponibilita(value: str, quote: str) -> str:
+    # Explicit "non opponibile" always wins regardless of status (handles LIBERO
+    # with saltuaria occupazione dell'esecutato declared non-opponibile).
+    if _NON_OPPONIBILE_RE.search(quote):
+        return "NON OPPONIBILE"
     if value != "OCCUPATO":
         return "NON VERIFICABILE"
     low = quote.lower()
@@ -159,7 +169,7 @@ def _signal_type_for_quote(value: str, quote: str) -> str:
     return "occupied_explicit"
 
 
-def _quote_window(text: str, start: int, end: int) -> str:
+def _quote_window(text: str, start: int, end: int, lookahead_lines: int = 0, lookbehind_lines: int = 0) -> str:
     lines = text.splitlines()
     if not lines:
         return text[max(0, start - 80):min(len(text), end + 120)].strip()
@@ -171,8 +181,10 @@ def _quote_window(text: str, start: int, end: int) -> str:
             match_line_index = idx
             break
         cursor = next_cursor
-    selected = [lines[match_line_index].strip()]
-    heading_lines = []
+    match_line = lines[match_line_index].strip()
+    # BENE/LOTTO heading search: look backward for scope attribution headers.
+    heading_lines: list[str] = []
+    heading_start_index = match_line_index
     probe = match_line_index - 1
     while probe >= 0 and len(heading_lines) < 2:
         candidate = lines[probe].strip()
@@ -180,10 +192,28 @@ def _quote_window(text: str, start: int, end: int) -> str:
             break
         if _BENE_REGEX.search(candidate) or _LOTTO_REGEX.search(candidate):
             heading_lines.insert(0, candidate)
+            heading_start_index = probe
         elif heading_lines:
             break
         probe -= 1
-    selected = heading_lines + selected
+    # Lookbehind context: cap at the heading boundary so we don't pull in content
+    # from a previous bene/lotto scope.
+    bwd_context: list[str] = []
+    if lookbehind_lines > 0:
+        bwd_floor = (heading_start_index + 1) if heading_lines else max(0, match_line_index - lookbehind_lines)
+        start_bwd = max(bwd_floor, match_line_index - lookbehind_lines)
+        heading_set = set(heading_lines)
+        for bwd_idx in range(start_bwd, match_line_index):
+            bwd_line = lines[bwd_idx].strip()
+            if bwd_line and bwd_line not in heading_set:
+                bwd_context.append(bwd_line)
+    selected = bwd_context + heading_lines + [match_line]
+    if lookahead_lines > 0:
+        end_fwd = min(len(lines), match_line_index + 1 + lookahead_lines)
+        for fwd_idx in range(match_line_index + 1, end_fwd):
+            fwd_line = lines[fwd_idx].strip()
+            if fwd_line:
+                selected.append(fwd_line)
     return "\n".join(part for part in selected if part)
 
 
@@ -269,6 +299,7 @@ def _make_hit(
     value: str,
     confidence: float,
     signal_type: str,
+    opponibilita_context: str | None = None,
 ) -> dict[str, Any]:
     evidence = make_evidence(page_number, quote, "occupancy_statement", ["stato_occupativo", "occupancy"], confidence)
     scope_id, ownership_method, universal = _ownership_decision(state, quote)
@@ -286,7 +317,7 @@ def _make_hit(
         "confidence": confidence,
         "valid": True,
         "evidence": [evidence],
-        "opponibilita": _infer_opponibilita(value, quote),
+        "opponibilita": _infer_opponibilita(value, opponibilita_context if opponibilita_context else quote),
         "page": page_number,
         "quote": quote,
         "signal_type": signal_type,
@@ -514,11 +545,13 @@ def _derive_scope_from_children(children: list[CanonicalScopeState]) -> dict[str
         }
     if free and not occupied and not non_verifiable:
         best = max(free, key=lambda scope: float(scope.occupancy.get("confidence", 0.0)))
+        opponibilita_values = {scope.occupancy.get("opponibilita") for scope in free}
+        opponibilita = best.occupancy.get("opponibilita", "NON VERIFICABILE") if len(opponibilita_values) == 1 else "NON VERIFICABILE"
         return {
             "status": "LIBERO",
             "winner": {
                 "value": "LIBERO",
-                "opponibilita": "NON VERIFICABILE",
+                "opponibilita": opponibilita,
                 "confidence": float(best.occupancy.get("confidence", 0.0)),
                 "evidence": best.occupancy.get("evidence", []),
             },
@@ -559,42 +592,46 @@ def _collect_candidates_and_hits(state: RuntimeState) -> tuple[list[dict[str, An
                 }
             )
         for match in re.finditer(r"\boccupat\w*\b|\bliber\w*\b|\bnessuno\b", text, re.IGNORECASE):
-            quote = _quote_window(text, match.start(), match.end())
-            section_type = classify_section_type(quote)
+            # Use a narrow quote (heading + match line only) for initial filtering checks.
+            # A separate wide quote (with lookbehind) provides sentence reconstruction context
+            # for liber* matches where PDF extraction splits phrases across lines.
+            narrow_quote = _quote_window(text, match.start(), match.end())
+            quote = _quote_window(text, match.start(), match.end(), lookbehind_lines=8)
+            section_type = classify_section_type(narrow_quote)
             match_text = match.group(0).lower()
             has_tenure_signal = _has_tenure_signal(quote)
-            if "suolo pubblico occupato" in quote.lower():
+            if "suolo pubblico occupato" in narrow_quote.lower():
                 candidates.append(
                     {
                         "value": "INVALID_OCCUPANCY_SIGNAL",
                         "confidence": 0.0,
                         "valid": False,
                         "reason": "public_space_occupancy_not_property_occupancy",
-                        "evidence": [make_evidence(page_number, quote, "public_space_occupancy", [], 0.0)],
+                        "evidence": [make_evidence(page_number, narrow_quote, "public_space_occupancy", [], 0.0)],
                     }
                 )
                 continue
-            if "pubblico occupato" in quote.lower():
+            if "pubblico occupato" in narrow_quote.lower():
                 continue
-            if section_type == "valuation" or "coefficiente" in quote.lower():
+            if section_type == "valuation" or "coefficiente" in narrow_quote.lower():
                 candidates.append(
                     {
                         "value": "INVALID_OCCUPANCY_SIGNAL",
                         "confidence": 0.0,
                         "valid": False,
                         "reason": "valuation_table_not_valid_occupancy",
-                        "evidence": [make_evidence(page_number, quote, "valuation_noise", [], 0.0)],
+                        "evidence": [make_evidence(page_number, narrow_quote, "valuation_noise", [], 0.0)],
                     }
                 )
                 continue
-            if _is_non_property_libero_noise(quote):
+            if _is_non_property_libero_noise(narrow_quote):
                 candidates.append(
                     {
                         "value": "INVALID_OCCUPANCY_SIGNAL",
                         "confidence": 0.0,
                         "valid": False,
                         "reason": "non_property_libero_noise",
-                        "evidence": [make_evidence(page_number, quote, "non_property_noise", [], 0.0)],
+                        "evidence": [make_evidence(page_number, narrow_quote, "non_property_noise", [], 0.0)],
                     }
                 )
                 continue
@@ -607,28 +644,52 @@ def _collect_candidates_and_hits(state: RuntimeState) -> tuple[list[dict[str, An
                         "confidence": 0.0,
                         "valid": False,
                         "reason": "weak_libero_blocked_by_tenure_signal",
-                        "evidence": [make_evidence(page_number, quote, "tenure_blocks_weak_free", [], 0.0)],
+                        "evidence": [make_evidence(page_number, narrow_quote, "tenure_blocks_weak_free", [], 0.0)],
                     }
                 )
                 continue
             value = None
-            if _has_valid_free_occupancy_anchor(quote):
+            if match_text.startswith("occupat"):
+                # For occupat* triggers, use the narrow quote for value detection so that
+                # LIBERO context from a prior sentence (or a different bene scope) does NOT
+                # override the signal coming from the actual match line.
+                # "occupata" / "occupazione" etc. that don't spell "occupato" are skipped
+                # (they usually refer to surface area, not property occupancy status).
+                if _has_valid_free_occupancy_anchor(narrow_quote):
+                    value = "LIBERO"  # e.g., "non risultava occupato" on a single line
+                elif "occupato" in narrow_quote.lower():
+                    value = "OCCUPATO"
+            elif _has_valid_free_occupancy_anchor(quote):
+                # liber* / nessuno matches: use wide lookbehind quote to reconstruct
+                # phrases split across lines by PDF extraction (e.g. "risulta\nLIBERO").
                 value = "LIBERO"
             elif "occupato" in quote.lower():
                 value = "OCCUPATO"
             elif "nessuno" in quote.lower() or "liber" in quote.lower():
                 continue
             if value:
-                confidence = _occupancy_confidence(quote, value)
+                # Use the quote that determined the value as the evidence quote.
+                evidence_quote = narrow_quote if match_text.startswith("occupat") else quote
+                confidence = _occupancy_confidence(evidence_quote, value)
                 hit_index += 1
+                # For bare "occupato" fragments (single word on its own PDF line), use a
+                # lower signal rank so that an adjacent LIBERO declaration can override it.
+                if value == "OCCUPATO" and len(narrow_quote.strip()) < 25:
+                    signal_type = "occupied_tenure"
+                else:
+                    signal_type = _signal_type_for_quote(value, evidence_quote)
+                # Wide lookahead window for opponibilità: "non opponibile" can appear
+                # up to 6 lines after the status declaration in fragmented PDF text.
+                wide_quote = _quote_window(text, match.start(), match.end(), lookahead_lines=6, lookbehind_lines=8)
                 hit = _make_hit(
                     state=state,
                     index=hit_index,
                     page_number=page_number,
-                    quote=quote,
+                    quote=evidence_quote,
                     value=value,
                     confidence=confidence,
-                    signal_type=_signal_type_for_quote(value, quote),
+                    signal_type=signal_type,
+                    opponibilita_context=wide_quote,
                 )
                 valid_hits.append(hit)
                 candidates.append(
@@ -664,6 +725,7 @@ def _collect_candidates_and_hits(state: RuntimeState) -> tuple[list[dict[str, An
                 continue
             confidence = _occupancy_confidence(quote, "OCCUPATO")
             hit_index += 1
+            wide_quote = _quote_window(text, match.start(), match.end(), lookahead_lines=6, lookbehind_lines=8)
             hit = _make_hit(
                 state=state,
                 index=hit_index,
@@ -672,6 +734,7 @@ def _collect_candidates_and_hits(state: RuntimeState) -> tuple[list[dict[str, An
                 value="OCCUPATO",
                 confidence=confidence,
                 signal_type="occupied_tenure",
+                opponibilita_context=wide_quote,
             )
             valid_hits.append(hit)
             candidates.append(

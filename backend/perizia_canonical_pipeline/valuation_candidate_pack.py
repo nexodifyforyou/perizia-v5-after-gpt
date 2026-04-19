@@ -140,9 +140,16 @@ _RIDUZIONE_PREFIX_PAT = re.compile(
 
 # Prezzo base d'asta with optional explicit lot prefix.
 # Group 1 captures the explicit lot ID when present (e.g. "LOTTO 1").
+# Apostrophe alternatives: ASCII ' (U+0027), curly left ' (U+2018), curly right ' (U+2019), period.
 _PREZZO_BASE_PAT = re.compile(
     r"(?:LOTTO\s+([A-Z0-9]+)\s*[-–]\s*)?"
-    r"(?:PREZZO\s+BASE\s+D['.']ASTA|prezzo\s+(?:a\s+)?base\s+d['.']asta|PREZZO\s+BASE\s+DI\s+VENDITA|prezzo\s+base\s+di\s+vendita)",
+    r"(?:PREZZO\s+BASE\s+D[\x27\u2018\u2019.]ASTA|prezzo\s+(?:a\s+)?base\s+d[\x27\u2018\u2019.]asta|PREZZO\s+BASE\s+DI\s+VENDITA|prezzo\s+base\s+di\s+vendita)",
+    re.IGNORECASE,
+)
+
+# "Valore complessivo del lotto" — total lot valuation, maps to valore_stima_raw
+_VALORE_COMPLESSIVO_LOTTO_PAT = re.compile(
+    r"\bvalore\s+complessivo\s+del\s+lotto\b",
     re.IGNORECASE,
 )
 
@@ -187,6 +194,19 @@ _EXPLICIT_LOT_LABEL_PAT = re.compile(
 # (i.e. the amount is on the next line).  We require the colon to be followed by
 # optional whitespace and end-of-line.
 _LABEL_ENDS_COLON_PAT = re.compile(r":\s*$")
+
+# Italian auction perizia pattern: "Prezzo base d'asta" followed by sub-lines
+# "Valore in caso di regolarizzazione ... a carico dell'acquirente: €.X"
+# where the "procedura" variant is "non previsto".
+# This covers the case where prezzo_base is presented in a two-scenario table.
+_PREZZO_BASE_ACQUIRENTE_PAT = re.compile(
+    r"a\s+carico\s+dell[''\u2019]acquirente\s*:",
+    re.IGNORECASE,
+)
+_PREZZO_BASE_PROCEDURA_NOT_PREVISTO_PAT = re.compile(
+    r"a\s+carico\s+della\s+procedura.*?:\s*\n?\s*non\s+previsto",
+    re.IGNORECASE | re.DOTALL,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -320,10 +340,73 @@ def _find_schema_pages(raw_pages: List[Dict]) -> Set[int]:
 # Amount extraction helpers
 # ---------------------------------------------------------------------------
 
+def _try_prezzo_base_acquirente_lookahead(
+    lines: List[str],
+    trigger_idx: int,
+    max_lookahead: int = 18,
+) -> Tuple[Optional[str], int]:
+    """
+    Extended lookahead for 'Prezzo base d'asta' that follows the Italian auction
+    two-scenario structure:
+      Prezzo base d'asta
+        Valore in caso di regolarizzazione ... a carico della procedura.: non previsto
+        Valore in caso di regolarizzazione ... a carico dell'acquirente:
+          €. 97.321,61
+
+    Returns (raw_amount_token, line_offset) or (None, -1).
+    Requires at least one "acquirente" sub-line to be present.
+    If the "procedura" variant is present and set to "non previsto", treat
+    the "acquirente" amount as the authoritative prezzo base.
+    """
+    end = min(len(lines), trigger_idx + max_lookahead + 1)
+    window_text = "\n".join(lines[trigger_idx + 1:end])
+
+    # Must have the acquirente pattern at all
+    if not _PREZZO_BASE_ACQUIRENTE_PAT.search(window_text):
+        return None, -1
+
+    # Walk forward to find "a carico dell'acquirente:" then extract the amount
+    acquirente_found = False
+    for offset in range(1, min(max_lookahead + 1, len(lines) - trigger_idx)):
+        line = lines[trigger_idx + offset]
+        stripped = line.strip()
+        if _PREZZO_BASE_ACQUIRENTE_PAT.search(line):
+            acquirente_found = True
+            # Amount may be inline on the same line
+            inline = _extract_amount_inline(line)
+            if inline:
+                return inline, offset
+            # Or on the next non-empty lines
+            for next_off in range(offset + 1, min(offset + 6, len(lines) - trigger_idx)):
+                next_line = lines[trigger_idx + next_off]
+                if not next_line.strip():
+                    continue
+                if _AMOUNT_ONLY_LINE_PAT.match(next_line):
+                    return _extract_amount_inline(next_line), next_off
+                # Two-line split: "€." then number on next line
+                if re.match(r"^\s*€\.?\s*$", next_line, re.IGNORECASE):
+                    for nn_off in range(next_off + 1, min(next_off + 4, len(lines) - trigger_idx)):
+                        nn_line = lines[trigger_idx + nn_off]
+                        if not nn_line.strip():
+                            continue
+                        combined = f"€. {nn_line.strip()}"
+                        if _AMOUNT_ONLY_LINE_PAT.match(combined):
+                            return _extract_amount_inline(combined), nn_off
+                        break
+                    break
+                # Non-empty, non-amount line → stop inner lookahead
+                inline2 = _extract_amount_inline(next_line)
+                if inline2:
+                    return inline2, next_off
+                break
+    return None, -1
+
+
 def _try_extract_amount(
     trigger_line: str,
     lines: List[str],
     trigger_idx: int,
+    field_type: Optional[str] = None,
 ) -> Tuple[Optional[str], int]:
     """
     Try to extract an amount from the trigger line or the next 3 non-empty lines.
@@ -340,11 +423,15 @@ def _try_extract_amount(
 
     # The trigger line must end with ":" for split pattern to apply
     if not _LABEL_ENDS_COLON_PAT.search(trigger_line):
+        # Special case: prezzo_base_raw may follow the two-scenario Italian structure
+        # where the amount is many lines below under "a carico dell'acquirente"
+        if field_type == "prezzo_base_raw":
+            return _try_prezzo_base_acquirente_lookahead(lines, trigger_idx)
         return None, -1
 
-    # Split: look ahead up to 3 non-empty lines
+    # Split: look ahead up to 4 non-empty lines
     lookahead_count = 0
-    for offset in range(1, min(4, len(lines) - trigger_idx)):
+    for offset in range(1, min(5, len(lines) - trigger_idx)):
         candidate_line = lines[trigger_idx + offset]
         stripped = candidate_line.strip()
         if not stripped:
@@ -352,13 +439,26 @@ def _try_extract_amount(
         lookahead_count += 1
 
         # Amount-only line (standalone €. amount)
-        m = _AMOUNT_ONLY_LINE_PAT.match(candidate_line)
-        if m:
+        if _AMOUNT_ONLY_LINE_PAT.match(candidate_line):
             return _extract_amount_inline(candidate_line), offset
 
-        # If the line has content that is NOT an amount → stop looking
-        # (another label or prose begins; don't look further)
-        if lookahead_count >= 1 and not _AMOUNT_ONLY_LINE_PAT.match(candidate_line):
+        # 2-line split: "€." alone on one line, number digits on the next.
+        # e.g. trigger: "Valore complessivo del lotto:"
+        #       offset+0: "€."
+        #       offset+1: "118.731,30"
+        if re.match(r"^\s*€\.?\s*$", candidate_line, re.IGNORECASE):
+            for next_off in range(offset + 1, min(offset + 4, len(lines) - trigger_idx)):
+                next_line = lines[trigger_idx + next_off]
+                if not next_line.strip():
+                    continue
+                combined = f"€. {next_line.strip()}"
+                if _AMOUNT_ONLY_LINE_PAT.match(combined):
+                    return _extract_amount_inline(combined), next_off
+                break
+            break
+
+        # Non-amount content → stop
+        if lookahead_count >= 1:
             break
 
     return None, -1
@@ -395,6 +495,10 @@ def _classify_trigger(line: str) -> Tuple[Optional[str], Optional[str]]:
 
     # Valore di stima del bene (most specific stima form)
     if _VALORE_STIMA_BENE_PAT.search(line):
+        return "valore_stima_raw", None
+
+    # Valore complessivo del lotto → treated as lot-level valore_stima_raw
+    if _VALORE_COMPLESSIVO_LOTTO_PAT.search(line):
         return "valore_stima_raw", None
 
     # Generic valore di stima
@@ -577,7 +681,7 @@ def build_valuation_candidate_pack(case_key: str) -> Dict[str, object]:
             # (handled above)
 
             # --- Try to extract amount ---
-            amount_raw, amount_offset = _try_extract_amount(line, lines, i)
+            amount_raw, amount_offset = _try_extract_amount(line, lines, i, field_type=field_type)
 
             # --- SCHEMA RIASSUNTIVO page handling ---
             if is_schema_page:
@@ -752,7 +856,12 @@ def build_valuation_candidate_pack(case_key: str) -> Dict[str, object]:
             # --- Emit candidate ---
             match_counter += 1
             cand_id = _make_candidate_id(field_type, lot_id, bene_id, page, i, match_counter)
-            extraction_method = "REGEX_VAL_INLINE" if amount_offset == 0 else f"REGEX_VAL_SPLIT_L+{amount_offset}"
+            if amount_offset == 0:
+                extraction_method = "REGEX_VAL_INLINE"
+            elif field_type == "prezzo_base_raw" and not _LABEL_ENDS_COLON_PAT.search(line):
+                extraction_method = f"REGEX_VAL_PREZZO_BASE_ACQUIRENTE_L+{amount_offset}"
+            else:
+                extraction_method = f"REGEX_VAL_SPLIT_L+{amount_offset}"
 
             context_window = _make_context_window(lines, i)
 

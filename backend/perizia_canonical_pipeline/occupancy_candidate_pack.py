@@ -53,7 +53,9 @@ OCC_TRIGGER_PAT = re.compile(
     r"occupazione"
     r"|possesso\s+dell.immobile"
     r"|possesso\s+a[\s]*l\s+momento\s+del\s+sopralluogo"
-    r")\b",
+    r"|possesso\s+del\s+bene"
+    r")\b"
+    r"|\b\d+[a-z]?\.\s+stato\s+di\s+possesso\s*:",
     re.IGNORECASE | re.UNICODE,
 )
 
@@ -62,7 +64,8 @@ OCC_TRIGGER_PAT = re.compile(
 # SOPRALLUOGO") is treated identically to the possesso form: wide window,
 # patterns E/F/G first, then fall-through to A→D.
 OCC_POSSESSO_FORM_PAT = re.compile(
-    r"\bstato\s+di\s+possesso\s+(?:dell.immobile|a[\s]*l\s+momento\s+del\s+sopralluogo)\b",
+    r"\bstato\s+di\s+possesso\s+(?:dell.immobile|a[\s]*l\s+momento\s+del\s+sopralluogo|del\s+bene)\b"
+    r"|\b\d+[a-z]?\.\s+stato\s+di\s+possesso\s*:",
     re.IGNORECASE | re.UNICODE,
 )
 
@@ -101,6 +104,35 @@ OCC_PROC_SIGNAL_PAT = re.compile(
 _SCHEMA_RIASSUNTIVO_PAT = re.compile(
     r"\bSCHEMA\s+RIASSUNTIVO\b",
     re.IGNORECASE | re.UNICODE,
+)
+
+# ---------------------------------------------------------------------------
+# Sibling occupancy nuance patterns
+# Detected from the forward window when a primary occupancy status is found.
+# ---------------------------------------------------------------------------
+
+# Non-opponibilità: "non opponibile all'aggiudicatario"
+_OCC_NON_OPPONIBILE_PAT = re.compile(
+    r"\bnon\s+opponibil[ei]\b",
+    re.IGNORECASE,
+)
+
+# Saltuaria occupazione dell'esecutato: "occupato saltuariamente dall'esecutato"
+_OCC_SALTUARIA_PAT = re.compile(
+    r"\boccupat[oa]\s+saltuariamente\b|\bsaltuaria\s+occupazione\b",
+    re.IGNORECASE,
+)
+
+# Liberazione a cura della procedura: "liberazione a cura e spese della procedura"
+_OCC_LIBERAZIONE_PROCEDURA_PAT = re.compile(
+    r"\bliberazione\s+a\s+cura\s+(?:e\s+spese\s+)?della\s+procedura\b",
+    re.IGNORECASE,
+)
+
+# Liberazione a cura dell'acquirente: "liberazione a cura e spese dell'acquirente"
+_OCC_LIBERAZIONE_ACQUIRENTE_PAT = re.compile(
+    r"\bliberazione\s+a\s+cura\s+(?:e\s+spese\s+)?dell.acquirente\b",
+    re.IGNORECASE,
 )
 
 # ---------------------------------------------------------------------------
@@ -165,6 +197,15 @@ OCC_PAT_OCCUPATO_DA = re.compile(
 # Kept as a final fallback for cases where none of the above fire.
 OCC_PAT_STANDALONE_LIBERO = re.compile(
     r"\bstato\s+di\s+occupazione\b[^a-z]{0,10}?(libero)\b",
+    re.IGNORECASE | re.UNICODE,
+)
+
+# Pattern D2 — "il bene/l'immobile/unità risulta libero" with flexible intervening words.
+# Handles cases where intervening words (e.g. "attualmente") appear between subject and
+# "risulta", and Unicode apostrophe (U+2019) in "l'immobile".
+OCC_PAT_RISULTA_LIBERO = re.compile(
+    r"\b(?:immobile|bene|unit[aà]\s+immobiliare)[^.;]{0,60}?\b(risulta)\b[^.;]{0,30}?\b"
+    r"(libero(?:\s+al\s+decreto\s+di\s+trasferimento)?)\b",
     re.IGNORECASE | re.UNICODE,
 )
 
@@ -783,6 +824,14 @@ def build_occupancy_candidate_pack(case_key: str) -> Dict:
                     status_raw = _normalize(m.group(1))
                     extraction_method = "OCC_STANDALONE_LIBERO"
 
+            if status_raw is None:
+                # Pattern D2: "bene/immobile ... risulta ... libero" (flexible gap)
+                # Handles Unicode apostrophe and intervening adverbs
+                m = OCC_PAT_RISULTA_LIBERO.search(window_text)
+                if m:
+                    status_raw = _normalize(m.group(2))
+                    extraction_method = "OCC_RISULTA_LIBERO"
+
             # Normalise OCR redaction-marker variants so that
             # "** ** Omissis ****" ≡ "**** Omissis ****" for dedup purposes.
             if status_raw:
@@ -825,10 +874,26 @@ def build_occupancy_candidate_pack(case_key: str) -> Dict:
             else:
                 title_raw = _extract_title_raw(status_raw)
 
-            # Build field list (status always; title if found; holder never for now)
+            # Build field list (status always; title if found; nuance signals if present)
             fields: List[Tuple[str, str]] = [("occupancy_status_raw", status_raw)]
             if title_raw:
                 fields.append(("occupancy_title_raw", title_raw))
+
+            # Detect occupancy nuance signals from the window text.
+            # These enrich the candidate without altering the primary status.
+            if _OCC_NON_OPPONIBILE_PAT.search(window_text):
+                fields.append(("occupancy_opponibilita_raw", "NON_OPPONIBILE"))
+            elif re.search(r"\bopponibil[ei]\b", window_text, re.IGNORECASE):
+                # Opponibile without "non" prefix → explicitly opponibile
+                fields.append(("occupancy_opponibilita_raw", "OPPONIBILE"))
+
+            if _OCC_SALTUARIA_PAT.search(window_text):
+                fields.append(("occupancy_saltuaria_raw", "saltuaria_occupazione_esecutato"))
+
+            if _OCC_LIBERAZIONE_PROCEDURA_PAT.search(window_text):
+                fields.append(("occupancy_liberazione_raw", "a_carico_procedura"))
+            elif _OCC_LIBERAZIONE_ACQUIRENTE_PAT.search(window_text):
+                fields.append(("occupancy_liberazione_raw", "a_carico_acquirente"))
 
             quote = line_s[:300]
             ctx_win = window_text[:400]

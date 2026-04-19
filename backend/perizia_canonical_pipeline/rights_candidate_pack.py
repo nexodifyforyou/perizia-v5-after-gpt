@@ -67,6 +67,14 @@ RIGHTS_PAT_INTESTATO = re.compile(
     re.IGNORECASE | re.UNICODE,
 )
 
+# Pattern 5 — "Quota di 1/1 propr." short-form rights declaration
+# e.g. "Quota di 1/1 propr." (most common Italian perizia short form)
+# Group 1 = quota fraction; diritto is synthesised as "piena proprietà".
+RIGHTS_PAT_QUOTA_PROPR = re.compile(
+    r"[Qq]uota\s+di\s+(\d+/\d+)\s+(?:propr\b|propr\.|propriet[aà])",
+    re.IGNORECASE | re.UNICODE,
+)
+
 # Trigger: any line that may contain rights information worth scanning
 RIGHTS_TRIGGER_PAT = re.compile(
     r"\b(?:"
@@ -75,6 +83,7 @@ RIGHTS_TRIGGER_PAT = re.compile(
     r"|diritto\s+reale"
     r"|intestat[oa]\s+in\s+(?:piena\s+|nuda\s+)?propriet[aà]"
     r"|intestat[oa]\s+in\s+usufrutto"
+    r"|quota\s+di\s+\d+/\d+\s+(?:propr\b|propr\.|propriet[aà])"
     r")\b",
     re.IGNORECASE | re.UNICODE,
 )
@@ -366,6 +375,7 @@ def build_rights_candidate_pack(case_key: str) -> Dict:
         (RIGHTS_PAT_VENDITA,        "VENDITA"),
         (RIGHTS_PAT_DIRITTO_REALE,  "DIRITTO_REALE"),
         (RIGHTS_PAT_INTESTATO,      "INTESTATO"),
+        (RIGHTS_PAT_QUOTA_PROPR,    "QUOTA_PROPR"),
     ]
 
     # -----------------------------------------------------------------------
@@ -410,19 +420,25 @@ def build_rights_candidate_pack(case_key: str) -> Dict:
 
                 # Parse fields from this match
                 fields: List[Tuple[str, str]] = []
-                diritto_raw = m.group(1).strip()
-                diritto = re.sub(r"\s+", " ", diritto_raw).lower()
-                # Normalize bare "proprietà" → "piena proprietà".
-                # The VENDITA pattern allows a short-form `propriet[aà]` alternative
-                # that produces "proprietà", while DIRITTI produces the canonical
-                # "piena proprietà" for the same right.  Normalise so both patterns
-                # agree and no false RIGHTS_MULTI_VALUE_UNRESOLVED is emitted.
-                if diritto == "proprietà":
-                    diritto = "piena proprietà"
-                fields.append(("rights_diritto", diritto))
-                if pname != "INTESTATO":
-                    quota = m.group(2).strip()
+                if pname == "QUOTA_PROPR":
+                    # group(1) = quota fraction; diritto is implicitly piena proprietà
+                    quota = m.group(1).strip()
+                    fields.append(("rights_diritto", "piena proprietà"))
                     fields.append(("rights_quota_raw", quota))
+                else:
+                    diritto_raw = m.group(1).strip()
+                    diritto = re.sub(r"\s+", " ", diritto_raw).lower()
+                    # Normalize bare "proprietà" → "piena proprietà".
+                    # The VENDITA pattern allows a short-form `propriet[aà]` alternative
+                    # that produces "proprietà", while DIRITTI produces the canonical
+                    # "piena proprietà" for the same right.  Normalise so both patterns
+                    # agree and no false RIGHTS_MULTI_VALUE_UNRESOLVED is emitted.
+                    if diritto == "proprietà":
+                        diritto = "piena proprietà"
+                    fields.append(("rights_diritto", diritto))
+                    if pname != "INTESTATO":
+                        quota = m.group(2).strip()
+                        fields.append(("rights_quota_raw", quota))
 
                 method = f"BODY_{pname}_WINDOW"
                 quote = m.group(0)[:300]

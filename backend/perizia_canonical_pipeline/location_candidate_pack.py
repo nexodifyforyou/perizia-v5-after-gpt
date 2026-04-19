@@ -24,9 +24,38 @@ STREET_MERGE_FIX = re.compile(
     re.UNICODE,
 )
 
+# OCR char-spacing in street type words: "V i a" → "Via", "C o r s o" → "Corso", etc.
+# These patterns fire only when single chars are separated by spaces (OCR artefact).
+_OCR_STREET_TYPE_FIXES = [
+    (re.compile(r"\bV\s+i\s+a\s+l\s+e\b", re.IGNORECASE), "Viale"),
+    (re.compile(r"\bV\s+i\s+a\b", re.IGNORECASE), "Via"),
+    (re.compile(r"\bP\s+i\s+a\s+z\s+z\s+a\s+l\s+e\b", re.IGNORECASE), "Piazzale"),
+    (re.compile(r"\bP\s+i\s+a\s+z\s+z\s+a\b", re.IGNORECASE), "Piazza"),
+    (re.compile(r"\bC\s+o\s+r\s+s\s+o\b", re.IGNORECASE), "Corso"),
+    (re.compile(r"\bV\s+i\s+c\s+o\s+l\s+o\b", re.IGNORECASE), "Vicolo"),
+    (re.compile(r"\bL\s+a\s+r\s+g\s+o\b", re.IGNORECASE), "Largo"),
+    (re.compile(r"\bS\s+t\s+r\s+a\s+d\s+a\b", re.IGNORECASE), "Strada"),
+]
+
+# General OCR char-spacing collapse: "C r i s t o f o r o" → "Cristoforo".
+# Applied BEFORE whitespace normalisation while double-spaces still separate words.
+# Matches runs of 3+ single alpha chars each separated by exactly one space,
+# bounded by double-spaces or start-of-string on the left.
+# Lookahead: NOT followed by "space + alpha" (which would extend the run).
+_OCR_CHAR_SPACING_PAT = re.compile(
+    r"(?:(?<=  )|^)"
+    r"([A-Za-zÀ-öø-ÿ](?: [A-Za-zÀ-öø-ÿ]){2,})"
+    r"(?! [A-Za-zÀ-öø-ÿ])",
+    re.UNICODE,
+)
+
 
 def _normalize_window_text(text: str) -> str:
     text = PROV_OCR_FIX.sub(lambda m: f"({m.group(1)}{m.group(2)})", text)
+    for pat, replacement in _OCR_STREET_TYPE_FIXES:
+        text = pat.sub(replacement, text)
+    # Collapse general OCR char-spacing before whitespace normalisation
+    text = _OCR_CHAR_SPACING_PAT.sub(lambda m: m.group(0).replace(" ", ""), text)
     text = STREET_MERGE_FIX.sub(r"\1 \2", text)
     return re.sub(r"\s+", " ", text).strip()
 
@@ -108,9 +137,29 @@ TABLE_LOC_PAT = re.compile(
     re.IGNORECASE | re.UNICODE,
 )
 
+# Pattern D2 — "site nel comune di COMUNE (PROV) Via NOME, [n.c.] CIVICO"
+# e.g. "Le unità immobiliari sono site nel comune di Vidigulfo (PV) Via Cristoforo Colombo, 2/4"
+# Handles OCR char-spaced street names (de-spaced by _OCR_STREET_TYPE_FIXES before matching).
+# Civico may appear as "n.c. X/Y", "n° X", "n. X", bare ", X/Y" (comma only), or "snc".
+SITE_NEL_COMUNE_PAT = re.compile(
+    r"site?\s+nel\s+comune\s+di\s+"
+    r"([A-Za-zÀ-öø-ÿ][A-Za-zÀ-öø-ÿ\s\.\-\'\u2019]+?)\s*"
+    r"\(([A-Z]{2})\)\s*"
+    r"(via|piazza|corso|viale|vicolo|largo|strada(?:\s+[a-z]+)?)\s+"
+    r"([A-Za-zÀ-öø-ÿ][A-Za-zÀ-öø-ÿ\s\.\-\'\u2019\.]+?)\s*,\s*"
+    r"(?:"
+    r"n\.c\.\s*([0-9]+(?:\s*/\s*[0-9]+)?)"
+    r"|n°\s*([0-9]+(?:\s*/\s*[0-9]+)?)"
+    r"|n\.\s*([0-9]+(?:\s*/\s*[0-9]+)?)"
+    r"|([0-9]+(?:\s*/\s*[0-9]+)?)"
+    r"|(senza\s+numero\s+civico|snc|s\.n\.c\.)"
+    r")",
+    re.IGNORECASE | re.UNICODE,
+)
+
 # Trigger: any line that might contain location information worth scanning
 LOCATION_TRIGGER_PAT = re.compile(
-    r"\b(?:ubicat[oa]|collocat[oa]|posto\s+in\s+comune|situati?\s+in|siti?\s+in)\b",
+    r"\b(?:ubicat[oa]|collocat[oa]|posto\s+in\s+comune|situati?\s+in|site?\s+nel\s+comune\s+di|siti?\s+in)\b",
     re.IGNORECASE,
 )
 
@@ -225,6 +274,19 @@ def _parse_match(m: re.Match, pattern_name: str) -> Optional[Dict[str, Optional[
             via_name = m.group(4)
             civico = m.group(5) or m.group(6) or m.group(7)
             is_snc = bool(m.group(8))
+
+        elif pattern_name == "SITE_NEL_COMUNE":
+            comune = m.group(1)
+            prov = m.group(2)
+            via_type = m.group(3)
+            via_name = m.group(4)
+            # groups 5-8 = n.c./n°/n./bare civico; group 9 = snc
+            raw_civico = m.group(5) or m.group(6) or m.group(7) or m.group(8)
+            # Normalise "2 / 4" → "2/4"
+            if raw_civico:
+                raw_civico = re.sub(r"\s*/\s*", "/", raw_civico.strip())
+            civico = raw_civico
+            is_snc = bool(m.group(9))
 
         else:
             return None
@@ -439,6 +501,7 @@ def build_location_candidate_pack(case_key: str) -> Dict:
         (UBICATO_A_PAT, "UBICATO_A"),
         (COLLOCATO_PAT, "COLLOCATO"),
         (POSTO_IN_COMUNE_PAT, "POSTO_IN_COMUNE"),
+        (SITE_NEL_COMUNE_PAT, "SITE_NEL_COMUNE"),
     ]
 
     # Patterns tried in bene-header window context (includes TABLE_LOC)

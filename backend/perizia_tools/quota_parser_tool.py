@@ -36,6 +36,17 @@ _SUBORDINATE_RIGHTS_PATTERNS = (
 )
 
 
+def _is_civic_address_fraction(raw: str, text: str, start: int, end: int) -> bool:
+    # Reject fractions preceded by a comma (civic number format: "Via X, 2/4")
+    # unless immediately surrounded by explicit ownership keywords in local context.
+    prefix = text[max(0, start - 5):start]
+    if "," not in prefix:
+        return False
+    local = text[max(0, start - 60):end + 10].lower()
+    has_rights_anchor = any(kw in local for kw in ("quota", "propriet", "piena", "usufrutto"))
+    return not has_rights_anchor
+
+
 def _is_date_like_fraction(raw: str, text: str, start: int, end: int) -> bool:
     if _DATEISH_RE.fullmatch(raw) and _DATE_TAIL_RE.match(text[end:]):
         return True
@@ -76,6 +87,8 @@ def quota_candidates(pages: List[Dict[str, Any]], result: Dict[str, Any]) -> Lis
             if not has_rights_context:
                 continue
             if _is_date_like_fraction(raw, text, match.start(), match.end()):
+                continue
+            if _is_civic_address_fraction(raw, text, match.start(), match.end()):
                 continue
             fraction = parse_fraction(raw)
             occurrence_key = (fraction, page_number, match.start())

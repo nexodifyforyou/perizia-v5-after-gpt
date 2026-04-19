@@ -187,6 +187,10 @@ def _normalize_categoria(value: Optional[str]) -> Optional[str]:
     if not value:
         return value
     compact = re.sub(r"\s+", "", value).upper()
+    # "00" and purely numeric codes are historical placeholder states (e.g. "Cat. 00"
+    # at initial registration before a category was assigned). Treat as invalid.
+    if re.match(r"^\d+$", compact):
+        return None
     m = re.match(r"^([A-Z])/?(\d+)$", compact)
     if m:
         return f"{m.group(1)}/{m.group(2)}"
@@ -490,6 +494,24 @@ def build_cadastral_candidate_pack(case_key: str) -> Dict[str, object]:
             # Single match — parse fields.
             m = matches[0]
             foglio, mappale, sub, cat = m[0], m[1], m[2] or None, m[3] or None
+
+            # Fallback: if the primary regex didn't capture categoria (group 4 empty),
+            # try a secondary search for "Cat. X/N" in the full line.
+            # This handles the common pattern "... sub. N – (address) – P1– Cat. A/4"
+            # where an address parenthetical or floor label appears between the sub
+            # number and the category, preventing the primary regex from capturing it.
+            if not cat:
+                _cat_fallback = re.search(
+                    r"\bCat(?:egoria|eg\.?|\.)\s+([\w][/\w]*)",
+                    line,
+                    re.IGNORECASE,
+                )
+                if _cat_fallback:
+                    _cat_raw = _cat_fallback.group(1).strip()
+                    # Only accept the fallback if it normalizes to a valid category (letter + number)
+                    _cat_norm = _normalize_categoria(_cat_raw)
+                    if _cat_norm:
+                        cat = _cat_raw
 
             if skip_previous_local:
                 continue

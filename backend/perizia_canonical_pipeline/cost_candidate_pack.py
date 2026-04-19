@@ -221,6 +221,7 @@ _COSTO_REGOLAR_PAT = re.compile(
     r"(?:"
     r"costi?\s+per\s+regolarizzare\s+l[\x27\u2018\u2019\W]immobile"
     r"|spese?\s+di\s+regolarizzazione"
+    r"|spese\s+tecniche\s+di\s+regolarizzazione"
     r"|costi?\s+di\s+regolarizzazione\s*:"   # section header → needs lookahead
     r"|per\s+un\s+totale\s+preventivabile"
     r"|totale\s+costi?\s+(?:per\s+la\s+)?regolarizzazione"

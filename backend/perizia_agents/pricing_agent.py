@@ -11,11 +11,11 @@ from perizia_tools.valuation_table_tool import valuation_candidates
 
 _DIRECT_SELECTED_PATTERNS = [
     re.compile(
-        r"prezzo\s+base\s+d[' ]asta[\s\S]{0,260}?€\.?\s*([0-9]{1,3}(?:\.[0-9]{3})*(?:,[0-9]{2})?)",
+        r"prezzo\s+base\s+d[' ]asta[\s\S]{0,400}?€\.?\s*([0-9]{1,3}(?:\.[0-9]{3})*(?:,[0-9]{2})?)",
         re.IGNORECASE | re.DOTALL,
     ),
     re.compile(
-        r"prezzo\s+a\s+base\s+d[' ]asta[\s\S]{0,260}?€\.?\s*([0-9]{1,3}(?:\.[0-9]{3})*(?:,[0-9]{2})?)",
+        r"prezzo\s+a\s+base\s+d[' ]asta[\s\S]{0,400}?€\.?\s*([0-9]{1,3}(?:\.[0-9]{3})*(?:,[0-9]{2})?)",
         re.IGNORECASE | re.DOTALL,
     ),
     re.compile(
@@ -24,6 +24,11 @@ _DIRECT_SELECTED_PATTERNS = [
     ),
     re.compile(
         r"valore\s+al\s+netto\s+dei\s+costi\s+di\s+regolarizzazione\s+e\s+della\s+riduzione\s+cautelativa[\s\S]{0,260}?€\.?\s*([0-9]{1,3}(?:\.[0-9]{3})*(?:,[0-9]{2})?)",
+        re.IGNORECASE | re.DOTALL,
+    ),
+    # Handles "Valore in caso di regolarizzazione ... a carico dell'acquirente: €. X" format
+    re.compile(
+        r"valore\s+in\s+caso\s+di\s+regolarizzazione[\s\S]{0,160}acquirente[\s\S]{0,80}?€\.?\s*([0-9]{1,3}(?:\.[0-9]{3})*(?:,[0-9]{2})?)",
         re.IGNORECASE | re.DOTALL,
     ),
 ]
@@ -54,6 +59,11 @@ _DIRECT_BENCHMARK_PATTERNS = [
     ),
     re.compile(
         r"valore\s+complessivo\s*\(vc\)[\s\S]{0,120}?€\.?\s*([0-9]{1,3}(?:\.[0-9]{3})*(?:,[0-9]{2})?)",
+        re.IGNORECASE | re.DOTALL,
+    ),
+    # Handles "Valore complessivo del lotto: €. X" format
+    re.compile(
+        r"valore\s+complessivo\s+del\s+lotto[\s\S]{0,80}?€\.?\s*([0-9]{1,3}(?:\.[0-9]{3})*(?:,[0-9]{2})?)",
         re.IGNORECASE | re.DOTALL,
     ),
 ]

@@ -295,6 +295,111 @@ def build_evidence_ledger(case_key: str) -> Dict[str, object]:
         distinct_values = sorted({str(cand.get("extracted_value")) for cand in ordered_candidates})
 
         if len(distinct_values) > 1:
+            # Special case: cadastral_subalterno with multiple distinct values
+            # that all share the same foglio AND mappale → multi-unit lot (e.g.
+            # apartment sub 6 + garage sub 8 on the same mappale).
+            # Treat as a resolved multi-unit fact rather than a conflict block.
+            if field_type == "cadastral_subalterno":
+                sibling_foglios = {
+                    str(cand.get("sibling_fields", {}).get("cadastral_foglio") or "")
+                    for cand in ordered_candidates
+                    if cand.get("sibling_fields")
+                }
+                sibling_mappali = {
+                    str(cand.get("sibling_fields", {}).get("cadastral_mappale") or "")
+                    for cand in ordered_candidates
+                    if cand.get("sibling_fields")
+                }
+                # All candidates share one foglio and one mappale → multi-unit promotion
+                if len(sibling_foglios) == 1 and len(sibling_mappali) == 1 and "" not in sibling_foglios and "" not in sibling_mappali:
+                    multi_value = ", ".join(distinct_values)
+                    cand0 = ordered_candidates[0]
+                    bene_id_val = None if bene_key == "lot" else bene_key
+                    cadastral_packets.append({
+                        "packet_id": (
+                            f"{field_type}::{lot_id}::{bene_key}"
+                            f"::p{cand0['page']}::l{cand0['line_index']}"
+                        ),
+                        "field_type": field_type,
+                        "lot_id": lot_id,
+                        "bene_id": bene_id_val,
+                        "corpo_id": None,
+                        "scope_certainty": attr,
+                        "scope_basis": cand0.get("composite_key") or f"lot:{lot_id}",
+                        "page": cand0["page"],
+                        "line_index": cand0["line_index"],
+                        "quote": cand0.get("line_quote"),
+                        "context_window": cand0.get("line_quote"),
+                        "extracted_value": multi_value,
+                        "extraction_method": "REGEX_CADAT_MULTI_UNIT_PROMOTED",
+                        "confidence": 0.9,
+                        "status": "ACTIVE",
+                        "source_refs": {
+                            "sibling_fields": cand0.get("sibling_fields"),
+                            "candidate_id": cand0.get("candidate_id"),
+                            "duplicate_candidate_ids": [
+                                c.get("candidate_id")
+                                for c in ordered_candidates[1:]
+                                if c.get("candidate_id")
+                            ],
+                            "multi_unit_note": (
+                                f"Multiple subalternos ({multi_value}) detected under "
+                                f"foglio {list(sibling_foglios)[0]}, "
+                                f"mappale {list(sibling_mappali)[0]}. "
+                                "Promoted as multi-unit lot entry."
+                            ),
+                        },
+                    })
+                    continue
+            # Special case: cadastral_categoria with multiple distinct values
+            # that all share the same foglio AND mappale (different sub-units of same property).
+            if field_type == "cadastral_categoria":
+                sibling_foglios_cat = {
+                    str(cand.get("sibling_fields", {}).get("cadastral_foglio") or "")
+                    for cand in ordered_candidates
+                    if cand.get("sibling_fields")
+                }
+                sibling_mappali_cat = {
+                    str(cand.get("sibling_fields", {}).get("cadastral_mappale") or "")
+                    for cand in ordered_candidates
+                    if cand.get("sibling_fields")
+                }
+                if len(sibling_foglios_cat) == 1 and len(sibling_mappali_cat) == 1 and "" not in sibling_foglios_cat and "" not in sibling_mappali_cat:
+                    multi_cat = ", ".join(distinct_values)
+                    cand0 = ordered_candidates[0]
+                    bene_id_val = None if bene_key == "lot" else bene_key
+                    cadastral_packets.append({
+                        "packet_id": (
+                            f"{field_type}::{lot_id}::{bene_key}"
+                            f"::p{cand0['page']}::l{cand0['line_index']}"
+                        ),
+                        "field_type": field_type,
+                        "lot_id": lot_id,
+                        "bene_id": bene_id_val,
+                        "corpo_id": None,
+                        "scope_certainty": attr,
+                        "scope_basis": cand0.get("composite_key") or f"lot:{lot_id}",
+                        "page": cand0["page"],
+                        "line_index": cand0["line_index"],
+                        "quote": cand0.get("line_quote"),
+                        "context_window": cand0.get("line_quote"),
+                        "extracted_value": multi_cat,
+                        "extraction_method": "REGEX_CADAT_MULTI_UNIT_PROMOTED",
+                        "confidence": 0.85,
+                        "status": "ACTIVE",
+                        "source_refs": {
+                            "sibling_fields": cand0.get("sibling_fields"),
+                            "candidate_id": cand0.get("candidate_id"),
+                            "multi_unit_note": (
+                                f"Multiple categories ({multi_cat}) for different sub-units "
+                                f"under foglio {list(sibling_foglios_cat)[0]}, "
+                                f"mappale {list(sibling_mappali_cat)[0]}. "
+                                "Promoted as multi-unit context."
+                            ),
+                        },
+                    })
+                    continue
+            # All other multi-value conflicts → standard block
             out["blocked_zones"].append({
                 "type": "CADASTRAL_SCOPE_FIELD_CONFLICT",
                 "reason": (

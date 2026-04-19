@@ -12,7 +12,8 @@ def _parse_it_amount(raw: str) -> float:
 
 
 def _extract_amounts(text: str):
-    return [_parse_it_amount(match) for match in re.findall(r"€\s*([0-9]{1,3}(?:\.[0-9]{3})*(?:,[0-9]{2})?)", text or "")]
+    # Handles both "€ X" and "€. X" (Italian abbreviated currency format)
+    return [_parse_it_amount(match) for match in re.findall(r"€\.?\s*([0-9]{1,3}(?:\.[0-9]{3})*(?:,[0-9]{2})?)", text or "")]
 
 
 def _extract_direct_costs(state: RuntimeState):
@@ -23,8 +24,10 @@ def _extract_direct_costs(state: RuntimeState):
         ("spese_tecniche_urbanistiche", "spese tecniche di regolazione difformità urbanistico edilizie"),
         ("spese_tecniche_catastali", "spese tecniche di regolazione catastale"),
         ("spese_condominiali", "spese condominiali scadute e non pagate"),
+        # Handles "Spese tecniche di regolarizzazione urbanistico e/o catastale" format
+        ("spese_regolarizzazione", "spese tecniche di regolarizzazione"),
     ]
-    adjustment_pattern = re.compile(r"riduzione\s+cautelativa[\s\S]{0,120}?€\s*([0-9]{1,3}(?:\.[0-9]{3})*(?:,[0-9]{2})?)", re.I | re.DOTALL)
+    adjustment_pattern = re.compile(r"riduzione\s+cautelativa[\s\S]{0,120}?€\.?\s*([0-9]{1,3}(?:\.[0-9]{3})*(?:,[0-9]{2})?)", re.I | re.DOTALL)
     for idx, page in enumerate(state.pages, start=1):
         text = str((page or {}).get("text") or "")
         low = text.lower()
@@ -77,6 +80,15 @@ def run_costs_agent(state: RuntimeState) -> None:
     explicit_costs = []
     valuation_adjustments = []
     if direct_costs or direct_total is not None:
+        # Deduplicate costs with same label+amount (same cost appearing on multiple pages)
+        seen_label_amount: set = set()
+        deduped_costs = []
+        for cost in direct_costs:
+            key = (cost.get("label"), round(float(cost.get("amount", 0)), 2))
+            if key not in seen_label_amount:
+                seen_label_amount.add(key)
+                deduped_costs.append(cost)
+        direct_costs = deduped_costs
         explicit_costs = direct_costs
         valuation_adjustments = direct_adjustments
         explicit_total = round(float(direct_total), 2) if direct_total is not None else round(sum(item["amount"] for item in direct_costs), 2)

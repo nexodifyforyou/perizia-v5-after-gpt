@@ -89,6 +89,9 @@ _FIELD_FAMILY_MAP: Dict[str, str] = {
     # occupancy
     "occupancy_status_raw": "occupancy",
     "occupancy_title_raw": "occupancy",
+    "occupancy_opponibilita_raw": "occupancy",
+    "occupancy_saltuaria_raw": "occupancy",
+    "occupancy_liberazione_raw": "occupancy",
     # valuation
     "valore_stima_raw": "valuation",
     "prezzo_base_raw": "valuation",
