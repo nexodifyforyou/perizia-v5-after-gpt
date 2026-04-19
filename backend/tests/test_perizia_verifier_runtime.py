@@ -916,6 +916,25 @@ def test_verifier_emits_legal_attention_fallback_for_cancellable_only_cases():
         assert "cancellazione delle formalità" in summary["decision_summary_it"]
 
 
+def test_summary_fallback_uses_case_specific_unresolved_signals():
+    result, pages = _repo_fixture("torino_via_marchese_visconti")
+    payload = run_quality_verifier(
+        analysis_id="torino_summary_fallback",
+        result=result,
+        pages=pages,
+        full_text="\n\n".join(page["text"] for page in pages),
+    )
+    canonical = payload["canonical_case"]
+    summary = canonical["summary_bundle"]
+    decision_summary = str(summary.get("decision_summary_it") or "")
+    next_step = str(summary.get("next_step_it") or "")
+
+    assert canonical["priority"]["top_issue"] is None
+    assert decision_summary != "Verifica manualmente i punti critici prima dell'offerta."
+    assert "opponibilità" in decision_summary.lower()
+    assert "segnale decisivo" in next_step.lower() or "agibilità" in next_step.lower()
+
+
 def test_multibene_occupancy_prefers_property_occupied_state_over_libero_noise():
     result, pages = _repo_fixture("multibene_1859886")
     payload = run_quality_verifier(
