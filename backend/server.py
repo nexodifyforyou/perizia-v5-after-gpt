@@ -7265,6 +7265,57 @@ def _promote_verifier_pricing_field_state(result: Dict[str, Any]) -> None:
     }
 
 
+def _canonical_pricing_amounts_for_money_box(pricing: Dict[str, Any]) -> List[float]:
+    amounts: List[float] = []
+    for key in ("selected_price", "benchmark_value", "adjusted_market_value"):
+        value = pricing.get(key)
+        if isinstance(value, (int, float)) and float(value) > 0:
+            amount = round(float(value), 2)
+            if amount not in amounts:
+                amounts.append(amount)
+    return amounts
+
+
+def _prune_verifier_pricing_amounts_from_money_box(result: Dict[str, Any]) -> None:
+    verifier_runtime = result.get("verifier_runtime") if isinstance(result.get("verifier_runtime"), dict) else {}
+    canonical_case = verifier_runtime.get("canonical_case") if isinstance(verifier_runtime.get("canonical_case"), dict) else {}
+    pricing = canonical_case.get("pricing") if isinstance(canonical_case.get("pricing"), dict) else {}
+    pricing_amounts = _canonical_pricing_amounts_for_money_box(pricing)
+    if not pricing_amounts:
+        return
+    for box_key in ("money_box", "section_3_money_box"):
+        box = result.get(box_key)
+        if not isinstance(box, dict):
+            continue
+        items = box.get("items")
+        if not isinstance(items, list):
+            continue
+        kept: List[Dict[str, Any]] = []
+        removed: List[Dict[str, Any]] = []
+        for item in items:
+            if not isinstance(item, dict):
+                continue
+            amount = _as_float_or_none(item.get("stima_euro"))
+            if amount is not None and round(float(amount), 2) in pricing_amounts:
+                removed.append({
+                    "amount": round(float(amount), 2),
+                    "label": item.get("label_it") or item.get("label") or item.get("voce"),
+                    "source": item.get("source"),
+                    "reason": "pricing_amount_not_buyer_cost",
+                })
+                continue
+            kept.append(item)
+        if not removed:
+            continue
+        box["items"] = kept
+        existing_removed = box.get("removed_pricing_amount_items")
+        if not isinstance(existing_removed, list):
+            existing_removed = []
+        existing_removed.extend(removed)
+        box["removed_pricing_amount_items"] = existing_removed
+        result[box_key] = box
+
+
 def _refresh_customer_facing_result_on_read(
     result: Dict[str, Any],
     pages: List[Dict[str, Any]],
@@ -7301,6 +7352,7 @@ def _refresh_customer_facing_result_on_read(
     _synthesize_decisione_rapida(result, states)
 
     _merge_verifier_explicit_cost_items(result)
+    _prune_verifier_pricing_amounts_from_money_box(result)
     _apply_market_ranges_to_money_box(result)
     _sanitize_lot_conservative_outputs(result)
     _normalize_evidence_offsets(result, safe_pages)

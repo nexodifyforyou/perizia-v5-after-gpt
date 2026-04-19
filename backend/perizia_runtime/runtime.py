@@ -314,6 +314,54 @@ def _should_promote_selected_price(existing_state: Any, selected_price: float, p
     return True
 
 
+def _canonical_pricing_amounts(pricing: Dict[str, Any]) -> List[float]:
+    amounts: List[float] = []
+    for key in ("selected_price", "benchmark_value", "adjusted_market_value"):
+        value = pricing.get(key)
+        if isinstance(value, (int, float)) and float(value) > 0:
+            amount = round(float(value), 2)
+            if amount not in amounts:
+                amounts.append(amount)
+    return amounts
+
+
+def _prune_pricing_amounts_from_money_boxes(result: Dict[str, Any], pricing: Dict[str, Any]) -> None:
+    pricing_amounts = _canonical_pricing_amounts(pricing)
+    if not pricing_amounts:
+        return
+    for box_key in ("money_box", "section_3_money_box"):
+        box = result.get(box_key)
+        if not isinstance(box, dict):
+            continue
+        items = box.get("items")
+        if not isinstance(items, list):
+            continue
+        kept: List[Dict[str, Any]] = []
+        removed: List[Dict[str, Any]] = []
+        for item in items:
+            if not isinstance(item, dict):
+                continue
+            amount = _as_float_or_none(item.get("stima_euro"))
+            if amount is not None and round(float(amount), 2) in pricing_amounts:
+                removed.append({
+                    "amount": round(float(amount), 2),
+                    "label": item.get("label_it") or item.get("label") or item.get("voce"),
+                    "source": item.get("source"),
+                    "reason": "pricing_amount_not_buyer_cost",
+                })
+                continue
+            kept.append(item)
+        if not removed:
+            continue
+        box["items"] = kept
+        existing_removed = box.get("removed_pricing_amount_items")
+        if not isinstance(existing_removed, list):
+            existing_removed = []
+        existing_removed.extend(removed)
+        box["removed_pricing_amount_items"] = existing_removed
+        result[box_key] = box
+
+
 def _apply_degraded_result_packaging(result: Dict[str, Any]) -> None:
     _annotate_degraded_output(result, guards_key="packaging_guards")
 
@@ -513,6 +561,8 @@ def apply_verifier_to_result(result: Dict[str, Any], verifier_payload: Dict[str,
         section_legal["top_items"] = top_items[:3]
         if is_degraded:
             _annotate_degraded_output(section_legal, guards_key="packaging_guards")
+    money_box = result.setdefault("money_box", {})
+    _prune_pricing_amounts_from_money_boxes(result, pricing)
     money_box = result.setdefault("money_box", {})
     money_box["verifier_costs_summary"] = _legacy_money_costs_summary(costs)
     if is_degraded:

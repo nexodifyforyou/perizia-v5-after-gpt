@@ -2029,6 +2029,74 @@ def test_read_refresh_preserves_verifier_selected_price_over_invalid_legacy_stat
     assert field_state.get("resolver_meta", {}).get("source") == "canonical_pricing.selected_price"
 
 
+def test_verifier_bridge_prunes_pricing_amounts_from_money_box():
+    for fixture_name in ("multibene_1859886", "rmei_928_2022", "silvabella"):
+        result, pages = _repo_fixture(fixture_name)
+        payload = run_quality_verifier(
+            analysis_id=f"{fixture_name}_money_box_pricing_prune",
+            result=result,
+            pages=pages,
+            full_text="\n\n".join(page["text"] for page in pages),
+        )
+        packaged = json.loads(json.dumps(result))
+        apply_verifier_to_result(packaged, payload)
+
+        pricing = payload["canonical_case"]["pricing"]
+        pricing_amounts = {
+            round(float(value), 2)
+            for value in (
+                pricing.get("selected_price"),
+                pricing.get("benchmark_value"),
+                pricing.get("adjusted_market_value"),
+            )
+            if isinstance(value, (int, float))
+        }
+        for box_key in ("money_box", "section_3_money_box"):
+            box = packaged.get(box_key) if isinstance(packaged.get(box_key), dict) else {}
+            for item in box.get("items") or []:
+                if not isinstance(item, dict) or item.get("stima_euro") is None:
+                    continue
+                try:
+                    amount = round(float(item["stima_euro"]), 2)
+                except Exception:
+                    continue
+                assert amount not in pricing_amounts, (
+                    f"{fixture_name} leaked pricing amount {item['stima_euro']} into {box_key}"
+                )
+
+
+def test_read_refresh_prunes_pricing_amounts_from_money_box():
+    import server
+
+    result, pages = _repo_fixture("silvabella")
+    payload = run_quality_verifier(
+        analysis_id="silvabella_money_box_read_refresh",
+        result=result,
+        pages=pages,
+        full_text="\n\n".join(page["text"] for page in pages),
+    )
+    packaged = json.loads(json.dumps(result))
+    apply_verifier_to_result(packaged, payload)
+    packaged.setdefault("money_box", {}).setdefault("items", []).append({
+        "label_it": "Costo rilevato da perizia",
+        "stima_euro": 45338.48,
+        "source": "step3_candidates",
+    })
+
+    server._refresh_customer_facing_result_on_read(packaged, pages)
+
+    pricing_amounts = {45338.48, 56861.33}
+    for item in (packaged.get("money_box") or {}).get("items") or []:
+        if isinstance(item, dict) and item.get("stima_euro") is not None:
+            try:
+                amount = round(float(item["stima_euro"]), 2)
+            except Exception:
+                continue
+            assert amount not in pricing_amounts
+    removed = (packaged.get("money_box") or {}).get("removed_pricing_amount_items") or []
+    assert any(round(float(item.get("amount") or 0), 2) == 45338.48 for item in removed)
+
+
 def test_pricing_invariant_multi_lot_root_scalars_are_suppressed():
     pricing = _pricing_probe("multilot_69_2024")
     invalid_reasons = {item["reason"] for item in pricing["invalid_candidates"]}
