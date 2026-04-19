@@ -760,6 +760,10 @@ def build_impianti_candidate_pack(case_key: str) -> Dict:
         str(bs["bene_id"]).strip()
         for bs in (bsm.get("bene_scopes") or [])
     }
+    known_bene_pairs: Set[Tuple[str, str]] = {
+        (str(bs["lot_id"]).strip().lower(), str(bs["bene_id"]).strip())
+        for bs in (bsm.get("bene_scopes") or [])
+    }
 
     candidates: List[Dict] = []
     blocked_or_ambiguous: List[Dict] = []
@@ -905,7 +909,11 @@ def build_impianti_candidate_pack(case_key: str) -> Dict:
                 # Enables bene-level attribution on pages where the last-bene fallback
                 # produced LOT_LEVEL_ONLY but explicit bene sub-sections are present.
                 if known_bene_ids and bene_id is None and lot_id is not None:
-                    if current_page_bene is not None:
+                    current_pair = (
+                        (str(lot_id).strip().lower(), str(current_page_bene).strip())
+                        if current_page_bene else None
+                    )
+                    if current_pair in known_bene_pairs:
                         bene_id = current_page_bene
                         attr = "BENE_LOCAL_CONTEXT_OVERRIDE"
 
@@ -1077,7 +1085,11 @@ def build_impianti_candidate_pack(case_key: str) -> Dict:
 
                 # Bene local context override (context-only — same stateful tracker)
                 if known_bene_ids and bene_id is None and lot_id is not None:
-                    if current_page_bene is not None:
+                    current_pair = (
+                        (str(lot_id).strip().lower(), str(current_page_bene).strip())
+                        if current_page_bene else None
+                    )
+                    if current_pair in known_bene_pairs:
                         bene_id = current_page_bene
                         attr = "BENE_LOCAL_CONTEXT_OVERRIDE"
 

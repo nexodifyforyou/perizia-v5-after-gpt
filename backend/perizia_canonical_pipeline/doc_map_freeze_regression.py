@@ -19,6 +19,9 @@ from .doc_map_freeze import (
     freeze_case,
     run_freeze,
 )
+from .evidence_ledger import build_evidence_ledger
+from .llm_clarification_issue_pack import build_clarification_issue_pack
+from .pre_canon_validator import validate_case
 from .runner import build_context
 
 
@@ -119,6 +122,13 @@ def _regression_checks(doc_map: Dict[str, Any]) -> List[str]:
     # scope_index must be present
     if not scope_index:
         errors.append("scope_index is missing or empty")
+
+    for warning in doc_map.get("warnings", []) or []:
+        if str(warning).startswith("[scope_enforcement]"):
+            errors.append(
+                "Scope enforcement warning must be fixed upstream, not hidden by "
+                f"freeze-time remapping: {warning}"
+            )
 
     # CRITICAL: every scope key in fields must be declared
     for scope_key in fields:
@@ -367,6 +377,9 @@ def main() -> None:
     for case in load_cases():
         case_key = case.case_key
         try:
+            build_evidence_ledger(case_key)
+            build_clarification_issue_pack(case_key)
+            validate_case(case_key)
             out_path = run_freeze(case_key)
             doc_map = json.loads(out_path.read_text(encoding="utf-8"))
         except Exception as exc:
