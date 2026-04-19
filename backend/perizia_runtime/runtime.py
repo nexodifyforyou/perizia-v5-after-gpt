@@ -267,6 +267,53 @@ def _legacy_money_costs_summary(costs: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
+def _as_float_or_none(value: Any) -> Optional[float]:
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, (int, float)):
+        return float(value)
+    if isinstance(value, str):
+        text = value.strip().replace("€", "").replace(" ", "")
+        if "," in text and "." in text:
+            text = text.replace(".", "").replace(",", ".")
+        else:
+            text = text.replace(",", ".")
+        try:
+            return float(text)
+        except Exception:
+            return None
+    return None
+
+
+def _pricing_evidence_for_selected_price(pricing: Dict[str, Any]) -> List[Dict[str, Any]]:
+    evidence = pricing.get("evidence") if isinstance(pricing.get("evidence"), list) else []
+    direct = [
+        copy.deepcopy(ev)
+        for ev in evidence
+        if isinstance(ev, dict) and str(ev.get("semantic_role") or "") == "direct_selected"
+    ]
+    return direct or [copy.deepcopy(ev) for ev in evidence[:2] if isinstance(ev, dict)]
+
+
+def _should_promote_selected_price(existing_state: Any, selected_price: float, pricing: Dict[str, Any]) -> bool:
+    if not isinstance(existing_state, dict):
+        return True
+    if str(existing_state.get("status") or "").upper() == "USER_PROVIDED":
+        return False
+    existing_value = _as_float_or_none(existing_state.get("value"))
+    if existing_value is None:
+        return True
+    if abs(existing_value - float(selected_price)) <= 1.0:
+        return False
+    for invalid in pricing.get("invalid_candidates", []) if isinstance(pricing.get("invalid_candidates"), list) else []:
+        if not isinstance(invalid, dict):
+            continue
+        invalid_value = _as_float_or_none(invalid.get("value"))
+        if invalid_value is not None and abs(invalid_value - existing_value) <= 0.01:
+            return True
+    return True
+
+
 def _apply_degraded_result_packaging(result: Dict[str, Any]) -> None:
     _annotate_degraded_output(result, guards_key="packaging_guards")
 
@@ -361,15 +408,22 @@ def apply_verifier_to_result(result: Dict[str, Any], verifier_payload: Dict[str,
         }
         if is_degraded:
             _annotate_degraded_output(field_states["quota"])
-    if isinstance(selected_price, (int, float)) and not field_states.get("prezzo_base_asta", {}).get("value"):
+    if isinstance(selected_price, (int, float)) and _should_promote_selected_price(
+        field_states.get("prezzo_base_asta"), float(selected_price), pricing
+    ):
+        previous_state = copy.deepcopy(field_states.get("prezzo_base_asta")) if isinstance(field_states.get("prezzo_base_asta"), dict) else None
         field_states["prezzo_base_asta"] = {
             "value": selected_price,
             "status": "LOW_CONFIDENCE" if is_degraded else "FOUND",
             "confidence": float(((verifier_payload.get("judgments") or {}).get("pricing") or {}).get("confidence") or 0.0),
-            "evidence": [],
+            "evidence": _pricing_evidence_for_selected_price(pricing),
             "searched_in": [],
             "user_prompt_it": None,
-            "resolver_meta": {"resolver_version": "verifier_runtime_v1"},
+            "resolver_meta": {
+                "resolver_version": "verifier_runtime_v1",
+                "source": "canonical_pricing.selected_price",
+                "previous_state": previous_state,
+            },
         }
         if is_degraded:
             _annotate_degraded_output(field_states["prezzo_base_asta"])

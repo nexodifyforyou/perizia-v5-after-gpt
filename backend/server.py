@@ -7205,6 +7205,66 @@ def _refresh_red_flags_operativi(result: Dict[str, Any]) -> None:
     result["red_flags_operativi"] = preserved
 
 
+def _pricing_selected_evidence_for_field_state(pricing: Dict[str, Any]) -> List[Dict[str, Any]]:
+    evidence = pricing.get("evidence") if isinstance(pricing.get("evidence"), list) else []
+    direct = [
+        copy.deepcopy(ev)
+        for ev in evidence
+        if isinstance(ev, dict) and str(ev.get("semantic_role") or "") == "direct_selected"
+    ]
+    return direct or [copy.deepcopy(ev) for ev in evidence[:2] if isinstance(ev, dict)]
+
+
+def _should_promote_verifier_selected_price(existing_state: Any, selected_price: float, pricing: Dict[str, Any]) -> bool:
+    if not isinstance(existing_state, dict):
+        return True
+    if str(existing_state.get("status") or "").upper() == "USER_PROVIDED":
+        return False
+    existing_value = _as_float_or_none(existing_state.get("value"))
+    if existing_value is None:
+        return True
+    if abs(existing_value - float(selected_price)) <= 1.0:
+        return False
+    for invalid in pricing.get("invalid_candidates", []) if isinstance(pricing.get("invalid_candidates"), list) else []:
+        if not isinstance(invalid, dict):
+            continue
+        invalid_value = _as_float_or_none(invalid.get("value"))
+        if invalid_value is not None and abs(invalid_value - existing_value) <= 0.01:
+            return True
+    return True
+
+
+def _promote_verifier_pricing_field_state(result: Dict[str, Any]) -> None:
+    verifier_runtime = result.get("verifier_runtime") if isinstance(result.get("verifier_runtime"), dict) else {}
+    canonical_case = verifier_runtime.get("canonical_case") if isinstance(verifier_runtime.get("canonical_case"), dict) else {}
+    pricing = canonical_case.get("pricing") if isinstance(canonical_case.get("pricing"), dict) else {}
+    selected_price = pricing.get("selected_price")
+    if not isinstance(selected_price, (int, float)):
+        return
+    states = result.setdefault("field_states", {})
+    if not isinstance(states, dict):
+        states = {}
+        result["field_states"] = states
+    existing_state = states.get("prezzo_base_asta")
+    if not _should_promote_verifier_selected_price(existing_state, float(selected_price), pricing):
+        return
+    previous_state = copy.deepcopy(existing_state) if isinstance(existing_state, dict) else None
+    confidence = float((((verifier_runtime.get("judgments") or {}).get("pricing") or {}).get("confidence")) or 0.0)
+    states["prezzo_base_asta"] = {
+        "value": selected_price,
+        "status": "FOUND",
+        "confidence": confidence,
+        "evidence": _pricing_selected_evidence_for_field_state(pricing),
+        "searched_in": [],
+        "user_prompt_it": None,
+        "resolver_meta": {
+            "resolver_version": "verifier_runtime_v1",
+            "source": "canonical_pricing.selected_price",
+            "previous_state": previous_state,
+        },
+    }
+
+
 def _refresh_customer_facing_result_on_read(
     result: Dict[str, Any],
     pages: List[Dict[str, Any]],
@@ -7228,6 +7288,7 @@ def _refresh_customer_facing_result_on_read(
 
     _apply_headline_field_states(result, safe_pages)
     _apply_decision_field_states(result, safe_pages)
+    _promote_verifier_pricing_field_state(result)
     _apply_headline_overrides(result, headline_overrides or {})
     _apply_field_overrides(result, field_overrides or {})
     _enforce_field_states_contract(result, safe_pages)

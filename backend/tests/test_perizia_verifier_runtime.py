@@ -1982,6 +1982,53 @@ def test_pricing_invariant_single_root_aggregate_benchmark_survives_component_va
     assert pricing["benchmark_value"] == 419849.0
 
 
+def test_verifier_selected_price_overrides_invalid_legacy_field_state():
+    result, pages = _repo_fixture("silvabella")
+    payload = run_quality_verifier(
+        analysis_id="silvabella_selected_price_bridge",
+        result=result,
+        pages=pages,
+        full_text="\n\n".join(page["text"] for page in pages),
+    )
+    packaged = json.loads(json.dumps(result))
+    apply_verifier_to_result(packaged, payload)
+
+    pricing = payload["canonical_case"]["pricing"]
+    field_state = (packaged.get("field_states") or {}).get("prezzo_base_asta") or {}
+    assert pricing["selected_price"] == 45338.48
+    assert abs(float(field_state.get("value")) - 45338.48) < 1.0
+    assert field_state.get("resolver_meta", {}).get("source") == "canonical_pricing.selected_price"
+    previous = field_state.get("resolver_meta", {}).get("previous_state") or {}
+    assert previous.get("value") == 2.0
+
+
+def test_read_refresh_preserves_verifier_selected_price_over_invalid_legacy_state():
+    import server
+
+    result, pages = _repo_fixture("silvabella")
+    payload = run_quality_verifier(
+        analysis_id="silvabella_selected_price_read_refresh",
+        result=result,
+        pages=pages,
+        full_text="\n\n".join(page["text"] for page in pages),
+    )
+    packaged = json.loads(json.dumps(result))
+    apply_verifier_to_result(packaged, payload)
+    # Simulate a stale legacy state being recomputed or retained before read refresh.
+    packaged.setdefault("field_states", {})["prezzo_base_asta"] = copy_state = {
+        "value": 2.0,
+        "status": "FOUND",
+        "confidence": 0.9,
+        "evidence": [{"page": 22, "quote": "PREZZO ABASED'ASTA DELL'IMMOBILE (Subalterno 2)"}],
+    }
+    server._refresh_customer_facing_result_on_read(packaged, pages)
+
+    field_state = (packaged.get("field_states") or {}).get("prezzo_base_asta") or {}
+    assert copy_state["value"] == 2.0
+    assert abs(float(field_state.get("value")) - 45338.48) < 1.0
+    assert field_state.get("resolver_meta", {}).get("source") == "canonical_pricing.selected_price"
+
+
 def test_pricing_invariant_multi_lot_root_scalars_are_suppressed():
     pricing = _pricing_probe("multilot_69_2024")
     invalid_reasons = {item["reason"] for item in pricing["invalid_candidates"]}
