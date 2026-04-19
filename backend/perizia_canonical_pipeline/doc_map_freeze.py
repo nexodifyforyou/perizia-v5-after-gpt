@@ -50,7 +50,7 @@ import json
 import re
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Set, Tuple
+from typing import Any, Dict, Iterable, List, Optional, Set, Tuple
 
 from .corpus_registry import get_case
 from .missing_slot_review import run_missing_slot_escalation, run_missing_slot_review
@@ -315,6 +315,299 @@ def _evidence_pages(resolution: Dict[str, Any]) -> Set[int]:
         if isinstance(page, int):
             pages.add(page)
     return pages
+
+
+def _unique_ints(values: Iterable[Any]) -> List[int]:
+    seen: Set[int] = set()
+    out: List[int] = []
+    for value in values:
+        if isinstance(value, bool):
+            continue
+        if isinstance(value, int):
+            page = value
+        elif isinstance(value, str) and value.strip().isdigit():
+            page = int(value.strip())
+        else:
+            continue
+        if page not in seen:
+            seen.add(page)
+            out.append(page)
+    return out
+
+
+def _issue_source_pages(issues: List[Any]) -> List[int]:
+    pages: List[Any] = []
+    for issue in issues:
+        pages.extend(issue.get("source_pages") or [])
+        for window in issue.get("local_text_windows") or []:
+            if isinstance(window, dict):
+                pages.append(window.get("page"))
+    return _unique_ints(pages)
+
+
+def _entry_source_pages(entry: Dict[str, Any]) -> List[int]:
+    pages: List[Any] = []
+    pages.extend(entry.get("source_pages") or [])
+    for evidence in entry.get("supporting_evidence") or []:
+        if isinstance(evidence, dict):
+            pages.append(evidence.get("page"))
+            pages.extend(evidence.get("source_pages") or [])
+    return _unique_ints(pages)
+
+
+def _field_label(field_type: str) -> str:
+    labels = {
+        "location_via": "indirizzo / via",
+        "location_civico": "numero civico",
+        "location_comune": "comune",
+        "location_provincia": "provincia",
+        "rights_diritto": "diritto reale",
+        "rights_quota_raw": "quota",
+        "occupancy_status_raw": "stato di occupazione",
+        "valore_stima_raw": "valore di stima",
+        "prezzo_base_raw": "prezzo base",
+        "cost_ripristino_raw": "costi di ripristino",
+        "cost_sanatoria_raw": "costi di sanatoria",
+        "cost_regolarizzazione_raw": "costi di regolarizzazione",
+        "cost_altri_oneri_quantificati_raw": "altri oneri quantificati",
+        "cost_condominiali_arretrati_raw": "spese condominiali arretrate",
+        "impianto_elettrico_status": "stato impianto elettrico",
+        "impianto_idrico_status": "stato impianto idrico",
+        "impianto_riscaldamento_status": "stato impianto riscaldamento",
+        "allacci_presenza_context": "contesto allacci / utenze",
+        "onere_non_quantificato_context": "oneri non quantificati",
+        "ripristino_non_quantificato_context": "ripristini non quantificati",
+    }
+    return labels.get(field_type, field_type.replace("_", " "))
+
+
+def _scope_label(scope_key: str) -> str:
+    lot_id, bene_id = _parse_scope_key(scope_key)
+    if lot_id is None:
+        return "documento"
+    if bene_id is None:
+        return f"lotto {lot_id}"
+    return f"lotto {lot_id}, bene {bene_id}"
+
+
+def _short_values(values: Iterable[Any], limit: int = 5) -> str:
+    cleaned: List[str] = []
+    seen: Set[str] = set()
+    for value in values:
+        text = re.sub(r"\s+", " ", str(value or "").strip())
+        if not text or text in seen:
+            continue
+        seen.add(text)
+        cleaned.append(text)
+        if len(cleaned) >= limit:
+            break
+    return ", ".join(cleaned)
+
+
+def _issue_shell_quotes(issues: List[Any], limit: int = 3) -> str:
+    quotes: List[str] = []
+    seen: Set[str] = set()
+    for issue in issues:
+        for quote in issue.get("shell_quotes") or []:
+            text = re.sub(r"\s+", " ", str(quote or "").strip())
+            if not text or text in seen:
+                continue
+            seen.add(text)
+            quotes.append(text[:180])
+            if len(quotes) >= limit:
+                return "; ".join(quotes)
+    return "; ".join(quotes)
+
+
+def _explain_unresolved_without_llm(
+    *,
+    scope_key: str,
+    field_type: str,
+    issues: List[Any],
+    issue_evidence: List[Dict[str, Any]],
+    context_packets: List[Any],
+) -> Tuple[str, str, List[int]]:
+    """
+    Build a case-specific fallback explanation from the bounded issue pack.
+
+    This is only used when a deterministic issue says the slot needs bounded LLM
+    resolution but no LLM output is present in the artifact set. It must not invent
+    a value; it preserves the pages, conflict reasons, candidate values, and local
+    quotes so the final contract remains auditably unresolved instead of carrying a
+    generic placeholder.
+    """
+    first_issue = issues[0] if issues else {}
+    issue_type = first_issue.get("issue_type") or "UNRESOLVED"
+    reason_codes: List[Any] = []
+    candidate_values: List[Any] = []
+    for issue in issues:
+        reason_codes.extend(issue.get("reason_codes") or [])
+        candidate_values.extend(issue.get("candidate_values") or [])
+    pages = _issue_source_pages(issues) or _entry_source_pages({"supporting_evidence": issue_evidence})
+    page_text = ", ".join(f"p. {p}" for p in pages[:12]) if pages else "pagine non isolate"
+    field_label = _field_label(field_type)
+    scope_text = _scope_label(scope_key)
+    values_text = _short_values(candidate_values)
+    quotes_text = _issue_shell_quotes(issues)
+    reason_text = _short_values(reason_codes, limit=8) or issue_type
+
+    if values_text:
+        why = (
+            f"Per {scope_text}, {field_label} resta irrisolto: il bounded issue pack "
+            f"segnala {issue_type} ({reason_text}) sulle pagine {page_text} con valori candidati "
+            f"non conciliati: {values_text}."
+        )
+    else:
+        why = (
+            f"Per {scope_text}, {field_label} resta irrisolto: il bounded issue pack "
+            f"segnala {issue_type} ({reason_text}) sulle pagine {page_text}, ma non isola "
+            "un valore finale normalizzato sicuro."
+        )
+    if quotes_text:
+        why += f" Passaggi da verificare: {quotes_text}."
+    if context_packets:
+        why += (
+            f" Sono presenti {len(context_packets)} evidenze di contesto, mantenute come supporto "
+            "ma non promosse a verità finale."
+        )
+    explanation = why + " Serve revisione sul pacchetto indicato prima di promuovere un valore."
+    return explanation, why, pages
+
+
+def _blocked_zone_candidates(blocked_zone: Dict[str, Any]) -> List[Dict[str, Any]]:
+    candidates = blocked_zone.get("candidates")
+    if isinstance(candidates, list):
+        return [c for c in candidates if isinstance(c, dict)]
+    for nested_key in (
+        "cadastral_ambiguity",
+        "location_ambiguity",
+        "rights_ambiguity",
+        "occupancy_ambiguity",
+        "valuation_ambiguity",
+        "cost_ambiguity",
+        "impianti_ambiguity",
+    ):
+        nested = blocked_zone.get(nested_key)
+        if not isinstance(nested, dict):
+            continue
+        nested_candidates = nested.get("candidates") or nested.get("matches")
+        if isinstance(nested_candidates, list):
+            out = []
+            for candidate in nested_candidates:
+                if not isinstance(candidate, dict):
+                    continue
+                merged = dict(candidate)
+                for key in ("page", "line_index", "line_quote", "quote", "reason", "type"):
+                    if key in nested and key not in merged:
+                        merged[key] = nested.get(key)
+                out.append(merged)
+            return out
+    return []
+
+
+def _blocked_zone_page(blocked_zone: Dict[str, Any]) -> Optional[int]:
+    for key in ("page", "page_number"):
+        page = blocked_zone.get(key)
+        if isinstance(page, int):
+            return page
+    for nested_key in (
+        "cadastral_ambiguity",
+        "location_ambiguity",
+        "rights_ambiguity",
+        "occupancy_ambiguity",
+        "valuation_ambiguity",
+        "cost_ambiguity",
+        "impianti_ambiguity",
+    ):
+        nested = blocked_zone.get(nested_key)
+        if isinstance(nested, dict) and isinstance(nested.get("page"), int):
+            return nested.get("page")
+    return None
+
+
+def _blocked_zone_quote(blocked_zone: Dict[str, Any]) -> Optional[str]:
+    for key in ("quote", "line_quote", "context"):
+        value = blocked_zone.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    for nested_key in (
+        "cadastral_ambiguity",
+        "location_ambiguity",
+        "rights_ambiguity",
+        "occupancy_ambiguity",
+        "valuation_ambiguity",
+        "cost_ambiguity",
+        "impianti_ambiguity",
+    ):
+        nested = blocked_zone.get(nested_key)
+        if not isinstance(nested, dict):
+            continue
+        for key in ("quote", "line_quote", "context", "reason"):
+            value = nested.get(key)
+            if isinstance(value, str) and value.strip():
+                return value.strip()
+    return None
+
+
+def _build_blocked_zone_evidence(blocked_zones: List[Any]) -> List[Dict[str, Any]]:
+    evidence: List[Dict[str, Any]] = []
+    for blocked_zone in blocked_zones:
+        if not isinstance(blocked_zone, dict):
+            continue
+        candidates = _blocked_zone_candidates(blocked_zone)
+        if candidates:
+            for candidate in candidates[:12]:
+                evidence.append({
+                    "page": candidate.get("page") or _blocked_zone_page(blocked_zone),
+                    "quote": candidate.get("quote") or candidate.get("line_quote") or _blocked_zone_quote(blocked_zone),
+                    "candidate_id": candidate.get("candidate_id"),
+                    "extracted_value": candidate.get("extracted_value"),
+                    "block_type": blocked_zone.get("type"),
+                    "reason": blocked_zone.get("reason") or candidate.get("reason"),
+                })
+            continue
+        evidence.append({
+            "page": _blocked_zone_page(blocked_zone),
+            "quote": _blocked_zone_quote(blocked_zone),
+            "block_type": blocked_zone.get("type"),
+            "reason": blocked_zone.get("reason"),
+            "distinct_values": blocked_zone.get("distinct_values", []),
+            "candidate_count": blocked_zone.get("candidate_count"),
+        })
+    return evidence
+
+
+def _explain_blocked_zones(
+    *,
+    scope_key: str,
+    field_type: str,
+    blocked_zones: List[Any],
+    evidence: List[Dict[str, Any]],
+) -> Tuple[str, List[int]]:
+    block_types = _short_values(
+        bz.get("type") for bz in blocked_zones if isinstance(bz, dict)
+    )
+    reasons = _short_values(
+        bz.get("reason") for bz in blocked_zones if isinstance(bz, dict)
+    )
+    values: List[Any] = []
+    for bz in blocked_zones:
+        if isinstance(bz, dict):
+            values.extend(bz.get("distinct_values") or [])
+    pages = _entry_source_pages({"supporting_evidence": evidence})
+    page_text = ", ".join(f"p. {p}" for p in pages[:12]) if pages else "pagine non isolate"
+    value_text = _short_values(values)
+    explanation = (
+        f"Per {_scope_label(scope_key)}, {_field_label(field_type)} resta bloccato: "
+        f"la raccolta deterministica ha escluso il dato per {block_types or 'ambiguità di estrazione'} "
+        f"sulle pagine {page_text}."
+    )
+    if value_text:
+        explanation += f" Valori o segnali concorrenti: {value_text}."
+    if reasons:
+        explanation += f" Motivo: {reasons}."
+    explanation += " Il valore non viene promosso finché il conflitto non è risolto nel relativo issue pack."
+    return explanation, pages
 
 
 def _canonical_scope_supports_page(
@@ -761,6 +1054,7 @@ def _build_field_map(
                 "field_type": field_type,
                 "issue_ids": entry.get("issue_ids", []),
                 "why_not_resolved": entry.get("why_not_resolved"),
+                "source_pages": _entry_source_pages(entry),
                 "needs_human_review": entry.get("needs_human_review", True),
             })
         elif state == "context_only":
@@ -778,6 +1072,8 @@ def _build_field_map(
                 "field_type": field_type,
                 "issue_ids": entry.get("issue_ids", []),
                 "explanation": entry.get("explanation"),
+                "why_not_resolved": entry.get("why_not_resolved"),
+                "source_pages": _entry_source_pages(entry),
             })
 
     # ---- Also surface blocked zones WITHOUT matching issues ----
@@ -791,25 +1087,25 @@ def _build_field_map(
             continue
         # No active, no context, no issue — pure silent block from evidence layer
         if not active_idx.get((sk, ft)) and not issue_idx.get((sk, ft)):
+            blocked_evidence = _build_blocked_zone_evidence(bz_list)
+            explanation, source_pages = _explain_blocked_zones(
+                scope_key=sk,
+                field_type=ft,
+                blocked_zones=bz_list,
+                evidence=blocked_evidence,
+            )
             entry = {
                 "state": "blocked",
                 "value": None,
                 "value_type": None,
                 "source_stage": "evidence_ledger",
                 "confidence_band": None,
-                "supporting_evidence": [
-                    {
-                        "reason": bz.get("reason"),
-                        "distinct_values": bz.get("distinct_values", []),
-                        "candidate_count": bz.get("candidate_count"),
-                        "block_type": bz.get("type"),
-                    }
-                    for bz in bz_list
-                ],
+                "supporting_evidence": blocked_evidence,
+                "source_pages": source_pages,
                 "packet_ids": [],
                 "issue_ids": [],
-                "explanation": bz_list[0].get("reason") if bz_list else None,
-                "why_not_resolved": "Deterministic block with no issue filed for LLM resolution.",
+                "explanation": explanation,
+                "why_not_resolved": explanation,
                 "needs_human_review": False,
             }
             fields.setdefault(sk, {}).setdefault(family, {})[ft] = entry
@@ -819,6 +1115,8 @@ def _build_field_map(
                 "field_type": ft,
                 "issue_ids": [],
                 "explanation": entry["explanation"],
+                "why_not_resolved": entry.get("why_not_resolved"),
+                "source_pages": _entry_source_pages(entry),
             })
 
     return fields, unresolved_items, context_items, blocked_items
@@ -1006,6 +1304,7 @@ def _append_to_summary_lists(
             "field_type": field_type,
             "issue_ids": entry.get("issue_ids", []),
             "why_not_resolved": entry.get("why_not_resolved"),
+            "source_pages": _entry_source_pages(entry),
             "needs_human_review": entry.get("needs_human_review", True),
         })
     elif state == "context_only":
@@ -1162,14 +1461,16 @@ def _build_field_entry(
             issue_evidence.extend(_build_context_evidence(context_packets))
 
         if needs_llm:
-            # Needs LLM but LLM was not run — report as unresolved_explained with
-            # the deterministic explanation from the issue itself
-            reason_codes = []
-            for iss in issues:
-                reason_codes.extend(iss.get("reason_codes", []))
-            candidate_values = []
-            for iss in issues:
-                candidate_values.extend(iss.get("candidate_values", []))
+            # Needs LLM but LLM was not run — keep it unresolved, but preserve
+            # the bounded issue pack's case-specific evidence instead of a
+            # generic "manual verification" placeholder.
+            explanation, why_not_resolved, source_pages = _explain_unresolved_without_llm(
+                scope_key=scope_key,
+                field_type=field_type,
+                issues=issues,
+                issue_evidence=issue_evidence,
+                context_packets=context_packets,
+            )
 
             return {
                 "state": "unresolved_explained",
@@ -1178,19 +1479,26 @@ def _build_field_entry(
                 "source_stage": "clarification_issues",
                 "confidence_band": "low",
                 "supporting_evidence": issue_evidence,
+                "source_pages": source_pages,
                 "packet_ids": [p.get("packet_id") for p in context_packets],
                 "issue_ids": issue_ids,
-                "explanation": (
-                    f"Deterministic stage flagged issue type={issue_type}; "
-                    f"reason_codes={reason_codes}; "
-                    f"candidate_values={candidate_values}; "
-                    f"LLM resolution not run."
-                ),
-                "why_not_resolved": "LLM resolution stage has not been applied to this issue.",
+                "explanation": explanation,
+                "why_not_resolved": why_not_resolved,
                 "needs_human_review": True,
             }
         else:
             # Deterministic block — does not need LLM
+            reason_codes = []
+            for iss in issues:
+                reason_codes.extend(iss.get("reason_codes", []))
+            pages = _entry_source_pages({"supporting_evidence": issue_evidence})
+            page_text = ", ".join(f"p. {p}" for p in pages[:12]) if pages else "pagine non isolate"
+            explanation = (
+                f"Per {_scope_label(scope_key)}, {_field_label(field_type)} resta bloccato: "
+                f"il bounded issue pack segnala {issue_type} ({_short_values(reason_codes) or 'blocco deterministico'}) "
+                f"sulle pagine {page_text}. Il dato non è promosso perché il blocco è una esclusione "
+                "deterministica, non una verità finale."
+            )
             return {
                 "state": "blocked",
                 "value": None,
@@ -1198,10 +1506,11 @@ def _build_field_entry(
                 "source_stage": "clarification_issues",
                 "confidence_band": None,
                 "supporting_evidence": issue_evidence,
+                "source_pages": pages,
                 "packet_ids": [p.get("packet_id") for p in context_packets],
                 "issue_ids": issue_ids,
-                "explanation": first_issue.get("reason_codes", []),
-                "why_not_resolved": "Deterministic block; does not require LLM resolution.",
+                "explanation": explanation,
+                "why_not_resolved": explanation,
                 "needs_human_review": False,
             }
 
@@ -1221,19 +1530,26 @@ def _build_field_entry(
             "needs_human_review": False,
         }
 
-    # ---- Only a blocked zone, no issue filed (handled in caller) ----
-    # Should not reach here normally
+    # ---- Only blocked zones, no issue filed ----
+    blocked_evidence = _build_blocked_zone_evidence(blocked_zones)
+    explanation, source_pages = _explain_blocked_zones(
+        scope_key=scope_key,
+        field_type=field_type,
+        blocked_zones=blocked_zones,
+        evidence=blocked_evidence,
+    )
     return {
         "state": "blocked",
         "value": None,
         "value_type": None,
         "source_stage": "evidence_ledger",
         "confidence_band": None,
-        "supporting_evidence": [],
+        "supporting_evidence": blocked_evidence,
+        "source_pages": source_pages,
         "packet_ids": [],
         "issue_ids": [],
-        "explanation": "Blocked deterministic zone with no matching packet or issue.",
-        "why_not_resolved": None,
+        "explanation": explanation,
+        "why_not_resolved": explanation,
         "needs_human_review": False,
     }
 

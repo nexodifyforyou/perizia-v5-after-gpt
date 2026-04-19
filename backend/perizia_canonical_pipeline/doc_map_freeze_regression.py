@@ -8,6 +8,7 @@ artifact directory, and writes a regression summary to:
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 from typing import Any, Dict, List
 
@@ -34,6 +35,15 @@ _KNOWN_STATES = {
     "blocked",
     "checked_no_reliable_basis",
 }
+
+_GENERIC_UNRESOLVED_RE = re.compile(
+    r"LLM resolution stage has not been applied|"
+    r"manual verification required|"
+    r"verifica manuale|"
+    r"Deterministic block with no issue filed|"
+    r"Deterministic block; does not require LLM",
+    re.IGNORECASE,
+)
 
 
 def _count_states(fields: Dict[str, Any]) -> Dict[str, int]:
@@ -209,6 +219,52 @@ def _regression_checks(doc_map: Dict[str, Any]) -> List[str]:
                         f"context_only entry has a non-null value (masquerading as truth): "
                         f"scope={scope_key} field={ft} value={entry.get('value')!r}"
                     )
+                if state == "unresolved_explained":
+                    explanation = " ".join(
+                        str(entry.get(k) or "") for k in ("explanation", "why_not_resolved")
+                    )
+                    if not explanation.strip():
+                        errors.append(
+                            f"unresolved_explained entry has no explanation: "
+                            f"scope={scope_key} field={ft}"
+                        )
+                    if _GENERIC_UNRESOLVED_RE.search(explanation):
+                        errors.append(
+                            f"unresolved_explained entry has generic explanation: "
+                            f"scope={scope_key} field={ft}"
+                        )
+                    pages = {
+                        ev.get("page")
+                        for ev in entry.get("supporting_evidence", [])
+                        if isinstance(ev, dict) and isinstance(ev.get("page"), int)
+                    } | {
+                        p for p in entry.get("source_pages", []) if isinstance(p, int)
+                    }
+                    if not pages:
+                        errors.append(
+                            f"unresolved_explained entry has no page anchors: "
+                            f"scope={scope_key} field={ft}"
+                        )
+                if state == "blocked":
+                    explanation = " ".join(
+                        str(entry.get(k) or "") for k in ("explanation", "why_not_resolved")
+                    )
+                    if not explanation.strip() or _GENERIC_UNRESOLVED_RE.search(explanation):
+                        errors.append(
+                            f"blocked entry has missing/generic explanation: "
+                            f"scope={scope_key} field={ft}"
+                        )
+                    pages = {
+                        ev.get("page")
+                        for ev in entry.get("supporting_evidence", [])
+                        if isinstance(ev, dict) and isinstance(ev.get("page"), int)
+                    } | {
+                        p for p in entry.get("source_pages", []) if isinstance(p, int)
+                    }
+                    if not pages and not is_unreadable:
+                        errors.append(
+                            f"blocked entry has no page anchors: scope={scope_key} field={ft}"
+                        )
 
     # For normal cases with declared scopes, the missing-slot review pack must exist
     # in source_artifacts (proves the review path ran, regardless of escalation outcome).
@@ -239,6 +295,35 @@ def _regression_checks(doc_map: Dict[str, Any]) -> List[str]:
                     f"unresolved_item references entry with wrong state={entry.get('state')}: "
                     f"scope={sk} field={ft}"
                 )
+        why = str(item.get("why_not_resolved") or "")
+        if not why.strip() or _GENERIC_UNRESOLVED_RE.search(why):
+            errors.append(
+                f"unresolved_item has missing/generic why_not_resolved: "
+                f"scope={sk} family={ff} field={ft}"
+            )
+        pages = item.get("source_pages")
+        if not isinstance(pages, list) or not any(isinstance(p, int) for p in pages):
+            errors.append(
+                f"unresolved_item has no page anchors: scope={sk} family={ff} field={ft}"
+            )
+
+    for item in doc_map.get("blocked_items", []):
+        if is_unreadable and item.get("block_type") == "UNREADABLE_DOCUMENT":
+            continue
+        explanation = " ".join(
+            str(item.get(k) or "") for k in ("explanation", "why_not_resolved")
+        )
+        if not explanation.strip() or _GENERIC_UNRESOLVED_RE.search(explanation):
+            errors.append(
+                f"blocked_item has missing/generic explanation: "
+                f"scope={item.get('scope_key')} family={item.get('field_family')} field={item.get('field_type')}"
+            )
+        pages = item.get("source_pages")
+        if not isinstance(pages, list) or not any(isinstance(p, int) for p in pages):
+            errors.append(
+                f"blocked_item has no page anchors: "
+                f"scope={item.get('scope_key')} family={item.get('field_family')} field={item.get('field_type')}"
+            )
 
     # grouped_llm_explanations: any entry must carry user_visible_explanation
     for g in doc_map.get("grouped_llm_explanations") or []:
