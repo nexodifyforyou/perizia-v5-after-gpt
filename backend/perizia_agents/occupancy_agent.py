@@ -811,6 +811,37 @@ def run_occupancy_agent(state: RuntimeState) -> None:
         "guards": list(_BASE_OCCUPANCY_GUARDS),
     }
     root_payload["candidates"] = candidates
+
+    # Synthesis guard: if document-root resolves OCCUPATO with NON OPPONIBILE,
+    # OR NON_VERIFICABILE where every valid candidate independently shows NON OPPONIBILE,
+    # and every lot from the pre-verifier extraction independently reports LIBERO,
+    # the lot-specific truth wins — the buyer-visible occupancy is effectively free.
+    # The NON_VERIFICABILE branch handles PDFs where "LIBERO, in quanto occupato" appears
+    # in compressed/reformatted text, creating a rank conflict that wipes the opponibilita
+    # even though all candidates independently detected NON OPPONIBILE.
+    _root_opponibilita_up = str(root_payload.get("opponibilita") or "").upper()
+    _valid_candidates = [c for c in candidates if c.get("valid")]
+    _all_candidates_non_opponibile = bool(_valid_candidates) and all(
+        "NON OPPONIBILE" in str(c.get("opponibilita") or "").upper()
+        for c in _valid_candidates
+    )
+    _guard_eligible = (
+        root_payload.get("status") == "OCCUPATO" and "NON OPPONIBILE" in _root_opponibilita_up
+    ) or (
+        root_payload.get("status") == "NON_VERIFICABILE" and _all_candidates_non_opponibile
+    )
+    if _guard_eligible:
+        lots = [lot for lot in (state.result.get("lots") or []) if isinstance(lot, dict)]
+        if lots and all(
+            str(lot.get("occupancy_status") or lot.get("stato_occupativo") or "").strip().upper() == "LIBERO"
+            for lot in lots
+        ):
+            root_payload["status"] = "LIBERO"
+            root_payload["opponibilita"] = "NON OPPONIBILE"
+            root_payload["guards"] = list(root_payload.get("guards") or []) + [
+                "non_opponibile_with_lot_libero_resolved_to_libero"
+            ]
+
     state.canonical_case.occupancy = root_payload
 
     status = root_payload.get("status")

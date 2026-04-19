@@ -35,6 +35,44 @@ FORMALITA_DATE_TERMS = ("trascrizion", "notifica")
 ASTA_TERMS = ("asta", "vendita", "delegato")
 ABUSI_COST_TERMS = ("sanatoria", "abitabil", "agibil", "lavor", "regolarizz")
 COST_TERMS = ("sanatoria", "regolarizz", "agibil", "abitabil", "lavor", "spese", "oneri", "costo")
+# Amounts whose context contains these phrases are property valuations, not buyer costs.
+VALUATION_EXCLUSION_TERMS = (
+    "valore di stima",
+    "valore complessivo",
+    "valore della quota",
+    "valore in caso di regolarizzazione",
+    "valore al netto",
+    "valore finale",
+    "base d'asta",
+    "base d\u2019asta",
+    "prezzo base",
+    "riduzione del valore",
+    "riduzione cautelativa",
+    "assenza di garanzia",
+    "rimborso forfettario",
+    "smaltimento di beni mobili",
+    "valutazione",
+    "valore immobile",
+    "stima del bene",
+    "coefficiente",
+    "valore stimato",
+)
+BUYER_COST_REQUIRED_TERMS = (
+    "spese tecniche di regolarizzazione",
+    "spese tecniche di regolazione",
+    "oneri tecnici",
+    "istruttoria pratica",
+    "spese condominiali scadute",
+    "spese condominiali insolute",
+    "morosità condominiale",
+    "morosita condominiale",
+    "debito condominiale",
+    "costo di liberazione",
+    "costi di liberazione",
+    "spese per liberazione",
+    "aggiornamento catastale",
+    "allineamento catastale",
+)
 BENE_TERMS = (
     ("BENE 1", re.compile(r"\bBENE\s*N[°º\.]?\s*1\b", re.IGNORECASE)),
     ("BENE 2", re.compile(r"\bBENE\s*N[°º\.]?\s*2\b", re.IGNORECASE)),
@@ -397,6 +435,10 @@ def _select_cost_money_candidates(money_candidates: List[Dict[str, Any]]) -> Lis
             continue
         text = f"{item.get('context','')} {item.get('quote','')}".lower()
         if not _contains_any(text, COST_TERMS):
+            continue
+        if _contains_any(text, VALUATION_EXCLUSION_TERMS):
+            continue
+        if not _contains_any(text, BUYER_COST_REQUIRED_TERMS):
             continue
         quote = _clean_quote(item.get("quote"))
         key = (float(amount), quote[:120])

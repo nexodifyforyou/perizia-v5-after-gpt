@@ -13,7 +13,7 @@ FIXTURES_ROOT = Path(__file__).resolve().parents[1] / "perizia_qa" / "fixtures"
 
 _AUCTION_PRICE_RE = re.compile(r"prezzo\s+(?:a\s+)?base\s+d[' ]asta|prezzo\s+base\s+asta", re.IGNORECASE)
 _NET_VALUATION_RE = re.compile(
-    r"valore\s+finale\s+di\s+stima|valore\s+al\s+netto(?:\s+dei\s+costi\s+di\s+regolarizzazione(?:\s+e\s+della\s+riduzione\s+cautelativa)?)?",
+    r"valore\s+finale\s+di\s+stima|valore\s+al\s+netto(?:\s+dei\s+costi\s+di\s+regolarizzazione(?:\s+e\s+della\s+riduzione\s+cautelativa)?)?|valore\s+in\s+caso\s+di\s+regolarizzazione",
     re.IGNORECASE,
 )
 _STIMA_VALUE_RE = re.compile(r"valore\s+di\s+stima(?:\s+del\s+bene)?|valore\s+complessivo", re.IGNORECASE)
@@ -38,7 +38,13 @@ def _pricing_role_context(row: Dict[str, Any]) -> str:
     low = f"{quote}\n{context}".lower()
     if _AUCTION_PRICE_RE.search(low):
         return "auction_price"
-    if "riduzione cautelativa" in low:
+    if (
+        "riduzione cautelativa" in low
+        or "riduzione del valore" in low
+        or "assenza di garanzia" in low
+        or "rimborso forfettario" in low
+        or "smaltimento di beni mobili" in low
+    ):
         return "valuation_adjustment"
     if _NET_VALUATION_RE.search(low):
         return "net_valuation"

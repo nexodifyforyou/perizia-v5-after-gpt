@@ -639,8 +639,8 @@ def _build_story(payload: Dict[str, Any], styles: Dict[str, ParagraphStyle], pag
         decision_rows.append([_safe_paragraph("Summary EN", styles["small"]), _safe_paragraph(decisione["summary_en"], styles["muted"])])
     story.append(_card_table(decision_rows, [page_width * 0.16, page_width * 0.84]))
 
-    # 5) Costi
-    story.append(_safe_paragraph("5. Costi", styles["h2"]))
+    # 5) Money Box / Costi
+    story.append(_safe_paragraph("5. Money Box / Costi", styles["h2"]))
     cost_rows = [[
         _safe_paragraph("Codice", styles["small"]),
         _safe_paragraph("Voce", styles["small"]),

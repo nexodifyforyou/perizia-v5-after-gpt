@@ -1828,6 +1828,18 @@ def test_valuation_candidates_classify_common_pricing_roles():
             "quote": "Valore finale di stima: € 224.268,00",
             "context": "Deprezzamenti Altro 20,00 % Valore finale di stima: € 224.268,00",
         },
+        {
+            "page": 4,
+            "amount_eur": 97321.61,
+            "quote": "smaltimento rifiuti a carico dell'acquirente: € 97.321,61",
+            "context": "Prezzo base d'asta Valore in caso di regolarizzazione urbanistica e catastale, spese di smaltimento rifiuti a carico dell'acquirente: € 97.321,61",
+        },
+        {
+            "page": 5,
+            "amount_eur": 17809.69,
+            "quote": "smaltimento di beni mobili presenti all'interno. € 17.809,69",
+            "context": "Riduzione del valore del 15% per assenza di garanzia per vizi, rimborso forfettario e smaltimento di beni mobili presenti all'interno. € 17.809,69",
+        },
     ]
     with tempfile.TemporaryDirectory() as tmpdir:
         runs_root = Path(tmpdir)
@@ -1841,9 +1853,13 @@ def test_valuation_candidates_classify_common_pricing_roles():
         finally:
             valuation_table_tool.RUNS_ROOT = old_runs_root
     by_role = {cand.semantic_role: cand for cand in candidates}
-    assert by_role["auction_price"].value == 64198.0
+    assert sorted(cand.value for cand in candidates if cand.semantic_role == "auction_price") == [64198.0, 97321.61]
     assert by_role["valuation_total"].value == 80248.0
-    assert by_role["net_valuation"].value == 224268.0
+    assert sorted(cand.value for cand in candidates if cand.semantic_role == "net_valuation") == [224268.0]
+    assert by_role["valuation_adjustment"].value == 17809.69
+    buyer_cost_values = {round(cand.value, 2) for cand in candidates if cand.semantic_role == "buyer_cost"}
+    assert 97321.61 not in buyer_cost_values
+    assert 17809.69 not in buyer_cost_values
 
 
 def test_valuation_candidates_reject_table_ratio_contamination_from_totals():
@@ -2036,3 +2052,540 @@ def test_torino_out_of_sample_pricing_layers_are_distinct_when_pdf_is_available(
     assert pricing["benchmark_value"] == 43654.20
     assert pricing["adjusted_market_value"] == 38404.20
     assert pricing["selected_price"] == 38110.20
+
+
+# ---------------------------------------------------------------------------
+# Regression: Vidigulfo synthesis layer — occupancy contradiction + fake cost
+# ---------------------------------------------------------------------------
+# These tests pin the exact synthesis failures fixed in commit after 2d8b378:
+# 1. document-root OCCUPATO+NON_OPPONIBILE + all lots LIBERO → synthesise LIBERO
+# 2. valuation TOTALE must not override label-matched buyer costs explicit_total
+# 3. NON_OPPONIBILE occupancy must not escalate to RED "Immobile occupato"
+
+
+def _vidigulfo_synthesis_payload():
+    """
+    Synthetic fixture that reproduces the Vidigulfo contradiction scenario:
+    - Document page says stato occupativo OCCUPATO, non opponibile
+    - Lot-level result seed says occupancy_status=LIBERO
+    - Cost table has spese condominiali €3.600,00 AND a valuation TOTALE €129.312,00
+      followed by "riduzione cautelativa" on the same page — mimicking the false-total bug.
+    """
+    pages = [
+        {
+            "page_number": 1,
+            "text": (
+                "LOTTO 1\n"
+                "STATO OCCUPATIVO\n"
+                "L'immobile risulta occupato da parte dell'esecutato a titolo di mera detenzione.\n"
+                "Occupazione non opponibile al terzo acquirente.\n"
+                "Valore di stima lordo: € 129.312,00\n"
+                "TOTALE  € 129.312,00\n"
+                "Riduzione cautelativa 3%  € 3.879,36\n"
+            ),
+        },
+        {
+            "page_number": 2,
+            "text": (
+                "LOTTO 1 – ONERI A CARICO DELL'ACQUIRENTE\n"
+                "spese condominiali scadute e non pagate  € 3.600,00\n"
+            ),
+        },
+    ]
+    result = {
+        "field_states": {},
+        "dati_certi_del_lotto": {},
+        "document_quality": {"status": "TEXT_OK"},
+        "semaforo_generale": {"status": "AMBER"},
+        "lots": [
+            {
+                "lot_number": 1,
+                "occupancy_status": "LIBERO",
+                "stato_occupativo": "LIBERO",
+                "evidence": {"occupancy_status": []},
+            }
+        ],
+    }
+    return run_quality_verifier(
+        analysis_id="vidigulfo_synthesis_regression",
+        result=result,
+        pages=pages,
+        full_text="\n\n".join(page["text"] for page in pages),
+    )
+
+
+def test_vidigulfo_lot_libero_plus_non_opponibile_resolves_to_libero():
+    payload = _vidigulfo_synthesis_payload()
+    occupancy = payload["canonical_case"]["occupancy"]
+    assert occupancy["status"] == "LIBERO", (
+        f"Expected LIBERO after NON_OPPONIBILE+lot-LIBERO synthesis, got {occupancy['status']!r}"
+    )
+    opponibilita = str(occupancy.get("opponibilita") or "").upper()
+    assert "NON OPPONIBILE" in opponibilita, (
+        f"NON OPPONIBILE must be preserved in opponibilita, got {opponibilita!r}"
+    )
+    assert "non_opponibile_with_lot_libero_resolved_to_libero" in occupancy.get("guards", []), (
+        "synthesis guard token must appear in occupancy guards"
+    )
+
+
+def test_vidigulfo_top_and_lot_occupancy_not_contradictory():
+    payload = _vidigulfo_synthesis_payload()
+    # Apply result packaging so result["stato_occupativo"] is populated
+    result = {}
+    apply_verifier_to_result(result, payload)
+    lot_status = "LIBERO"  # seed value — lots[0].stato_occupativo
+    top_status = (result.get("stato_occupativo") or {}).get("status")
+    assert top_status == lot_status, (
+        f"lot-level and top-level stato_occupativo must agree; lot={lot_status!r} top={top_status!r}"
+    )
+
+
+def test_vidigulfo_no_red_immobile_occupato_issue():
+    payload = _vidigulfo_synthesis_payload()
+    issues = payload["canonical_case"]["priority"].get("issues", [])
+    red_occupancy = [
+        issue for issue in issues
+        if issue.get("code") == "OCCUPANCY_RISK" and issue.get("severity") == "RED"
+    ]
+    assert not red_occupancy, (
+        "RED OCCUPANCY_RISK must not be raised when occupancy is NON_OPPONIBILE+lot-LIBERO"
+    )
+
+
+def test_vidigulfo_summary_does_not_say_immobile_occupato():
+    payload = _vidigulfo_synthesis_payload()
+    result = {}
+    apply_verifier_to_result(result, payload)
+    summary_it = str((result.get("summary_for_client") or {}).get("summary_it") or "").lower()
+    assert "immobile occupato" not in summary_it, (
+        f"summary_it must not say 'immobile occupato' for NON_OPPONIBILE case; got: {summary_it!r}"
+    )
+
+
+def test_vidigulfo_cost_total_uses_label_matched_items_not_valuation_total():
+    payload = _vidigulfo_synthesis_payload()
+    costs = payload["canonical_case"]["costs"]
+    explicit_total = costs.get("explicit_total")
+    assert explicit_total is not None, "explicit_total must be set"
+    assert abs(float(explicit_total) - 3600.0) < 1.0, (
+        f"explicit_total must be €3.600 (from spese condominiali), got {explicit_total}"
+    )
+    assert float(explicit_total) < 10000, (
+        f"explicit_total must not include valuation TOTALE (129.312); got {explicit_total}"
+    )
+
+
+def test_vidigulfo_summary_does_not_contain_fake_valuation_total():
+    payload = _vidigulfo_synthesis_payload()
+    result = {}
+    apply_verifier_to_result(result, payload)
+    summary_it = str((result.get("summary_for_client") or {}).get("summary_it") or "")
+    summary_bundle = result.get("summary_for_client_bundle") or {}
+    decision_summary = str(summary_bundle.get("decision_summary_it") or "")
+    caution_points = " ".join(str(p) for p in summary_bundle.get("caution_points_it") or [])
+    combined = summary_it + decision_summary + caution_points
+    assert "129.851" not in combined, f"fake cost total 129.851 must not appear in summary; got: {combined!r}"
+    assert "129.312" not in combined, f"valuation total 129.312 must not appear in cost summary; got: {combined!r}"
+
+
+# ---------------------------------------------------------------------------
+# Vidigulfo Round 2 — field_states, delivery_timeline, money_box, summary
+# ---------------------------------------------------------------------------
+
+def _vidigulfo_round2_pages():
+    """
+    Key pages from the real Vidigulfo document (via Cristoforo Colombo 2/4).
+    Covers: address, quota, occupancy (LIBERO+non opponibile+liberazione),
+    costs (€3.600) AND valuation totals (€118.731,30 / €17.809,69 / €97.321,61)
+    that must NOT bleed into money_box or cost totals.
+    """
+    return [
+        {
+            "page_number": 1,
+            # Case number on a separate page from the quota section so the "254/25"
+            # fraction candidate does not acquire a rights context and is filtered.
+            "text": (
+                "TRIBUNALE DI PAVIA\n"
+                "ESECUZIONE IMMOBILIARE n. 254/25 Reg. Esec.\n"
+                "Immobile in Comune di Vidigulfo – via Cristoforo Colombo, 2/4\n"
+            ),
+        },
+        {
+            "page_number": 2,
+            # Blank lines between the address and the quota section match the real PDF,
+            # ensuring the civic-address fraction "2/4" is not confused with the rights quota.
+            "text": (
+                "CONCLUSIONI DEFINITIVE\n"
+                "Immobile in Vidigulfo – Via Cristoforo Colombo, 2/4\n"
+                "\n"
+                "\n"
+                "1. QUOTA DI PROPRIETA' DEL BENE PIGNORATO\n"
+                "APPARTAMENTO AL PIANO PRIMO E GARAGE AL PT:\n"
+                "Quota di 1/1 propr. OMISSIS\n"
+            ),
+        },
+        {
+            "page_number": 3,
+            # Exact line structure from the real Vidigulfo PDF (page 3 of raw_pages.json):
+            # Each topographic word is on its own line up to "saltuariamente", then the
+            # remainder of the paragraph flows as full sentences.  This ensures the 6-line
+            # lookahead from "occupato" reaches "E pertanto non" (which contains "non"),
+            # and the next sentence line starts with "opponibile" — so the agent captures
+            # NON OPPONIBILE.  The synthesis guard then fires: OCCUPATO + NON OPPONIBILE
+            # + all lots LIBERO → resolved to LIBERO.
+            "text": (
+                "4. STATO DI POSSESSO DEL BENE\n"
+                "Al momento del sopralluogo l'immobile oggetto di\n"
+                "pignoramento\n"
+                "risulta\n"
+                "LIBERO,\n"
+                "in\n"
+                "quanto\n"
+                "occupato\n"
+                "saltuariamente\n"
+                "dall'esecutato, a causa della mancanza degli allacciamenti. E pertanto non\n"
+                "opponibile all'aggiudicatario, con liberazione a cura e spese della procedura\n"
+                "esecutiva.\n"
+            ),
+        },
+        {
+            "page_number": 4,
+            "text": (
+                "Spese tecniche di regolarizzazione urbanistico e/o catastale          €.     3.600,00\n"
+                "\n"
+                "Prezzo base d'asta\n"
+                "Valore in caso di regolarizzazione urbanistica e catastale, spese di\n"
+                "smaltimento rifiuti a carico dell'acquirente:\n"
+                "€.   97.321,61\n"
+            ),
+        },
+        {
+            "page_number": 15,
+            "text": (
+                "Valore complessivo del lotto:\n"
+                "€. 118.731,30\n"
+                "Valore della quota di 1/1:\n"
+                "€. 118.731,30\n"
+                "\n"
+                "8.4. Adeguamenti e correzioni della stima\n"
+                "Riduzione del valore del 15%\n"
+                "€.     17.809,69\n"
+                "\n"
+                "Spese tecniche di regolarizzazione urbanistico e/o catastale          €.     3.600,00\n"
+                "\n"
+                "8.5. Prezzo base d'asta\n"
+                "Valore in caso di regolarizzazione urbanistica e catastale, spese di\n"
+                "smaltimento rifiuti a carico dell'acquirente:\n"
+                "€.   97.321,61\n"
+            ),
+        },
+    ]
+
+
+def _vidigulfo_round2_result_seed():
+    return {
+        "field_states": {},
+        "dati_certi_del_lotto": {},
+        "document_quality": {"status": "TEXT_OK"},
+        "semaforo_generale": {"status": "AMBER"},
+        "lots": [
+            {
+                "lot_number": 1,
+                "occupancy_status": "LIBERO",
+                "stato_occupativo": "LIBERO",
+                "ubicazione": "Via Cristoforo Colombo 2/4, Vidigulfo",
+                # quota and diritto_reale mirror the real server-side pre-extraction,
+                # providing the legacy quota candidate that the catasto agent uses.
+                "quota": "1/1",
+                "diritto_reale": "1/1 piena proprietà",
+                "evidence": {"occupancy_status": [], "ubicazione": []},
+            }
+        ],
+    }
+
+
+def _vidigulfo_round2_payload():
+    pages = _vidigulfo_round2_pages()
+    result = _vidigulfo_round2_result_seed()
+    return run_quality_verifier(
+        analysis_id="vidigulfo_round2_regression",
+        result=result,
+        pages=pages,
+        full_text="\n\n".join(page["text"] for page in pages),
+    )
+
+
+def test_vidigulfo_r2_occupancy_is_libero_non_opponibile():
+    payload = _vidigulfo_round2_payload()
+    occ = payload["canonical_case"]["occupancy"]
+    assert occ["status"] == "LIBERO", f"occupancy must resolve to LIBERO; got {occ['status']!r}"
+    assert "NON OPPONIBILE" in str(occ.get("opponibilita") or "").upper(), (
+        f"opponibilita must be NON OPPONIBILE; got {occ.get('opponibilita')!r}"
+    )
+
+
+def test_vidigulfo_r2_cost_is_3600_not_valuation_total():
+    payload = _vidigulfo_round2_payload()
+    costs = payload["canonical_case"]["costs"]
+    explicit_total = costs.get("explicit_total") or 0.0
+    assert abs(float(explicit_total) - 3600.0) < 5.0, (
+        f"explicit_total must be ~€3.600 from spese tecniche, got {explicit_total}"
+    )
+    assert float(explicit_total) < 50000, (
+        f"explicit_total must not include valuation amounts (97321.61 / 118731.30); got {explicit_total}"
+    )
+
+
+def test_vidigulfo_r2_quota_written_to_field_states():
+    pages = _vidigulfo_round2_pages()
+    result = _vidigulfo_round2_result_seed()
+    payload = run_quality_verifier(
+        analysis_id="vidigulfo_r2_quota",
+        result=result,
+        pages=pages,
+        full_text="\n\n".join(p["text"] for p in pages),
+    )
+    packaged = json.loads(json.dumps(result))
+    apply_verifier_to_result(packaged, payload)
+    quota_val = (packaged.get("field_states") or {}).get("quota", {}).get("value")
+    assert quota_val is not None, "field_states.quota.value must not be None after verifier bridge"
+    assert "1/1" in str(quota_val), f"field_states.quota.value must contain '1/1'; got {quota_val!r}"
+
+
+def test_vidigulfo_r2_prezzo_base_written_to_field_states():
+    pages = _vidigulfo_round2_pages()
+    result = _vidigulfo_round2_result_seed()
+    payload = run_quality_verifier(
+        analysis_id="vidigulfo_r2_prezzo",
+        result=result,
+        pages=pages,
+        full_text="\n\n".join(p["text"] for p in pages),
+    )
+    packaged = json.loads(json.dumps(result))
+    apply_verifier_to_result(packaged, payload)
+    prezzo = (packaged.get("field_states") or {}).get("prezzo_base_asta", {}).get("value")
+    assert prezzo is not None, "field_states.prezzo_base_asta.value must not be None after verifier bridge"
+    assert abs(float(prezzo) - 97321.61) < 1.0, (
+        f"field_states.prezzo_base_asta.value must be ~97321.61; got {prezzo!r}"
+    )
+
+
+def test_vidigulfo_r2_summary_leads_with_non_opponibile_liberazione():
+    payload = _vidigulfo_round2_payload()
+    bundle = payload["canonical_case"]["summary_bundle"]
+    decision = str(bundle.get("decision_summary_it") or "").lower()
+    assert "non opponibile" in decision, (
+        f"decision_summary_it must reference 'non opponibile'; got: {decision!r}"
+    )
+    assert "liberazion" in decision, (
+        f"decision_summary_it must reference 'liberazione'; got: {decision!r}"
+    )
+
+
+def test_vidigulfo_r2_summary_does_not_say_immobile_occupato():
+    pages = _vidigulfo_round2_pages()
+    result = _vidigulfo_round2_result_seed()
+    payload = run_quality_verifier(
+        analysis_id="vidigulfo_r2_summary_occupato",
+        result=result,
+        pages=pages,
+        full_text="\n\n".join(p["text"] for p in pages),
+    )
+    packaged = json.loads(json.dumps(result))
+    apply_verifier_to_result(packaged, payload)
+    summary_it = str((packaged.get("summary_for_client") or {}).get("summary_it") or "").lower()
+    assert "immobile occupato" not in summary_it, (
+        f"summary_it must not say 'immobile occupato' for LIBERO+NON_OPPONIBILE case; got: {summary_it!r}"
+    )
+
+
+def test_vidigulfo_r2_address_accepts_real_street_rejects_garbage():
+    """_extract_address_state must accept Via Cristoforo Colombo and reject methodology paragraphs."""
+    import sys
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+    from server import _extract_address_state  # type: ignore[import]
+
+    pages = _vidigulfo_round2_pages()
+
+    # With a valid street address, value must contain the street name
+    good_lots = [{"ubicazione": "Via Cristoforo Colombo 2/4, Vidigulfo", "evidence": {}}]
+    good = _extract_address_state(pages, good_lots)
+    assert good["value"] is not None, "must find address when lot.ubicazione is a real street"
+    assert "colombo" in str(good["value"]).lower() or "vidigulfo" in str(good["value"]).lower(), (
+        f"address value must reference Colombo or Vidigulfo; got {good['value']!r}"
+    )
+
+    # With a garbage methodology paragraph, must fall through to page scan
+    garbage_lots = [
+        {
+            "ubicazione": (
+                "La metodologia estimativa adottata si fonda sulla comparazione tra il "
+                "complesso delle caratteristiche dell'unità immobiliare in esame e quello "
+                "di altri immobili sostanzialmente analoghi di cui è stato accertato il "
+                "prezzo di vendita."
+            ),
+            "evidence": {},
+        }
+    ]
+    garbage = _extract_address_state(pages, garbage_lots)
+    if garbage["value"] is not None:
+        assert "metodologia" not in str(garbage["value"]).lower(), (
+            f"address value must not contain methodology text; got {garbage['value']!r}"
+        )
+
+
+def test_vidigulfo_r2_delivery_timeline_matches_liberazione():
+    """_extract_delivery_timeline_state must match 'liberazione a cura e spese della procedura'."""
+    import sys
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+    from server import _extract_delivery_timeline_state  # type: ignore[import]
+
+    pages = _vidigulfo_round2_pages()
+    state = _extract_delivery_timeline_state(pages)
+    assert state["value"] is not None, (
+        "delivery_timeline.value must not be None when 'liberazione a cura e spese della procedura' is present"
+    )
+    assert "liberazion" in str(state["value"]).lower(), (
+        f"delivery_timeline.value must reference 'liberazione'; got {state['value']!r}"
+    )
+
+
+def test_vidigulfo_r2_money_box_excludes_valuation_amounts():
+    """_select_cost_money_candidates must exclude valuation totals; include real cost €3.600."""
+    import sys
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+    from section_builder import _select_cost_money_candidates  # type: ignore[import]
+
+    candidates = [
+        # Valuation total — must be excluded
+        {
+            "amount_eur": 118731.30,
+            "quote": "Valore complessivo del lotto: €. 118.731,30",
+            "context": "Valore complessivo del lotto",
+            "page": 15,
+        },
+        # Valuation reduction — must be excluded (contains "riduzione")
+        {
+            "amount_eur": 17809.69,
+            "quote": "Riduzione del valore del 15% ... €. 17.809,69",
+            "context": "riduzione cautelativa valore",
+            "page": 15,
+        },
+        # Prezzo base — must be excluded (context contains "prezzo base")
+        {
+            "amount_eur": 97321.61,
+            "quote": "Valore in caso di regolarizzazione ... €. 97.321,61",
+            "context": "prezzo base d'asta spese a carico dell'acquirente",
+            "page": 4,
+        },
+        # Real buyer cost — must be included
+        {
+            "amount_eur": 3600.00,
+            "quote": "Spese tecniche di regolarizzazione urbanistico e/o catastale €. 3.600,00",
+            "context": "spese tecniche regolarizzazione catastale",
+            "page": 4,
+        },
+    ]
+
+    selected = _select_cost_money_candidates(candidates)
+    selected_amounts = [c["amount_eur"] for c in selected]
+
+    assert 3600.0 in selected_amounts, (
+        f"€3.600 (spese tecniche) must be selected as a buyer cost; got {selected_amounts}"
+    )
+    assert 118731.30 not in selected_amounts, (
+        f"€118.731,30 (valore complessivo) must be excluded as a valuation amount; got {selected_amounts}"
+    )
+    assert 17809.69 not in selected_amounts, (
+        f"€17.809,69 (riduzione cautelativa) must be excluded as a valuation amount; got {selected_amounts}"
+    )
+    assert 97321.61 not in selected_amounts, (
+        f"€97.321,61 (prezzo base) must be excluded as a valuation amount; got {selected_amounts}"
+    )
+
+
+def test_vidigulfo_r2_api_payload_address_and_money_box_are_clean():
+    import server  # type: ignore[import]
+    from section_builder import _integrate_money_box_cost_items  # type: ignore[import]
+
+    pages = _vidigulfo_round2_pages() + [
+        {
+            "page_number": 13,
+            "text": (
+                "La superficie commerciale è da intendersi come la somma della superficie lorda "
+                "dell'appartamento, ragguagliata dalla superficie relativa ad accessori e "
+                "pertinenze ai sensi della Norma UNI 10750/2005 e DPR. n. 138/98. "
+                "Le percentuali indicate nelle citate normative possono variare in più o in meno "
+                "in base ad un insieme di fattori, tra questi: la particolare ubicazione "
+                "dell'immobile, l'entità delle superfici esterne, il livello dei piani."
+            ),
+        }
+    ]
+    result = _vidigulfo_round2_result_seed()
+    result["lots"][0]["ubicazione"] = (
+        "pertinenze ai sensi della Norma UNI 10750/2005 e DPR. n. 138/98. "
+        "Le percentuali indicate nelle citate normative possono variare in più o in meno "
+        "in base ad un insieme di fattori, tra questi: la particolare ubicazione "
+        "dell'immobile, l'entità delle superfici esterne, il livello dei piani."
+    )
+    result["lots"][0]["evidence"]["ubicazione"] = [
+        {
+            "page": 13,
+            "quote": result["lots"][0]["ubicazione"],
+            "search_hint": "ubicazione dell'immobile",
+        }
+    ]
+    result["money_box"] = {
+        "items": [],
+        "total_extra_costs": {"range": {"min": 0, "max": 0}, "max_is_open": False},
+    }
+    money_candidates = [
+        {
+            "amount_eur": 17809.69,
+            "quote": "smaltimento di beni mobili presenti all'interno. €. 17.809,69 Spese relative a lavori di manutenzione",
+            "context": "oneri tributari su base catastale e reale, per assenza di garanzia per vizi, rimborso forfettario e di eventuale smaltimento di beni mobili presenti all'interno. €. 17.809,69",
+            "page": 15,
+        },
+        {
+            "amount_eur": 97321.61,
+            "quote": "catastale, spese di smaltimento rifiuti a carico dell'acquirente: €. 97.321,61",
+            "context": "Prezzo base d'asta Valore in caso di regolarizzazione urbanistica e catastale, spese di smaltimento rifiuti a carico dell'acquirente: €. 97.321,61",
+            "page": 15,
+        },
+        {
+            "amount_eur": 97321.61,
+            "quote": "Valore in caso di regolarizzazione urbanistica e catastale, spese di smaltimento rifiuti a carico dell'acquirente: €. 97.321,61",
+            "context": "8.5. Prezzo base d'asta",
+            "page": 4,
+        },
+        {
+            "amount_eur": 3600.00,
+            "quote": "Spese tecniche di regolarizzazione urbanistico e/o catastale €. 3.600,00",
+            "context": "Spese tecniche di regolarizzazione urbanistico e/o catastale €. 3.600,00",
+            "page": 4,
+        },
+    ]
+
+    server._apply_headline_field_states(result, pages)
+    _integrate_money_box_cost_items(result, money_candidates)
+    result["section_3_money_box"] = json.loads(json.dumps(result["money_box"]))
+    server._apply_market_ranges_to_money_box(result)
+
+    address_value = (result.get("field_states") or {}).get("address", {}).get("value")
+    assert address_value is not None
+    assert "cristoforo colombo" in str(address_value).lower()
+    assert "vidigulfo" in str(address_value).lower() or str(address_value).lower().startswith("via cristoforo colombo")
+    assert "norma uni" not in str(address_value).lower()
+    assert "particolare ubicazione" not in str(address_value).lower()
+    lot_address = ((result.get("lots") or [{}])[0] or {}).get("ubicazione")
+    assert lot_address == address_value
+
+    money_items = (result.get("money_box") or {}).get("items") or []
+    numeric_amounts = [
+        round(float(item.get("stima_euro")), 2)
+        for item in money_items
+        if isinstance(item, dict) and isinstance(item.get("stima_euro"), (int, float))
+    ]
+    assert 17809.69 not in numeric_amounts
+    assert 97321.61 not in numeric_amounts

@@ -1715,19 +1715,41 @@ def _normalize_address_value(value: Optional[str]) -> Optional[str]:
     if not value:
         return value
     cleaned = _normalize_headline_text(str(value))
-    m = re.search(
-        r"([A-ZÀ-ÿ][A-Za-zÀ-ÿ' ]+\([A-Z]{2}\)\s*-\s*(?:Via|Viale|Piazza|Corso|Strada|Vicolo|Largo|Localit[aà])\s+[^\n,;:.]{1,80}?\d+(?:/\d+)?)",
+    m_city_street = re.search(
+        r"(?:Immobile\s+in\s+(?:Comune\s+di\s+)?|site?\s+nel\s+comune\s+di\s+)?"
+        r"([A-ZÀ-ÿ][A-Za-zÀ-ÿ' ]{2,60}?)(?:\s*\(([A-Z]{2})\))?\s*(?:[–-]\s*)"
+        r"((?:Via|Viale|Piazza|Corso|Strada|Vicolo|Largo|Localit[aà])\s+[^\n;:.]{1,80}?\d+(?:\s*/\s*\d+)?)",
         cleaned,
         re.I,
     )
-    if not m:
-        m = re.search(
-            r"((?:Via|Viale|Piazza|Corso|Strada|Vicolo|Largo|Localit[aà])\s+[^\n,;:.]{1,80}?\d+(?:/\d+)?)",
+    if not m_city_street:
+        m_city_street = re.search(
+            r"site?\s+nel\s+comune\s+di\s+([A-ZÀ-ÿ][A-Za-zÀ-ÿ' ]{2,60}?)(?:\s*\(([A-Z]{2})\))?\s+"
+            r"((?:Via|Viale|Piazza|Corso|Strada|Vicolo|Largo|Localit[aà])\s+[^\n;:.]{1,80}?\d+(?:\s*/\s*\d+)?)",
             cleaned,
             re.I,
         )
-    if m:
-        cleaned = m.group(1)
+    if m_city_street:
+        city = _normalize_headline_text(m_city_street.group(1)).strip(" ,;-")
+        prov = (m_city_street.group(2) or "").upper()
+        street = _normalize_headline_text(m_city_street.group(3)).strip(" ,;-")
+        cleaned = f"{city} ({prov}) - {street}" if prov else f"{city} - {street}"
+    else:
+        m = re.search(
+            r"([A-ZÀ-ÿ][A-Za-zÀ-ÿ' ]+\([A-Z]{2}\)\s*-\s*(?:Via|Viale|Piazza|Corso|Strada|Vicolo|Largo|Localit[aà])\s+[^\n;:.]{1,80}?\d+(?:\s*/\s*\d+)?)",
+            cleaned,
+            re.I,
+        )
+        if not m:
+            m = re.search(
+                r"((?:Via|Viale|Piazza|Corso|Strada|Vicolo|Largo|Localit[aà])\s+[^\n;:.]{1,80}?\d+(?:\s*/\s*\d+)?)",
+                cleaned,
+                re.I,
+            )
+        if m:
+            cleaned = m.group(1)
+    cleaned = re.sub(r"\s*,\s*(\d)", r" \1", cleaned)
+    cleaned = re.sub(r"\s*/\s*", "/", cleaned)
     for marker in (
         "DESCRIZIONE",
         "COMPLETEZZA DOCUMENTAZIONE",
@@ -1752,6 +1774,36 @@ def _normalize_address_value(value: Optional[str]) -> Optional[str]:
     )
     cleaned = re.sub(r"\s*-\s*([a-zà-ù])", r"-\1", cleaned)
     return cleaned.strip(" ,;-") or None
+
+
+def _address_value_looks_specific(value: Optional[str]) -> bool:
+    if not value:
+        return False
+    text = _normalize_headline_text(str(value))
+    low = _normalize_signal_text(text)
+    if not low:
+        return False
+    if any(
+        marker in low
+        for marker in (
+            "metodologia estimativa",
+            "norma uni",
+            "dpr",
+            "percentuali indicate",
+            "particolare ubicazione dell'immobile",
+            "particolare ubicazione dell’immobile",
+            "qualita ambientale",
+            "qualità ambientale",
+            "coefficienti per la determinazione",
+            "superficie commerciale",
+        )
+    ):
+        return False
+    street = r"(?:via|viale|piazza|corso|strada|vicolo|largo|localit[aà])"
+    return bool(
+        re.search(rf"\b{street}\b[^\n;]{{1,90}}\b(?:\d+|snc|s\.n\.c\.|senza\s+numero\s+civico)\b", text, re.I)
+        or re.search(rf"\bcomune\s+di\s+[A-ZÀ-ÿ][^\n;]{{2,60}}\b{street}\b", text, re.I)
+    )
 
 
 def _normalize_quota_value(value: Optional[str]) -> Optional[str]:
@@ -2355,34 +2407,50 @@ def _extract_address_state(pages: List[Dict[str, Any]], lots: List[Dict[str, Any
     if lots:
         for lot in lots:
             ubic = str(lot.get("ubicazione", "") or "").strip()
-            if ubic and ubic.upper() not in {"NON SPECIFICATO IN PERIZIA", "TBD"}:
-                value = ubic
-                ev_list = lot.get("evidence", {}).get("ubicazione", []) if isinstance(lot.get("evidence"), dict) else []
-                if ev_list:
-                    evidence.extend(ev_list)
-                status = "FOUND" if ev_list else "LOW_CONFIDENCE"
-                break
+            if not ubic or ubic.upper() in {"NON SPECIFICATO IN PERIZIA", "TBD"}:
+                continue
+            # Guard: lot.ubicazione sometimes contains methodology paragraphs from
+            # misclassified extraction.  Only accept it if it looks like an address.
+            if not _address_value_looks_specific(ubic):
+                continue
+            value = _normalize_address_value(ubic) or ubic
+            ev_list = lot.get("evidence", {}).get("ubicazione", []) if isinstance(lot.get("evidence"), dict) else []
+            if ev_list:
+                evidence.extend(ev_list)
+            status = "FOUND" if ev_list else "LOW_CONFIDENCE"
+            break
 
     if status == "NOT_FOUND":
-        match = _find_regex_in_pages(pages, r"Ubicazione[:\s]*([^\n]{5,120})", re.I)
+        address_patterns = (
+            r"Immobile\s+in\s+(?:Comune\s+di\s+)?[A-ZÀ-ÿ][^\n–-]{2,80}\s*[–-]\s*(?:Via|Viale|Piazza|Corso|Strada|Vicolo|Largo|Localit[aà])\s+[^\n]{5,100}",
+            r"site?\s+nel\s+comune\s+di\s+[A-ZÀ-ÿ][^\n]{2,80}?\([A-Z]{2}\)\s*(?:Via|Viale|Piazza|Corso|Strada|Vicolo|Largo|Localit[aà])\s+[^\n]{5,100}",
+            r"Ubicazione[:\s]*([^\n]{5,120})",
+            r"\b(Via|Viale|Piazza|Corso|Strada|Vicolo|Largo|Localit[aà])\b[^\n]{5,120}",
+        )
+        match = None
+        for pattern in address_patterns:
+            candidate = _find_regex_in_pages(pages, pattern, re.I, field_key="address")
+            if not candidate:
+                continue
+            candidate_value = _normalize_address_value(candidate.get("quote", ""))
+            if not _address_value_looks_specific(candidate_value or candidate.get("quote", "")):
+                continue
+            match = candidate
+            value = candidate_value
+            break
         if match:
             evidence.append(match)
-            value = _normalize_address_value(match.get("quote", ""))
             status = "FOUND"
-        else:
-            match = _find_regex_in_pages(pages, r"\b(Via|Viale|Piazza|Corso|Strada|Vicolo|Largo|Localit[aà])\b[^\n]{5,120}", re.I)
-            if match:
-                evidence.append(match)
-                value = _normalize_address_value(match.get("quote", ""))
-                status = "LOW_CONFIDENCE"
 
     if value:
         value = _normalize_address_value(value)
-        has_street = re.search(r"\b(via|viale|piazza|corso|strada|vicolo|largo|localit[aà])\b", value, re.I)
+        has_street = _address_value_looks_specific(value)
         if len(value) < 10 and status == "FOUND":
             status = "LOW_CONFIDENCE"
-        elif not has_street and status == "FOUND":
-            status = "LOW_CONFIDENCE"
+        elif not has_street:
+            value = None
+            evidence = []
+            status = "NOT_FOUND"
 
     snippets = _collect_keyword_snippets(pages, keywords)
     searched_in = _make_searched_in(pages, keywords, status, snippets)
@@ -3133,6 +3201,9 @@ def _extract_delivery_timeline_state(pages: List[Dict[str, Any]]) -> Dict[str, A
         re.compile(r"(liberazion\w+[^\n]{0,120}entro\s+\d{1,3}\s+giorni[^\n]{0,80})", re.I),
         re.compile(r"(sar[aà]\s+liberat\w*[^\n]{0,120}(?:al\s+momento|alla\s+data|entro)[^\n]{0,120})", re.I),
         re.compile(r"(deve\s+essere\s+rilasciat\w*[^\n]{0,140})", re.I),
+        # Matches "liberazione a cura e spese della procedura" (no explicit days,
+        # but procedure-mandated release is a definitive timeline type).
+        re.compile(r"(liberazion\w+\s+a\s+cura\s+e\s+spese\s+della\s+procedura[^\n]{0,120})", re.I),
     ]
     ambiguous = re.compile(r"(da\s+verificare|potrebbe|sarebbe|eventual\w+)", re.I)
     candidates: List[Dict[str, Any]] = []
@@ -5083,9 +5154,9 @@ def _is_buyer_burden_quote(text: str) -> bool:
     normalized = _normalize_signal_text(text)
     if not normalized:
         return False
-    if re.search(r"(prezzo\s+base|valore\s+di\s+stima|valore\s+finale|€/mq|quota\s+in\s+vendita|totale\s+in\s+vendita|rendita|reg\.\s*gen\.|reg\.\s*part\.|importo\s*:|ipoteca|mutuo\s+fondiario|pignoramento|formalit[àa]\s+a\s+carico)", normalized, re.I):
+    if re.search(r"(prezzo\s+base|valore\s+di\s+stima|valore\s+finale|valore\s+in\s+caso\s+di\s+regolarizzazione|valore\s+complessivo|valore\s+della\s+quota|€/mq|quota\s+in\s+vendita|totale\s+in\s+vendita|rendita|reg\.\s*gen\.|reg\.\s*part\.|importo\s*:|ipoteca|mutuo\s+fondiario|pignoramento|formalit[àa]\s+a\s+carico)", normalized, re.I):
         return False
-    if re.search(r"(deprezzament|rischio\s+assunto\s+per\s+mancata\s+garanzia)", normalized, re.I):
+    if re.search(r"(deprezzament|riduzione\s+del\s+valore|riduzione\s+cautelativa|assenza\s+di\s+garanzia|rimborso\s+forfettario|smaltimento\s+di\s+beni\s+mobili|rischio\s+assunto\s+per\s+mancata\s+garanzia)", normalized, re.I):
         return False
     return bool(
         re.search(
@@ -5169,6 +5240,12 @@ def _money_box_amount_is_defensible(text: str, code: str) -> bool:
     if not normalized:
         return False
     if _is_toc_like_quote(text):
+        return False
+    if re.search(
+        r"(prezzo\s+base|valore\s+in\s+caso\s+di\s+regolarizzazione|valore\s+complessivo|valore\s+della\s+quota|riduzione\s+del\s+valore|assenza\s+di\s+garanzia|rimborso\s+forfettario|smaltimento\s+di\s+beni\s+mobili)",
+        normalized,
+        re.I,
+    ):
         return False
     explicit_cost_context = False
     if code == "A":
@@ -5422,6 +5499,7 @@ def _sanitize_money_box_for_customer(result: Dict[str, Any]) -> None:
             )
         ]
 
+    sanitized_items: List[Dict[str, Any]] = []
     for item in cleaned_items:
         if not isinstance(item, dict):
             continue
@@ -5440,6 +5518,8 @@ def _sanitize_money_box_for_customer(result: Dict[str, Any]) -> None:
         )
 
         if evidence and not _is_buyer_burden_quote(quote_blob):
+            if source == "STEP3_CANDIDATES" and _as_float_or_none(item.get("stima_euro")) is not None:
+                continue
             if code not in {"G"}:
                 if _as_float_or_none(item.get("stima_euro")) is not None:
                     item["stima_euro"] = "TBD"
@@ -5462,7 +5542,9 @@ def _sanitize_money_box_for_customer(result: Dict[str, Any]) -> None:
                 item["stima_euro"] = "TBD"
                 if str(item.get("type") or "").upper() not in {"INFO_ONLY"}:
                     item["type"] = "QUALITATIVE"
+        sanitized_items.append(item)
 
+    cleaned_items = sanitized_items
     money_box["items"] = cleaned_items
     if supplement_burdens:
         money_box["qualitative_burdens"] = copy.deepcopy(supplement_burdens)
@@ -5934,6 +6016,7 @@ def _apply_headline_field_states(result: Dict[str, Any], pages: List[Dict[str, A
     result["field_states"] = states
     _enforce_field_states_contract(result, pages)
     _apply_headline_states_to_headers(result, result.get("field_states", states))
+    _repair_lot_addresses_from_headline(result)
 
 def _normalize_override_value(field: str, value: Any) -> Any:
     if value is None:
@@ -6270,6 +6353,8 @@ def _select_best_address_candidate(candidates: List[Tuple[str, Dict[str, Any]]])
         value = re.sub(r"\.{2,}\s*\d+\s*$", "", value).strip(" ,.;-")
         if _is_toc_like_line(value) or _is_toc_like_quote(value):
             continue
+        if not _address_value_looks_specific(value):
+            continue
         low = value.lower()
         if (
             not _looks_like_specific_address(value)
@@ -6300,8 +6385,7 @@ def _select_best_address_candidate(candidates: List[Tuple[str, Dict[str, Any]]])
             score += 40
         if "comune di" in low or "(pt)" in low or "(mn)" in low:
             score += 15
-        if _looks_like_specific_address(value):
-            score += 30
+        score += 30
         ranked.append((score, value, ev))
     if not ranked:
         return None
@@ -6422,8 +6506,10 @@ def _extract_lot_identity_and_rights(lot_pages: List[Dict[str, Any]], lot_num: i
             ):
                 line_start, line_end = _line_bounds(text, m.start(), m.end())
                 ev = _build_evidence(text, page_num, line_start, line_end, field_key="ubicazione", anchor_hint=m.group(0))
-                out["ubicazione"] = _normalize_headline_text(m.group(1))
-                out["ubicazione_evidence"] = [ev]
+                candidate_location = _normalize_headline_text(m.group(1))
+                if _address_value_looks_specific(candidate_location):
+                    out["ubicazione"] = candidate_location
+                    out["ubicazione_evidence"] = [ev]
                 break
             if out.get("ubicazione"):
                 break
@@ -9606,6 +9692,7 @@ def _repair_identity_and_cadastral_storage(result: Dict[str, Any], pages: List[D
             case_header["address"] = normalized
     result["report_header"] = report_header
     result["case_header"] = case_header
+    _repair_lot_addresses_from_headline(result)
 
     dati = result.get("dati_certi_del_lotto", {}) if isinstance(result.get("dati_certi_del_lotto"), dict) else {}
     diritto_obj = dati.get("diritto_reale") if isinstance(dati.get("diritto_reale"), dict) else {}
@@ -9673,6 +9760,27 @@ def _repair_identity_and_cadastral_storage(result: Dict[str, Any], pages: List[D
             dichiarazioni_impianti[alias_key] = display
         bene["dichiarazioni"] = dichiarazioni
         bene["dichiarazioni_impianti"] = dichiarazioni_impianti
+
+
+def _repair_lot_addresses_from_headline(result: Dict[str, Any]) -> None:
+    states = result.get("field_states") if isinstance(result.get("field_states"), dict) else {}
+    address_state = states.get("address") if isinstance(states.get("address"), dict) else {}
+    address_value = _normalize_address_value(address_state.get("value"))
+    if not _address_value_looks_specific(address_value):
+        return
+    address_evidence = _normalize_contract_evidence_list(address_state.get("evidence", []), max_items=2)
+    lots = result.get("lots") if isinstance(result.get("lots"), list) else []
+    for lot in lots:
+        if not isinstance(lot, dict):
+            continue
+        current = str(lot.get("ubicazione") or "").strip()
+        if current and _address_value_looks_specific(current):
+            lot["ubicazione"] = _normalize_address_value(current) or current
+            continue
+        lot["ubicazione"] = address_value
+        evidence_map = lot.setdefault("evidence", {})
+        if isinstance(evidence_map, dict):
+            evidence_map["ubicazione"] = copy.deepcopy(address_evidence)
 
 def _to_iso(value: Any) -> Optional[str]:
     dt = _parse_dt(value)

@@ -27,7 +27,10 @@ def _extract_direct_costs(state: RuntimeState):
         # Handles "Spese tecniche di regolarizzazione urbanistico e/o catastale" format
         ("spese_regolarizzazione", "spese tecniche di regolarizzazione"),
     ]
-    adjustment_pattern = re.compile(r"riduzione\s+cautelativa[\s\S]{0,120}?€\.?\s*([0-9]{1,3}(?:\.[0-9]{3})*(?:,[0-9]{2})?)", re.I | re.DOTALL)
+    adjustment_pattern = re.compile(
+        r"(?:riduzione\s+cautelativa|riduzione\s+del\s+valore)[\s\S]{0,260}?€\.?\s*([0-9]{1,3}(?:\.[0-9]{3})*(?:,[0-9]{2})?)",
+        re.I | re.DOTALL,
+    )
     for idx, page in enumerate(state.pages, start=1):
         text = str((page or {}).get("text") or "")
         low = text.lower()
@@ -37,14 +40,21 @@ def _extract_direct_costs(state: RuntimeState):
             if start_idx < 0:
                 continue
             next_markers = [low.find(next_anchor, start_idx + len(anchor)) for _, next_anchor in label_order[i + 1:]]
-            next_markers += [low.find("totale", start_idx + len(anchor)), low.find("riduzione cautelativa", start_idx + len(anchor))]
+            next_markers += [
+                low.find("totale", start_idx + len(anchor)),
+                low.find("riduzione cautelativa", start_idx + len(anchor)),
+                # "Prezzo base d'asta" introduces the auction price, not a buyer cost.
+                low.find("prezzo base", start_idx + len(anchor)),
+            ]
             next_markers = [marker for marker in next_markers if marker > start_idx]
             end_idx = min(next_markers) if next_markers else min(len(text), start_idx + 260)
             window = text[start_idx:end_idx]
             amounts = _extract_amounts(window)
             if not amounts:
                 continue
-            amount = amounts[-1]
+            # Take the first amount after the label — the last may fall outside the cost
+            # line and into the auction-price section if the window crosses a heading.
+            amount = amounts[0]
             explicit_costs.append(
                 {
                     "label": label,
@@ -91,7 +101,15 @@ def run_costs_agent(state: RuntimeState) -> None:
         direct_costs = deduped_costs
         explicit_costs = direct_costs
         valuation_adjustments = direct_adjustments
-        explicit_total = round(float(direct_total), 2) if direct_total is not None else round(sum(item["amount"] for item in direct_costs), 2)
+        # When label-matched costs exist, sum them directly — direct_total from the
+        # TOTALE→riduzione-cautelativa window may capture the valuation table total,
+        # not the buyer-cost sub-total.
+        if direct_costs:
+            explicit_total = round(sum(item["amount"] for item in direct_costs), 2)
+        elif direct_total is not None:
+            explicit_total = round(float(direct_total), 2)
+        else:
+            explicit_total = 0.0
         if not explicit_costs and direct_total is not None:
             explicit_costs = [
                 {

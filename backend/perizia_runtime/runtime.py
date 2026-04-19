@@ -347,6 +347,32 @@ def apply_verifier_to_result(result: Dict[str, Any], verifier_payload: Dict[str,
         if is_degraded:
             _annotate_degraded_output(dati["prezzo_base_asta_verifier"])
     field_states = result.setdefault("field_states", {})
+    # Promote high-confidence verifier findings to field_states so the final API
+    # surface reflects canonical judgments even when server-side extraction fails.
+    if quota.get("value") and not field_states.get("quota", {}).get("value"):
+        field_states["quota"] = {
+            "value": quota.get("value"),
+            "status": "LOW_CONFIDENCE" if is_degraded else "FOUND",
+            "confidence": quota.get("confidence", 0.0),
+            "evidence": quota.get("evidence", []),
+            "searched_in": [],
+            "user_prompt_it": None,
+            "resolver_meta": {"resolver_version": "verifier_runtime_v1"},
+        }
+        if is_degraded:
+            _annotate_degraded_output(field_states["quota"])
+    if isinstance(selected_price, (int, float)) and not field_states.get("prezzo_base_asta", {}).get("value"):
+        field_states["prezzo_base_asta"] = {
+            "value": selected_price,
+            "status": "LOW_CONFIDENCE" if is_degraded else "FOUND",
+            "confidence": float(((verifier_payload.get("judgments") or {}).get("pricing") or {}).get("confidence") or 0.0),
+            "evidence": [],
+            "searched_in": [],
+            "user_prompt_it": None,
+            "resolver_meta": {"resolver_version": "verifier_runtime_v1"},
+        }
+        if is_degraded:
+            _annotate_degraded_output(field_states["prezzo_base_asta"])
     if occupancy.get("status"):
         field_states["stato_occupativo"] = {
             "value": occupancy.get("status"),

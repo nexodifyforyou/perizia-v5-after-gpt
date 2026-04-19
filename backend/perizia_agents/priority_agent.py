@@ -66,18 +66,34 @@ def run_priority_agent(state: RuntimeState) -> None:
     occupancy = state.canonical_case.occupancy
     occupancy_supported = occupancy.get("status") == "OCCUPATO" and bool(occupancy.get("evidence"))
     if occupancy_supported:
-        issues.append(
-            {
-                "code": "OCCUPANCY_RISK",
-                "title_it": "Immobile occupato",
-                "severity": "RED",
-                "category": "occupancy",
-                "priority_score": 88.0,
-                "evidence": occupancy.get("evidence", []),
-                "summary_it": "Lo stato occupativo richiede verifica immediata.",
-                "action_it": "Verifica titolo e tempi di liberazione.",
-            }
-        )
+        opponibilita = str(occupancy.get("opponibilita") or "").strip().upper()
+        is_non_opponibile = "NON OPPONIBILE" in opponibilita
+        if is_non_opponibile:
+            issues.append(
+                {
+                    "code": "OCCUPANCY_RISK",
+                    "title_it": "Occupazione non opponibile al terzo acquirente",
+                    "severity": "AMBER",
+                    "category": "occupancy",
+                    "priority_score": 52.0,
+                    "evidence": occupancy.get("evidence", []),
+                    "summary_it": "La perizia indica occupazione non opponibile ai terzi acquirenti.",
+                    "action_it": "Verifica la documentazione sull'opponibilità prima dell'offerta.",
+                }
+            )
+        else:
+            issues.append(
+                {
+                    "code": "OCCUPANCY_RISK",
+                    "title_it": "Immobile occupato",
+                    "severity": "RED",
+                    "category": "occupancy",
+                    "priority_score": 88.0,
+                    "evidence": occupancy.get("evidence", []),
+                    "summary_it": "Lo stato occupativo richiede verifica immediata.",
+                    "action_it": "Verifica titolo e tempi di liberazione.",
+                }
+            )
     normalized = [_normalized_issue_dict(item) for item in issues]
     has_surviving_legal = bool(legal.get("surviving"))
     has_evidenced_cost_issue = any(

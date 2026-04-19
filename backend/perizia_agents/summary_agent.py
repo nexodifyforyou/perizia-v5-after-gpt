@@ -16,14 +16,31 @@ def run_summary_agent(state: RuntimeState) -> None:
     if not next_step_it:
         next_step_it = "Verifica manualmente i punti critici prima dell'offerta."
     caution_points_it = []
-    if occupancy.get("opponibilita") == "NON VERIFICABILE":
+    opponibilita = str(occupancy.get("opponibilita") or "").strip().upper()
+    occ_status = str(occupancy.get("status") or "").strip().upper()
+    is_non_opponibile = "NON OPPONIBILE" in opponibilita
+    if is_non_opponibile and occ_status == "LIBERO":
+        # Property is effectively free but has non-binding occupancy — surface the full nuance.
+        caution_points_it.append(
+            "Immobile libero; occupazione non opponibile all'aggiudicatario, liberazione a cura e spese della procedura"
+        )
+    elif opponibilita == "NON VERIFICABILE":
         caution_points_it.append("Opponibilità non verificabile dalla perizia")
     if state.canonical_case.pricing.get("absurdity_guard_triggered"):
         caution_points_it.append("Prezzo scartato per possibile contaminazione numerica")
     if costs.get("explicit_total"):
         caution_points_it.append(f"Costi espliciti rilevati: € {float(costs['explicit_total']):,.2f}".replace(",", "X").replace(".", ",").replace("X", "."))
-    summary_it_parts = [part for part in [top_issue_it, next_step_it] if part]
-    summary_it = " ".join(part.rstrip(".") + "." for part in summary_it_parts)[:1500] or "Analisi completata con verifiche manuali ancora necessarie."
+    # When the property is LIBERO with NON_OPPONIBILE, lead with the occupancy nuance
+    # rather than defaulting to a generic costs-only summary.
+    if is_non_opponibile and occ_status == "LIBERO" and not str(top_issue.get("code") or "").startswith("LEGAL_SURVIVING"):
+        occupancy_clause = "Immobile libero con occupazione non opponibile all'aggiudicatario (liberazione a cura e spese della procedura esecutiva)"
+        summary_it_parts = [occupancy_clause]
+        if top_issue_it and top_issue_it != occupancy_clause:
+            summary_it_parts.append(top_issue_it)
+        summary_it_parts.append(next_step_it)
+    else:
+        summary_it_parts = [part for part in [top_issue_it, next_step_it] if part]
+    summary_it = " ".join(part.rstrip(".") + "." for part in summary_it_parts if part)[:1500] or "Analisi completata con verifiche manuali ancora necessarie."
     state.canonical_case.summary_bundle = {
         "top_issue_it": top_issue_it,
         "top_issue_en": "",
