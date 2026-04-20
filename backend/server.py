@@ -5522,7 +5522,7 @@ def _sanitize_money_box_for_customer(result: Dict[str, Any]) -> None:
                 continue
             if code not in {"G"}:
                 if _as_float_or_none(item.get("stima_euro")) is not None:
-                    item["stima_euro"] = "TBD"
+                    item["stima_euro"] = None
                 if str(item.get("type") or "").upper() not in {"INFO_ONLY"}:
                     item["type"] = "QUALITATIVE" if evidence else item.get("type", "TBD")
 
@@ -5539,9 +5539,16 @@ def _sanitize_money_box_for_customer(result: Dict[str, Any]) -> None:
                     if str(item.get("type") or "").upper() in {"", "TBD", "QUALITATIVE"}:
                         item["type"] = "ESTIMATE"
             elif _as_float_or_none(item.get("stima_euro")) is not None:
-                item["stima_euro"] = "TBD"
+                item["stima_euro"] = None
                 if str(item.get("type") or "").upper() not in {"INFO_ONLY"}:
                     item["type"] = "QUALITATIVE"
+        if isinstance(item.get("stima_euro"), str) and "TBD" in str(item.get("stima_euro")).upper():
+            item["stima_euro"] = None
+        for text_key in ("stima_nota", "source"):
+            if isinstance(item.get(text_key), str) and "TBD" in str(item.get(text_key)).upper():
+                item[text_key] = None
+        if isinstance(item.get("type"), str) and "TBD" in str(item.get("type")).upper():
+            item["type"] = "QUALITATIVE" if item.get("stima_euro") is None else "ESTIMATE"
         sanitized_items.append(item)
 
     cleaned_items = sanitized_items
@@ -5563,19 +5570,19 @@ def _sanitize_money_box_for_customer(result: Dict[str, Any]) -> None:
         money_box.pop("total_extra_costs_range", None)
         money_box["qualitative_burdens"] = copy.deepcopy(qualitative_burdens)
         money_box["total_extra_costs"] = {
-            "min": "NON_QUANTIFICATO_IN_PERIZIA",
-            "max": "NON_QUANTIFICATO_IN_PERIZIA",
+            "min": None,
+            "max": None,
             "max_is_open": False,
-            "note": "Buyer-side extra cost burdens are grounded, but the perizia does not support a defensible numeric total",
+            "note": None,
         }
         if isinstance(result.get("section_3_money_box"), dict):
             result["section_3_money_box"]["items"] = copy.deepcopy(cleaned_items)
             result["section_3_money_box"]["qualitative_burdens"] = copy.deepcopy(qualitative_burdens)
             result["section_3_money_box"].pop("total_extra_costs_range", None)
             result["section_3_money_box"]["totale_extra_budget"] = {
-                "min": "NON_QUANTIFICATO_IN_PERIZIA",
-                "max": "NON_QUANTIFICATO_IN_PERIZIA",
-                "nota": "Costi extra non quantificati in perizia; mantenuti solo oneri qualitativi grounded",
+                "min": None,
+                "max": None,
+                "nota": None,
             }
     elif supported_numeric_total > 0:
         note = "Document-backed buyer burdens only"
@@ -6136,6 +6143,8 @@ def _normalize_lot_payload_aliases(lot: Dict[str, Any], lot_number: int) -> Dict
     if price_value is not None:
         lot_obj["prezzo_base_asta"] = float(price_value)
         lot_obj["prezzo_base_value"] = float(price_value)
+    elif isinstance(lot_obj.get("prezzo_base_eur"), str) and "TBD" in str(lot_obj.get("prezzo_base_eur")).upper():
+        lot_obj["prezzo_base_eur"] = None
 
     stima_value = _as_float_or_none(
         lot_obj.get("valore_stima")
@@ -6162,6 +6171,10 @@ def _normalize_lot_payload_aliases(lot: Dict[str, Any], lot_number: int) -> Dict
     if quota_value:
         lot_obj["quota"] = quota_value
 
+    for nullable_key in ("ubicazione", "superficie_mq", "diritto_reale", "diritto"):
+        if isinstance(lot_obj.get(nullable_key), str) and "TBD" in str(lot_obj.get(nullable_key)).upper():
+            lot_obj[nullable_key] = None
+
     if lot_obj.get("titolo") in (None, "", "TBD", "NON SPECIFICATO IN PERIZIA"):
         tipologia = _normalize_headline_text(str(lot_obj.get("tipologia") or ""))
         if tipologia:
@@ -6176,13 +6189,13 @@ def _ensure_lot_contract(lot: Dict[str, Any], lot_number: int) -> Dict[str, Any]
     lot_obj = dict(lot) if isinstance(lot, dict) else {}
     lot_obj.setdefault("lot_number", lot_number)
     lot_obj.setdefault("lot_id", str(lot_obj.get("lot_number") or lot_number))
-    lot_obj.setdefault("prezzo_base_eur", "TBD")
+    lot_obj.setdefault("prezzo_base_eur", None)
     lot_obj.setdefault("prezzo_base_value", None)
     lot_obj.setdefault("prezzo_base_asta", None)
-    lot_obj.setdefault("ubicazione", "TBD")
-    lot_obj.setdefault("superficie_mq", "TBD")
+    lot_obj.setdefault("ubicazione", None)
+    lot_obj.setdefault("superficie_mq", None)
     lot_obj.setdefault("superficie_catastale", None)
-    lot_obj.setdefault("diritto_reale", "TBD")
+    lot_obj.setdefault("diritto_reale", None)
     lot_obj.setdefault("diritto", None)
     lot_obj.setdefault("quota", None)
     lot_obj.setdefault("titolo", None)
@@ -6957,9 +6970,9 @@ def _sanitize_lot_conservative_outputs(result: Dict[str, Any]) -> None:
         }
     else:
         money_box["total_extra_costs"] = {
-            "min": "NON_QUANTIFICATO_IN_PERIZIA",
-            "max": "NON_QUANTIFICATO_IN_PERIZIA",
-            "nota": "Costi extra non quantificati in perizia; mantenuti solo oneri qualitativi buyer-borne",
+            "min": None,
+            "max": None,
+            "nota": None,
         }
     result["money_box"] = money_box
     result["section_3_money_box"] = copy.deepcopy(money_box)

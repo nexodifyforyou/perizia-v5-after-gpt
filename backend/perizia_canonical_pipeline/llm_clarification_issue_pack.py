@@ -12,6 +12,7 @@ from __future__ import annotations
 import argparse
 import json
 import re
+from pathlib import Path
 from typing import Dict, List, Optional, Sequence, Set
 
 from .corpus_registry import list_case_keys
@@ -279,6 +280,44 @@ def _window_for_page(raw_pages_by_num: Dict[int, Dict], page: int, line_index: O
     }
 
 
+def _bounded_page_text(raw_pages_by_num: Dict[int, Dict], page: int, max_len: int = 4500) -> Dict:
+    text = raw_pages_by_num.get(page, {}).get("text", "") or ""
+    return {"page": page, "text": text[:max_len]}
+
+
+def _nearest_anchor_pages(raw_pages_by_num: Dict[int, Dict], pages: Sequence[int], limit: int = 2) -> List[Dict]:
+    if not pages:
+        return []
+    anchor_re = re.compile(r"\b(?:LOTTO|Bene\s*N[°o.]?|CORPO)\b", re.IGNORECASE)
+    selected: List[int] = []
+    min_page = min(pages)
+    for page in sorted(raw_pages_by_num, reverse=True):
+        if page > min_page:
+            continue
+        text = raw_pages_by_num.get(page, {}).get("text", "") or ""
+        if anchor_re.search(text):
+            selected.append(page)
+        if len(selected) >= limit:
+            break
+    return [_bounded_page_text(raw_pages_by_num, page) for page in sorted(selected)]
+
+
+def _recap_pages(raw_pages_by_num: Dict[int, Dict], pages: Sequence[int], limit: int = 3) -> List[Dict]:
+    recap_re = re.compile(
+        r"\b(?:schema\s+riassuntivo|riepilogo|conclusioni|prezzo\s+base|valore\s+di\s+stima)\b",
+        re.IGNORECASE,
+    )
+    selected: List[int] = []
+    page_set = set(pages)
+    for page in sorted(raw_pages_by_num):
+        text = raw_pages_by_num.get(page, {}).get("text", "") or ""
+        if page in page_set or recap_re.search(text):
+            selected.append(page)
+        if len(selected) >= limit:
+            break
+    return [_bounded_page_text(raw_pages_by_num, page) for page in selected]
+
+
 def _table_zone_types(table_zone_map: Dict, page: int, line_index: Optional[int]) -> List[str]:
     zones = []
     for zone in table_zone_map.get("table_zones") or []:
@@ -334,6 +373,9 @@ def _build_issue(
         _window_for_page(raw_pages_by_num, page, row.get("line_index"), needles)
         for page in pages
     ]
+    reason_codes = _reason_codes(row)
+    candidate_values = _candidate_values(row)
+    blocked_values = _blocked_values(row)
     zone_types: List[str] = []
     for page in pages:
         for zone_type in _table_zone_types(table_zone_map, page, row.get("line_index")):
@@ -351,12 +393,32 @@ def _build_issue(
         "bene_id": row.get("bene_id"),
         "issue_type": issue_type,
         "deterministic_status": "UNRESOLVED",
-        "reason_codes": _reason_codes(row),
-        "candidate_values": _candidate_values(row),
-        "blocked_values": _blocked_values(row),
+        "reason_codes": reason_codes,
+        "candidate_values": candidate_values,
+        "blocked_values": blocked_values,
         "supporting_candidates": supporting_candidates,
         "supporting_blocked_entries": [_blocked_projection(row)],
         "source_pages": pages,
+        "target_case_key": case_key,
+        "target_field": field_type,
+        "target_scope": _scope_metadata(row, zone_types),
+        "known_candidates": supporting_candidates,
+        "blocked_reasons": [
+            {"reason_code": code, "text": str(row.get("reason") or "")}
+            for code in reason_codes
+        ],
+        "relevant_pages": [_bounded_page_text(raw_pages_by_num, page) for page in pages],
+        "anchor_pages": _nearest_anchor_pages(raw_pages_by_num, pages),
+        "recap_pages": _recap_pages(raw_pages_by_num, pages),
+        "supporting_evidence_snippets": _shell_quotes(row),
+        "current_ambiguity_summary": {
+            "issue_type": issue_type,
+            "deterministic_status": "UNRESOLVED",
+            "why_deterministic_promotion_failed": str(row.get("reason") or block_type),
+            "candidate_values": candidate_values,
+            "blocked_values": blocked_values,
+            "reason_codes": reason_codes,
+        },
         "source_line_indices": _source_line_indices(row),
         "shell_quotes": _shell_quotes(row),
         "local_text_windows": local_windows,

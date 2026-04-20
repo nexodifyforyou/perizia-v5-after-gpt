@@ -48,6 +48,7 @@ def _scenario_summary(scenario: Dict, out: Dict) -> Dict:
         "field_family": issue["field_family"],
         "field_type": issue["field_type"],
         "llm_outcome": resolution["llm_outcome"],
+        "resolution_mode": resolution.get("resolution_mode"),
         "resolved_value": resolution["resolved_value"],
         "needs_human_review": resolution["needs_human_review"],
         "source_pages": resolution["source_pages"],

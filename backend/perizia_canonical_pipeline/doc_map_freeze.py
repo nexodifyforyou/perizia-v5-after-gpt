@@ -35,6 +35,7 @@ Field states:
     deterministic_active        — evidence_ledger ACTIVE packet; deterministic truth
     context_only                — evidence_ledger CONTEXT_ONLY or LLM upgraded_context
     llm_resolved                — LLM outcome=resolved (fills a previously blocked slot)
+    resolved_with_context       — LLM qualified resolution; value plus mandatory qualification
     unresolved_explained        — LLM outcome=unresolved_explained, or issue with no LLM run
     blocked                     — deterministic block with no issue or no resolution
     checked_no_reliable_basis   — bounded review ran for this slot; no freeze-safe basis found
@@ -404,6 +405,18 @@ def _short_values(values: Iterable[Any], limit: int = 5) -> str:
     return ", ".join(cleaned)
 
 
+def _issue_type_label(issue_type: Any) -> str:
+    labels = {
+        "FIELD_CONFLICT": "valori concorrenti",
+        "SUSPICIOUS_SILENCE": "assenza di un dato conclusivo",
+        "SCOPE_AMBIGUITY": "ambiguita di ambito tra bene e lotto",
+        "GROUPED_CONTEXT_NEEDS_EXPLANATION": "contesto raggruppato da spiegare",
+        "OCR_VARIANT_COLLISION": "varianti testuali dovute alla qualita OCR",
+        "TABLE_RECAP_DUPLICATE_UNCLEAR": "recap e tabella non allineati in modo sicuro",
+    }
+    return labels.get(str(issue_type or "").upper(), "ambiguita deterministica")
+
+
 def _issue_shell_quotes(issues: List[Any], limit: int = 3) -> str:
     quotes: List[str] = []
     seen: Set[str] = set()
@@ -437,7 +450,7 @@ def _explain_unresolved_without_llm(
     generic placeholder.
     """
     first_issue = issues[0] if issues else {}
-    issue_type = first_issue.get("issue_type") or "UNRESOLVED"
+    issue_type = _issue_type_label(first_issue.get("issue_type"))
     reason_codes: List[Any] = []
     candidate_values: List[Any] = []
     for issue in issues:
@@ -449,18 +462,17 @@ def _explain_unresolved_without_llm(
     scope_text = _scope_label(scope_key)
     values_text = _short_values(candidate_values)
     quotes_text = _issue_shell_quotes(issues)
-    reason_text = _short_values(reason_codes, limit=8) or issue_type
 
     if values_text:
         why = (
             f"Per {scope_text}, {field_label} resta irrisolto: il bounded issue pack "
-            f"segnala {issue_type} ({reason_text}) sulle pagine {page_text} con valori candidati "
+            f"segnala {issue_type} sulle pagine {page_text} con valori candidati "
             f"non conciliati: {values_text}."
         )
     else:
         why = (
             f"Per {scope_text}, {field_label} resta irrisolto: il bounded issue pack "
-            f"segnala {issue_type} ({reason_text}) sulle pagine {page_text}, ma non isola "
+            f"segnala {issue_type} sulle pagine {page_text}, ma non isola "
             "un valore finale normalizzato sicuro."
         )
     if quotes_text:
@@ -1065,6 +1077,19 @@ def _build_field_map(
                 "packet_ids": entry.get("packet_ids", []),
                 "issue_ids": entry.get("issue_ids", []),
             })
+        elif state == "resolved_with_context":
+            context_items.append({
+                "scope_key": scope_key,
+                "field_family": family,
+                "field_type": field_type,
+                "packet_ids": entry.get("packet_ids", []),
+                "issue_ids": entry.get("issue_ids", []),
+                "state": "resolved_with_context",
+                "context_qualification": entry.get("context_qualification"),
+                "why_not_fully_certain": entry.get("why_not_fully_certain"),
+                "supporting_pages": entry.get("supporting_pages", []),
+                "tension_pages": entry.get("tension_pages", []),
+            })
         elif state == "blocked":
             blocked_items.append({
                 "scope_key": scope_key,
@@ -1188,6 +1213,7 @@ def _build_entry_from_escalation(
 
     Outcome mapping:
       resolved          → llm_resolved
+      resolved/upgraded_context + qualified_resolution → resolved_with_context
       upgraded_context  → context_only
       unresolved_explained → unresolved_explained
 
@@ -1211,17 +1237,22 @@ def _build_entry_from_escalation(
             outcome = "unresolved_explained"
 
     if outcome == "resolved":
+        state = "resolved_with_context" if resolution.get("resolution_mode") == "qualified_resolution" else "llm_resolved"
         return {
-            "state": "llm_resolved",
+            "state": state,
             "value": resolution.get("resolved_value"),
             "value_type": resolution.get("resolved_value_type"),
             "source_stage": "missing_slot_escalation",
             "confidence_band": resolution.get("confidence_band", "medium"),
             "supporting_evidence": resolution.get("supporting_evidence", []),
+            "supporting_pages": resolution.get("supporting_pages", []),
+            "tension_pages": resolution.get("tension_pages", []),
             "packet_ids": [],
             "issue_ids": issue_ids,
             "review_ids": review_ids,
             "explanation": resolution.get("user_visible_explanation"),
+            "context_qualification": resolution.get("context_qualification"),
+            "why_not_fully_certain": resolution.get("why_not_fully_certain"),
             "why_not_resolved": None,
             "needs_human_review": resolution.get("needs_human_review", False),
         }
@@ -1232,6 +1263,25 @@ def _build_entry_from_escalation(
             {"page": w["page"], "cue_word": w.get("cue_word"), "window": w.get("window")}
             for w in review.get("cue_windows", [])
         ]
+        if resolution.get("resolution_mode") == "qualified_resolution" and resolution.get("resolved_value") is not None:
+            return {
+                "state": "resolved_with_context",
+                "value": resolution.get("resolved_value"),
+                "value_type": resolution.get("resolved_value_type"),
+                "source_stage": "missing_slot_escalation",
+                "confidence_band": resolution.get("confidence_band", "medium"),
+                "supporting_evidence": cue_evidence + (resolution.get("supporting_evidence") or []),
+                "supporting_pages": resolution.get("supporting_pages", []),
+                "tension_pages": resolution.get("tension_pages", []),
+                "packet_ids": [],
+                "issue_ids": issue_ids,
+                "review_ids": review_ids,
+                "explanation": resolution.get("user_visible_explanation"),
+                "context_qualification": resolution.get("context_qualification"),
+                "why_not_fully_certain": resolution.get("why_not_fully_certain"),
+                "why_not_resolved": resolution.get("why_not_resolved"),
+                "needs_human_review": resolution.get("needs_human_review", False),
+            }
         return {
             "state": "context_only",
             "value": None,
@@ -1315,6 +1365,19 @@ def _append_to_summary_lists(
             "packet_ids": entry.get("packet_ids", []),
             "issue_ids": entry.get("issue_ids", []),
         })
+    elif state == "resolved_with_context":
+        context_items.append({
+            "scope_key": scope_key,
+            "field_family": family,
+            "field_type": field_type,
+            "packet_ids": entry.get("packet_ids", []),
+            "issue_ids": entry.get("issue_ids", []),
+            "state": "resolved_with_context",
+            "context_qualification": entry.get("context_qualification"),
+            "why_not_fully_certain": entry.get("why_not_fully_certain"),
+            "supporting_pages": entry.get("supporting_pages", []),
+            "tension_pages": entry.get("tension_pages", []),
+        })
 
 
 def _build_field_entry(
@@ -1333,10 +1396,11 @@ def _build_field_entry(
     Merge precedence:
       1. ACTIVE packets → deterministic_active (not overridden by LLM or issues)
       2. LLM resolved → llm_resolved (only fills blocked slot)
-      3. LLM unresolved_explained → unresolved_explained
-      4. LLM upgraded_context → context_only (upgraded)
-      5. Issue with no resolution → blocked or unresolved_explained (deterministic)
-      6. CONTEXT_ONLY packets with no other signal → context_only
+      3. LLM qualified resolution → resolved_with_context
+      4. LLM unresolved_explained → unresolved_explained
+      5. LLM upgraded_context without a safe lean → context_only (upgraded)
+      6. Issue with no resolution → blocked or unresolved_explained (deterministic)
+      7. CONTEXT_ONLY packets with no other signal → context_only
     """
     # ---- RULE 1: Deterministic active truth remains primary ----
     if active_packets:
@@ -1400,16 +1464,21 @@ def _build_field_entry(
 
         if resolved_res:
             # LLM safely resolved the issue
+            state = "resolved_with_context" if resolved_res.get("resolution_mode") == "qualified_resolution" else "llm_resolved"
             return {
-                "state": "llm_resolved",
+                "state": state,
                 "value": resolved_res.get("resolved_value"),
                 "value_type": resolved_res.get("resolved_value_type"),
                 "source_stage": "llm_resolution",
                 "confidence_band": resolved_res.get("confidence_band", "medium"),
                 "supporting_evidence": resolved_res.get("supporting_evidence", []),
+                "supporting_pages": resolved_res.get("supporting_pages", []),
+                "tension_pages": resolved_res.get("tension_pages", []),
                 "packet_ids": [p.get("packet_id") for p in context_packets],
                 "issue_ids": issue_ids,
                 "explanation": resolved_res.get("user_visible_explanation"),
+                "context_qualification": resolved_res.get("context_qualification"),
+                "why_not_fully_certain": resolved_res.get("why_not_fully_certain"),
                 "why_not_resolved": None,
                 "needs_human_review": resolved_res.get("needs_human_review", False),
             }
@@ -1432,6 +1501,26 @@ def _build_field_entry(
             }
 
         if upgraded_res:
+            if upgraded_res.get("resolution_mode") == "qualified_resolution" and upgraded_res.get("resolved_value") is not None:
+                ctx_evidence = _build_context_evidence(context_packets)
+                ctx_evidence.extend(upgraded_res.get("supporting_evidence", []))
+                return {
+                    "state": "resolved_with_context",
+                    "value": upgraded_res.get("resolved_value"),
+                    "value_type": upgraded_res.get("resolved_value_type"),
+                    "source_stage": "llm_resolution",
+                    "confidence_band": upgraded_res.get("confidence_band", "medium"),
+                    "supporting_evidence": ctx_evidence,
+                    "supporting_pages": upgraded_res.get("supporting_pages", []),
+                    "tension_pages": upgraded_res.get("tension_pages", []),
+                    "packet_ids": [p.get("packet_id") for p in context_packets],
+                    "issue_ids": issue_ids,
+                    "explanation": upgraded_res.get("user_visible_explanation"),
+                    "context_qualification": upgraded_res.get("context_qualification"),
+                    "why_not_fully_certain": upgraded_res.get("why_not_fully_certain"),
+                    "why_not_resolved": upgraded_res.get("why_not_resolved"),
+                    "needs_human_review": upgraded_res.get("needs_human_review", False),
+                }
             # LLM upgraded context — stays context, not resolved truth
             ctx_evidence = _build_context_evidence(context_packets)
             ctx_evidence.extend(upgraded_res.get("supporting_evidence", []))
@@ -1495,7 +1584,7 @@ def _build_field_entry(
             page_text = ", ".join(f"p. {p}" for p in pages[:12]) if pages else "pagine non isolate"
             explanation = (
                 f"Per {_scope_label(scope_key)}, {_field_label(field_type)} resta bloccato: "
-                f"il bounded issue pack segnala {issue_type} ({_short_values(reason_codes) or 'blocco deterministico'}) "
+                f"il bounded issue pack segnala {_issue_type_label(issue_type)} "
                 f"sulle pagine {page_text}. Il dato non è promosso perché il blocco è una esclusione "
                 "deterministica, non una verità finale."
             )
@@ -1654,7 +1743,7 @@ def _determine_freeze_status(
                 state = entry.get("state")
                 if state in ("unresolved_explained", "blocked"):
                     return "frozen_with_unresolved"
-                if state == "context_only":
+                if state in ("context_only", "resolved_with_context"):
                     has_context = True
     if has_context:
         return "frozen_with_context_only"

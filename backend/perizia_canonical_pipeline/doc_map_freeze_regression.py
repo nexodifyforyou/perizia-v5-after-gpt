@@ -34,6 +34,7 @@ _KNOWN_STATES = {
     "deterministic_active",
     "context_only",
     "llm_resolved",
+    "resolved_with_context",
     "unresolved_explained",
     "blocked",
     "checked_no_reliable_basis",
@@ -45,6 +46,15 @@ _GENERIC_UNRESOLVED_RE = re.compile(
     r"verifica manuale|"
     r"Deterministic block with no issue filed|"
     r"Deterministic block; does not require LLM",
+    re.IGNORECASE,
+)
+
+_USER_VISIBLE_MACHINE_CODE_RE = re.compile(
+    r"\b(?:NON_QUANTIFICATO_IN_PERIZIA|NON_QUANTIFICATO|MISSING_EVIDENCE|"
+    r"SCOPE_AMBIGUITY|SCOPE AMBIGUITY|OCR_NOISE|FIELD_CONFLICT|FIELD CONFLICT|"
+    r"SUSPICIOUS_SILENCE|SUSPICIOUS SILENCE|GROUPED_CONTEXT_NEEDS_EXPLANATION|"
+    r"GROUPED CONTEXT NEEDS EXPLANATION|OCR_VARIANT_COLLISION|OCR VARIANT COLLISION|"
+    r"TABLE_RECAP_DUPLICATE_UNCLEAR|TABLE RECAP DUPLICATE UNCLEAR)\b",
     re.IGNORECASE,
 )
 
@@ -223,6 +233,29 @@ def _regression_checks(doc_map: Dict[str, Any]) -> List[str]:
                                 "missing-slot llm_resolved failed scope guard: "
                                 f"scope={scope_key} family={family} field={ft}: {failure}"
                             )
+                if state == "resolved_with_context":
+                    if entry.get("value") in (None, ""):
+                        errors.append(
+                            f"resolved_with_context entry has no value: scope={scope_key} field={ft}"
+                        )
+                    if not entry.get("context_qualification"):
+                        errors.append(
+                            f"resolved_with_context entry lacks context_qualification: scope={scope_key} field={ft}"
+                        )
+                    if not entry.get("why_not_fully_certain"):
+                        errors.append(
+                            f"resolved_with_context entry lacks why_not_fully_certain: scope={scope_key} field={ft}"
+                        )
+                    pages = set(entry.get("supporting_pages") or []) | set(entry.get("tension_pages") or [])
+                    pages |= {
+                        ev.get("page")
+                        for ev in entry.get("supporting_evidence", [])
+                        if isinstance(ev, dict) and isinstance(ev.get("page"), int)
+                    }
+                    if not any(isinstance(p, int) for p in pages):
+                        errors.append(
+                            f"resolved_with_context entry has no page anchors: scope={scope_key} field={ft}"
+                        )
                 # context_only must NOT have a non-null value masquerading as truth
                 if state == "context_only" and entry.get("value") is not None:
                     errors.append(
@@ -241,6 +274,11 @@ def _regression_checks(doc_map: Dict[str, Any]) -> List[str]:
                     if _GENERIC_UNRESOLVED_RE.search(explanation):
                         errors.append(
                             f"unresolved_explained entry has generic explanation: "
+                            f"scope={scope_key} field={ft}"
+                        )
+                    if _USER_VISIBLE_MACHINE_CODE_RE.search(explanation):
+                        errors.append(
+                            f"unresolved_explained entry exposes machine code in explanation: "
                             f"scope={scope_key} field={ft}"
                         )
                     pages = {
@@ -262,6 +300,11 @@ def _regression_checks(doc_map: Dict[str, Any]) -> List[str]:
                     if not explanation.strip() or _GENERIC_UNRESOLVED_RE.search(explanation):
                         errors.append(
                             f"blocked entry has missing/generic explanation: "
+                            f"scope={scope_key} field={ft}"
+                        )
+                    if _USER_VISIBLE_MACHINE_CODE_RE.search(explanation):
+                        errors.append(
+                            f"blocked entry exposes machine code in explanation: "
                             f"scope={scope_key} field={ft}"
                         )
                     pages = {
@@ -311,6 +354,11 @@ def _regression_checks(doc_map: Dict[str, Any]) -> List[str]:
                 f"unresolved_item has missing/generic why_not_resolved: "
                 f"scope={sk} family={ff} field={ft}"
             )
+        if _USER_VISIBLE_MACHINE_CODE_RE.search(why):
+            errors.append(
+                f"unresolved_item exposes machine code in why_not_resolved: "
+                f"scope={sk} family={ff} field={ft}"
+            )
         pages = item.get("source_pages")
         if not isinstance(pages, list) or not any(isinstance(p, int) for p in pages):
             errors.append(
@@ -328,6 +376,11 @@ def _regression_checks(doc_map: Dict[str, Any]) -> List[str]:
                 f"blocked_item has missing/generic explanation: "
                 f"scope={item.get('scope_key')} family={item.get('field_family')} field={item.get('field_type')}"
             )
+        if _USER_VISIBLE_MACHINE_CODE_RE.search(explanation):
+            errors.append(
+                f"blocked_item exposes machine code in explanation: "
+                f"scope={item.get('scope_key')} family={item.get('field_family')} field={item.get('field_type')}"
+            )
         pages = item.get("source_pages")
         if not isinstance(pages, list) or not any(isinstance(p, int) for p in pages):
             errors.append(
@@ -342,6 +395,11 @@ def _regression_checks(doc_map: Dict[str, Any]) -> List[str]:
         if not g.get("user_visible_explanation"):
             errors.append(
                 f"grouped_llm_explanation entry has no user_visible_explanation: "
+                f"scope={g.get('scope_key')} field_type={g.get('field_type')}"
+            )
+        if _USER_VISIBLE_MACHINE_CODE_RE.search(str(g.get("user_visible_explanation") or "")):
+            errors.append(
+                f"grouped_llm_explanation exposes machine code: "
                 f"scope={g.get('scope_key')} field_type={g.get('field_type')}"
             )
 
@@ -362,7 +420,7 @@ def _regression_checks(doc_map: Dict[str, Any]) -> List[str]:
             .get("valore_stima_raw")
         )
         if safe and safe.get("source_stage") == "missing_slot_escalation":
-            if safe.get("state") != "llm_resolved" or safe.get("value") != "€ 231.140,00":
+            if safe.get("state") not in {"llm_resolved", "resolved_with_context"} or safe.get("value") != "€ 231.140,00":
                 errors.append(
                     "Mantova safe valuation regressed: bene:unico/4 valore_stima_raw "
                     "missing-slot escalation no longer freezes the Bene-4-safe value"
@@ -453,6 +511,7 @@ def main() -> None:
             f"{unreadable_str}{warn_str} "
             f"active={sc.get('deterministic_active', 0)} "
             f"llm_res={sc.get('llm_resolved', 0)} "
+            f"resolved_ctx={sc.get('resolved_with_context', 0)} "
             f"unresolved={sc.get('unresolved_explained', 0)} "
             f"context={sc.get('context_only', 0)} "
             f"blocked={sc.get('blocked', 0)} "

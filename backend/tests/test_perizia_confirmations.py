@@ -729,8 +729,8 @@ def test_qualitative_only_burden_remains_qualitative_when_amount_is_unsupported(
     result = _build_result_with_money_box_items(pages, mutate)
     item_e = next(item for item in result["money_box"]["items"] if item["code"] == "E")
     assert item_e["type"] == "QUALITATIVE"
-    assert item_e["stima_euro"] == "TBD"
-    assert result["money_box"]["total_extra_costs"]["min"] == "NON_QUANTIFICATO_IN_PERIZIA"
+    assert item_e["stima_euro"] is None
+    assert result["money_box"]["total_extra_costs"]["min"] is None
 
 
 def test_weak_evidence_does_not_generate_fake_numeric_total():
@@ -751,8 +751,8 @@ def test_weak_evidence_does_not_generate_fake_numeric_total():
         ),
     )
     item_a = next(item for item in result["money_box"]["items"] if item["code"] == "A")
-    assert item_a["stima_euro"] == "TBD"
-    assert result["money_box"]["total_extra_costs"]["min"] == "NON_QUANTIFICATO_IN_PERIZIA"
+    assert item_a["stima_euro"] is None
+    assert result["money_box"]["total_extra_costs"]["min"] is None
 
 
 def test_irrelevant_or_seller_side_amount_does_not_mix_into_buyer_money_box():
@@ -773,8 +773,8 @@ def test_irrelevant_or_seller_side_amount_does_not_mix_into_buyer_money_box():
         ),
     )
     item_a = next(item for item in result["money_box"]["items"] if item["code"] == "A")
-    assert item_a["stima_euro"] == "TBD"
-    assert result["money_box"]["total_extra_costs"]["min"] == "NON_QUANTIFICATO_IN_PERIZIA"
+    assert item_a["stima_euro"] is None
+    assert result["money_box"]["total_extra_costs"]["min"] is None
 
 
 def test_broad_wording_variants_are_recognized_when_linkage_is_strong():
@@ -817,8 +817,8 @@ def test_broad_wording_variants_do_not_create_false_numeric_mapping_when_linkage
         )
     result = _build_result_with_money_box_items(pages, mutate)
     item_e = next(item for item in result["money_box"]["items"] if item["code"] == "E")
-    assert item_e["stima_euro"] == "TBD"
-    assert result["money_box"]["total_extra_costs"]["min"] == "NON_QUANTIFICATO_IN_PERIZIA"
+    assert item_e["stima_euro"] is None
+    assert result["money_box"]["total_extra_costs"]["min"] is None
 
 
 def test_customer_facing_money_box_structure_remains_usable():
@@ -1542,7 +1542,7 @@ def test_money_box_contract_remains_usable_after_condo_suppression():
     assert result["money_box"]["policy"] == "CONSERVATIVE"
     assert isinstance(result["money_box"]["items"], list)
     assert isinstance(result["money_box"].get("qualitative_burdens", []), list)
-    assert result["money_box"]["total_extra_costs"]["min"] == "NON_QUANTIFICATO_IN_PERIZIA"
+    assert result["money_box"]["total_extra_costs"]["min"] is None
 
 
 def test_non_condo_money_box_behavior_remains_conservative():

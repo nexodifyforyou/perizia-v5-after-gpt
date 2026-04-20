@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 import argparse
 import os
-import re
 import subprocess
 import sys
 from pathlib import Path
@@ -79,15 +78,7 @@ def main() -> None:
         failures.append("Decisione Rapida header missing")
 
     if "TBD" in text:
-        total_lines = re.findall(r"Totale\s*\(min\)[^\n]*", text, flags=re.IGNORECASE)
-        if not total_lines:
-            failures.append("Totale (min) line missing")
-        else:
-            total_line = total_lines[0]
-            if "TBD" not in total_line.upper():
-                failures.append(f"Totale (min) is not TBD when TBD items exist: {total_line.strip()}")
-            if re.search(r"\b0\b", total_line) and "TBD" not in total_line.upper():
-                failures.append(f"Totale (min) shows 0 with TBD items: {total_line.strip()}")
+        failures.append("PDF contains forbidden raw TBD placeholder")
 
     if analysis_id == "analysis_51bae75af061" and "Usi civici" not in text:
         failures.append("Usi civici missing in Legal Killers for analysis_51bae75af061")

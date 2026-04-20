@@ -10,6 +10,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 import perizia_agents.agibilita_agent as agibilita_agent
 import perizia_runtime.runtime as verifier_runtime_module
+from perizia_canonical_pipeline.doc_map_freeze import _build_field_entry
+from perizia_canonical_pipeline.llm_resolution_pack import _validate_resolution
 from perizia_ingest.readability_gate import READABLE_BUT_EXTRACTION_BAD, READABLE_DOCUMENT, UNREADABLE_FROM_AVAILABLE_SURFACES
 from perizia_qa.fixture_runner import run_named_fixture
 from perizia_runtime.evidence_mode import DEGRADED_TEXT, STOP_UNREADABLE, TEXT_FIRST
@@ -128,6 +130,120 @@ def test_structure_agent_discovers_single_lot_single_bene_scope_tree():
     assert scopes["lotto:unico"]["parent_scope_id"] == "document_root"
     assert scopes["bene:1"]["parent_scope_id"] == "lotto:unico"
     assert scopes["bene:1"]["metadata"]["ownership_method"] == "nearest_lotto_heading"
+
+
+def test_runtime_propagates_full_freeze_contract_into_result(monkeypatch):
+    contract = {
+        "fields": {
+            "field::document::extra_costs": {
+                "state": "unresolved_explained",
+                "field_type": "extra_costs",
+                "source_pages": [3],
+                "explanation": "La perizia menziona il costo, ma non fornisce un importo finale sicuro.",
+                "why_not_resolved": "Il pacchetto bounded non contiene un importo normalizzato conclusivo.",
+                "confidence_band": "low",
+                "needs_human_review": True,
+            }
+        },
+        "unresolved_items": [],
+        "blocked_items": [],
+        "grouped_llm_explanations": [{"field_family": "extra_costs", "user_visible_explanation": "copy"}],
+    }
+    monkeypatch.setattr(verifier_runtime_module, "_load_freeze_contract", lambda _: contract)
+    pages = [{"page_number": 1, "text": "Documento sintetico con testo sufficiente per il controllo di leggibilita. Lotto unico e dati disponibili."}]
+    _force_readability_mode(monkeypatch, pages, READABLE_DOCUMENT)
+    payload = run_quality_verifier(
+        analysis_id="freeze_contract_runtime",
+        result={"field_states": {}, "pdf_sha256": "abc"},
+        pages=pages,
+        full_text=pages[0]["text"],
+        pdf_sha256="abc",
+    )
+    result = {}
+    apply_verifier_to_result(result, payload)
+
+    assert result["canonical_freeze_contract"]["fields"]["field::document::extra_costs"]["state"] == "unresolved_explained"
+    assert result["canonical_freeze_explanations"][0]["field_family"] == "extra_costs"
+
+
+def test_llm_validation_preserves_qualified_resolution_as_context_value():
+    issue = {
+        "issue_id": "case::occupancy::0001",
+        "case_key": "case",
+        "field_family": "occupancy",
+        "field_type": "occupancy_status_raw",
+        "lot_id": "1",
+        "issue_type": "GROUPED_CONTEXT_NEEDS_EXPLANATION",
+        "candidate_values": ["LIBERO"],
+        "source_pages": [12, 15],
+        "supporting_candidates": [{"extracted_value": "LIBERO", "page": 12, "quote": "Lotto 1 risulta libero"}],
+        "local_text_windows": [{"page": 15, "text": "Liberazione a cura della procedura e occupazione saltuaria non opponibile"}],
+        "shell_quotes": ["Lotto 1 risulta libero"],
+    }
+    raw = {
+        "llm_outcome": "upgraded_context",
+        "resolution_mode": "qualified_resolution",
+        "resolved_value": "LIBERO",
+        "resolved_value_type": "occupancy_status_raw",
+        "context_qualification": "Libero, con nota su occupazione saltuaria e liberazione a cura della procedura.",
+        "why_not_fully_certain": "Una resa come solo LIBERO perderebbe la qualifica indicata a pagina 15.",
+        "why_not_resolved": "Il valore è usabile solo con qualifica.",
+        "user_visible_explanation": "Per Lotto 1, stato di occupazione: il passaggio “Lotto 1 risulta libero” sostiene LIBERO, ma pagina 15 richiede contesto su liberazione a cura della procedura.",
+        "source_pages": [12, 15],
+        "supporting_pages": [12],
+        "tension_pages": [15],
+        "confidence_band": "medium",
+        "needs_human_review": True,
+    }
+
+    resolution = _validate_resolution(issue, raw, "test", "model")
+
+    assert resolution["llm_outcome"] == "upgraded_context"
+    assert resolution["resolution_mode"] == "qualified_resolution"
+    assert resolution["resolved_value"] == "LIBERO"
+    assert resolution["context_qualification"]
+    assert resolution["why_not_fully_certain"]
+
+
+def test_freeze_maps_qualified_resolution_to_resolved_with_context():
+    issue = {
+        "issue_id": "case::occupancy::0001",
+        "field_type": "occupancy_status_raw",
+        "issue_type": "GROUPED_CONTEXT_NEEDS_EXPLANATION",
+        "needs_llm": True,
+    }
+    resolution = {
+        "issue_id": issue["issue_id"],
+        "llm_outcome": "upgraded_context",
+        "resolution_mode": "qualified_resolution",
+        "resolved_value": "LIBERO",
+        "resolved_value_type": "occupancy_status_raw",
+        "confidence_band": "medium",
+        "supporting_evidence": [{"page": 12, "quote": "Lotto 1 risulta libero"}],
+        "supporting_pages": [12],
+        "tension_pages": [15],
+        "user_visible_explanation": "Libero con qualifica da verificare sulle pagine 12 e 15.",
+        "context_qualification": "Libero, ma con qualifica su liberazione e occupazione saltuaria.",
+        "why_not_fully_certain": "Il valore nudo perderebbe il contesto della pagina 15.",
+        "why_not_resolved": "Il valore richiede qualifica.",
+        "needs_human_review": True,
+    }
+
+    entry = _build_field_entry(
+        scope_key="lot:1",
+        field_type="occupancy_status_raw",
+        active_packets=[],
+        context_packets=[],
+        blocked_zones=[],
+        issues=[issue],
+        resolutions=[resolution],
+        warnings=[],
+    )
+
+    assert entry["state"] == "resolved_with_context"
+    assert entry["value"] == "LIBERO"
+    assert entry["context_qualification"]
+    assert entry["why_not_fully_certain"]
 
 
 def test_structure_agent_discovers_multiple_lotto_scopes():
@@ -2754,3 +2870,4 @@ def test_vidigulfo_r2_api_payload_address_and_money_box_are_clean():
     ]
     assert 17809.69 not in numeric_amounts
     assert 97321.61 not in numeric_amounts
+

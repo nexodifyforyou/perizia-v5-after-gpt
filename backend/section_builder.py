@@ -530,9 +530,9 @@ def _integrate_money_box_cost_items(result: Dict[str, Any], money_candidates: Li
 
     if has_unknown:
         money_box["total_extra_costs"] = {
-            "range": {"min": "TBD", "max": "TBD"},
+            "range": {"min": None, "max": None},
             "max_is_open": True,
-            "note": "TBD because one or more cost items are unspecified",
+            "note": None,
         }
     else:
         money_box["total_extra_costs"] = {

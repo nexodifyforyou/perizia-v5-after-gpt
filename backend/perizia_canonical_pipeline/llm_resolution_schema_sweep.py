@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 from pathlib import Path
 from typing import Any, Dict, List
 
@@ -13,6 +14,14 @@ from .llm_resolution_pack import _explanation_has_case_shape
 
 DEFAULT_RUNS_ROOT = Path("/srv/perizia/_qa/canonical_pipeline/runs")
 DEFAULT_SUMMARY_PATH = Path("/srv/perizia/_qa/canonical_pipeline/llm_resolution_schema_sweep_summary.json")
+_USER_VISIBLE_MACHINE_CODE_RE = re.compile(
+    r"\b(?:NON_QUANTIFICATO_IN_PERIZIA|NON_QUANTIFICATO|MISSING_EVIDENCE|"
+    r"SCOPE_AMBIGUITY|SCOPE AMBIGUITY|OCR_NOISE|FIELD_CONFLICT|FIELD CONFLICT|"
+    r"SUSPICIOUS_SILENCE|SUSPICIOUS SILENCE|GROUPED_CONTEXT_NEEDS_EXPLANATION|"
+    r"GROUPED CONTEXT NEEDS EXPLANATION|OCR_VARIANT_COLLISION|OCR VARIANT COLLISION|"
+    r"TABLE_RECAP_DUPLICATE_UNCLEAR|TABLE RECAP DUPLICATE UNCLEAR)\b",
+    re.IGNORECASE,
+)
 
 
 def _load_json(path: Path) -> Any:
@@ -57,6 +66,7 @@ def scan_llm_resolution_pack_artifacts(runs_root: Path = DEFAULT_RUNS_ROOT) -> D
             resolution_count += 1
             issue_id = str(resolution.get("issue_id") or "")
             outcome = resolution.get("llm_outcome")
+            resolution_mode = resolution.get("resolution_mode")
             resolved_value = resolution.get("resolved_value")
             why_not_resolved = resolution.get("why_not_resolved")
             user_visible_explanation = str(resolution.get("user_visible_explanation") or "").strip()
@@ -86,13 +96,36 @@ def scan_llm_resolution_pack_artifacts(runs_root: Path = DEFAULT_RUNS_ROOT) -> D
                     "detail": "resolved requires resolved_value",
                 })
 
-            if outcome == "upgraded_context" and resolved_value is not None:
+            if outcome == "upgraded_context" and resolved_value is not None and resolution_mode != "qualified_resolution":
                 violations.append({
                     "case_key": case_key,
                     "issue_id": issue_id,
                     "violation": "upgraded_context_has_resolved_value",
-                    "detail": "upgraded_context must not carry resolved_value",
+                    "detail": "upgraded_context may carry resolved_value only for qualified_resolution",
                 })
+
+            if resolution_mode == "qualified_resolution":
+                if resolved_value is None:
+                    violations.append({
+                        "case_key": case_key,
+                        "issue_id": issue_id,
+                        "violation": "qualified_resolution_missing_value",
+                        "detail": "qualified_resolution requires a safe best value",
+                    })
+                if not str(resolution.get("context_qualification") or "").strip():
+                    violations.append({
+                        "case_key": case_key,
+                        "issue_id": issue_id,
+                        "violation": "qualified_resolution_missing_context",
+                        "detail": "qualified_resolution requires context_qualification",
+                    })
+                if not str(resolution.get("why_not_fully_certain") or "").strip():
+                    violations.append({
+                        "case_key": case_key,
+                        "issue_id": issue_id,
+                        "violation": "qualified_resolution_missing_uncertainty",
+                        "detail": "qualified_resolution requires why_not_fully_certain",
+                    })
 
             if issue and not _explanation_has_case_shape(issue, user_visible_explanation, outcome, resolved_value):
                 violations.append({
@@ -100,6 +133,15 @@ def scan_llm_resolution_pack_artifacts(runs_root: Path = DEFAULT_RUNS_ROOT) -> D
                     "issue_id": issue_id,
                     "violation": "user_visible_explanation_not_case_shaped",
                     "detail": "user_visible_explanation must include field, scope, and concrete bounded evidence",
+                })
+
+            user_text = " ".join(str(resolution.get(k) or "") for k in ("user_visible_explanation", "why_not_resolved"))
+            if _USER_VISIBLE_MACHINE_CODE_RE.search(user_text):
+                violations.append({
+                    "case_key": case_key,
+                    "issue_id": issue_id,
+                    "violation": "user_visible_machine_code",
+                    "detail": "user-visible unresolved text exposes internal machine reason or issue codes",
                 })
 
     by_type: Dict[str, int] = {}

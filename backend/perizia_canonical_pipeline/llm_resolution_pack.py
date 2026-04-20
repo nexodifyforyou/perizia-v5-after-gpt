@@ -34,6 +34,12 @@ MAX_OPENAI_RETRIES = 2
 DEFAULT_RETRY_DELAY_SECONDS = 1.0
 MAX_RETRY_DELAY_SECONDS = 8.0
 ALLOWED_OUTCOMES = {"resolved", "unresolved_explained", "upgraded_context"}
+ALLOWED_RESOLUTION_MODES = {
+    "clean_resolution",
+    "qualified_resolution",
+    "true_unresolved",
+    "blocked",
+}
 FAMILY_PRIORITY = {
     "valuation": 0,
     "occupancy": 1,
@@ -61,6 +67,14 @@ GENERIC_EXPLANATION_PATTERNS = [
     "non viene mostrato un valore fisso",
     "caso lasciato irrisolto",
 ]
+USER_VISIBLE_MACHINE_CODE_RE = re.compile(
+    r"\b(?:NON_QUANTIFICATO_IN_PERIZIA|NON_QUANTIFICATO|MISSING_EVIDENCE|"
+    r"SCOPE_AMBIGUITY|SCOPE AMBIGUITY|OCR_NOISE|FIELD_CONFLICT|FIELD CONFLICT|"
+    r"SUSPICIOUS_SILENCE|SUSPICIOUS SILENCE|GROUPED_CONTEXT_NEEDS_EXPLANATION|"
+    r"GROUPED CONTEXT NEEDS EXPLANATION|OCR_VARIANT_COLLISION|OCR VARIANT COLLISION|"
+    r"TABLE_RECAP_DUPLICATE_UNCLEAR|TABLE RECAP DUPLICATE UNCLEAR)\b",
+    re.IGNORECASE,
+)
 
 
 class LLMResolutionUnavailable(RuntimeError):
@@ -161,20 +175,30 @@ def _issue_payload(issue: Dict) -> Dict:
     return {
         "issue_id": issue.get("issue_id"),
         "case_key": issue.get("case_key"),
+        "target_case_key": issue.get("target_case_key") or issue.get("case_key"),
+        "target_field": issue.get("target_field") or issue.get("field_type"),
+        "target_scope": issue.get("target_scope") or issue.get("scope_metadata"),
         "field_family": issue.get("field_family"),
         "field_type": issue.get("field_type"),
         "lot_id": issue.get("lot_id"),
         "bene_id": issue.get("bene_id"),
         "issue_type": issue.get("issue_type"),
         "deterministic_status": issue.get("deterministic_status"),
+        "current_ambiguity_summary": issue.get("current_ambiguity_summary"),
         "reason_codes": issue.get("reason_codes"),
         "candidate_values": issue.get("candidate_values"),
         "blocked_values": issue.get("blocked_values"),
+        "known_candidates": issue.get("known_candidates"),
+        "blocked_reasons": issue.get("blocked_reasons"),
         "source_line_indices": issue.get("source_line_indices"),
         "shell_quotes": issue.get("shell_quotes"),
+        "supporting_evidence_snippets": issue.get("supporting_evidence_snippets"),
         "supporting_candidates": issue.get("supporting_candidates"),
         "supporting_blocked_entries": issue.get("supporting_blocked_entries"),
         "source_pages": issue.get("source_pages"),
+        "relevant_pages": issue.get("relevant_pages"),
+        "anchor_pages": issue.get("anchor_pages"),
+        "recap_pages": issue.get("recap_pages"),
         "local_text_windows": issue.get("local_text_windows"),
         "table_zone_types": issue.get("table_zone_types"),
         "scope_metadata": issue.get("scope_metadata"),
@@ -185,11 +209,17 @@ def _issue_payload(issue: Dict) -> Dict:
 
 def _system_prompt() -> str:
     return (
-        "You are a bounded clarification layer for PeriziaScan canonical artifacts. "
-        "Use only the supplied issue packet evidence. Do not re-extract the document, "
-        "do not summarize the perizia, do not make investment recommendations, and do "
-        "not invent values. Resolve to one value only when a supplied candidate/text "
-        "window strongly supports it. Otherwise keep it unresolved and explain why. "
+        "You are analyzing a real-estate auction appraisal issue for a single target "
+        "field within a specific scope. Your job is not to summarize the whole "
+        "document and not to invent certainty. Reason only about the supplied bounded "
+        "issue pack. You may return only resolved, upgraded_context, or "
+        "unresolved_explained. Classify the case as clean_resolution, "
+        "qualified_resolution, true_unresolved, or blocked. Use only the supplied "
+        "evidence, respect the target scope, do not merge across lots/beni unless the "
+        "issue pack proves it is safe, mention exact pages worth checking, and never "
+        "put a fake value into unresolved output. If one best conclusion is safe but "
+        "needs mandatory qualification, return qualified_resolution with the value and "
+        "context qualification. "
         "Return only valid JSON."
     )
 
@@ -198,11 +228,18 @@ def _user_prompt(issue: Dict) -> str:
     schema = {
         "issue_id": "same issue id",
         "llm_outcome": "resolved | unresolved_explained | upgraded_context",
+        "outcome": "resolved | unresolved_explained | upgraded_context",
+        "resolution_mode": "clean_resolution | qualified_resolution | true_unresolved | blocked",
         "resolved_value": "string or null",
         "resolved_value_type": "field value type or null",
+        "context_qualification": "Italian qualification text or null",
+        "why_not_fully_certain": "Italian text or null",
         "confidence_band": "high | medium | low",
         "user_visible_explanation": "short Italian explanation grounded in evidence",
         "supporting_evidence": [{"page": 0, "quote": "short quote from supplied evidence", "reason": "why it supports outcome"}],
+        "evidence_pages": [0],
+        "supporting_pages": [0],
+        "tension_pages": [0],
         "rejected_alternatives": [{"value": "string", "reason": "why rejected"}],
         "why_not_resolved": "required when unresolved_explained or upgraded_context, else null",
         "needs_human_review": True,
@@ -213,6 +250,10 @@ def _user_prompt(issue: Dict) -> str:
             "task": "Resolve this one deterministic issue packet if, and only if, evidence is strong.",
             "strict_rules": [
                 "Never output a resolved_value that is not present in supporting candidates or local text windows.",
+                "For clean_resolution, provide resolved_value and rationale without material qualification.",
+                "For qualified_resolution, provide resolved_value, context_qualification, why_not_fully_certain, supporting_pages, and tension_pages.",
+                "For true_unresolved, leave resolved_value null and provide why_not_resolved plus user_visible_explanation.",
+                "For blocked, leave resolved_value null and explain the structural blockage.",
                 "For FIELD_CONFLICT choose resolved only if the supplied snippets clearly say one value is the final/current value.",
                 "For SUSPICIOUS_SILENCE or GROUPED_CONTEXT_NEEDS_EXPLANATION prefer upgraded_context when the text gives context but not a fixed field value.",
                 "For SCOPE_AMBIGUITY prefer unresolved_explained unless the supplied windows clearly assign scope.",
@@ -509,6 +550,18 @@ def _values_phrase(issue: Dict) -> str:
     return " / ".join(values)
 
 
+def _issue_type_label(issue_type: object) -> str:
+    labels = {
+        "FIELD_CONFLICT": "valori concorrenti",
+        "SUSPICIOUS_SILENCE": "assenza sospetta di un dato conclusivo",
+        "SCOPE_AMBIGUITY": "ambiguita di ambito tra bene e lotto",
+        "GROUPED_CONTEXT_NEEDS_EXPLANATION": "contesto raggruppato da spiegare",
+        "OCR_VARIANT_COLLISION": "varianti testuali dovute alla qualita OCR",
+        "TABLE_RECAP_DUPLICATE_UNCLEAR": "recap e tabella non allineati in modo sicuro",
+    }
+    return labels.get(str(issue_type or "").upper(), "ambiguita deterministica")
+
+
 def _is_generic_explanation(text: str) -> bool:
     norm = _normalize_for_match(text)
     return any(pattern in norm for pattern in GENERIC_EXPLANATION_PATTERNS)
@@ -542,7 +595,7 @@ def _evidence_shaped_explanation(issue: Dict, raw_resolution: Dict, outcome: str
     quotes = _issue_quotes(issue)
     evidence = _quote_phrase(quotes)
     values = _values_phrase(issue)
-    issue_type = issue.get("issue_type")
+    issue_type = _issue_type_label(issue.get("issue_type"))
 
     if outcome == "resolved":
         alternatives = raw_resolution.get("rejected_alternatives")
@@ -598,7 +651,7 @@ def _fallback_why_not_resolved(issue: Dict, raw_resolution: Dict, outcome: str) 
     if outcome == "upgraded_context":
         return "Il pacchetto contiene contesto utile, ma non un valore normalizzato sicuro."
 
-    issue_type = issue.get("issue_type") or "issue"
+    issue_type = _issue_type_label(issue.get("issue_type"))
     field_type = issue.get("field_type") or issue.get("field_family") or "campo"
     values = sorted(_candidate_values(issue))
     if values:
@@ -614,14 +667,33 @@ def _fallback_why_not_resolved(issue: Dict, raw_resolution: Dict, outcome: str) 
 
 def _validate_resolution(issue: Dict, raw_resolution: Dict, provider: str, model: str) -> Dict:
     warnings: List[str] = []
-    outcome = raw_resolution.get("llm_outcome")
+    outcome = raw_resolution.get("llm_outcome") or raw_resolution.get("outcome")
     if outcome not in ALLOWED_OUTCOMES:
         warnings.append(f"Invalid llm_outcome {outcome!r}; downgraded to unresolved_explained.")
         outcome = "unresolved_explained"
+    resolution_mode = raw_resolution.get("resolution_mode")
+    if resolution_mode not in ALLOWED_RESOLUTION_MODES:
+        if outcome == "resolved":
+            resolution_mode = "clean_resolution"
+        elif outcome == "upgraded_context":
+            resolution_mode = "qualified_resolution" if raw_resolution.get("resolved_value") else "true_unresolved"
+        else:
+            resolution_mode = "true_unresolved"
+        warnings.append("resolution_mode missing or invalid; inferred from outcome and value.")
     resolved_value = raw_resolution.get("resolved_value")
     evidence_text = _normalize_for_match(_all_evidence_text(issue))
     candidate_values = _candidate_values(issue)
-    if outcome == "resolved":
+    if outcome == "upgraded_context" and resolution_mode == "qualified_resolution" and resolved_value is not None:
+        value_text = str(resolved_value).strip()
+        value_ok = bool(value_text) and (
+            value_text in candidate_values or _normalize_for_match(value_text) in evidence_text
+        )
+        if not value_ok:
+            warnings.append("Qualified resolved value was not present in bounded evidence; downgraded.")
+            outcome = "unresolved_explained"
+            resolution_mode = "true_unresolved"
+            resolved_value = None
+    elif outcome == "resolved":
         value_text = "" if resolved_value is None else str(resolved_value).strip()
         value_ok = bool(value_text) and (
             value_text in candidate_values or _normalize_for_match(value_text) in evidence_text
@@ -629,9 +701,12 @@ def _validate_resolution(issue: Dict, raw_resolution: Dict, provider: str, model
         if not value_ok:
             warnings.append("Resolved value was not present in bounded evidence; downgraded.")
             outcome = "unresolved_explained"
+            resolution_mode = "true_unresolved"
             resolved_value = None
     else:
         resolved_value = None
+        if resolution_mode == "clean_resolution":
+            resolution_mode = "true_unresolved"
 
     source_pages = raw_resolution.get("source_pages") or issue.get("source_pages") or []
     if not isinstance(source_pages, list):
@@ -643,7 +718,7 @@ def _validate_resolution(issue: Dict, raw_resolution: Dict, provider: str, model
     supporting_evidence = raw_resolution.get("supporting_evidence") if isinstance(raw_resolution.get("supporting_evidence"), list) else []
     warnings.extend(_evidence_page_warnings(issue, supporting_evidence))
     resolved_value_type = raw_resolution.get("resolved_value_type")
-    if outcome == "resolved":
+    if outcome == "resolved" or (outcome == "upgraded_context" and resolution_mode == "qualified_resolution" and resolved_value is not None):
         if not resolved_value_type:
             resolved_value_type = issue.get("field_type")
     else:
@@ -653,19 +728,31 @@ def _validate_resolution(issue: Dict, raw_resolution: Dict, provider: str, model
     if outcome in {"unresolved_explained", "upgraded_context"} and not why_not_resolved:
         warnings.append(f"{outcome} response omitted why_not_resolved; populated from bounded issue packet.")
         why_not_resolved = _fallback_why_not_resolved(issue, raw_resolution, outcome)
+    elif why_not_resolved and USER_VISIBLE_MACHINE_CODE_RE.search(why_not_resolved):
+        warnings.append(f"{outcome} response exposed internal machine codes in why_not_resolved; populated from bounded issue packet.")
+        why_not_resolved = _fallback_why_not_resolved(issue, {}, outcome)
     user_visible_explanation = _optional_text(raw_resolution.get("user_visible_explanation"))
     if not user_visible_explanation or not _explanation_has_case_shape(issue, user_visible_explanation, outcome, resolved_value):
         warnings.append("user_visible_explanation was missing or too generic; populated from bounded issue packet.")
         user_visible_explanation = _evidence_shaped_explanation(issue, raw_resolution, outcome, resolved_value)
+    elif USER_VISIBLE_MACHINE_CODE_RE.search(user_visible_explanation):
+        warnings.append("user_visible_explanation exposed internal machine codes; populated from bounded issue packet.")
+        user_visible_explanation = _evidence_shaped_explanation(issue, {}, outcome, resolved_value)
 
     resolution = {
         "issue_id": issue["issue_id"],
         "llm_outcome": outcome,
+        "resolution_mode": resolution_mode,
         "resolved_value": resolved_value,
         "resolved_value_type": resolved_value_type,
+        "context_qualification": _optional_text(raw_resolution.get("context_qualification")),
+        "why_not_fully_certain": _optional_text(raw_resolution.get("why_not_fully_certain")),
         "confidence_band": raw_resolution.get("confidence_band") if raw_resolution.get("confidence_band") in {"high", "medium", "low"} else "low",
         "user_visible_explanation": user_visible_explanation,
         "supporting_evidence": supporting_evidence,
+        "evidence_pages": [p for p in (raw_resolution.get("evidence_pages") or source_pages) if p in _issue_pages(issue)],
+        "supporting_pages": [p for p in (raw_resolution.get("supporting_pages") or source_pages) if p in _issue_pages(issue)],
+        "tension_pages": [p for p in (raw_resolution.get("tension_pages") or []) if p in _issue_pages(issue)],
         "rejected_alternatives": raw_resolution.get("rejected_alternatives") if isinstance(raw_resolution.get("rejected_alternatives"), list) else [],
         "why_not_resolved": why_not_resolved if outcome in {"unresolved_explained", "upgraded_context"} else None,
         "needs_human_review": bool(raw_resolution.get("needs_human_review", True)),
@@ -678,6 +765,11 @@ def _validate_resolution(issue: Dict, raw_resolution: Dict, provider: str, model
         resolution["needs_human_review"] = True
     if resolution["llm_outcome"] == "upgraded_context" and not resolution["why_not_resolved"]:
         resolution["why_not_resolved"] = "Contesto utile, ma non valore finale normalizzabile."
+    if resolution["resolution_mode"] == "qualified_resolution":
+        if not resolution["context_qualification"]:
+            resolution["context_qualification"] = resolution["user_visible_explanation"]
+        if not resolution["why_not_fully_certain"]:
+            resolution["why_not_fully_certain"] = resolution["why_not_resolved"] or "Il valore richiede contesto qualificante dalle pagine del pacchetto."
     return resolution
 
 

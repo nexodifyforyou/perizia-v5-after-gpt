@@ -31,16 +31,16 @@ _CORPUS_REGISTRY_PATH = Path("/srv/perizia/_qa/canonical_pipeline/working_corpus
 _CORPUS_ARTIFACT_ROOT = Path("/srv/perizia/_qa/canonical_pipeline/runs")
 
 
-def _load_freeze_grouped_explanations(pdf_sha256: Optional[str]) -> List[Dict[str, Any]]:
+def _load_freeze_contract(pdf_sha256: Optional[str]) -> Dict[str, Any]:
     """
-    Look up the corpus registry by PDF sha256 and return grouped_llm_explanations
-    from the corresponding doc_map.json freeze artifact.
+    Look up the corpus registry by PDF sha256 and return the canonical
+    doc_map freeze contract for the matching case.
 
-    Returns empty list on any failure (missing registry, no match, missing artifact).
-    Never raises — this is a best-effort enrichment.
+    Returns an empty dict on any failure (missing registry, no match, missing
+    artifact). Never raises.
     """
     if not pdf_sha256:
-        return []
+        return {}
     try:
         registry = json.loads(_CORPUS_REGISTRY_PATH.read_text(encoding="utf-8"))
         case_key = next(
@@ -48,17 +48,43 @@ def _load_freeze_grouped_explanations(pdf_sha256: Optional[str]) -> List[Dict[st
             None,
         )
         if not case_key:
-            return []
+            return {}
         doc_map_path = _CORPUS_ARTIFACT_ROOT / case_key / "artifacts" / "doc_map.json"
         if not doc_map_path.exists():
-            return []
+            return {}
         doc_map = json.loads(doc_map_path.read_text(encoding="utf-8"))
-        return [
-            g for g in (doc_map.get("grouped_llm_explanations") or [])
-            if isinstance(g, dict)
-        ]
+        return {
+            "case_key": doc_map.get("case_key") or case_key,
+            "status": doc_map.get("status"),
+            "freeze_status": doc_map.get("freeze_status"),
+            "freeze_ready": doc_map.get("freeze_ready"),
+            "case_summary": copy.deepcopy(doc_map.get("case_summary") or {}),
+            "scope_index": copy.deepcopy(doc_map.get("scope_index") or {}),
+            "fields": copy.deepcopy(doc_map.get("fields") or {}),
+            "unresolved_items": copy.deepcopy(doc_map.get("unresolved_items") or []),
+            "blocked_items": copy.deepcopy(doc_map.get("blocked_items") or []),
+            "context_items": copy.deepcopy(doc_map.get("context_items") or []),
+            "grouped_llm_explanations": [
+                copy.deepcopy(g)
+                for g in (doc_map.get("grouped_llm_explanations") or [])
+                if isinstance(g, dict)
+            ],
+            "source_artifact": str(doc_map_path),
+        }
     except Exception:
-        return []
+        return {}
+
+
+def _load_freeze_grouped_explanations(pdf_sha256: Optional[str]) -> List[Dict[str, Any]]:
+    """
+    Backward-compatible helper for callers that still need only grouped
+    explanations. The canonical authority is _load_freeze_contract.
+
+    Returns empty list on any failure.
+    Never raises — this is a best-effort enrichment.
+    """
+    contract = _load_freeze_contract(pdf_sha256)
+    return contract.get("grouped_llm_explanations", []) if isinstance(contract, dict) else []
 
 
 DEGRADED_SOURCE_GUARD = "degraded_source_text_only"
@@ -246,9 +272,12 @@ def run_quality_verifier(*, analysis_id: str, result: Dict[str, Any], pages: Lis
         "reasoning_status": "NORMAL" if evidence_mode["evidence_mode"] == TEXT_FIRST else "DEGRADED_TEXT_CAUTION",
         }
     )
-    freeze_grouped = _load_freeze_grouped_explanations(pdf_sha256)
-    if freeze_grouped:
-        payload_dict["canonical_case"]["grouped_llm_explanations"] = freeze_grouped
+    freeze_contract = _load_freeze_contract(pdf_sha256)
+    if freeze_contract:
+        payload_dict["canonical_case"]["freeze_contract"] = freeze_contract
+        freeze_grouped = freeze_contract.get("grouped_llm_explanations", [])
+        if freeze_grouped:
+            payload_dict["canonical_case"]["grouped_llm_explanations"] = freeze_grouped
     if evidence_mode["evidence_mode"] == DEGRADED_TEXT:
         payload_dict["verifier_cautions"] = _degraded_text_cautions()
         _apply_degraded_packaging(payload_dict)
@@ -396,6 +425,9 @@ def apply_verifier_to_result(result: Dict[str, Any], verifier_payload: Dict[str,
     summary_bundle = canonical.get("summary_bundle", {}) if isinstance(canonical.get("summary_bundle"), dict) else {}
 
     result["verifier_runtime"] = verifier_payload
+    freeze_contract = canonical.get("freeze_contract")
+    if isinstance(freeze_contract, dict) and freeze_contract:
+        result["canonical_freeze_contract"] = copy.deepcopy(freeze_contract)
     freeze_grouped = canonical.get("grouped_llm_explanations")
     if isinstance(freeze_grouped, list) and freeze_grouped:
         result["canonical_freeze_explanations"] = freeze_grouped

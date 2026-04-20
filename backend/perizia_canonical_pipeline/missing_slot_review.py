@@ -39,6 +39,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Set, Tuple
@@ -593,6 +594,9 @@ def run_missing_slot_escalation(
     Per-slot LLM call failures are caught and recorded. Hard non-retryable
     provider failures stop later escalation calls for this case.
     """
+    if os.environ.get("CANONICAL_DISABLE_LLM_ESCALATION") == "1":
+        return {}
+
     from .llm_resolution_pack import (
         discover_openai_config,
         resolve_single_issue,
