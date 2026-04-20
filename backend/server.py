@@ -6102,16 +6102,91 @@ def _apply_field_overrides(result: Dict[str, Any], overrides: Dict[str, Any], fi
     _apply_headline_states_to_headers(result, states)
     _apply_decision_states_to_result(result, states)
 
+def _normalize_primary_lot_quota(*values: Any) -> Optional[str]:
+    for raw in values:
+        text = _normalize_headline_text(str(raw or ""))
+        if not text:
+            continue
+        quota_match = re.search(r"\bquota\s+di\s+(\d+\s*/\s*\d+)\b", text, re.I)
+        if quota_match:
+            return quota_match.group(1).replace(" ", "")
+        right_match = re.search(r"\b(?:propriet[àa]|usufrutto|nuda\s+propriet[àa])\s+(\d+\s*/\s*\d+)\b", text, re.I)
+        if right_match:
+            return right_match.group(1).replace(" ", "")
+        any_match = re.search(r"\b(\d+\s*/\s*\d+)\b", text)
+        if any_match:
+            return any_match.group(1).replace(" ", "")
+    return None
+
+
+def _normalize_lot_payload_aliases(lot: Dict[str, Any], lot_number: int) -> Dict[str, Any]:
+    lot_obj = lot if isinstance(lot, dict) else {}
+
+    if lot_obj.get("lot_id") in (None, "", "TBD", "NON SPECIFICATO IN PERIZIA"):
+        lot_obj["lot_id"] = str(lot_obj.get("lot_number") or lot_number)
+
+    if lot_obj.get("lot_number") in (None, "", "TBD"):
+        lot_obj["lot_number"] = lot_number
+
+    price_value = _as_float_or_none(
+        lot_obj.get("prezzo_base_asta")
+        if lot_obj.get("prezzo_base_asta") not in (None, "", "TBD", "NON SPECIFICATO IN PERIZIA")
+        else lot_obj.get("prezzo_base_value")
+    )
+    if price_value is not None:
+        lot_obj["prezzo_base_asta"] = float(price_value)
+        lot_obj["prezzo_base_value"] = float(price_value)
+
+    stima_value = _as_float_or_none(
+        lot_obj.get("valore_stima")
+        if lot_obj.get("valore_stima") not in (None, "", "TBD", "NON SPECIFICATO IN PERIZIA")
+        else lot_obj.get("valore_stima_eur")
+    )
+    if stima_value is not None:
+        lot_obj["valore_stima"] = int(round(float(stima_value)))
+        lot_obj["valore_stima_eur"] = int(round(float(stima_value)))
+
+    diritto_value = _normalize_headline_text(
+        str(
+            lot_obj.get("diritto")
+            or lot_obj.get("diritto_reale")
+            or ""
+        )
+    )
+    if diritto_value:
+        lot_obj["diritto"] = diritto_value
+        if lot_obj.get("diritto_reale") in (None, "", "TBD", "NON SPECIFICATO IN PERIZIA"):
+            lot_obj["diritto_reale"] = diritto_value
+
+    quota_value = _normalize_primary_lot_quota(lot_obj.get("quota"), lot_obj.get("diritto_reale"), lot_obj.get("diritto"))
+    if quota_value:
+        lot_obj["quota"] = quota_value
+
+    if lot_obj.get("titolo") in (None, "", "TBD", "NON SPECIFICATO IN PERIZIA"):
+        tipologia = _normalize_headline_text(str(lot_obj.get("tipologia") or ""))
+        if tipologia:
+            lot_obj["titolo"] = f"Lotto {lot_obj.get('lot_number') or lot_number} - {tipologia}"
+        else:
+            lot_obj["titolo"] = f"Lotto {lot_obj.get('lot_number') or lot_number}"
+
+    return lot_obj
+
+
 def _ensure_lot_contract(lot: Dict[str, Any], lot_number: int) -> Dict[str, Any]:
     lot_obj = dict(lot) if isinstance(lot, dict) else {}
     lot_obj.setdefault("lot_number", lot_number)
+    lot_obj.setdefault("lot_id", str(lot_obj.get("lot_number") or lot_number))
     lot_obj.setdefault("prezzo_base_eur", "TBD")
     lot_obj.setdefault("prezzo_base_value", None)
+    lot_obj.setdefault("prezzo_base_asta", None)
     lot_obj.setdefault("ubicazione", "TBD")
     lot_obj.setdefault("superficie_mq", "TBD")
     lot_obj.setdefault("superficie_catastale", None)
     lot_obj.setdefault("diritto_reale", "TBD")
+    lot_obj.setdefault("diritto", None)
     lot_obj.setdefault("quota", None)
+    lot_obj.setdefault("titolo", None)
+    lot_obj.setdefault("valore_stima", None)
     lot_obj.setdefault("occupancy_status", None)
     lot_obj.setdefault("stato_occupativo", None)
     lot_obj.setdefault("shared_rights_note", None)
@@ -6121,7 +6196,7 @@ def _ensure_lot_contract(lot: Dict[str, Any], lot_number: int) -> Dict[str, Any]
         if not isinstance(evidence.get(key), list):
             evidence[key] = []
     lot_obj["evidence"] = evidence
-    return lot_obj
+    return _normalize_lot_payload_aliases(lot_obj, lot_number)
 
 
 def _get_page_number(page_obj: Dict[str, Any]) -> int:
@@ -7598,7 +7673,7 @@ def _enrich_lots_from_sections(
                 if dep_pct >= 1.0:
                     lot["deprezzamento_percentuale"] = f"{dep_pct:.2f}"
 
-        lots[idx] = lot
+        lots[idx] = _normalize_lot_payload_aliases(lot, lot_num)
     return lots
 
 

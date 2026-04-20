@@ -193,6 +193,37 @@ def test_structure_agent_parents_bene_to_lotto_when_structure_supports_it():
     assert scopes["bene:3"]["parent_scope_id"] == "lotto:3"
 
 
+def test_multilot_69_live_api_lots_keep_lot_scoped_contract_fields():
+    import server  # type: ignore[import]
+
+    result, pages = _repo_fixture("multilot_69_2024")
+
+    # Simulate the customer-facing API read path, where persisted analyses are
+    # refreshed before being returned from /api/analysis/perizia/{analysis_id}.
+    server._refresh_customer_facing_result_on_read(
+        result,
+        pages,
+        analysis_id="multilot_69_2024",
+    )
+    live_payload = {"ok": True, "analysis_id": "multilot_69_2024", "result": result}
+    lots = live_payload["result"].get("lots")
+
+    assert isinstance(lots, list)
+    assert len(lots) == 3
+    assert [lot.get("lot_id") for lot in lots] == ["1", "2", "3"]
+    assert [lot.get("prezzo_base_asta") for lot in lots] == [64198.0, 84000.0, 224268.0]
+    assert [lot.get("valore_stima") for lot in lots] == [80248, 105000, 280336]
+    assert [lot.get("quota") for lot in lots] == ["1/1", "1/1", "1/1"]
+    assert all(lot.get("diritto") for lot in lots)
+    assert all(lot.get("titolo") for lot in lots)
+
+    # The document-level field_state may keep the selected first-lot value for
+    # backward compatibility, but it must not flatten over the per-lot facts.
+    assert (result.get("field_states") or {}).get("prezzo_base_asta", {}).get("value") == 64198.0
+    assert len({lot.get("prezzo_base_asta") for lot in lots}) == 3
+    assert len({lot.get("valore_stima") for lot in lots}) == 3
+
+
 def test_agibilita_negative_writes_to_bene_scope_first():
     result = {
         "field_states": {},
