@@ -6978,6 +6978,77 @@ def _sanitize_lot_conservative_outputs(result: Dict[str, Any]) -> None:
     result["section_3_money_box"] = copy.deepcopy(money_box)
 
 
+_VISIBLE_MACHINE_PLACEHOLDER_STRINGS = {
+    "TBD",
+    "NOT_SPECIFIED",
+    "NOT_SPECIFIED_IN_PERIZIA",
+    "NON_QUANTIFICATO",
+    "NON_QUANTIFICATO_IN_PERIZIA",
+}
+
+
+def _is_visible_machine_placeholder(value: Any) -> bool:
+    if not isinstance(value, str):
+        return False
+    text = value.strip()
+    upper = text.upper()
+    return upper in _VISIBLE_MACHINE_PLACEHOLDER_STRINGS or "TBD" in upper
+
+
+def _scrub_visible_machine_placeholders(result: Dict[str, Any]) -> int:
+    """
+    Final compatibility-map guard: visible API payloads must not leak raw legacy
+    placeholders. This only nulls placeholders; it does not synthesize meaning.
+    """
+    if not isinstance(result, dict):
+        return 0
+
+    def walk(node: Any) -> int:
+        count = 0
+        if isinstance(node, dict):
+            for key, value in list(node.items()):
+                if _is_visible_machine_placeholder(value):
+                    node[key] = None
+                    count += 1
+                else:
+                    count += walk(value)
+            return count
+        if isinstance(node, list):
+            for item in node:
+                count += walk(item)
+        return count
+
+    return walk(result)
+
+
+def _ensure_section_3_money_box_alias(result: Dict[str, Any]) -> None:
+    if not isinstance(result, dict):
+        return
+    if isinstance(result.get("section_3_money_box"), dict):
+        return
+    money_box = result.get("money_box")
+    if not isinstance(money_box, dict):
+        return
+    section3 = copy.deepcopy(money_box)
+    total = section3.get("total_extra_costs")
+    if isinstance(total, dict) and "totale_extra_budget" not in section3:
+        if isinstance(total.get("range"), dict):
+            section3["totale_extra_budget"] = {
+                "min": total["range"].get("min"),
+                "max": total["range"].get("max"),
+                "nota": total.get("note") or total.get("nota"),
+                "contract_metadata": copy.deepcopy(total.get("contract_metadata")),
+            }
+        else:
+            section3["totale_extra_budget"] = {
+                "min": total.get("min"),
+                "max": total.get("max"),
+                "nota": total.get("note") or total.get("nota"),
+                "contract_metadata": copy.deepcopy(total.get("contract_metadata")),
+            }
+    result["section_3_money_box"] = section3
+
+
 def _focused_cost_evidence_for_amount(evidence_list: List[Dict[str, Any]], amount: float) -> List[Dict[str, Any]]:
     normalized = _normalize_contract_evidence_list(evidence_list, max_items=2)
     if not normalized:
@@ -7470,6 +7541,12 @@ def _refresh_customer_facing_result_on_read(
 
     if analysis_id:
         result["user_messages"] = _build_user_messages(result, {}, analysis_id=analysis_id)
+    _ensure_section_3_money_box_alias(result)
+    scrubbed_placeholders = _scrub_visible_machine_placeholders(result)
+    if scrubbed_placeholders:
+        debug_obj = result.get("debug") if isinstance(result.get("debug"), dict) else {}
+        debug_obj["visible_machine_placeholders_scrubbed"] = scrubbed_placeholders
+        result["debug"] = debug_obj
 
 
 def _enrich_lots_from_sections(
@@ -15225,6 +15302,11 @@ async def analyze_perizia(request: Request, file: UploadFile = File(...)):
     if not offline_qa:
         await _enrich_summary_with_optional_llm(result, request_id)
     result["debug"] = debug_obj
+    _ensure_section_3_money_box_alias(result)
+    scrubbed_placeholders = _scrub_visible_machine_placeholders(result)
+    if scrubbed_placeholders:
+        debug_obj["visible_machine_placeholders_scrubbed"] = scrubbed_placeholders
+        result["debug"] = debug_obj
     logger.info(f"[{request_id}] assemble_output analysis_id={analysis_id}")
 
     # Create analysis record

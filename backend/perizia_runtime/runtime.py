@@ -31,6 +31,162 @@ _CORPUS_REGISTRY_PATH = Path("/srv/perizia/_qa/canonical_pipeline/working_corpus
 _CORPUS_ARTIFACT_ROOT = Path("/srv/perizia/_qa/canonical_pipeline/runs")
 
 
+_MACHINE_PLACEHOLDER_STRINGS = {
+    "TBD",
+    "NOT_SPECIFIED",
+    "NOT_SPECIFIED_IN_PERIZIA",
+    "NON_QUANTIFICATO",
+    "NON_QUANTIFICATO_IN_PERIZIA",
+}
+
+
+def _is_machine_placeholder(value: Any) -> bool:
+    if value is None:
+        return False
+    if isinstance(value, str):
+        text = value.strip()
+        upper = text.upper()
+        return upper in _MACHINE_PLACEHOLDER_STRINGS or "TBD" in upper
+    return False
+
+
+def _scrub_machine_placeholders(node: Any) -> int:
+    """
+    Remove legacy machine placeholders from runtime-visible payload branches.
+
+    This does not infer values. It only converts placeholders emitted by older
+    compatibility payloads into null so the freeze contract metadata can carry
+    the reason.
+    """
+    count = 0
+    if isinstance(node, dict):
+        for key, value in list(node.items()):
+            if _is_machine_placeholder(value):
+                node[key] = None
+                count += 1
+            else:
+                count += _scrub_machine_placeholders(value)
+        return count
+    if isinstance(node, list):
+        for item in node:
+            count += _scrub_machine_placeholders(item)
+    return count
+
+
+def _blocked_contract_reason(freeze_contract: Dict[str, Any]) -> Optional[str]:
+    status = str(freeze_contract.get("status") or "").upper()
+    freeze_status = str(freeze_contract.get("freeze_status") or "").upper()
+    if "BLOCKED_UNREADABLE" in {status, freeze_status} or "UNREADABLE" in status or "UNREADABLE" in freeze_status:
+        return "canonical_freeze_blocked_unreadable"
+    for item in freeze_contract.get("blocked_items") or []:
+        if not isinstance(item, dict):
+            continue
+        reason_blob = " ".join(str(item.get(k) or "") for k in ("reason", "freeze_status", "explanation", "why_not_resolved"))
+        if "unreadable" in reason_blob.lower():
+            return "canonical_freeze_blocked_unreadable"
+    return None
+
+
+def _blocked_field_metadata(freeze_contract: Dict[str, Any], field_key: str) -> Dict[str, Any]:
+    blocked_items = [
+        copy.deepcopy(item)
+        for item in freeze_contract.get("blocked_items") or []
+        if isinstance(item, dict)
+    ]
+    return {
+        "state": "blocked",
+        "source": "canonical_freeze_contract",
+        "field_key": field_key,
+        "reason": _blocked_contract_reason(freeze_contract),
+        "freeze_status": freeze_contract.get("freeze_status"),
+        "case_key": freeze_contract.get("case_key"),
+        "blocked_items": blocked_items[:3],
+        "needs_human_review": True,
+    }
+
+
+def _apply_blocked_freeze_contract_to_result(result: Dict[str, Any], freeze_contract: Dict[str, Any]) -> None:
+    reason = _blocked_contract_reason(freeze_contract)
+    if not reason:
+        return
+
+    result["analysis_status"] = "UNREADABLE"
+    result["canonical_contract_state"] = {
+        "state": "blocked",
+        "reason": reason,
+        "freeze_status": freeze_contract.get("freeze_status"),
+        "case_key": freeze_contract.get("case_key"),
+        "source": "canonical_freeze_contract",
+    }
+
+    lot_fields = ("prezzo_base_eur", "ubicazione", "superficie_mq", "diritto_reale", "diritto")
+    lots = result.get("lots")
+    if isinstance(lots, list):
+        for lot_idx, lot in enumerate(lots):
+            if not isinstance(lot, dict):
+                continue
+            meta = lot.get("field_contract_metadata")
+            if not isinstance(meta, dict):
+                meta = {}
+                lot["field_contract_metadata"] = meta
+            for field in lot_fields:
+                if field in lot:
+                    lot[field] = None
+                meta[field] = _blocked_field_metadata(freeze_contract, f"lots[{lot_idx}].{field}")
+
+    lot_index = result.get("lot_index")
+    if isinstance(lot_index, list):
+        for idx, row in enumerate(lot_index):
+            if not isinstance(row, dict):
+                continue
+            meta = row.get("field_contract_metadata")
+            if not isinstance(meta, dict):
+                meta = {}
+                row["field_contract_metadata"] = meta
+            for field in ("prezzo", "ubicazione"):
+                if field in row:
+                    row[field] = None
+                meta[field] = _blocked_field_metadata(freeze_contract, f"lot_index[{idx}].{field}")
+
+    for box_key in ("money_box", "section_3_money_box"):
+        box = result.get(box_key)
+        if not isinstance(box, dict):
+            continue
+        box["contract_metadata"] = _blocked_field_metadata(freeze_contract, box_key)
+        items = box.get("items")
+        if isinstance(items, list):
+            for idx, item in enumerate(items):
+                if not isinstance(item, dict):
+                    continue
+                item["contract_metadata"] = _blocked_field_metadata(freeze_contract, f"{box_key}.items[{idx}]")
+                for field in ("type", "stima_euro", "source", "stima_nota"):
+                    if field in item and _is_machine_placeholder(item.get(field)):
+                        item[field] = None
+        for total_key in ("total_extra_costs", "totale_extra_budget"):
+            total = box.get(total_key)
+            if isinstance(total, dict):
+                total["contract_metadata"] = _blocked_field_metadata(freeze_contract, f"{box_key}.{total_key}")
+                for field in ("min", "max", "nota", "note"):
+                    if field in total and _is_machine_placeholder(total.get(field)):
+                        total[field] = None
+                value_range = total.get("range")
+                if isinstance(value_range, dict):
+                    for field in ("min", "max"):
+                        if _is_machine_placeholder(value_range.get(field)):
+                            value_range[field] = None
+
+    indice = result.get("indice_di_convenienza")
+    if isinstance(indice, dict):
+        indice["contract_metadata"] = _blocked_field_metadata(freeze_contract, "indice_di_convenienza")
+        for field in ("extra_costs_min", "extra_costs_max", "all_in_light_min", "all_in_light_max"):
+            if field in indice:
+                indice[field] = None
+
+    scrubbed = _scrub_machine_placeholders(result)
+    if scrubbed:
+        result.setdefault("debug", {})["runtime_machine_placeholders_scrubbed"] = scrubbed
+
+
 def _load_freeze_contract(pdf_sha256: Optional[str]) -> Dict[str, Any]:
     """
     Look up the corpus registry by PDF sha256 and return the canonical
@@ -324,6 +480,35 @@ def _pricing_evidence_for_selected_price(pricing: Dict[str, Any]) -> List[Dict[s
     return direct or [copy.deepcopy(ev) for ev in evidence[:2] if isinstance(ev, dict)]
 
 
+def _freeze_contract_field_entry(freeze_contract: Any, scope_key: str, family: str, field_type: str) -> Optional[Dict[str, Any]]:
+    if not isinstance(freeze_contract, dict):
+        return None
+    fields = freeze_contract.get("fields")
+    if not isinstance(fields, dict):
+        return None
+    nested = fields.get(scope_key)
+    if isinstance(nested, dict):
+        family_fields = nested.get(family)
+        if isinstance(family_fields, dict) and isinstance(family_fields.get(field_type), dict):
+            return family_fields[field_type]
+    flat_key = f"field::{scope_key}::{field_type}"
+    flat_entry = fields.get(flat_key)
+    return flat_entry if isinstance(flat_entry, dict) else None
+
+
+def _pricing_evidence_for_benchmark_value(pricing: Dict[str, Any], contract_entry: Dict[str, Any]) -> List[Dict[str, Any]]:
+    supporting = contract_entry.get("supporting_evidence")
+    if isinstance(supporting, list) and supporting:
+        return [copy.deepcopy(ev) for ev in supporting if isinstance(ev, dict)]
+    evidence = pricing.get("evidence") if isinstance(pricing.get("evidence"), list) else []
+    benchmark = [
+        copy.deepcopy(ev)
+        for ev in evidence
+        if isinstance(ev, dict) and str(ev.get("semantic_role") or "") in {"valuation_total", "benchmark_value"}
+    ]
+    return benchmark or [copy.deepcopy(ev) for ev in evidence[:2] if isinstance(ev, dict)]
+
+
 def _should_promote_selected_price(existing_state: Any, selected_price: float, pricing: Dict[str, Any]) -> bool:
     if not isinstance(existing_state, dict):
         return True
@@ -341,6 +526,26 @@ def _should_promote_selected_price(existing_state: Any, selected_price: float, p
         if invalid_value is not None and abs(invalid_value - existing_value) <= 0.01:
             return True
     return True
+
+
+def _should_promote_benchmark_value(existing_state: Any, benchmark_value: float) -> bool:
+    if not isinstance(existing_state, dict):
+        return True
+    if str(existing_state.get("status") or "").upper() == "USER_PROVIDED":
+        return False
+    existing_value = _as_float_or_none(existing_state.get("value"))
+    if existing_value is None:
+        return True
+    return abs(existing_value - float(benchmark_value)) > 1.0
+
+
+def _benchmark_contract_entry_matches_pricing(contract_entry: Any, benchmark_value: float) -> bool:
+    if not isinstance(contract_entry, dict):
+        return False
+    if str(contract_entry.get("state") or "") not in {"deterministic_active", "llm_resolved", "resolved_with_context"}:
+        return False
+    contract_value = _as_float_or_none(contract_entry.get("value"))
+    return contract_value is not None and abs(contract_value - float(benchmark_value)) <= 1.0
 
 
 def _canonical_pricing_amounts(pricing: Dict[str, Any]) -> List[float]:
@@ -428,6 +633,7 @@ def apply_verifier_to_result(result: Dict[str, Any], verifier_payload: Dict[str,
     freeze_contract = canonical.get("freeze_contract")
     if isinstance(freeze_contract, dict) and freeze_contract:
         result["canonical_freeze_contract"] = copy.deepcopy(freeze_contract)
+        _apply_blocked_freeze_contract_to_result(result, freeze_contract)
     freeze_grouped = canonical.get("grouped_llm_explanations")
     if isinstance(freeze_grouped, list) and freeze_grouped:
         result["canonical_freeze_explanations"] = freeze_grouped
@@ -507,6 +713,37 @@ def apply_verifier_to_result(result: Dict[str, Any], verifier_payload: Dict[str,
         }
         if is_degraded:
             _annotate_degraded_output(field_states["prezzo_base_asta"])
+    benchmark_value = pricing.get("benchmark_value")
+    benchmark_contract_entry = _freeze_contract_field_entry(
+        freeze_contract, "document", "valuation", "valore_stima_raw"
+    )
+    if (
+        isinstance(benchmark_value, (int, float))
+        and _benchmark_contract_entry_matches_pricing(benchmark_contract_entry, float(benchmark_value))
+        and _should_promote_benchmark_value(field_states.get("valore_stima"), float(benchmark_value))
+    ):
+        previous_state = copy.deepcopy(field_states.get("valore_stima")) if isinstance(field_states.get("valore_stima"), dict) else None
+        benchmark_state = {
+            "value": benchmark_value,
+            "status": "LOW_CONFIDENCE" if is_degraded else "FOUND",
+            "confidence": float(((verifier_payload.get("judgments") or {}).get("pricing") or {}).get("confidence") or 0.0),
+            "evidence": _pricing_evidence_for_benchmark_value(pricing, benchmark_contract_entry or {}),
+            "searched_in": list((benchmark_contract_entry or {}).get("supporting_pages") or []),
+            "user_prompt_it": None,
+            "resolver_meta": {
+                "resolver_version": "verifier_runtime_v1",
+                "source": "canonical_freeze_contract.fields.document.valuation.valore_stima_raw",
+                "source_state": (benchmark_contract_entry or {}).get("state"),
+                "canonical_pricing_source": "canonical_pricing.benchmark_value",
+                "previous_state": previous_state,
+            },
+        }
+        for context_key in ("explanation", "context_qualification", "why_not_fully_certain"):
+            if (benchmark_contract_entry or {}).get(context_key):
+                benchmark_state[context_key] = (benchmark_contract_entry or {}).get(context_key)
+        field_states["valore_stima"] = benchmark_state
+        if is_degraded:
+            _annotate_degraded_output(field_states["valore_stima"])
     if occupancy.get("status"):
         field_states["stato_occupativo"] = {
             "value": occupancy.get("status"),

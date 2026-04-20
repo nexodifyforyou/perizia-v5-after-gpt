@@ -166,6 +166,68 @@ def test_runtime_propagates_full_freeze_contract_into_result(monkeypatch):
     assert result["canonical_freeze_explanations"][0]["field_family"] == "extra_costs"
 
 
+def test_blocked_unreadable_freeze_contract_scrubs_visible_placeholders(monkeypatch):
+    contract = {
+        "case_key": "via_del_mare_4591_4593",
+        "status": "BLOCKED_UNREADABLE",
+        "freeze_status": "blocked_unreadable",
+        "blocked_items": [
+            {
+                "reason": "Document quality is BLOCKED_UNREADABLE",
+                "freeze_status": "blocked_unreadable",
+            }
+        ],
+    }
+    monkeypatch.setattr(verifier_runtime_module, "_load_freeze_contract", lambda _: contract)
+    pages = [{"page_number": 1, "text": "Documento sintetico con testo sufficiente per il controllo di leggibilita. Lotto unico e dati disponibili."}]
+    _force_readability_mode(monkeypatch, pages, READABLE_DOCUMENT)
+    payload = run_quality_verifier(
+        analysis_id="blocked_freeze_runtime",
+        result={"field_states": {}, "pdf_sha256": "abc"},
+        pages=pages,
+        full_text=pages[0]["text"],
+        pdf_sha256="abc",
+    )
+    result = {
+        "lots": [
+            {
+                "prezzo_base_eur": "TBD",
+                "ubicazione": "TBD",
+                "superficie_mq": "TBD",
+                "diritto_reale": "TBD",
+                "diritto": "TBD",
+            }
+        ],
+        "lot_index": [{"prezzo": "TBD", "ubicazione": "TBD"}],
+        "money_box": {
+            "items": [{"type": "TBD", "stima_euro": "TBD", "source": "TBD"}],
+            "total_extra_costs": {"range": {"min": "TBD", "max": "TBD"}},
+        },
+        "section_3_money_box": {
+            "items": [{"type": "TBD", "stima_euro": "TBD", "source": "TBD"}],
+            "totale_extra_budget": {"min": "TBD", "max": "TBD"},
+        },
+        "indice_di_convenienza": {
+            "extra_costs_min": "TBD",
+            "extra_costs_max": "TBD",
+            "all_in_light_min": "TBD",
+            "all_in_light_max": "TBD",
+        },
+    }
+    apply_verifier_to_result(result, payload)
+
+    assert result["analysis_status"] == "UNREADABLE"
+    assert result["canonical_contract_state"]["reason"] == "canonical_freeze_blocked_unreadable"
+    assert result["lots"][0]["prezzo_base_eur"] is None
+    assert result["lots"][0]["field_contract_metadata"]["prezzo_base_eur"]["state"] == "blocked"
+    assert result["lot_index"][0]["prezzo"] is None
+    assert result["money_box"]["items"][0]["stima_euro"] is None
+    assert result["money_box"]["total_extra_costs"]["range"]["min"] is None
+    assert result["section_3_money_box"]["totale_extra_budget"]["min"] is None
+    assert result["indice_di_convenienza"]["all_in_light_min"] is None
+    assert "TBD" not in json.dumps(result)
+
+
 def test_llm_validation_preserves_qualified_resolution_as_context_value():
     issue = {
         "issue_id": "case::occupancy::0001",
@@ -2652,6 +2714,68 @@ def test_vidigulfo_r2_prezzo_base_written_to_field_states():
     )
 
 
+def test_vidigulfo_r2_valore_stima_written_from_freeze_contract_to_field_states(monkeypatch):
+    freeze_contract = {
+        "case_key": "via_cristoforo_colombo_2_4",
+        "status": "OK",
+        "freeze_status": "frozen_with_context_only",
+        "fields": {
+            "document": {
+                "valuation": {
+                    "prezzo_base_raw": {
+                        "state": "resolved_with_context",
+                        "value": "€.   97.321,61",
+                        "explanation": "A pag. 15 il paragrafo 8.5 riporta il prezzo base pari a €. 97.321,61.",
+                        "context_qualification": "Prezzo base d'asta con spese a carico dell'acquirente.",
+                        "why_not_fully_certain": "La cifra compare anche nel riepilogo iniziale.",
+                        "supporting_evidence": [{"page": 15, "quote": "Prezzo base d'asta €. 97.321,61"}],
+                        "supporting_pages": [15],
+                    },
+                    "valore_stima_raw": {
+                        "state": "resolved_with_context",
+                        "value": "€. 118.731,30",
+                        "explanation": "Il valore è usato per valore stima perché il passaggio Valore complessivo del lotto lo sostiene direttamente.",
+                        "context_qualification": "Il valore è espresso come Valore complessivo del lotto e coincide con Valore della quota di 1/1.",
+                        "why_not_fully_certain": "La promozione automatica era stata bloccata come duplicato/recap, ma la finestra locale è chiara.",
+                        "supporting_evidence": [{"page": 15, "quote": "Valore complessivo del lotto: €. 118.731,30"}],
+                        "supporting_pages": [15],
+                        "tension_pages": [15],
+                    },
+                }
+            }
+        },
+    }
+    monkeypatch.setattr(verifier_runtime_module, "_load_freeze_contract", lambda _: freeze_contract)
+    pages = _vidigulfo_round2_pages()
+    result = _vidigulfo_round2_result_seed()
+    payload = run_quality_verifier(
+        analysis_id="vidigulfo_r2_valore_stima_bridge",
+        result=result,
+        pages=pages,
+        full_text="\n\n".join(p["text"] for p in pages),
+        pdf_sha256="vidigulfo-live-shaped",
+    )
+    packaged = json.loads(json.dumps(result))
+    before_valore = (packaged.get("field_states") or {}).get("valore_stima")
+    before_prezzo = (packaged.get("field_states") or {}).get("prezzo_base_asta")
+    apply_verifier_to_result(packaged, payload)
+
+    valuation_contract = packaged["canonical_freeze_contract"]["fields"]["document"]["valuation"]
+    valore_state = (packaged.get("field_states") or {}).get("valore_stima") or {}
+    prezzo_state = (packaged.get("field_states") or {}).get("prezzo_base_asta") or {}
+    assert before_valore is None
+    assert before_prezzo is None
+    assert valuation_contract["valore_stima_raw"]["state"] == "resolved_with_context"
+    assert valuation_contract["valore_stima_raw"]["value"] == "€. 118.731,30"
+    assert abs(float(valore_state.get("value")) - 118731.30) < 1.0
+    assert valore_state.get("explanation") == valuation_contract["valore_stima_raw"]["explanation"]
+    assert valore_state.get("context_qualification") == valuation_contract["valore_stima_raw"]["context_qualification"]
+    assert valore_state.get("why_not_fully_certain") == valuation_contract["valore_stima_raw"]["why_not_fully_certain"]
+    assert valore_state.get("resolver_meta", {}).get("source") == "canonical_freeze_contract.fields.document.valuation.valore_stima_raw"
+    assert valore_state.get("resolver_meta", {}).get("canonical_pricing_source") == "canonical_pricing.benchmark_value"
+    assert abs(float(prezzo_state.get("value")) - 97321.61) < 1.0
+
+
 def test_vidigulfo_r2_summary_leads_with_non_opponibile_liberazione():
     payload = _vidigulfo_round2_payload()
     bundle = payload["canonical_case"]["summary_bundle"]
@@ -2870,4 +2994,3 @@ def test_vidigulfo_r2_api_payload_address_and_money_box_are_clean():
     ]
     assert 17809.69 not in numeric_amounts
     assert 97321.61 not in numeric_amounts
-
