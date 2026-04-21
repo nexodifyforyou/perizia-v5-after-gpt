@@ -925,6 +925,20 @@ def _resolve_scope(
     return None
 
 
+def _issue_scope_hint(issue: Dict[str, Any]) -> str:
+    target_scope = issue.get("target_scope")
+    if isinstance(target_scope, dict):
+        scope_key = target_scope.get("scope_key")
+        if isinstance(scope_key, str) and scope_key:
+            return scope_key
+    scope_meta = issue.get("scope_metadata")
+    if isinstance(scope_meta, dict):
+        scope_key = scope_meta.get("scope_key")
+        if isinstance(scope_key, str) and scope_key:
+            return scope_key
+    return _scope_key(issue.get("lot_id"), issue.get("bene_id"))
+
+
 def _build_field_map(
     ledger: Dict[str, Any],
     issue_pack: Dict[str, Any],
@@ -1002,7 +1016,7 @@ def _build_field_map(
         ft = iss.get("field_type", "")
         if not ft:
             continue
-        raw_sk = _scope_key(iss.get("lot_id"), iss.get("bene_id"))
+        raw_sk = _issue_scope_hint(iss)
         sk = _resolve_scope(raw_sk, declared_scopes, declared_lot_keys, warnings, f"issue {iss.get('issue_id','?')}")
         if sk is None:
             continue
@@ -1824,6 +1838,9 @@ def freeze_case(case_key: str) -> Dict[str, Any]:
     # "document" is always valid (unscoped catch-all).
     # All lot/bene scope keys from scope_index are the only other valid scopes.
     declared_scopes: Set[str] = {"document"} | set(scope_index.get("composite_scope_keys", []))
+    declared_lot_keys: Set[str] = {
+        sk for sk in declared_scopes if sk.startswith("lot:")
+    }
 
     # ---- 7. Raw pages index and scope page ranges (for cue sweep) ----
     raw_pages_data = _load_json(artifact_dir / "raw_pages.json") or []
@@ -1930,7 +1947,7 @@ def freeze_case(case_key: str) -> Dict[str, Any]:
                 ft = iss.get("field_type", "")
                 if _infer_family(ft) != "other":
                     continue  # handled by normal field-map path
-                raw_sk = _scope_key(iss.get("lot_id"), iss.get("bene_id"))
+                raw_sk = _issue_scope_hint(iss)
                 sk = _resolve_scope(
                     raw_sk, declared_scopes, _grouped_declared_lot_keys,
                     warnings, f"grouped_llm issue {iid}",
@@ -1952,11 +1969,44 @@ def freeze_case(case_key: str) -> Dict[str, Any]:
                     "bene_id": bene_id_hint,
                     "field_type": ft,
                     "llm_outcome": res.get("llm_outcome"),
+                    "resolution_mode": res.get("resolution_mode"),
                     "user_visible_explanation": res.get("user_visible_explanation"),
                     "why_not_resolved": res.get("why_not_resolved"),
                     "confidence_band": res.get("confidence_band"),
                     "needs_human_review": res.get("needs_human_review"),
+                    "source_pages": res.get("source_pages", []),
+                    "evidence_pages": res.get("evidence_pages", []),
+                    "supporting_pages": res.get("supporting_pages", []),
+                    "tension_pages": res.get("tension_pages", []),
                 })
+
+        for nonclean_packet, freeze_state in [
+            *((packet, "admissible_tainted") for packet in (issue_pack.get("tainted_packets", []) or []) if isinstance(packet, dict)),
+            *((packet, "upstream_blocked_packet") for packet in (issue_pack.get("blocked_packets", []) or []) if isinstance(packet, dict)),
+        ]:
+            if not isinstance(nonclean_packet, dict):
+                continue
+            raw_sk = _issue_scope_hint(nonclean_packet)
+            sk = _resolve_scope(
+                raw_sk,
+                declared_scopes,
+                declared_lot_keys,
+                warnings,
+                f"nonclean_packet {nonclean_packet.get('issue_id','?')}",
+            )
+            blocked_items.append({
+                "scope_key": sk,
+                "field_family": nonclean_packet.get("field_family"),
+                "field_type": nonclean_packet.get("field_type"),
+                "issue_ids": [nonclean_packet.get("issue_id")] if nonclean_packet.get("issue_id") else [],
+                "explanation": nonclean_packet.get("reason_for_label"),
+                "why_not_resolved": ", ".join(nonclean_packet.get("admissibility_reason_codes") or []),
+                "source_pages": nonclean_packet.get("source_pages") or [],
+                "freeze_state": freeze_state,
+                "admissibility_status": nonclean_packet.get("admissibility_status"),
+                "contamination_class": nonclean_packet.get("contamination_class"),
+                "contamination_disposition": nonclean_packet.get("contamination_disposition"),
+            })
 
         freeze_status = _determine_freeze_status(
             fields=fields,
@@ -1969,6 +2019,8 @@ def freeze_case(case_key: str) -> Dict[str, Any]:
     active_count = sum(1 for p in packets if p.get("status") == "ACTIVE")
     context_count = sum(1 for p in packets if p.get("status") == "CONTEXT_ONLY")
     all_issues = issue_pack.get("issues", [])
+    tainted_packets = issue_pack.get("tainted_packets", []) or []
+    blocked_packets = issue_pack.get("blocked_packets", []) or []
     unresolved_count = sum(
         1 for i in all_issues if i.get("deterministic_status") == "UNRESOLVED"
     )
@@ -1983,6 +2035,8 @@ def freeze_case(case_key: str) -> Dict[str, Any]:
         "total_active_packets": active_count,
         "total_context_packets": context_count,
         "total_issues": len(all_issues),
+        "total_tainted_packets": len(tainted_packets),
+        "total_blocked_packets": len(blocked_packets),
         "total_unresolved_issues": unresolved_count,
         "total_blocked_zones": len(ledger.get("blocked_zones", [])),
         "table_zones_detected": len(table_zone.get("table_zones", []) or table_zone.get("zones", [])),

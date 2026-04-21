@@ -11,7 +11,10 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import perizia_agents.agibilita_agent as agibilita_agent
 import perizia_runtime.runtime as verifier_runtime_module
 from perizia_canonical_pipeline.doc_map_freeze import _build_field_entry
+from perizia_canonical_pipeline.llm_clarification_issue_pack import build_clarification_issue_pack
+from perizia_canonical_pipeline.llm_resolution_pack import select_prioritized_issues
 from perizia_canonical_pipeline.llm_resolution_pack import _validate_resolution
+from perizia_canonical_pipeline.trace_single_case import _build_llm_call_trace
 from perizia_ingest.readability_gate import READABLE_BUT_EXTRACTION_BAD, READABLE_DOCUMENT, UNREADABLE_FROM_AVAILABLE_SURFACES
 from perizia_qa.fixture_runner import run_named_fixture
 from perizia_runtime.evidence_mode import DEGRADED_TEXT, STOP_UNREADABLE, TEXT_FIRST
@@ -50,6 +53,24 @@ def _force_readability_mode(monkeypatch, pages, verdict: str):
     readability = verifier_runtime_module.assess_document_readability(pages)
     readability["readability_verdict"] = verdict
     monkeypatch.setattr(verifier_runtime_module, "assess_document_readability", lambda _: readability)
+
+
+def _clarification_issue(case_key: str, *, field_family: str, source_pages: list[int], lot_id=None, bene_id=None):
+    pack = build_clarification_issue_pack(case_key)
+    for issue in pack["issues"]:
+        if issue.get("field_family") != field_family:
+            continue
+        if issue.get("source_pages") != source_pages:
+            continue
+        if lot_id is not None and issue.get("lot_id") != lot_id:
+            continue
+        if bene_id is not None and issue.get("bene_id") != bene_id:
+            continue
+        return issue
+    raise AssertionError(
+        f"Missing clarification issue for case={case_key} family={field_family} "
+        f"pages={source_pages} lot_id={lot_id} bene_id={bene_id}"
+    )
 
 
 def test_runtime_state_initializes_document_root_scope():
@@ -1862,6 +1883,139 @@ def test_multilot_fixture_writes_scoped_catasto_and_prefers_primary_over_ancilla
     assert lot2["categoria"]["value"] != "F/1"
     assert lot3["categoria"]["value"] != "F/1"
     assert payload["canonical_case"]["catasto"]["particella"]["value"] is None
+
+
+def test_multilot_clarification_issue_pack_derives_scope_and_target_entry_pages():
+    pack = build_clarification_issue_pack("multilot_69_2024")
+    issue = next(
+        item for item in pack["blocked_packets"]
+        if item.get("field_family") == "valuation"
+        and item.get("source_pages") == [52, 53]
+        and item.get("lot_id") == "3"
+        and item.get("bene_id") == "1"
+    )
+    assert issue["target_scope"]["scope_key"] == "bene:3/1"
+    assert issue["target_scope"]["scope_start_page"] == 52
+    assert issue["target_scope"]["scope_end_page"] == 54
+    assert [page["page"] for page in issue["target_section_entry_pages"]] == [33, 52]
+    assert issue["page_selection"]["has_target_section_entry_page"] is True
+    assert issue["page_selection"]["uses_summary_or_index_page"] is False
+    assert issue["page_selection"]["uses_transition_page"] is True
+    assert issue["admissibility_status"] == "upstream_blocked_packet"
+    assert "CONTAMINATION_WITH_TRANSITION_PAGE" in issue["admissibility_reason_codes"]
+    assert [page["page"] for page in issue["anchor_pages"]] == [33, 52]
+
+
+def test_multilot_clarification_issue_pack_marks_transition_and_scope_bounded_recap_pages():
+    pack = build_clarification_issue_pack("multilot_69_2024")
+    issue = next(
+        item for item in pack["blocked_packets"]
+        if item.get("field_family") == "valuation"
+        and item.get("source_pages") == [67, 68, 69]
+        and item.get("lot_id") == "3"
+    )
+    assert issue["target_scope"]["scope_key"] == "lot:3"
+    assert issue["page_selection"]["uses_transition_page"] is True
+    assert issue["page_selection"]["uses_summary_or_index_page"] is True
+    assert issue["admissibility_status"] == "upstream_blocked_packet"
+    assert "CONTAMINATION_WITH_TRANSITION_PAGE" in issue["admissibility_reason_codes"]
+    assert "CONTAMINATION_WITH_SUMMARY_INDEX_PAGE" in issue["admissibility_reason_codes"]
+    recap_pages = [page["page"] for page in issue["recap_pages"]]
+    assert recap_pages
+    assert all(33 <= page <= 81 for page in recap_pages)
+    assert 3 not in recap_pages
+    anchor_pages = [page["page"] for page in issue["anchor_pages"]]
+    assert anchor_pages[:2] == [33, 68]
+
+
+def test_llm_selection_skips_structurally_unsafe_multilot_packets():
+    pack = build_clarification_issue_pack("multilot_69_2024")
+    selected = select_prioritized_issues(pack, issue_type="SCOPE_AMBIGUITY", field_family="occupancy", limit=8)
+    selected_ids = {issue["issue_id"] for issue in selected}
+    unsafe_issue = next(
+        issue
+        for issue in pack["blocked_packets"]
+        if issue.get("field_family") == "occupancy" and issue.get("source_pages") == [3]
+    )
+    assert unsafe_issue["page_selection"]["llm_safe"] is False
+    assert unsafe_issue["issue_id"] not in selected_ids
+
+
+def test_single_lot_clarification_issue_pack_infers_scope_from_scope_maps():
+    issue = _clarification_issue(
+        "via_cristoforo_colombo_2_4",
+        field_family="valuation",
+        source_pages=[15],
+    )
+    assert issue["target_scope"]["scope_key"] == "lot:unico"
+    assert issue["target_scope_kind"] == "lot"
+    assert issue["admissibility_status"] == "admissible_clean"
+
+
+def test_multilot_clarification_issue_pack_blocks_missing_scope_summary_packets_upstream():
+    pack = build_clarification_issue_pack("multilot_69_2024")
+    blocked = next(
+        issue for issue in pack["blocked_packets"]
+        if issue.get("field_family") == "location" and issue.get("source_pages") == [3]
+    )
+    assert blocked["admissibility_status"] == "upstream_blocked_packet"
+    assert "MISSING_TARGET_SCOPE" in blocked["admissibility_reason_codes"]
+    assert "SUMMARY_INDEX_PRIMARY_ONLY" in blocked["admissibility_reason_codes"]
+    assert blocked["issue_id"] not in {issue["issue_id"] for issue in pack["issues"]}
+
+
+def test_grouped_llm_trace_rows_keep_structured_fields():
+    with tempfile.TemporaryDirectory() as tmp_dir:
+        artifact_dir = Path(tmp_dir)
+        (artifact_dir / "doc_map.json").write_text(
+            json.dumps(
+                {
+                    "fields": {},
+                    "grouped_llm_explanations": [
+                        {
+                            "issue_id": "issue-1",
+                            "scope_key": "lot:3",
+                            "field_type": "occupancy",
+                            "llm_outcome": "unresolved_explained",
+                            "resolution_mode": "true_unresolved",
+                            "user_visible_explanation": "copy",
+                            "why_not_resolved": "ambiguous scope",
+                            "confidence_band": "low",
+                            "needs_human_review": True,
+                            "source_pages": [71],
+                            "evidence_pages": [71],
+                            "supporting_pages": [33, 71],
+                            "tension_pages": [70],
+                        }
+                    ],
+                },
+                ensure_ascii=False,
+            ),
+            encoding="utf-8",
+        )
+        (artifact_dir / "llm_resolution_pack.json").write_text(
+            json.dumps({"issues": [], "resolutions": []}, ensure_ascii=False),
+            encoding="utf-8",
+        )
+        (artifact_dir / "missing_slot_review_pack.json").write_text(
+            json.dumps({"reviews": []}, ensure_ascii=False),
+            encoding="utf-8",
+        )
+        (artifact_dir / "missing_slot_escalation_pack.json").write_text(
+            json.dumps({"escalations": []}, ensure_ascii=False),
+            encoding="utf-8",
+        )
+        (artifact_dir / "raw_pages.json").write_text(
+            json.dumps([{"page_number": 71, "text": "LOTTO 3"}], ensure_ascii=False),
+            encoding="utf-8",
+        )
+        rows = _build_llm_call_trace(artifact_dir, "multilot_69_2024")
+    grouped = next(row for row in rows if row["source_stage"] == "grouped_llm_explanation")
+    assert grouped["structured_llm_response"]["resolution_mode"] == "true_unresolved"
+    assert grouped["structured_llm_response"]["evidence_pages"] == [71]
+    assert grouped["structured_llm_response"]["supporting_pages"] == [33, 71]
+    assert grouped["structured_llm_response"]["tension_pages"] == [70]
+    assert grouped["post_guard_result_after_freeze"]["state"] == "grouped_llm_explanation"
 
 
 def test_rmei_fixture_collapses_single_scope_catasto_to_root():

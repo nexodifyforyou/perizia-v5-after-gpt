@@ -424,17 +424,30 @@ def _build_llm_call_trace(
             "structured_payload_sent": None,
             "structured_llm_response": {
                 "llm_outcome": grouped.get("llm_outcome"),
+                "resolution_mode": grouped.get("resolution_mode"),
                 "user_visible_explanation": grouped.get("user_visible_explanation"),
                 "why_not_resolved": grouped.get("why_not_resolved"),
                 "confidence_band": grouped.get("confidence_band"),
                 "needs_human_review": grouped.get("needs_human_review"),
                 "lot_id": grouped.get("lot_id"),
                 "bene_id": grouped.get("bene_id"),
+                "source_pages": grouped.get("source_pages", []),
+                "evidence_pages": grouped.get("evidence_pages", []),
+                "supporting_pages": grouped.get("supporting_pages", []),
+                "tension_pages": grouped.get("tension_pages", []),
             },
             "llm_attempted": True,
             "llm_succeeded": True,
             "llm_error": None,
-            "post_guard_result_after_freeze": None,
+            "post_guard_result_after_freeze": {
+                "scope_key": grouped.get("scope_key"),
+                "family": grouped.get("field_type"),
+                "field_type": grouped.get("field_type"),
+                "state": "grouped_llm_explanation",
+                "value": None,
+                "source_stage": "doc_map_grouped_llm_explanation",
+                "why_not_resolved": grouped.get("why_not_resolved"),
+            },
         })
 
     return rows

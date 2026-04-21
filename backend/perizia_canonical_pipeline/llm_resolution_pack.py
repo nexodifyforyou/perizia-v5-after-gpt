@@ -178,6 +178,8 @@ def _issue_payload(issue: Dict) -> Dict:
         "target_case_key": issue.get("target_case_key") or issue.get("case_key"),
         "target_field": issue.get("target_field") or issue.get("field_type"),
         "target_scope": issue.get("target_scope") or issue.get("scope_metadata"),
+        "scope_status": issue.get("scope_status"),
+        "target_scope_kind": issue.get("target_scope_kind"),
         "field_family": issue.get("field_family"),
         "field_type": issue.get("field_type"),
         "lot_id": issue.get("lot_id"),
@@ -197,8 +199,16 @@ def _issue_payload(issue: Dict) -> Dict:
         "supporting_blocked_entries": issue.get("supporting_blocked_entries"),
         "source_pages": issue.get("source_pages"),
         "relevant_pages": issue.get("relevant_pages"),
+        "target_section_entry_pages": issue.get("target_section_entry_pages"),
         "anchor_pages": issue.get("anchor_pages"),
         "recap_pages": issue.get("recap_pages"),
+        "page_selection": issue.get("page_selection"),
+        "contamination_class": issue.get("contamination_class"),
+        "contamination_disposition": issue.get("contamination_disposition"),
+        "admissibility_status": issue.get("admissibility_status"),
+        "admissibility_reason_codes": issue.get("admissibility_reason_codes"),
+        "quality_label": issue.get("quality_label"),
+        "reason_for_label": issue.get("reason_for_label"),
         "local_text_windows": issue.get("local_text_windows"),
         "table_zone_types": issue.get("table_zone_types"),
         "scope_metadata": issue.get("scope_metadata"),
@@ -216,10 +226,12 @@ def _system_prompt() -> str:
         "unresolved_explained. Classify the case as clean_resolution, "
         "qualified_resolution, true_unresolved, or blocked. Use only the supplied "
         "evidence, respect the target scope, do not merge across lots/beni unless the "
-        "issue pack proves it is safe, mention exact pages worth checking, and never "
-        "put a fake value into unresolved output. If one best conclusion is safe but "
-        "needs mandatory qualification, return qualified_resolution with the value and "
-        "context qualification. "
+        "issue pack proves it is safe, treat target_section_entry_pages and anchor_pages "
+        "as stronger scope anchors than recap pages, never treat summary_or_index pages "
+        "or transition pages as primary evidence on their own, mention exact pages worth "
+        "checking, and never put a fake value into unresolved output. If one best "
+        "conclusion is safe but needs mandatory qualification, return "
+        "qualified_resolution with the value and context qualification. "
         "Return only valid JSON."
     )
 
@@ -259,6 +271,9 @@ def _user_prompt(issue: Dict) -> str:
                 "For SCOPE_AMBIGUITY prefer unresolved_explained unless the supplied windows clearly assign scope.",
                 "For TABLE_RECAP_DUPLICATE_UNCLEAR prefer unresolved_explained unless the recap and source value agree on the same value and scope.",
                 "For upgraded_context, explain why the context should be surfaced but not treated as a final normalized field value.",
+                "Use target_section_entry_pages and anchor_pages to confirm scope before trusting source_pages.",
+                "Do not resolve from summary_or_index pages alone.",
+                "Do not choose a value from a transition_page unless target_section_entry_pages prove the same lot/bene scope.",
                 "For unresolved_explained, why_not_resolved must explain the conflict, ambiguity, or unsafe scope.",
                 "Keep needs_human_review true unless confidence is high and resolved_value is directly quoted.",
             ],
@@ -846,6 +861,10 @@ def select_prioritized_issues(
         if field_type and issue.get("field_type") != field_type:
             continue
         if issue.get("needs_llm") is False:
+            continue
+        if issue.get("admissibility_status") != "admissible_clean":
+            continue
+        if (issue.get("page_selection") or {}).get("llm_safe") is False:
             continue
         if not _has_resolution_evidence(issue):
             continue
