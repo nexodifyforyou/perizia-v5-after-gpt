@@ -32,6 +32,11 @@ import { buildCustomerCostPolicy } from '../lib/costPolicy';
 import { buildCanonicalLegalPriorityMeta, getCanonicalTopAttentionText, isWeakBackgroundLegalSummary, pickCanonicalTopAttentionItem } from '../lib/legalPriority';
 
 const API_URL = process.env.REACT_APP_BACKEND_URL;
+const DISPLAY_INVALID_TEXTS = new Set([
+  '',
+  'NON SPECIFICATO IN PERIZIA',
+  'NOT SPECIFIED IN APPRAISAL'
+]);
 
 // Helper function to normalize placeholder values
 const normalizePlaceholder = (value) => {
@@ -44,6 +49,14 @@ const normalizePlaceholder = (value) => {
     }
   }
   return value;
+};
+
+const isDisplayInvalidValue = (value) => {
+  if (value === null || value === undefined) return true;
+  if (typeof value === 'string') {
+    return DISPLAY_INVALID_TEXTS.has(value.trim().toUpperCase());
+  }
+  return false;
 };
 
 const normalizeSpacedOCR = (value) => {
@@ -129,6 +142,41 @@ const safeRender = (value, fallback = 'Non specificato in perizia') => {
   return String(normalized) || fallback;
 };
 
+const pickCustomerFacingTitle = (value, fallback = '') => (
+  value?.headline_it ||
+  value?.flag_it ||
+  value?.label_it ||
+  value?.label ||
+  value?.title_it ||
+  value?.title ||
+  value?.killer ||
+  fallback
+);
+
+const pickCustomerIssueText = (value, fallback = '') => (
+  value?.explanation_it ||
+  value?.verify_next_it ||
+  value?.why_not_resolved ||
+  value?.explanation ||
+  value?.detail ||
+  value?.reason_it ||
+  value?.action_required_it ||
+  value?.action ||
+  fallback
+);
+
+const pickCustomerFlagText = (value, fallback = '') => (
+  value?.action_it ||
+  value?.explanation_it ||
+  value?.verify_next_it ||
+  value?.explanation ||
+  value?.detail ||
+  value?.reason_it ||
+  value?.action_required_it ||
+  value?.action ||
+  fallback
+);
+
 // Format money value - handles TBD and numbers
 const formatMoney = (value) => {
   if (value === 'TBD' || value === null || value === undefined) return 'TBD';
@@ -201,6 +249,132 @@ const normalizeUiSeverity = (value, fallback = 'AMBER') => {
   if (['RED', 'ROSSO', 'CRITICAL', 'CRITICO', 'ERROR'].includes(normalized)) return 'RED';
   if (['INFO', 'LOW', 'GREEN', 'VERDE', 'OK'].includes(normalized)) return 'INFO';
   return 'AMBER';
+};
+
+const CANONICAL_ISSUE_GROUP_TITLES = {
+  legal: 'Legale / Formalità',
+  technical: 'Tecnico / Compliance',
+  occupancy: 'Occupazione',
+  missingData: 'Copertura documento / Dati mancanti',
+  costUncertainty: 'Incertezza costi / Assunzioni'
+};
+
+const CANONICAL_ISSUE_KIND_LABELS = {
+  confirmed_risk: 'Rischio confermato',
+  unresolved_conflict: 'Conflitto irrisolto',
+  coverage_gap: 'Copertura documento',
+  cost_uncertainty: 'Incertezza costi'
+};
+
+const getCanonicalIssueScopeLabel = (issue) => {
+  const scope = issue?.scope;
+  if (!scope || typeof scope !== 'object') return '';
+  if (scope?.lot_number) return `Lotto ${scope.lot_number}`;
+  if (scope?.bene_number) return `Bene ${scope.bene_number}`;
+  const scopeKey = safeRender(scope?.scope_key, '').trim();
+  const lotMatch = scopeKey.match(/^lot:(\d+)$/i);
+  if (lotMatch) return `Lotto ${lotMatch[1]}`;
+  const beneMatch = scopeKey.match(/^bene:(\d+)$/i);
+  if (beneMatch) return `Bene ${beneMatch[1]}`;
+  return '';
+};
+
+const buildCanonicalIssueBody = (issue) => {
+  const explanation = safeRender(issue?.explanation_it || issue?.action_it, '').trim();
+  const verifyNext = safeRender(issue?.verify_next_it, '').trim();
+  const whyNotResolved = safeRender(issue?.why_not_resolved, '').trim();
+  const parts = [];
+
+  if (explanation) {
+    parts.push(explanation);
+  }
+
+  if (verifyNext && !explanation.includes(verifyNext)) {
+    parts.push(`Verifica: ${verifyNext}`);
+  }
+
+  if (whyNotResolved && !explanation.includes(whyNotResolved)) {
+    parts.push(`Ambiguità: ${whyNotResolved}`);
+  }
+
+  if (!parts.length) {
+    return safeRender(pickCustomerIssueText(issue), '').trim();
+  }
+
+  return parts.join(' ');
+};
+
+const classifyCanonicalIssue = (issue) => {
+  const family = safeRender(issue?.family || issue?.key, '').toLowerCase();
+  const status = safeRender(issue?.status || issue?.status_it, '').toUpperCase();
+  const severity = safeRender(issue?.severity || issue?.severity_it, '').toUpperCase();
+  const text = `${family} ${safeRender(issue?.headline_it, '')} ${safeRender(issue?.explanation_it, '')}`.toLowerCase();
+
+  if (status === 'BLOCKED' || severity === 'BLOCKER') {
+    return { group: 'missingData', kind: 'coverage_gap', severity: 'INFO' };
+  }
+  if (family.includes('occupancy') || /occupaz|opponibil|liberaz/.test(text)) {
+    return {
+      group: 'occupancy',
+      kind: status === 'LOW_CONFIDENCE' ? 'unresolved_conflict' : 'confirmed_risk',
+      severity: normalizeUiSeverity(severity || status, status === 'LOW_CONFIDENCE' ? 'AMBER' : 'RED')
+    };
+  }
+  if (family.includes('cost') || family.includes('valuation') || /prezzo base|valore di stima|costi|spese/.test(text)) {
+    return {
+      group: 'costUncertainty',
+      kind: status === 'FOUND' ? 'confirmed_risk' : 'cost_uncertainty',
+      severity: normalizeUiSeverity(severity || status, 'AMBER')
+    };
+  }
+  if (family.includes('urbanistica') || family.includes('agibilita') || family.includes('impianti') || family.includes('catast')) {
+    return {
+      group: 'technical',
+      kind: status === 'FOUND' ? 'confirmed_risk' : 'unresolved_conflict',
+      severity: normalizeUiSeverity(severity || status, status === 'FOUND' ? 'RED' : 'AMBER')
+    };
+  }
+  return {
+    group: 'legal',
+    kind: status === 'FOUND' ? 'confirmed_risk' : 'unresolved_conflict',
+    severity: normalizeUiSeverity(severity || status, 'AMBER')
+  };
+};
+
+const mapCanonicalIssueToLegalItem = (issue, idx) => {
+  const title = safeRender(pickCustomerFacingTitle(issue), '').trim();
+  const detail = buildCanonicalIssueBody(issue);
+  if (!title || !detail) return null;
+  const classification = classifyCanonicalIssue(issue);
+  return {
+    key: issue?.issue_id || `canonical_legal_${idx}`,
+    killer: title,
+    action: detail,
+    explanation_it: detail,
+    status: classification.severity,
+    status_it: safeRender(issue?.status_it || issue?.status, ''),
+    evidence: Array.isArray(issue?.evidence) ? issue.evidence : [],
+    kind: classification.group === 'missingData' ? 'caution_watch' : 'material_blocker',
+    contextLabel: getCanonicalIssueScopeLabel(issue),
+    family: safeRender(issue?.family || issue?.key, ''),
+  };
+};
+
+const mapCanonicalIssueToRedFlagItem = (issue, idx) => {
+  const title = safeRender(pickCustomerFacingTitle(issue), '').trim();
+  const detail = buildCanonicalIssueBody(issue);
+  if (!title || !detail) return null;
+  const classification = classifyCanonicalIssue(issue);
+  return {
+    key: issue?.issue_id || `canonical_flag_${idx}`,
+    label: title,
+    explanation: detail,
+    explanation_it: detail,
+    severity: classification.severity,
+    evidence: Array.isArray(issue?.evidence) ? issue.evidence : [],
+    kindLabel: CANONICAL_ISSUE_KIND_LABELS[classification.kind] || '',
+    scopeLabel: getCanonicalIssueScopeLabel(issue),
+  };
 };
 
 const formatMeasuredValue = (value, defaultUnit = '') => {
@@ -359,6 +533,7 @@ const classifyMoneyBoxItem = (item) => {
 
 const PanoramicaDataValueCard = ({ label, value, evidence, valueClassName = 'text-zinc-100' }) => {
   const normalizedValue = normalizeOverviewValue(value);
+  if (isDisplayInvalidValue(normalizedValue)) return null;
   const { quote, searchHint, pages } = formatPrimaryEvidenceQuote(evidence);
   return (
     <div className="p-4 bg-zinc-950 rounded-lg border border-zinc-800">
@@ -590,12 +765,12 @@ const LegalKillerItem = ({ name, data }) => {
     ).join(' ');
   };
   
-  // Get action text - new format uses 'action', old uses 'action_required_it'
-  const actionText = data?.action || data?.action_required_it || '';
+  const actionText = pickCustomerIssueText(data);
   
   // Get the display name - use 'killer' from new format or formatted name
   const displayName = data?.killer || formatName(name);
   const contextLabel = safeRender(data?.contextLabel, '');
+  const scopeLabel = safeRender(data?.scopeLabel, '');
 
   return (
     <div className={`p-4 rounded-lg border ${getStatusBg(status)}`}>
@@ -607,6 +782,11 @@ const LegalKillerItem = ({ name, data }) => {
             {contextLabel && (
               <span className="text-[10px] px-2 py-0.5 rounded border border-zinc-700 text-zinc-400 uppercase tracking-wide">
                 {contextLabel}
+              </span>
+            )}
+            {scopeLabel && (
+              <span className="text-[10px] px-2 py-0.5 rounded border border-zinc-700 text-zinc-400 uppercase tracking-wide">
+                {scopeLabel}
               </span>
             )}
             {hasEvidence && (
@@ -648,7 +828,7 @@ const RedFlagItem = ({ flag }) => {
         }`} />
         <div className="flex-1">
           <div className="flex items-center gap-2 flex-wrap">
-            <p className="text-sm font-medium text-zinc-100">{safeRender(flag.flag_it, flag.message_it || flag.code || 'Flag')}</p>
+            <p className="text-sm font-medium text-zinc-100">{safeRender(pickCustomerFacingTitle(flag, flag.message_it || flag.code || 'Flag'))}</p>
             {hasEvidence && (
               <span className="text-xs font-mono text-gold flex items-center gap-1">
                 <FileText className="w-3 h-3" />
@@ -657,9 +837,9 @@ const RedFlagItem = ({ flag }) => {
             )}
           </div>
           <p className="text-xs text-zinc-500 mt-1">{safeRender(flag.flag_en, flag.message_en || '')}</p>
-          {(flag.action_it || flag.action_en) && (
+          {(pickCustomerFlagText(flag) || flag.action_en) && (
             <p className="text-xs text-zinc-400 mt-2">
-              <span className="text-gold">Azione:</span> {safeRender(flag.action_it, flag.action_en || '')}
+              <span className="text-gold">Azione:</span> {safeRender(pickCustomerFlagText(flag), flag.action_en || '')}
             </p>
           )}
           {hasEvidence && evidence[0]?.quote && (
@@ -683,6 +863,7 @@ const RedFlagMatrixItem = ({ item }) => {
       ? 'border-zinc-700 bg-zinc-800/60'
       : 'border-amber-500/30 bg-amber-500/5';
   const kindLabel = safeRender(item?.kindLabel, '');
+  const scopeLabel = safeRender(item?.scopeLabel, '');
 
   return (
     <div className={`p-3 rounded-lg border ${toneClass}`}>
@@ -695,8 +876,13 @@ const RedFlagMatrixItem = ({ item }) => {
                 {kindLabel}
               </span>
             )}
+            {scopeLabel && (
+              <span className="text-[10px] px-2 py-0.5 rounded border border-zinc-700 text-zinc-400 uppercase tracking-wide">
+                {scopeLabel}
+              </span>
+            )}
           </div>
-          {item?.explanation && <p className="text-xs text-zinc-400 mt-1">{safeRender(item.explanation, '')}</p>}
+          {pickCustomerIssueText(item) && <p className="text-xs text-zinc-400 mt-1">{safeRender(pickCustomerIssueText(item), '')}</p>}
         </div>
         {evidence.length > 0 && <EvidenceBadge evidence={evidence} />}
       </div>
@@ -943,6 +1129,7 @@ const AnalysisResult = () => {
   const section11 = result.section_11_red_flags || [];
   const section12 = result.section_12_checklist_pre_offerta || [];
   const summaryData = result.summary_for_client || {};
+  const summaryBundle = result.summary_for_client_bundle || {};
   const qaPass = result.qa_pass || {};
   
   // Get lots array for multi-lot support
@@ -1022,6 +1209,7 @@ const AnalysisResult = () => {
   const summary = summaryData;
   const qa = qaPass.status ? qaPass : (result.qa || {});
   const fieldStates = result.field_states || {};
+  const canonicalIssues = Array.isArray(result.issues) ? result.issues : [];
   const datiAsta = result.dati_asta || result.dati_certi_del_lotto?.dati_asta || result.dati_certi?.dati_asta;
   const resultPathUsed = analysis?.__result_path || (analysis?.result ? 'result' : null);
   const estrattoSections = normalizeEstrattoSections(estrattoQuality);
@@ -1852,8 +2040,8 @@ const AnalysisResult = () => {
   const getHeadlineDisplayValue = (fieldKey, fallbackValue) => {
     const status = getHeadlineStatus(fieldKey);
     if (status === 'LOW_CONFIDENCE') return 'DA VERIFICARE';
-    if (status === 'NOT_FOUND') return 'Non specificato in perizia';
-    return safeRender(fallbackValue, 'Non specificato in perizia');
+    if (status === 'NOT_FOUND') return '';
+    return safeRender(fallbackValue, '');
   };
 
   const MissingStateRationale = ({ fieldKey, forceMissing = false }) => {
@@ -2257,11 +2445,11 @@ const AnalysisResult = () => {
       if (category === 'agibilita_docs' && hasPositiveAgibilitaTruth && !/(non|assen|manc|irregolar)/.test(sourceText)) return;
       const kind = legalKindByCategory[category];
       out.push({
-        killer: safeRender(source?.killer || source?.label_it || source?.label, categoryLabelMap[category]),
+        killer: safeRender(pickCustomerFacingTitle(source, categoryLabelMap[category]), categoryLabelMap[category]),
         headlineEn: safeRender(source?.headline_en || source?.label_en, categoryLabelMapEn[category]),
         status: normalizeLegalSeverity(category, source?.status),
         status_it: safeRender(source?.status_it, ''),
-        action: safeRender(source?.reason_it || source?.action_required_it || source?.action, ''),
+        action: safeRender(pickCustomerIssueText(source), ''),
         evidence: getEvidence(source),
         kind,
         contextLabel: legalKindLabelMap[kind],
@@ -2272,7 +2460,13 @@ const AnalysisResult = () => {
   };
 
   const topLegalChecklistItems = buildTopLegalChecklist();
-  const legalKillersObj = topLegalChecklistItems.reduce((acc, item, idx) => {
+  const canonicalLegalChecklistItems = canonicalIssues
+    .map((issue, idx) => mapCanonicalIssueToLegalItem(issue, idx))
+    .filter(Boolean);
+  const displayLegalChecklistItems = canonicalLegalChecklistItems.length > 0
+    ? canonicalLegalChecklistItems
+    : topLegalChecklistItems;
+  const legalKillersObj = displayLegalChecklistItems.reduce((acc, item, idx) => {
     acc[item.killer || `killer_${idx + 1}`] = item;
     return acc;
   }, {});
@@ -2428,8 +2622,8 @@ const AnalysisResult = () => {
 
   redFlags.forEach((flag, idx) => {
     if (typeof flag === 'string') return;
-    const title = safeRender(flag?.flag_it || flag?.label || flag?.title_it || flag?.title, '').trim();
-    const detail = safeRender(flag?.action_it || flag?.explanation || flag?.detail || flag?.reason_it, '').trim();
+    const title = safeRender(pickCustomerFacingTitle(flag), '').trim();
+    const detail = safeRender(pickCustomerFlagText(flag), '').trim();
     if (!title) return;
     const classified = classifyStoredRedFlag(title, detail);
     addRedFlag(classified.group, {
@@ -2447,7 +2641,7 @@ const AnalysisResult = () => {
     addRedFlag('legal', {
       key: `legal_check_${idx}`,
       label: safeRender(item?.killer, 'Segnalazione legale'),
-      explanation: safeRender(item?.action || item?.status_it || item?.contextLabel, ''),
+      explanation: safeRender(pickCustomerIssueText(item, item?.status_it || item?.contextLabel || ''), ''),
       severity: normalizeUiSeverity(item?.status, item?.kind === 'background_note' ? 'INFO' : 'AMBER'),
       evidence: getEvidence(item),
       kindLabel: item.kind === 'material_blocker'
@@ -2557,7 +2751,28 @@ const AnalysisResult = () => {
     { key: 'missingData', title: 'Copertura documento / Dati mancanti', items: redFlagGroups.missingData },
     { key: 'costUncertainty', title: 'Incertezza costi / Assunzioni', items: redFlagGroups.costUncertainty }
   ];
-  const hasGroupedRedFlags = groupedRedFlags.some((group) => group.items.length > 0);
+  const canonicalGroupedRedFlagBuckets = canonicalIssues.reduce((acc, issue, idx) => {
+    const mapped = mapCanonicalIssueToRedFlagItem(issue, idx);
+    if (!mapped) return acc;
+    const classification = classifyCanonicalIssue(issue);
+    acc[classification.group].push(mapped);
+    return acc;
+  }, {
+    legal: [],
+    technical: [],
+    occupancy: [],
+    missingData: [],
+    costUncertainty: []
+  });
+  const canonicalGroupedRedFlags = Object.entries(CANONICAL_ISSUE_GROUP_TITLES).map(([key, title]) => ({
+    key,
+    title,
+    items: canonicalGroupedRedFlagBuckets[key] || []
+  }));
+  const displayGroupedRedFlags = canonicalGroupedRedFlags.some((group) => group.items.length > 0)
+    ? canonicalGroupedRedFlags
+    : groupedRedFlags;
+  const hasGroupedRedFlags = displayGroupedRedFlags.some((group) => group.items.length > 0);
 
   const scoreSummarySignal = (textRaw) => {
     const text = safeRender(textRaw, '').toLowerCase();
@@ -2634,10 +2849,21 @@ const AnalysisResult = () => {
   const shouldUseCanonicalSummaryFallback = Boolean(topAttentionLegalItem) && (!summaryMentionsCanonicalIssue || summaryHasGenericDocumentFraming);
   const summaryFallbackIt = [displayDecisionIt, decisionBulletsIt[0]].filter(Boolean).join('. ').trim();
   const summaryFallbackEn = [displayHeaderSummaryEn, decisionBulletsEn[0]].filter(Boolean).join('. ').trim();
-  const displaySummaryForClientIt = shouldUseCanonicalSummaryFallback
+  const bundleSummaryIt = safeRender(summaryBundle.decision_summary_it, '');
+  const bundleSummaryEn = safeRender(summaryBundle.decision_summary_en, '');
+  const displayDecisionItSafe = bundleSummaryIt || displayDecisionIt;
+  const displayDecisionEnSafe = bundleSummaryEn || displayDecisionEn;
+  const displayHeaderDriverItSafe = bundleSummaryIt || displayHeaderDriverIt;
+  const displayHeaderSummaryItSafe = bundleSummaryIt || displayHeaderSummaryIt;
+  const displayHeaderSummaryEnSafe = bundleSummaryEn || displayHeaderSummaryEn;
+  const displaySummaryForClientIt = bundleSummaryIt
+    ? bundleSummaryIt
+    : shouldUseCanonicalSummaryFallback
     ? summaryFallbackIt
     : safeRender(summary.summary_it, 'Analisi documento completata.');
-  const displaySummaryForClientEn = shouldUseCanonicalSummaryFallback
+  const displaySummaryForClientEn = bundleSummaryEn
+    ? bundleSummaryEn
+    : shouldUseCanonicalSummaryFallback
     ? summaryFallbackEn
     : safeRender(summary.summary_en, '');
 
@@ -2705,7 +2931,8 @@ const AnalysisResult = () => {
     const displayValue = getHeadlineDisplayValue(fieldKey, value);
     const needsVerification = isNeedsVerification(status);
     const isConfirmed = status === 'USER_PROVIDED';
-    const shouldRender = value !== undefined && value !== null && value !== '' || status;
+    const hasDisplayValue = !isDisplayInvalidValue(displayValue);
+    const shouldRender = hasDisplayValue || (needsVerification && Array.isArray(evidence) && evidence.length > 0) || isConfirmed;
 
     if (!shouldRender) return null;
 
@@ -2740,11 +2967,14 @@ const AnalysisResult = () => {
   const HeadlineFieldCard = ({ label, fieldKey, value, evidence, preferValueWhenPresent = false, suppressVerificationUi = false }) => {
     const status = getHeadlineStatus(fieldKey);
     const hasPreferredValue = preferValueWhenPresent && value !== undefined && value !== null && value !== '';
-    const displayValue = hasPreferredValue ? safeRender(value, 'Non specificato in perizia') : getHeadlineDisplayValue(fieldKey, value);
+    const displayValue = hasPreferredValue ? safeRender(value, '') : getHeadlineDisplayValue(fieldKey, value);
     const hasEvidence = evidence && Array.isArray(evidence) && evidence.length > 0;
     const pages = hasEvidence ? [...new Set(evidence.map(e => e.page).filter(Boolean))].sort((a, b) => a - b) : [];
     const needsVerification = !suppressVerificationUi && isNeedsVerification(status);
     const isConfirmed = status === 'USER_PROVIDED';
+    const hasDisplayValue = !isDisplayInvalidValue(displayValue);
+
+    if (!hasDisplayValue && !needsVerification && !isConfirmed) return null;
 
     return (
       <div className="p-4 bg-zinc-950 rounded-lg">
@@ -2758,7 +2988,7 @@ const AnalysisResult = () => {
           )}
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          <p className="font-medium text-zinc-100">{displayValue}</p>
+          {hasDisplayValue && <p className="font-medium text-zinc-100">{displayValue}</p>}
           {needsVerification && (
             <span className="px-2 py-0.5 rounded-full text-[10px] font-mono bg-amber-500/20 text-amber-300">
               DA VERIFICARE
@@ -2981,16 +3211,16 @@ const AnalysisResult = () => {
           {activeTab === 'overview' && (
             <>
               <p className="text-sm text-zinc-400 mt-3">
-                {displayHeaderSummaryIt}
+                {displayHeaderSummaryItSafe}
               </p>
               <p className="text-xs text-zinc-500 mt-1">
-                {displayHeaderSummaryEn}
+                {displayHeaderSummaryEnSafe}
               </p>
               <div className="xl:text-right">
                 {/* Show driver/reason for semaforo */}
-                {displayHeaderDriverIt && (
+                {displayHeaderDriverItSafe && (
                   <p className="text-xs text-amber-400 mt-1">
-                    Driver: {displayHeaderDriverIt}
+                    Driver: {displayHeaderDriverItSafe}
                   </p>
                 )}
                 {/* Show evidence pages */}
@@ -3010,8 +3240,8 @@ const AnalysisResult = () => {
                     {decisionSourceLabel}
                   </span>
                 </div>
-                <p className="text-lg font-semibold text-zinc-100">{displayDecisionIt}</p>
-                <p className="text-sm text-zinc-500 mt-1">{displayDecisionEn}</p>
+                <p className="text-lg font-semibold text-zinc-100">{displayDecisionItSafe}</p>
+                <p className="text-sm text-zinc-500 mt-1">{displayDecisionEnSafe}</p>
                 {displayedDecisionBullets.length > 0 && (
                   <ul className="mt-3 space-y-1 text-sm text-zinc-300 list-disc pl-5">
                     {displayedDecisionBullets.map((item) => (
@@ -3775,21 +4005,27 @@ const AnalysisResult = () => {
                   value={getSurfaceDisplayValue('regolarita_urbanistica', abusi.conformita_urbanistica)}
                   evidence={getFieldEvidence('regolarita_urbanistica', abusi.conformita_urbanistica)}
                 />
-                <DataValueWithEvidence
-                  label="Agibilità/Abitabilità"
-                  value={safeRender(compactAgibilitaDetail.value, 'Non specificato in perizia')}
-                  evidence={compactAgibilitaDetail.evidence}
-                />
-                <DataValueWithEvidence
-                  label="APE (Certificato Energetico)"
-                  value={getSurfaceDisplayValue('ape', abusi.ape)}
-                  evidence={getFieldEvidence('ape', abusi.ape)}
-                />
-                <DataValueWithEvidence
-                  label="Dati Asta"
-                  value={safeRender(datiAsta?.data || datiAsta?.value || datiAsta, 'Non specificato in perizia')}
-                  evidence={getEvidence(datiAsta)}
-                />
+                {!isDisplayInvalidValue(safeRender(compactAgibilitaDetail.value, '')) && (
+                  <DataValueWithEvidence
+                    label="Agibilità/Abitabilità"
+                    value={safeRender(compactAgibilitaDetail.value, '')}
+                    evidence={compactAgibilitaDetail.evidence}
+                  />
+                )}
+                {!isDisplayInvalidValue(getSurfaceDisplayValue('ape', abusi.ape)) && (
+                  <DataValueWithEvidence
+                    label="APE (Certificato Energetico)"
+                    value={getSurfaceDisplayValue('ape', abusi.ape)}
+                    evidence={getFieldEvidence('ape', abusi.ape)}
+                  />
+                )}
+                {!isDisplayInvalidValue(safeRender(datiAsta?.data || datiAsta?.value || datiAsta, '')) && (
+                  <DataValueWithEvidence
+                    label="Dati Asta"
+                    value={safeRender(datiAsta?.data || datiAsta?.value || datiAsta, '')}
+                    evidence={getEvidence(datiAsta)}
+                  />
+                )}
               </div>
             </div>
           </TabsContent>
@@ -3807,7 +4043,7 @@ const AnalysisResult = () => {
 
               {hasGroupedRedFlags ? (
                 <div className="space-y-5">
-                  {groupedRedFlags.map((group) => (
+                  {displayGroupedRedFlags.map((group) => (
                     group.items.length > 0 ? (
                       <div key={`rf_group_${group.key}`} className="p-4 rounded-lg border border-zinc-800 bg-zinc-950/60">
                         <h3 className="text-sm font-semibold text-zinc-100 mb-3">{group.title}</h3>

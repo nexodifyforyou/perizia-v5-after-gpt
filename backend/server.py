@@ -33,6 +33,7 @@ from section_builder import build_estratto_quality
 from evidence_utils import normalize_evidence_quote
 from narrator import build_decisione_rapida_narration, build_deterministic_summary_for_client, build_summary_for_client_bundle
 from cost_market_ranges import market_range_for_item
+from customer_decision_contract import apply_customer_decision_contract, sanitize_customer_facing_result, separate_internal_runtime_from_customer_result
 from perizia_runtime.runtime import apply_verifier_to_result, run_quality_verifier
 
 ROOT_DIR = Path(__file__).parent
@@ -1636,7 +1637,24 @@ def _normalize_field_state_contract(field_key: str, state: Any, pages: List[Dict
         "searched_in": searched_in,
         "user_prompt_it": prompt,
     }
-    for extra_key in ("review_required", "needs_user_confirmation", "resolver_meta", "conflicts", "all_candidates", "chosen_candidate", "top_candidates"):
+    for extra_key in (
+        "review_required",
+        "needs_user_confirmation",
+        "resolver_meta",
+        "conflicts",
+        "all_candidates",
+        "chosen_candidate",
+        "top_candidates",
+        "contract_state",
+        "explanation",
+        "context_qualification",
+        "why_not_fully_certain",
+        "why_not_resolved",
+        "source_pages",
+        "supporting_pages",
+        "tension_pages",
+        "needs_human_review",
+    ):
         if extra_key in st:
             normalized[extra_key] = copy.deepcopy(st.get(extra_key))
     return normalized
@@ -4528,6 +4546,19 @@ def _build_state_from_existing_value(
     return _build_field_state(value=value, status=status, evidence=evidence_list, searched_in=searched_in)
 
 def _apply_decision_states_to_result(result: Dict[str, Any], states: Dict[str, Any]) -> None:
+    def _state_customer_explanation(state: Any, *, missing_fallback: str, uncertain_fallback: str) -> Optional[str]:
+        st = state if isinstance(state, dict) else {}
+        for key in ("explanation", "context_qualification", "why_not_fully_certain", "why_not_resolved"):
+            text = str(st.get(key) or "").strip()
+            if text:
+                return text
+        status = str(st.get("status") or "").upper()
+        if status in {"", "NOT_FOUND", "UNKNOWN"}:
+            return missing_fallback
+        if status in {"LOW_CONFIDENCE", "DA_VERIFICARE"}:
+            return uncertain_fallback
+        return None
+
     dati = result.get("dati_certi_del_lotto", {}) if isinstance(result.get("dati_certi_del_lotto"), dict) else {}
     prezzo_state = states.get("prezzo_base_asta") or {}
     superficie_state = states.get("superficie") or {}
@@ -4562,6 +4593,12 @@ def _apply_decision_states_to_result(result: Dict[str, Any], states: Dict[str, A
     dati["diritto_reale"] = {
         "value": diritto_clean or diritto_display,
         "evidence": diritto_evidence,
+        "explanation_it": _state_customer_explanation(
+            diritto_state,
+            missing_fallback="Il diritto reale non emerge in modo affidabile dalla perizia: verifica manuale richiesta.",
+            uncertain_fallback="Il diritto reale richiede una verifica manuale prima dell'uso decisionale.",
+        ),
+        "contract_state": diritto_state.get("contract_state"),
     }
     if quota_clean:
         dati["quota"] = {"value": quota_clean, "evidence": diritto_evidence}
@@ -4591,6 +4628,15 @@ def _apply_decision_states_to_result(result: Dict[str, Any], states: Dict[str, A
     occ["status_it"] = status_it_map.get(occ_norm, occ_display or "Da verificare")
     occ["status_en"] = status_en_map.get(occ_norm, "To verify")
     occ["evidence"] = occ_state.get("evidence", [])
+    occ["explanation_it"] = _state_customer_explanation(
+        occ_state,
+        missing_fallback="Lo stato occupativo non è ricavabile in modo affidabile dalla perizia.",
+        uncertain_fallback="Lo stato occupativo richiede verifica perché il dato disponibile non è pienamente conclusivo.",
+    )
+    occ["context_qualification"] = occ_state.get("context_qualification")
+    occ["why_not_fully_certain"] = occ_state.get("why_not_fully_certain")
+    occ["why_not_resolved"] = occ_state.get("why_not_resolved")
+    occ["contract_state"] = occ_state.get("contract_state")
     result["stato_occupativo"] = occ
 
     abusi = result.get("abusi_edilizi_conformita", {}) if isinstance(result.get("abusi_edilizi_conformita"), dict) else {}
@@ -4601,11 +4647,26 @@ def _apply_decision_states_to_result(result: Dict[str, Any], states: Dict[str, A
         "status": _legacy_urbanistica_status_from_state(reg_state),
         "detail_it": reg_display,
         "evidence": reg_state.get("evidence", []),
+        "explanation_it": _state_customer_explanation(
+            reg_state,
+            missing_fallback="La perizia non consente di confermare la regolarità urbanistica: verifica manuale necessaria.",
+            uncertain_fallback="La regolarità urbanistica resta qualificata o incerta e richiede verifica manuale.",
+        ),
+        "contract_state": reg_state.get("contract_state"),
     }
     abusi["conformita_catastale"] = {
         "status": _legacy_catastale_status_from_state(cat_state),
         "detail_it": _field_state_display_value(cat_state),
         "evidence": cat_state.get("evidence", []),
+        "explanation_it": _state_customer_explanation(
+            cat_state,
+            missing_fallback="La perizia non fornisce un esito catastale conclusivo: verifica manuale necessaria.",
+            uncertain_fallback="La conformità catastale resta non conclusiva e richiede verifica manuale.",
+        ),
+        "context_qualification": cat_state.get("context_qualification"),
+        "why_not_fully_certain": cat_state.get("why_not_fully_certain"),
+        "why_not_resolved": cat_state.get("why_not_resolved"),
+        "contract_state": cat_state.get("contract_state"),
     }
     ape_state = states.get("ape") or {}
     abusi["ape"] = {
@@ -4639,6 +4700,12 @@ def _apply_decision_states_to_result(result: Dict[str, Any], states: Dict[str, A
         "status": _field_state_display_value(agibilita_state),
         "detail_it": _field_state_display_value(agibilita_state),
         "evidence": agibilita_state.get("evidence", []),
+        "explanation_it": _state_customer_explanation(
+            agibilita_state,
+            missing_fallback="La perizia non riporta un certificato di agibilità/abitabilità conclusivo.",
+            uncertain_fallback="L'agibilità richiede verifica manuale perché il dato non è pienamente conclusivo.",
+        ),
+        "contract_state": agibilita_state.get("contract_state"),
     }
     result["abusi_edilizi_conformita"] = abusi
 
@@ -4646,14 +4713,24 @@ def _apply_decision_states_to_result(result: Dict[str, Any], states: Dict[str, A
     items = money_box.get("items", [])
     spese_state = states.get("spese_condominiali_arretrate") or {}
     spese_display = _field_state_display_value(spese_state)
+    spese_note = _state_customer_explanation(
+        spese_state,
+        missing_fallback="La perizia segnala il tema delle spese condominiali arretrate ma non indica un importo difendibile: verifica manuale richiesta.",
+        uncertain_fallback="Le spese condominiali arretrate non sono risolte in modo affidabile: verifica manuale richiesta.",
+    )
     if isinstance(items, list):
         for item in items:
             label = str(item.get("label_it", "") or item.get("voce", "") or "")
             if item.get("code") == "E" or "Spese condominiali" in label:
-                item["stima_nota"] = spese_display
-                fonte_value = "Perizia" if spese_state.get("evidence") else "Non specificato in perizia"
+                item["stima_nota"] = spese_note or (None if spese_display == "NON SPECIFICATO IN PERIZIA" else spese_display)
+                fonte_value = "Perizia" if spese_state.get("evidence") else None
                 item["fonte_perizia"] = {"value": fonte_value, "evidence": spese_state.get("evidence", [])}
                 item["source"] = fonte_value
+                item["contract_state"] = (
+                    "quantified_estimate"
+                    if _as_float_or_none(item.get("stima_euro")) is not None
+                    else ("unresolved_explained" if str(spese_state.get("status") or "").upper() in {"NOT_FOUND", "LOW_CONFIDENCE"} else "info_only")
+                )
                 break
     result["money_box"] = money_box
 
@@ -5491,13 +5568,31 @@ def _sanitize_money_box_for_customer(result: Dict[str, Any]) -> None:
                 )
             )
         ]
-        supplement_burdens = [
+    supplement_burdens = [
             burden for burden in supplement_burdens
             if not (
                 isinstance(burden, dict)
                 and "spese condominiali" in _normalize_signal_text(burden.get("label_it") or burden.get("label_en") or "")
             )
         ]
+
+    blocked_unreadable = (
+        str(result.get("analysis_status") or "").upper() == "UNREADABLE"
+        or str(((result.get("canonical_contract_state") or {}) if isinstance(result.get("canonical_contract_state"), dict) else {}).get("reason") or "").lower() == "canonical_freeze_blocked_unreadable"
+        or str(((result.get("document_quality") or {}) if isinstance(result.get("document_quality"), dict) else {}).get("status") or "").upper() == "UNREADABLE"
+    )
+    blocked_note = "Documento/perizia non leggibile o estrazione bloccata: nessun totale extra difendibile può essere ricavato automaticamente; verifica manuale obbligatoria."
+    spese_note = None
+    if isinstance(spese_state, dict):
+        for key in ("explanation", "context_qualification", "why_not_fully_certain", "why_not_resolved"):
+            text = str(spese_state.get(key) or "").strip()
+            if text:
+                spese_note = text
+                break
+        if not spese_note and str(spese_state.get("status") or "").upper() == "NOT_FOUND":
+            spese_note = "La perizia non indica un importo difendibile per eventuali spese condominiali arretrate: verifica manuale richiesta."
+        if not spese_note and str(spese_state.get("status") or "").upper() == "LOW_CONFIDENCE":
+            spese_note = "Le spese condominiali arretrate richiedono verifica manuale perché il dato disponibile non è pienamente conclusivo."
 
     sanitized_items: List[Dict[str, Any]] = []
     for item in cleaned_items:
@@ -5549,14 +5644,126 @@ def _sanitize_money_box_for_customer(result: Dict[str, Any]) -> None:
                 item[text_key] = None
         if isinstance(item.get("type"), str) and "TBD" in str(item.get("type")).upper():
             item["type"] = "QUALITATIVE" if item.get("stima_euro") is None else "ESTIMATE"
+        label_blob = _normalize_signal_text(item.get("label_it") or item.get("label_en") or item.get("stima_nota") or "")
+        numeric_amount = _as_float_or_none(item.get("stima_euro"))
+        if blocked_unreadable:
+            item["contract_state"] = "blocked_unreadable"
+            item["stima_euro"] = None
+            item["stima_nota"] = blocked_note
+        elif numeric_amount is not None and numeric_amount > 0:
+            item["contract_state"] = "quantified_estimate"
+            item["customer_visible_amount_status"] = "quantified_estimate"
+        elif "spese condominiali" in label_blob and spese_note:
+            item["contract_state"] = "unresolved_explained"
+            item["customer_visible_amount_status"] = "unresolved_explained"
+            item["stima_nota"] = spese_note
+        elif evidence:
+            item["contract_state"] = "qualitative_burden"
+            item["customer_visible_amount_status"] = "qualitative_burden"
+            if not str(item.get("stima_nota") or "").strip() or "non quantificato" in str(item.get("stima_nota") or "").lower():
+                item["stima_nota"] = "Onere segnalato dalla perizia senza importo finale difendibile: verifica manuale richiesta."
+        else:
+            item["contract_state"] = "info_only"
+            item["customer_visible_amount_status"] = "info_only"
         sanitized_items.append(item)
 
     cleaned_items = sanitized_items
     money_box["items"] = cleaned_items
+    for burden in supplement_burdens:
+        if not isinstance(burden, dict):
+            continue
+        if isinstance(burden.get("stima_euro"), str) and (
+            str(burden.get("stima_euro")).strip().upper() in {"TBD", "NON_QUANTIFICATO", "NON_QUANTIFICATO_IN_PERIZIA", "NOT_SPECIFIED", "NOT_SPECIFIED_IN_PERIZIA"}
+            or "TBD" in str(burden.get("stima_euro")).strip().upper()
+        ):
+            burden["stima_euro"] = None
+        burden["contract_state"] = "qualitative_burden" if not blocked_unreadable else "blocked_unreadable"
+        if blocked_unreadable:
+            burden["stima_nota"] = blocked_note
+        elif not str(burden.get("stima_nota") or "").strip() or "non quantificato" in str(burden.get("stima_nota") or "").lower():
+            burden["stima_nota"] = "Onere segnalato dalla perizia senza importo finale difendibile: verifica manuale richiesta."
     if supplement_burdens:
         money_box["qualitative_burdens"] = copy.deepcopy(supplement_burdens)
 
-    if not is_multi_lot and supported_numeric_total <= 0:
+    verifier_summary = money_box.get("verifier_costs_summary", {}) if isinstance(money_box.get("verifier_costs_summary"), dict) else {}
+    verifier_runtime = result.get("verifier_runtime") if isinstance(result.get("verifier_runtime"), dict) else {}
+    canonical_case = verifier_runtime.get("canonical_case") if isinstance(verifier_runtime.get("canonical_case"), dict) else {}
+    costs = canonical_case.get("costs") if isinstance(canonical_case.get("costs"), dict) else {}
+    explicit_items = costs.get("explicit_buyer_costs") if isinstance(costs.get("explicit_buyer_costs"), list) else []
+    if not verifier_summary:
+        verifier_summary = {
+            "explicit_total_eur": costs.get("explicit_total"),
+            "explicit_items_count": len(explicit_items),
+        }
+    if explicit_items and not cleaned_items:
+        fallback_items: List[Dict[str, Any]] = []
+        for idx, raw_item in enumerate(explicit_items, start=1):
+            if not isinstance(raw_item, dict):
+                continue
+            amount = _as_float_or_none(raw_item.get("amount_eur"))
+            if amount is None:
+                amount = _as_float_or_none(raw_item.get("amount"))
+            evidence = _normalize_contract_evidence_list(raw_item.get("evidence", []), max_items=2)
+            if amount is None or amount <= 0:
+                continue
+            fallback_items.append({
+                "code": f"VR_FALLBACK_{idx}",
+                "label_it": "Costo esplicito rilevato in perizia",
+                "label_en": "Explicit cost found in appraisal",
+                "type": "ESTIMATE",
+                "stima_euro": int(round(amount)),
+                "stima_nota": "Importo esplicito rilevato in perizia.",
+                "source": "VERIFIER_RUNTIME",
+                "evidence": evidence,
+                "contract_state": "quantified_estimate",
+                "customer_visible_amount_status": "quantified_estimate",
+            })
+        if fallback_items:
+            cleaned_items = fallback_items
+            money_box["items"] = cleaned_items
+    explicit_total = _as_float_or_none(verifier_summary.get("explicit_total_eur"))
+    if blocked_unreadable:
+        money_box["policy"] = "BLOCKED_UNREADABLE"
+        money_box.pop("total_extra_costs_range", None)
+        money_box["total_extra_costs"] = {
+            "min": None,
+            "max": None,
+            "max_is_open": False,
+            "note": blocked_note,
+            "contract_state": "blocked_unreadable",
+        }
+        if isinstance(result.get("section_3_money_box"), dict):
+            result["section_3_money_box"]["items"] = copy.deepcopy(cleaned_items)
+            if supplement_burdens:
+                result["section_3_money_box"]["qualitative_burdens"] = copy.deepcopy(supplement_burdens)
+            result["section_3_money_box"].pop("total_extra_costs_range", None)
+            result["section_3_money_box"]["totale_extra_budget"] = {
+                "min": None,
+                "max": None,
+                "nota": blocked_note,
+                "contract_state": "blocked_unreadable",
+            }
+    elif explicit_total is not None and explicit_total > 0:
+        note = f"Totale stimato in perizia: € {int(round(explicit_total))}."
+        if cleaned_items:
+            note += " Le singole voci quantificate sotto sono componenti del totale e non un secondo totale autonomo."
+        money_box["total_extra_costs"] = {
+            "range": {"min": int(round(explicit_total)), "max": int(round(explicit_total))},
+            "max_is_open": False,
+            "note": note,
+            "contract_state": "quantified_estimate",
+        }
+        if isinstance(result.get("section_3_money_box"), dict):
+            result["section_3_money_box"]["items"] = copy.deepcopy(cleaned_items)
+            if supplement_burdens:
+                result["section_3_money_box"]["qualitative_burdens"] = copy.deepcopy(supplement_burdens)
+            result["section_3_money_box"]["totale_extra_budget"] = {
+                "min": int(round(explicit_total)),
+                "max": int(round(explicit_total)),
+                "nota": note,
+                "contract_state": "quantified_estimate",
+            }
+    elif not is_multi_lot and supported_numeric_total <= 0:
         qualitative_burdens = supplement_burdens or _build_conservative_cost_burdens(result, cleaned_items)
         if suppress_condo_burden:
             qualitative_burdens = [
@@ -5573,7 +5780,8 @@ def _sanitize_money_box_for_customer(result: Dict[str, Any]) -> None:
             "min": None,
             "max": None,
             "max_is_open": False,
-            "note": None,
+            "note": spese_note or "La perizia segnala oneri o verifiche buyer-side, ma non fornisce un totale extra difendibile.",
+            "contract_state": "unresolved_explained" if qualitative_burdens else "info_only",
         }
         if isinstance(result.get("section_3_money_box"), dict):
             result["section_3_money_box"]["items"] = copy.deepcopy(cleaned_items)
@@ -5582,16 +5790,20 @@ def _sanitize_money_box_for_customer(result: Dict[str, Any]) -> None:
             result["section_3_money_box"]["totale_extra_budget"] = {
                 "min": None,
                 "max": None,
-                "nota": None,
+                "nota": spese_note or "La perizia non consente di stimare un totale extra difendibile.",
+                "contract_state": "unresolved_explained" if qualitative_burdens else "info_only",
             }
     elif supported_numeric_total > 0:
         note = "Document-backed buyer burdens only"
         if supplement_burdens:
             note = "Document-backed quantified buyer burdens only; qualitative burdens remain excluded from the numeric total"
+        if explicit_total is not None and abs(explicit_total - supported_numeric_total) <= 1.0:
+            note = f"Totale stimato in perizia: € {int(round(supported_numeric_total))}. Le singole voci quantificate sotto sono componenti del totale e non un secondo totale autonomo."
         money_box["total_extra_costs"] = {
             "range": {"min": int(round(supported_numeric_total)), "max": int(round(supported_numeric_total))},
             "max_is_open": False,
             "note": note,
+            "contract_state": "quantified_estimate",
         }
         if isinstance(result.get("section_3_money_box"), dict):
             result["section_3_money_box"]["items"] = copy.deepcopy(cleaned_items)
@@ -5601,6 +5813,7 @@ def _sanitize_money_box_for_customer(result: Dict[str, Any]) -> None:
                 "min": int(round(supported_numeric_total)),
                 "max": int(round(supported_numeric_total)),
                 "nota": note,
+                "contract_state": "quantified_estimate",
             }
     elif isinstance(result.get("section_3_money_box"), dict):
         result["section_3_money_box"]["items"] = copy.deepcopy(cleaned_items)
@@ -5977,6 +6190,7 @@ def _apply_headline_field_states(result: Dict[str, Any], pages: List[Dict[str, A
     has_text = any(str(p.get("text", "") or "").strip() for p in pages)
     report_header = result.get("report_header", {}) if isinstance(result.get("report_header"), dict) else {}
     case_header = result.get("case_header", {}) if isinstance(result.get("case_header"), dict) else {}
+    existing_states = result.get("field_states") if isinstance(result.get("field_states"), dict) else {}
 
     if has_text:
         lots = result.get("lots") or []
@@ -6020,9 +6234,11 @@ def _apply_headline_field_states(result: Dict[str, Any], pages: List[Dict[str, A
             ),
         }
 
-    result["field_states"] = states
+    merged_states = copy.deepcopy(existing_states)
+    merged_states.update(states)
+    result["field_states"] = merged_states
     _enforce_field_states_contract(result, pages)
-    _apply_headline_states_to_headers(result, result.get("field_states", states))
+    _apply_headline_states_to_headers(result, result.get("field_states", merged_states))
     _repair_lot_addresses_from_headline(result)
 
 def _normalize_override_value(field: str, value: Any) -> Any:
@@ -6063,9 +6279,7 @@ def _apply_field_overrides(result: Dict[str, Any], overrides: Dict[str, Any], fi
         overrides = dict(overrides)
         overrides["superficie"] = overrides.get("superficie_catastale")
     if not isinstance(result.get("field_states"), dict):
-        pages_for_proof = [{"page_number": 1, "text": ""}]
-        _apply_headline_field_states(result, pages_for_proof)
-        _apply_decision_field_states(result, pages_for_proof)
+        result["field_states"] = {}
     states = result.get("field_states", {})
     field_list = fields or [
         "tribunale",
@@ -6106,7 +6320,18 @@ def _apply_field_overrides(result: Dict[str, Any], overrides: Dict[str, Any], fi
         state["searched_in"] = []
         states[field] = state
     result["field_states"] = states
-    _apply_headline_states_to_headers(result, states)
+    headline_states = {
+        key: states.get(key, {
+            "value": None,
+            "status": "NOT_FOUND",
+            "confidence": 0.0,
+            "evidence": [],
+            "searched_in": [],
+            "user_prompt_it": None,
+        })
+        for key in ("tribunale", "procedura", "lotto", "address")
+    }
+    _apply_headline_states_to_headers(result, headline_states)
     _apply_decision_states_to_result(result, states)
 
 def _normalize_primary_lot_quota(*values: Any) -> Optional[str]:
@@ -6982,6 +7207,7 @@ _VISIBLE_MACHINE_PLACEHOLDER_STRINGS = {
     "TBD",
     "NOT_SPECIFIED",
     "NOT_SPECIFIED_IN_PERIZIA",
+    "NON SPECIFICATO IN PERIZIA",
     "NON_QUANTIFICATO",
     "NON_QUANTIFICATO_IN_PERIZIA",
 }
@@ -7047,6 +7273,298 @@ def _ensure_section_3_money_box_alias(result: Dict[str, Any]) -> None:
                 "contract_metadata": copy.deepcopy(total.get("contract_metadata")),
             }
     result["section_3_money_box"] = section3
+
+
+def _is_runtime_authoritative_result(result: Dict[str, Any]) -> bool:
+    if not isinstance(result, dict):
+        return False
+    verifier_runtime = result.get("verifier_runtime")
+    canonical_contract_state = result.get("canonical_contract_state")
+    summary_bundle = result.get("summary_for_client_bundle")
+    customer_contract = result.get("customer_decision_contract")
+    return (
+        isinstance(verifier_runtime, dict)
+        or isinstance(canonical_contract_state, dict)
+        or isinstance(summary_bundle, dict)
+        or isinstance(customer_contract, dict)
+    )
+
+
+def _compatibility_only_project_legal_killers_from_runtime(result: Dict[str, Any]) -> None:
+    if not isinstance(result, dict):
+        return
+    section = result.get("section_9_legal_killers")
+    if not isinstance(section, dict):
+        return
+
+    projected_section: Dict[str, Any] = {}
+
+    items = section.get("items") if isinstance(section.get("items"), list) else []
+    top_items = section.get("top_items") if isinstance(section.get("top_items"), list) else []
+    resolver_meta = section.get("resolver_meta") if isinstance(section.get("resolver_meta"), dict) else None
+
+    if items:
+        projected_section["items"] = copy.deepcopy(items)
+    if top_items:
+        projected_section["top_items"] = copy.deepcopy(top_items)
+    if resolver_meta:
+        projected_section["resolver_meta"] = copy.deepcopy(resolver_meta)
+    else:
+        theme_meta = [
+            {
+                "theme": resolution.get("theme"),
+                "theme_resolution": resolution.get("theme_resolution"),
+                "contradiction_flag": bool(resolution.get("contradiction_flag")),
+                "source_priority": resolution.get("source_priority"),
+                "driver_field": resolution.get("driver_field"),
+                "driver_status": resolution.get("driver_status"),
+                "driver_value": resolution.get("driver_value"),
+            }
+            for resolution in _field_state_theme_resolution(result).values()
+        ]
+        if theme_meta:
+            projected_section["resolver_meta"] = {"themes": theme_meta}
+
+    result["section_9_legal_killers"] = projected_section
+
+
+def _compatibility_only_project_money_box_from_runtime(result: Dict[str, Any]) -> None:
+    if not isinstance(result, dict):
+        return
+
+    verifier_runtime = result.get("verifier_runtime") if isinstance(result.get("verifier_runtime"), dict) else {}
+    canonical_case = verifier_runtime.get("canonical_case") if isinstance(verifier_runtime.get("canonical_case"), dict) else {}
+    costs = canonical_case.get("costs") if isinstance(canonical_case.get("costs"), dict) else {}
+    pricing = canonical_case.get("pricing") if isinstance(canonical_case.get("pricing"), dict) else {}
+    existing_money_box = result.get("money_box") if isinstance(result.get("money_box"), dict) else {}
+    blocked_unreadable = (
+        str(result.get("analysis_status") or "").upper() == "UNREADABLE"
+        or str(((result.get("canonical_contract_state") or {}) if isinstance(result.get("canonical_contract_state"), dict) else {}).get("reason") or "").lower() == "canonical_freeze_blocked_unreadable"
+        or str(((result.get("document_quality") or {}) if isinstance(result.get("document_quality"), dict) else {}).get("status") or "").upper() == "UNREADABLE"
+    )
+
+    explicit_total = _as_float_or_none(costs.get("explicit_total"))
+    raw_items = costs.get("explicit_buyer_costs") if isinstance(costs.get("explicit_buyer_costs"), list) else []
+    projected_items: List[Dict[str, Any]] = []
+    for idx, raw_item in enumerate(raw_items, start=1):
+        if not isinstance(raw_item, dict):
+            continue
+        amount = _as_float_or_none(raw_item.get("amount_eur"))
+        if amount is None:
+            amount = _as_float_or_none(raw_item.get("amount"))
+        if amount is None or amount <= 0:
+            continue
+        evidence = _normalize_contract_evidence_list(raw_item.get("evidence", []), max_items=2)
+        label = str(raw_item.get("label_it") or raw_item.get("label") or "").strip() or "Costo buyer-side esplicito da perizia"
+        projected_items.append({
+            "code": str(raw_item.get("code") or f"VR_COST_{idx:02d}"),
+            "label_it": label,
+            "label_en": str(raw_item.get("label_en") or label).strip() or label,
+            "type": "ESTIMATE",
+            "stima_euro": int(round(float(amount))),
+            "stima_nota": "Costo buyer-side esplicito rilevato nella perizia.",
+            "source": "VERIFIER_RUNTIME",
+            "evidence": copy.deepcopy(evidence),
+            "fonte_perizia": {
+                "value": "Perizia",
+                "evidence": copy.deepcopy(evidence),
+            },
+            "contract_state": "quantified_estimate",
+            "customer_visible_amount_status": "quantified_estimate",
+        })
+
+    removed_pricing_items: List[Dict[str, Any]] = []
+    pricing_amounts = _canonical_pricing_amounts_for_money_box(pricing)
+    existing_items = existing_money_box.get("items") if isinstance(existing_money_box.get("items"), list) else []
+    if pricing_amounts and existing_items:
+        for item in existing_items:
+            if not isinstance(item, dict):
+                continue
+            amount = _as_float_or_none(item.get("stima_euro"))
+            if amount is None or round(float(amount), 2) not in pricing_amounts:
+                continue
+            removed_pricing_items.append({
+                "amount": round(float(amount), 2),
+                "label": item.get("label_it") or item.get("label") or item.get("voce"),
+                "source": item.get("source"),
+                "reason": "pricing_amount_not_buyer_cost",
+            })
+
+    money_box: Dict[str, Any] = {"items": projected_items}
+    existing_summary = existing_money_box.get("verifier_costs_summary") if isinstance(existing_money_box.get("verifier_costs_summary"), dict) else {}
+    money_box["verifier_costs_summary"] = {
+        "explicit_total_eur": explicit_total,
+        "explicit_items_count": len(projected_items),
+        "valuation_adjustments_count": len(costs.get("valuation_adjustments", []) if isinstance(costs.get("valuation_adjustments"), list) else []),
+    }
+    if existing_summary:
+        money_box["verifier_costs_summary"].update(copy.deepcopy(existing_summary))
+    if removed_pricing_items:
+        money_box["removed_pricing_amount_items"] = removed_pricing_items
+
+    if blocked_unreadable:
+        blocked_note = "Documento/perizia non leggibile o estrazione bloccata: nessun totale extra difendibile può essere ricavato automaticamente; verifica manuale obbligatoria."
+        money_box["policy"] = "BLOCKED_UNREADABLE"
+        money_box["total_extra_costs"] = {
+            "min": None,
+            "max": None,
+            "max_is_open": False,
+            "note": blocked_note,
+            "contract_state": "blocked_unreadable",
+        }
+        for item in money_box["items"]:
+            if isinstance(item, dict):
+                item["stima_euro"] = None
+                item["stima_nota"] = blocked_note
+                item["contract_state"] = "blocked_unreadable"
+                item["customer_visible_amount_status"] = "blocked_unreadable"
+    elif explicit_total is not None and explicit_total > 0:
+        total_note = f"Totale stimato in perizia: € {int(round(explicit_total))}."
+        if projected_items:
+            total_note += " Le singole voci quantificate sotto sono componenti del totale e non un secondo totale autonomo."
+        money_box["total_extra_costs"] = {
+            "range": {"min": int(round(explicit_total)), "max": int(round(explicit_total))},
+            "max_is_open": False,
+            "note": total_note,
+            "contract_state": "quantified_estimate",
+        }
+    else:
+        money_box["total_extra_costs"] = {
+            "min": None,
+            "max": None,
+            "max_is_open": False,
+            "note": None,
+            "contract_state": "info_only",
+        }
+
+    result["money_box"] = money_box
+    _ensure_section_3_money_box_alias(result)
+    section3 = result.get("section_3_money_box")
+    if isinstance(section3, dict):
+        total = money_box.get("total_extra_costs") if isinstance(money_box.get("total_extra_costs"), dict) else {}
+        if isinstance(total.get("range"), dict):
+            section3["totale_extra_budget"] = {
+                "min": total["range"].get("min"),
+                "max": total["range"].get("max"),
+                "nota": total.get("note") or total.get("nota"),
+                "contract_state": total.get("contract_state"),
+            }
+        else:
+            section3["totale_extra_budget"] = {
+                "min": total.get("min"),
+                "max": total.get("max"),
+                "nota": total.get("note") or total.get("nota"),
+                "contract_state": total.get("contract_state"),
+            }
+        result["section_3_money_box"] = section3
+
+
+def _compatibility_only_project_summary_and_flags_from_runtime(result: Dict[str, Any]) -> None:
+    if not isinstance(result, dict):
+        return
+
+    bundle = result.get("summary_for_client_bundle") if isinstance(result.get("summary_for_client_bundle"), dict) else {}
+    summary = result.get("summary_for_client") if isinstance(result.get("summary_for_client"), dict) else {}
+    section_legal = result.get("section_9_legal_killers") if isinstance(result.get("section_9_legal_killers"), dict) else {}
+    top_items = section_legal.get("top_items") if isinstance(section_legal.get("top_items"), list) else []
+    blocked_unreadable = (
+        str(result.get("analysis_status") or "").upper() == "UNREADABLE"
+        or str(((result.get("canonical_contract_state") or {}) if isinstance(result.get("canonical_contract_state"), dict) else {}).get("reason") or "").lower() == "canonical_freeze_blocked_unreadable"
+        or str(((result.get("document_quality") or {}) if isinstance(result.get("document_quality"), dict) else {}).get("status") or "").upper() == "UNREADABLE"
+    )
+
+    if bundle:
+        status = str(bundle.get("semaforo_status") or "").upper() or ("UNKNOWN" if blocked_unreadable else "")
+        status_it_map = {"GREEN": "VERDE", "AMBER": "ATTENZIONE", "RED": "CRITICO", "UNKNOWN": "NON VALUTABILE"}
+        status_en_map = {"GREEN": "GREEN", "AMBER": "AMBER", "RED": "RED", "UNKNOWN": "NOT ASSESSABLE"}
+        top_blockers: List[str] = []
+        if blocked_unreadable:
+            top_blockers = ["DOCUMENT_UNREADABLE"]
+        else:
+            top_blockers = [str(item.get("killer") or "").strip() for item in top_items[:3] if isinstance(item, dict) and str(item.get("killer") or "").strip()]
+
+        semaforo = result.get("semaforo_generale") if isinstance(result.get("semaforo_generale"), dict) else {}
+        if status:
+            semaforo["status"] = status
+            semaforo["status_it"] = status_it_map.get(status, status)
+            semaforo["status_en"] = status_en_map.get(status, status)
+        if bundle.get("top_issue_it") or bundle.get("decision_summary_it"):
+            semaforo["reason_it"] = bundle.get("top_issue_it") or bundle.get("decision_summary_it")
+        if bundle.get("top_issue_en") or bundle.get("decision_summary_en"):
+            semaforo["reason_en"] = bundle.get("top_issue_en") or bundle.get("decision_summary_en")
+        if top_blockers:
+            semaforo["top_blockers"] = top_blockers
+        result["semaforo_generale"] = semaforo
+
+        section1 = result.get("section_1_semaforo_generale") if isinstance(result.get("section_1_semaforo_generale"), dict) else {}
+        section1.update(copy.deepcopy(semaforo))
+        result["section_1_semaforo_generale"] = section1
+
+        decision = result.get("decision_rapida_client") if isinstance(result.get("decision_rapida_client"), dict) else {}
+        if bundle.get("decision_summary_it"):
+            decision["summary_it"] = bundle.get("decision_summary_it")
+        elif summary.get("summary_it"):
+            decision["summary_it"] = summary.get("summary_it")
+        if bundle.get("decision_summary_en"):
+            decision["summary_en"] = bundle.get("decision_summary_en")
+        elif summary.get("summary_en"):
+            decision["summary_en"] = summary.get("summary_en")
+        if top_items:
+            decision["driver_rosso"] = copy.deepcopy(top_items[:3])
+        result["decision_rapida_client"] = decision
+
+        section2 = result.get("section_2_decisione_rapida") if isinstance(result.get("section_2_decisione_rapida"), dict) else {}
+        if decision.get("summary_it"):
+            section2["summary_it"] = decision.get("summary_it")
+        if decision.get("summary_en"):
+            section2["summary_en"] = decision.get("summary_en")
+        result["section_2_decisione_rapida"] = section2
+
+    summary.setdefault("disclaimer_it", "Documento informativo. Non costituisce consulenza legale. Consultare un professionista qualificato.")
+    summary.setdefault("disclaimer_en", "Informational document. Not legal advice. Consult a qualified professional.")
+    result["summary_for_client"] = summary
+
+    if blocked_unreadable:
+        result["red_flags_operativi"] = [
+            {
+                "code": "MANUAL_REVIEW",
+                "severity": "BLOCKER",
+                "flag_it": "Documento non leggibile o estrazione bloccata",
+                "flag_en": "Unreadable document or blocked extraction",
+                "action_it": "Nessuna conclusione affidabile automatica: verifica manuale obbligatoria sul documento originale.",
+            }
+        ]
+
+
+def _compatibility_only_project_customer_views_from_runtime(result: Dict[str, Any]) -> None:
+    if not isinstance(result, dict):
+        return
+    _promote_verifier_pricing_field_state(result)
+    states = result.get("field_states") if isinstance(result.get("field_states"), dict) else {}
+    if states:
+        _enforce_field_states_contract(result, [])
+        normalized_states = result.get("field_states", states)
+        headline_states = {
+            key: normalized_states.get(key)
+            for key in ("tribunale", "procedura", "lotto", "address")
+            if isinstance(normalized_states.get(key), dict)
+        }
+        if headline_states and any(
+            isinstance(state, dict) and (
+                state.get("value") not in (None, "", [])
+                or str(state.get("status") or "").upper() not in {"", "NOT_FOUND"}
+                or bool(state.get("evidence"))
+            )
+            for state in headline_states.values()
+        ):
+            _apply_headline_states_to_headers(result, headline_states)
+            _apply_customer_headline_fallbacks(result)
+    _compatibility_only_project_money_box_from_runtime(result)
+    if isinstance(result.get("field_states"), dict):
+        _apply_decision_states_to_result(result, result.get("field_states", {}))
+    _compatibility_only_project_legal_killers_from_runtime(result)
+    _compatibility_only_project_summary_and_flags_from_runtime(result)
+    _ensure_section_3_money_box_alias(result)
 
 
 def _focused_cost_evidence_for_amount(evidence_list: List[Dict[str, Any]], amount: float) -> List[Dict[str, Any]]:
@@ -7276,6 +7794,23 @@ def _build_case_aware_narration_payload(result: Dict[str, Any]) -> Optional[Dict
 
 
 def _refresh_red_flags_operativi(result: Dict[str, Any]) -> None:
+    blocked_unreadable = (
+        str(result.get("analysis_status") or "").upper() == "UNREADABLE"
+        or str(((result.get("canonical_contract_state") or {}) if isinstance(result.get("canonical_contract_state"), dict) else {}).get("reason") or "").lower() == "canonical_freeze_blocked_unreadable"
+        or str(((result.get("document_quality") or {}) if isinstance(result.get("document_quality"), dict) else {}).get("status") or "").upper() == "UNREADABLE"
+    )
+    if blocked_unreadable:
+        result["red_flags_operativi"] = [
+            {
+                "code": "MANUAL_REVIEW",
+                "severity": "BLOCKER",
+                "flag_it": "Documento non leggibile o estrazione bloccata",
+                "flag_en": "Unreadable document or blocked extraction",
+                "action_it": "Nessuna conclusione affidabile automatica: verifica manuale obbligatoria sul documento originale.",
+            }
+        ]
+        return
+
     existing_flags = result.get("red_flags_operativi")
     existing_list = existing_flags if isinstance(existing_flags, list) else []
     preserved: List[Dict[str, Any]] = []
@@ -7484,6 +8019,20 @@ def _refresh_customer_facing_result_on_read(
     field_overrides: Optional[Dict[str, Any]] = None,
 ) -> None:
     if not isinstance(result, dict):
+        return
+
+    if _is_runtime_authoritative_result(result):
+        _promote_verifier_pricing_field_state(result)
+        _prune_verifier_pricing_amounts_from_money_box(result)
+        apply_customer_decision_contract(result)
+        _apply_headline_overrides(result, headline_overrides or {})
+        if analysis_id and not isinstance(result.get("user_messages"), list):
+            result["user_messages"] = []
+        scrubbed_placeholders = _scrub_visible_machine_placeholders(result)
+        if scrubbed_placeholders:
+            debug_obj = result.get("debug") if isinstance(result.get("debug"), dict) else {}
+            debug_obj["visible_machine_placeholders_scrubbed"] = scrubbed_placeholders
+            result["debug"] = debug_obj
         return
 
     safe_pages = pages if isinstance(pages, list) and pages else [{"page_number": 1, "text": ""}]
@@ -13170,7 +13719,8 @@ NON aggiungere commenti, solo JSON valido."""
         logger.info(f"PASS 3: Final validation for {file_name}")
         
         # Deterministic calculations and fixes
-        result = apply_deterministic_fixes(result, pdf_text, pages, detected_lots, has_evidence)
+        # TEMP PROOF BYPASS: disable legacy PASS 3 deterministic overwrite block
+        # result = apply_deterministic_fixes(result, pdf_text, pages, detected_lots, has_evidence)
         result = enforce_evidence_or_low_confidence(result)
         
         # Ensure required fields exist
@@ -13549,6 +14099,115 @@ def apply_deterministic_fixes(result: Dict, pdf_text: str, pages: List[Dict], de
     result["qa"] = qa
     
     return result
+
+
+def _build_canonical_route_seed(
+    file_name: str,
+    case_id: str,
+    run_id: str,
+    pages: List[Dict[str, Any]],
+    extracted_lots: Optional[List[Dict[str, Any]]] = None,
+    detected_legal_killers: Optional[List[Dict[str, Any]]] = None,
+) -> Dict[str, Any]:
+    """
+    Build the initial live-route payload for /api/analysis/perizia.
+
+    This seed is intentionally narrow: it carries deterministic extraction
+    metadata forward into the canonical verifier/runtime bridge, but it does not
+    author customer-facing fallback branches. The final customer contract must
+    be owned by canonical runtime packaging plus the narrator/sanitizers.
+    """
+    extracted_lots = extracted_lots or []
+    detected_legal_killers = detected_legal_killers or []
+
+    normalized_lots: List[Dict[str, Any]] = []
+    for idx, lot in enumerate(extracted_lots):
+        lot_num = lot.get("lot_number") if isinstance(lot, dict) and isinstance(lot.get("lot_number"), int) else (idx + 1)
+        normalized_lots.append(_ensure_lot_contract(lot, lot_num))
+    if not normalized_lots:
+        normalized_lots = [_build_fallback_lot_from_pages(pages)]
+
+    beni_list = _extract_beni_from_pages(pages)
+    normalized_lots = _enrich_lots_from_sections(normalized_lots, pages, beni=beni_list)
+    normalized_lots = _assign_beni_to_lots(normalized_lots, beni_list)
+
+    if len(normalized_lots) >= 2:
+        lotto_value = "Lotti " + ", ".join(str(lot.get("lot_number")) for lot in normalized_lots)
+        is_multi_lot = True
+    elif len(normalized_lots) == 1:
+        lot_number = normalized_lots[0].get("lot_number")
+        lotto_value = "Lotto Unico" if lot_number == 1 else f"Lotto {lot_number}"
+        is_multi_lot = False
+    else:
+        lotto_value = "Lotto"
+        is_multi_lot = False
+
+    first_lot = normalized_lots[0] if normalized_lots and isinstance(normalized_lots[0], dict) else {}
+    first_evidence = first_lot.get("evidence", {}) if isinstance(first_lot.get("evidence"), dict) else {}
+    address_value = first_lot.get("ubicazione") if first_lot.get("ubicazione") not in (None, "", "NON SPECIFICATO IN PERIZIA") else None
+    legal_killers_items = _augment_legal_killers_from_lots(
+        [
+            {
+                "killer": lk["title"],
+                "status": "SI" if lk["severity"] == "ROSSO" else "GIALLO",
+                "action": "Verifica obbligatoria",
+                "evidence": [{
+                    "page": lk["page"],
+                    "quote": lk["quote"],
+                    "start_offset": lk.get("start_offset"),
+                    "end_offset": lk.get("end_offset"),
+                    "bbox": None,
+                }],
+                "source": "deterministic_scan",
+            }
+            for lk in detected_legal_killers
+            if isinstance(lk, dict)
+        ],
+        normalized_lots,
+    )
+
+    result: Dict[str, Any] = {
+        "schema_version": "nexodify_perizia_scan_v2",
+        "detail_scope": "LOT_FIRST" if len(normalized_lots) > 1 else ("BENE_FIRST" if len(beni_list) > 1 else "SINGLE_ASSET"),
+        "run": {
+            "run_id": run_id,
+            "generated_at_utc": datetime.now(timezone.utc).isoformat(),
+            "input": {"source_type": "perizia_pdf", "file_name": file_name, "pages_total": len(pages)},
+        },
+        "lots": normalized_lots,
+        "lots_count": len(normalized_lots),
+        "is_multi_lot": is_multi_lot,
+        "case_header": {
+            "procedure_id": None,
+            "lotto": lotto_value,
+            "tribunale": None,
+            "address": {"street": None, "city": None, "full": address_value},
+            "deposit_date": None,
+        },
+        "report_header": {
+            "title": "NEXODIFY INTELLIGENCE | Auction Scan",
+            "procedure": {"value": None, "evidence": []},
+            "lotto": {"value": lotto_value, "evidence": first_evidence.get("lotto", []) if isinstance(first_evidence.get("lotto"), list) else []},
+            "tribunale": {"value": None, "evidence": []},
+            "address": {"value": address_value, "evidence": first_evidence.get("ubicazione", []) if isinstance(first_evidence.get("ubicazione"), list) else []},
+            "is_multi_lot": is_multi_lot,
+            "generated_at": datetime.now(timezone.utc).isoformat(),
+        },
+        "lot_index": _build_lot_index_entries(normalized_lots),
+        "money_box": {"items": []},
+        "section_9_legal_killers": {"items": legal_killers_items},
+        "summary_for_client": {
+            "disclaimer_it": "Documento informativo. Non costituisce consulenza legale. Consultare un professionista qualificato.",
+            "disclaimer_en": "Informational document. Not legal advice. Consult a qualified professional.",
+        },
+        "qa_pass": {"status": "WARN", "checks": []},
+    }
+    if beni_list:
+        result["beni"] = beni_list
+        if len(normalized_lots) == 1 and isinstance(normalized_lots[0], dict):
+            result["lots"][0]["beni"] = beni_list
+    return result
+
 
 def create_fallback_analysis(file_name: str, case_id: str, run_id: str, pages: List[Dict], pdf_text: str, extracted_lots: List[Dict] = None, detected_legal_killers: List[Dict] = None) -> Dict:
     """Create fallback analysis when LLM fails - extract what we can deterministically"""
@@ -14195,7 +14854,12 @@ def _write_extraction_pack(analysis_id: str, payload: Dict[str, Any], document_q
 
 
 def _apply_unreadable_hard_stop(result: Dict[str, Any], document_quality: Dict[str, Any]) -> None:
-    if str(document_quality.get("status")) != "UNREADABLE":
+    blocked_unreadable = (
+        str(document_quality.get("status") or "").upper() == "UNREADABLE"
+        or str(((result.get("canonical_contract_state") or {}) if isinstance(result.get("canonical_contract_state"), dict) else {}).get("reason") or "").lower() == "canonical_freeze_blocked_unreadable"
+        or str(result.get("analysis_status") or "").upper() == "UNREADABLE"
+    )
+    if not blocked_unreadable:
         return
 
     result["analysis_status"] = "UNREADABLE"
@@ -14209,12 +14873,7 @@ def _apply_unreadable_hard_stop(result: Dict[str, Any], document_quality: Dict[s
     semaforo["status_en"] = "NOT ASSESSABLE"
     semaforo["reason_it"] = document_quality.get("customer_message_it")
     semaforo["reason_en"] = document_quality.get("customer_message_en")
-    blockers = semaforo.get("top_blockers")
-    if isinstance(blockers, list):
-        if "DOCUMENT_UNREADABLE" not in blockers:
-            blockers.append("DOCUMENT_UNREADABLE")
-    else:
-        semaforo["top_blockers"] = ["DOCUMENT_UNREADABLE"]
+    semaforo["top_blockers"] = ["DOCUMENT_UNREADABLE"]
 
     section1 = result.get("section_1_semaforo_generale")
     if isinstance(section1, dict):
@@ -14223,12 +14882,7 @@ def _apply_unreadable_hard_stop(result: Dict[str, Any], document_quality: Dict[s
         section1["status_en"] = "NOT ASSESSABLE"
         section1["reason_it"] = document_quality.get("customer_message_it")
         section1["reason_en"] = document_quality.get("customer_message_en")
-        section1_blockers = section1.get("top_blockers")
-        if isinstance(section1_blockers, list):
-            if "DOCUMENT_UNREADABLE" not in section1_blockers:
-                section1_blockers.append("DOCUMENT_UNREADABLE")
-        else:
-            section1["top_blockers"] = ["DOCUMENT_UNREADABLE"]
+        section1["top_blockers"] = ["DOCUMENT_UNREADABLE"]
 
     decision_message_it = f"{document_quality.get('customer_message_it')}\nDisclaimer: verifica manuale obbligatoria."
     decision_message_en = f"{document_quality.get('customer_message_en')}\nDisclaimer: manual review is required."
@@ -14238,6 +14892,7 @@ def _apply_unreadable_hard_stop(result: Dict[str, Any], document_quality: Dict[s
         result["decision_rapida_client"] = decision
     decision["summary_it"] = decision_message_it
     decision["summary_en"] = decision_message_en
+    decision["driver_rosso"] = [{"code": "DOCUMENT_UNREADABLE"}]
 
     section2 = result.get("section_2_decisione_rapida")
     if not isinstance(section2, dict):
@@ -14245,6 +14900,15 @@ def _apply_unreadable_hard_stop(result: Dict[str, Any], document_quality: Dict[s
         result["section_2_decisione_rapida"] = section2
     section2["summary_it"] = decision_message_it
     section2["summary_en"] = decision_message_en
+    result["red_flags_operativi"] = [
+        {
+            "code": "MANUAL_REVIEW",
+            "severity": "BLOCKER",
+            "flag_it": "Documento non leggibile o estrazione bloccata",
+            "flag_en": "Unreadable document or blocked extraction",
+            "action_it": "Nessuna conclusione affidabile automatica: verifica manuale obbligatoria sul documento originale.",
+        }
+    ]
 
 
 def _to_int(value: Any) -> Optional[int]:
@@ -15183,7 +15847,14 @@ async def analyze_perizia(request: Request, file: UploadFile = File(...)):
         logger.info(f"[{request_id}] deterministic_analysis_start")
         extracted_lots = _extract_lots_from_schema_riassuntivo(pages)
         detected_legal_killers = _scan_legal_killers(pages)
-        result = create_fallback_analysis(file.filename, case_id, run_id, pages, full_text, extracted_lots, detected_legal_killers)
+        result = _build_canonical_route_seed(
+            file.filename,
+            case_id,
+            run_id,
+            pages,
+            extracted_lots,
+            detected_legal_killers,
+        )
         logger.info(f"[{request_id}] deterministic_analysis_end")
 
         return result, pages, full_text, extraction_payload
@@ -15204,12 +15875,7 @@ async def analyze_perizia(request: Request, file: UploadFile = File(...)):
         )
         raise HTTPException(status_code=504, detail={"error": "PIPELINE_TIMEOUT", "message": f"Pipeline exceeded {PIPELINE_TIMEOUT_SECONDS}s", "retry": True})
 
-    _apply_headline_field_states(result, pages)
-    _apply_decision_field_states(result, pages)
-    _normalize_legal_killers(result, pages)
-    _apply_market_ranges_to_money_box(result)
     _normalize_evidence_offsets(result, pages)
-    result["panoramica_contract"] = _build_panoramica_contract(result, pages)
 
     document_quality = extraction_payload.get("document_quality", {})
     if not isinstance(document_quality, dict):
@@ -15227,7 +15893,6 @@ async def analyze_perizia(request: Request, file: UploadFile = File(...)):
         debug_obj["ocr_execution"] = extraction_payload.get("ocr_execution")
     result["debug"] = debug_obj
 
-    _apply_unreadable_hard_stop(result, document_quality)
     _write_extraction_pack(analysis_id, extraction_payload, document_quality)
     candidate_summary: Dict[str, Any]
     try:
@@ -15243,6 +15908,8 @@ async def analyze_perizia(request: Request, file: UploadFile = File(...)):
             "error": "candidate_miner_failed",
         }
     debug_obj["candidate_summary"] = candidate_summary
+    preserved_money_box = copy.deepcopy(result.get("money_box")) if isinstance(result.get("money_box"), dict) else None
+    preserved_section_3_money_box = copy.deepcopy(result.get("section_3_money_box")) if isinstance(result.get("section_3_money_box"), dict) else None
     try:
         result["estratto_quality"] = build_estratto_quality(analysis_id, result)
     except Exception as e:
@@ -15261,6 +15928,14 @@ async def analyze_perizia(request: Request, file: UploadFile = File(...)):
                 "error": "section_builder_failed",
             },
         }
+    if preserved_money_box is None:
+        result.pop("money_box", None)
+    else:
+        result["money_box"] = preserved_money_box
+    if preserved_section_3_money_box is None:
+        result.pop("section_3_money_box", None)
+    else:
+        result["section_3_money_box"] = preserved_section_3_money_box
     try:
         verifier_payload = run_quality_verifier(
             analysis_id=analysis_id,
@@ -15270,7 +15945,6 @@ async def analyze_perizia(request: Request, file: UploadFile = File(...)):
             pdf_sha256=input_sha256,
         )
         apply_verifier_to_result(result, verifier_payload)
-        _merge_verifier_explicit_cost_items(result)
         debug_obj["verifier_runtime"] = {
             "qa_checks": verifier_payload.get("qa_checks", []),
             "comparison": verifier_payload.get("comparison", {}),
@@ -15278,8 +15952,9 @@ async def analyze_perizia(request: Request, file: UploadFile = File(...)):
     except Exception as e:
         logger.exception(f"[{request_id}] verifier_runtime_failed analysis_id={analysis_id} err={e}")
         debug_obj["verifier_runtime"] = {"error": "verifier_runtime_failed", "message": str(e)[:240]}
-    _sanitize_lot_conservative_outputs(result)
-    result["panoramica_contract"] = _build_panoramica_contract(result, pages)
+    _promote_verifier_pricing_field_state(result)
+    _prune_verifier_pricing_amounts_from_money_box(result)
+    apply_customer_decision_contract(result)
     result["user_messages"] = _build_user_messages(result, extraction_payload, analysis_id=analysis_id)
     narrator_enabled = os.environ.get("NARRATOR_ENABLED", "0").strip() == "1"
     narrator_model = str(os.environ.get("NARRATOR_MODEL") or "").strip() or None
@@ -15298,15 +15973,16 @@ async def analyze_perizia(request: Request, file: UploadFile = File(...)):
     case_aware_narration = _build_case_aware_narration_payload(result)
     if case_aware_narration:
         result["decision_rapida_narrated"] = case_aware_narration
+    apply_customer_decision_contract(result)
     logger.info(f"[{request_id}] narrator status={narrator_meta.get('status')} enabled={narrator_meta.get('enabled')}")
-    if not offline_qa:
-        await _enrich_summary_with_optional_llm(result, request_id)
     result["debug"] = debug_obj
     _ensure_section_3_money_box_alias(result)
     scrubbed_placeholders = _scrub_visible_machine_placeholders(result)
     if scrubbed_placeholders:
         debug_obj["visible_machine_placeholders_scrubbed"] = scrubbed_placeholders
         result["debug"] = debug_obj
+    sanitize_customer_facing_result(result)
+    internal_runtime = separate_internal_runtime_from_customer_result(result)
     logger.info(f"[{request_id}] assemble_output analysis_id={analysis_id}")
 
     # Create analysis record
@@ -15323,6 +15999,8 @@ async def analyze_perizia(request: Request, file: UploadFile = File(...)):
     )
 
     analysis_dict = analysis.model_dump()
+    if internal_runtime:
+        analysis_dict["internal_runtime"] = internal_runtime
     analysis_dict["created_at"] = analysis_dict["created_at"].isoformat()
     analysis_dict["raw_text"] = full_text[:100000]  # Store raw text for assistant
     analysis_dict["status"] = "UNREADABLE" if result.get("analysis_status") == "UNREADABLE" else "COMPLETED"
@@ -15442,6 +16120,8 @@ async def download_perizia_pdf(analysis_id: str, request: Request):
         raise HTTPException(status_code=404, detail="Analysis not found")
 
     result = analysis.get("result", {}) or {}
+    if _is_runtime_authoritative_result(result):
+        apply_customer_decision_contract(result)
     _apply_headline_overrides(result, analysis.get("headline_overrides") or {})
     _apply_field_overrides(result, analysis.get("field_overrides") or {})
 
@@ -15516,6 +16196,8 @@ async def download_perizia_html(analysis_id: str, request: Request):
         raise HTTPException(status_code=404, detail="Analysis not found")
 
     result = analysis.get("result", {}) or {}
+    if _is_runtime_authoritative_result(result):
+        apply_customer_decision_contract(result)
     _apply_headline_overrides(result, analysis.get("headline_overrides") or {})
     _apply_field_overrides(result, analysis.get("field_overrides") or {})
     html = generate_report_html(analysis, result)
