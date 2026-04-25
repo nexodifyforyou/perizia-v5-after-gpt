@@ -667,20 +667,36 @@ const MoneyBoxItem = ({ item }) => {
     : null;
   const hasMarketRange = marketRange && typeof marketRange.min === 'number' && typeof marketRange.max === 'number';
   const source = safeRender(item?.source, '').toUpperCase();
-  const isVerde = hasEvidence || source === 'PERIZIA' || source === 'STEP3_CANDIDATES' || safeRender(code, '').toUpperCase().startsWith('S3C');
+  const classification = safeRender(item?.classification, '').toLowerCase();
+  const isAnchoredNonAdditive =
+    item?.type === 'ANCHORED_SIGNAL' ||
+    item?.additive_to_extra_total === false ||
+    ['valuation_deduction', 'valuation_risk_deduction', 'cost_signal_to_verify'].includes(classification);
+  const isVerde = !isAnchoredNonAdditive && (source === 'PERIZIA' || source === 'STEP3_CANDIDATES' || safeRender(code, '').toUpperCase().startsWith('S3C'));
   const isOro = hasMarketRange || source === 'MARKET_ESTIMATE';
+  const anchoredBadgeLabel = classification.startsWith('valuation') ? 'Voce di stima' : 'Da verificare';
   const displayValue = euroValue !== null
     ? `€${euroValue.toLocaleString()}`
-    : (hasMarketRange ? `€${marketRange.min.toLocaleString()} - €${marketRange.max.toLocaleString()}` : 'Non disponibile');
-  const shortNota = getShortText(item.stima_nota, 110);
+    : hasMarketRange
+      ? `€${marketRange.min.toLocaleString()} - €${marketRange.max.toLocaleString()}`
+      : isAnchoredNonAdditive
+        ? 'Non sommato'
+        : 'Non disponibile';
+  const shortNota = getShortText(item.stima_nota || item.note_it, 110);
   const firstEvidence = evidence[0];
   const firstEvidenceQuote = safeRender(firstEvidence?.quote, '');
   const evidencePreview = firstEvidenceQuote.length > 180 ? `${firstEvidenceQuote.slice(0, 180)}...` : firstEvidenceQuote;
   const evidenceText = expandedEvidence ? firstEvidenceQuote : evidencePreview;
   const cardToneClass = isOro
     ? 'border-gold/40 bg-gold/5'
-    : (isVerde ? 'border-emerald-500/35 bg-emerald-500/5' : 'border-zinc-800 bg-zinc-950/50');
-  const amountClass = isOro ? 'text-gold' : (isVerde ? 'text-emerald-300' : 'text-zinc-300');
+    : isAnchoredNonAdditive
+      ? 'border-amber-500/35 bg-amber-500/5'
+      : (isVerde ? 'border-emerald-500/35 bg-emerald-500/5' : 'border-zinc-800 bg-zinc-950/50');
+  const amountClass = isOro
+    ? 'text-gold'
+    : isAnchoredNonAdditive
+      ? 'text-amber-300'
+      : (isVerde ? 'text-emerald-300' : 'text-zinc-300');
 
   return (
     <div className={`p-4 rounded-lg border ${cardToneClass}`}>
@@ -690,6 +706,11 @@ const MoneyBoxItem = ({ item }) => {
             {code ? `${code} · ` : ''}{label}
           </p>
           <div className="mt-1 flex items-center gap-2">
+            {isAnchoredNonAdditive && !isOro && (
+              <span className="inline-block text-[10px] px-2 py-0.5 rounded border border-amber-500/40 text-amber-300">
+                {anchoredBadgeLabel}
+              </span>
+            )}
             {isVerde && !isOro && (
               <span className="inline-block text-[10px] px-2 py-0.5 rounded border border-emerald-500/40 text-emerald-300">
                 Verde
@@ -2172,6 +2193,12 @@ const AnalysisResult = () => {
   const explicitCostMentions = customerCostPolicy.explicitBuyerCosts;
   const groundedUnquantifiedBurdens = customerCostPolicy.groundedUnquantifiedBurdens;
   const costTotalSummary = customerCostPolicy.totalSummary;
+  const valuationDeductionSignals = Array.isArray(moneyBox.valuation_deductions)
+    ? moneyBox.valuation_deductions
+    : [];
+  const costSignalsToVerify = Array.isArray(moneyBox.cost_signals_to_verify)
+    ? moneyBox.cost_signals_to_verify
+    : [];
   const moneyBoxBreakdown = canonicalMoneyBoxItems.reduce((acc, item) => {
     const euroValue = parseNumericEuro(item?.stima_euro);
     const marketRange = item?.market_range_eur && typeof item.market_range_eur === 'object'
@@ -3716,8 +3743,21 @@ const AnalysisResult = () => {
                       Voce di deprezzamento della valutazione in perizia: non equivale automaticamente a cassa extra lato acquirente.
                     </p>
                   </>
+                ) : valuationDeductionSignals.length > 0 ? (
+                  <div className="space-y-3">
+                    {valuationDeductionSignals.map((item, index) => (
+                      <MoneyBoxItem key={`valuation_signal_${index}`} item={item} />
+                    ))}
+                  </div>
                 ) : (
                   <p className="text-sm text-zinc-500">Non specificato in perizia</p>
+                )}
+                {valuationDeprezzamentiValue !== null && valuationDeductionSignals.length > 0 && (
+                  <div className="mt-4 space-y-3">
+                    {valuationDeductionSignals.map((item, index) => (
+                      <MoneyBoxItem key={`valuation_signal_extra_${index}`} item={item} />
+                    ))}
+                  </div>
                 )}
               </div>
 
@@ -3735,11 +3775,17 @@ const AnalysisResult = () => {
               </div>
 
               <div className="p-4 rounded-lg border border-zinc-800 bg-zinc-950/40">
-                <h3 className="text-sm font-semibold text-zinc-100 mb-3">Oneri buyer-side non quantificati / Grounded unquantified buyer-side burdens</h3>
+                <h3 className="text-sm font-semibold text-zinc-100 mb-3">Segnali di costo da verificare / Grounded cost signals to verify</h3>
                 <p className="text-xs text-zinc-500 mb-3">
-                  Mostrati solo quando la perizia supporta un onere lato acquirente reale ma non quantificato in modo difendibile.
+                  Mostrati quando la perizia contiene voci ancorate, senza sommarle come extra buyer-side se manca prova testuale di separata debenza.
                 </p>
-                {groundedUnquantifiedBurdens.length > 0 ? (
+                {costSignalsToVerify.length > 0 ? (
+                  <div className="space-y-3">
+                    {costSignalsToVerify.map((item, index) => (
+                      <MoneyBoxItem key={`cost_signal_${index}`} item={item} />
+                    ))}
+                  </div>
+                ) : groundedUnquantifiedBurdens.length > 0 ? (
                   <div className="space-y-2">
                     {groundedUnquantifiedBurdens.map((item) => (
                       <div key={item.key} className="rounded-lg border border-zinc-800 bg-zinc-950/60 px-4 py-3">
@@ -3752,7 +3798,7 @@ const AnalysisResult = () => {
                     ))}
                   </div>
                 ) : (
-                  <p className="text-zinc-500 text-sm">Nessun onere buyer-side non quantificato difendibile disponibile.</p>
+                  <p className="text-zinc-500 text-sm">Nessun segnale di costo ancorato disponibile.</p>
                 )}
               </div>
 

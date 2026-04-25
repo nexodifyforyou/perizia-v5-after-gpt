@@ -1,10 +1,15 @@
+import json
 import sys
 from pathlib import Path
 from typing import Any
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from customer_decision_contract import sanitize_customer_facing_result, separate_internal_runtime_from_customer_result
+from customer_decision_contract import (
+    apply_customer_decision_contract,
+    sanitize_customer_facing_result,
+    separate_internal_runtime_from_customer_result,
+)
 
 
 BANNED_FIELDS = {
@@ -191,3 +196,122 @@ def test_separate_internal_runtime_removes_runtime_keys_from_customer_result():
     assert result["summary_for_client_bundle"]["decision_summary_it"] == "Issue"
     assert internal_runtime["verifier_runtime"]["canonical_case"]["freeze_contract"]["state"] == "unresolved_explained"
     assert internal_runtime["canonical_freeze_explanations"][0]["explanation_fallback_reason"] == "no_packet"
+
+
+def test_apply_customer_contract_surfaces_anchored_money_signals_without_fake_additive_total():
+    result = {
+        "field_states": {},
+        "estratto_quality": {
+            "sections": [
+                {
+                    "heading_key": "abusi_agibilita",
+                    "items": [
+                        {
+                            "item_id": "ab_cost_m_000049",
+                            "label_it": "Costo collegato ad abusi/agibilità: 23000,00 €",
+                            "candidate_ids": ["m_000049"],
+                            "amount_eur": 0,
+                            "evidence": [
+                                {
+                                    "page": 40,
+                                    "quote": "Deprezzamenti Oneri di regolarizzazione urbanistica 23000,00 € Rischio assunto per mancata garanzia 5000,00 € Valore finale di stima: € 391.849,00",
+                                }
+                            ],
+                        },
+                        {
+                            "item_id": "ab_cost_m_000027",
+                            "label_it": "Costo collegato ad abusi/agibilità: € 15.000,00",
+                            "candidate_ids": ["m_000027"],
+                            "amount_eur": 15000,
+                            "evidence": [
+                                {
+                                    "page": 37,
+                                    "quote": "Si quantificano le spese di massima per completare l'immobile e per le pratiche dell'abitabilità: - Completamento lavori € 15.000,00; - pratiche per abitabilità € 5.000,00",
+                                }
+                            ],
+                        },
+                        {
+                            "item_id": "ab_cost_m_000031",
+                            "label_it": "Costo collegato ad abusi/agibilità: € 5.000,00",
+                            "candidate_ids": ["m_000031"],
+                            "amount_eur": 5000,
+                            "evidence": [
+                                {
+                                    "page": 38,
+                                    "quote": "pratiche per abitabilità € 5.000,00 (già conteggiate)",
+                                }
+                            ],
+                        },
+                    ],
+                }
+            ]
+        },
+        "verifier_runtime": {
+            "canonical_case": {
+                "costs": {
+                    "explicit_buyer_costs": [],
+                    "valuation_adjustments": [],
+                    "explicit_total": None,
+                },
+                "priority": {},
+            }
+        },
+    }
+
+    apply_customer_decision_contract(result)
+
+    money_box = result["section_3_money_box"]
+    assert money_box["items"]
+    serialized_money_box = json.dumps(money_box, ensure_ascii=False).lower()
+
+    assert "oneri di regolarizzazione urbanistica" in serialized_money_box
+    assert "23000" in serialized_money_box or "23.000" in serialized_money_box
+    assert "rischio assunto per mancata garanzia" in serialized_money_box
+    assert "completamento lavori" in serialized_money_box
+    assert "15000" in serialized_money_box or "15.000" in serialized_money_box
+    assert "pratiche per abitabilità" in serialized_money_box
+    assert "5000" in serialized_money_box or "5.000" in serialized_money_box
+    assert "già conteggiate" in serialized_money_box
+
+    valuation_deductions = money_box["valuation_deductions"]
+    assert {
+        item["classification"]
+        for item in valuation_deductions
+    } == {"valuation_deduction", "valuation_risk_deduction"}
+    assert all(item["additive_to_extra_total"] is False for item in valuation_deductions)
+    assert {ev["page"] for item in valuation_deductions for ev in item["evidence"]} == {40}
+
+    cost_signals = money_box["cost_signals_to_verify"]
+    assert cost_signals
+    assert all(item["additive_to_extra_total"] is False for item in cost_signals)
+    assert {37, 38}.issubset({ev["page"] for item in cost_signals for ev in item["evidence"]})
+
+    total = money_box["total_extra_costs"]
+    assert total["min"] is None
+    assert total["max"] is None
+    assert "48.000" not in json.dumps(total, ensure_ascii=False)
+    assert "28.000" not in json.dumps(total, ensure_ascii=False)
+    assert "non sommati" in total["note"]
+
+    hits = []
+    for key in CUSTOMER_KEYS:
+        if key in result:
+            hits.extend(_collect_customer_hits(result[key], f"result.{key}"))
+    assert hits == []
+
+    customer_payload = {
+        "section_3_money_box": result["section_3_money_box"],
+        "money_box": result["money_box"],
+        "customer_decision_contract": result["customer_decision_contract"],
+    }
+    serialized_customer = json.dumps(customer_payload, ensure_ascii=False)
+    for forbidden in (
+        "ab_cost_m_",
+        "raw",
+        "debug",
+        "candidate",
+        "unresolved_explained",
+        "source_path",
+        "verifier_runtime",
+    ):
+        assert forbidden not in serialized_customer

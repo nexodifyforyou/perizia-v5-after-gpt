@@ -406,8 +406,22 @@ const buildClientFacingDriver = (semaforo, decision) => {
 
 const buildCostBuckets = (result) => {
   const policy = buildCustomerCostPolicy(result);
+  const moneyBox = result?.section_3_money_box?.items ? result.section_3_money_box : (result?.money_box || {});
+  const mapAnchoredSignal = (item, index, prefix) => ({
+    key: `${prefix}-${index}`,
+    label: safeRender(item?.label_it || item?.label || item?.voce, ''),
+    note: safeRender(item?.stima_nota || item?.note_it || item?.note, ''),
+    evidence: getPrimaryEvidence(item?.fonte_perizia, item?.evidence, item),
+  });
+  const valuationDeductions = Array.isArray(moneyBox?.valuation_deductions)
+    ? moneyBox.valuation_deductions.map((item, index) => mapAnchoredSignal(item, index, 'valuation-signal')).filter((item) => item.label)
+    : [];
+  const directCostSignals = Array.isArray(moneyBox?.cost_signals_to_verify)
+    ? moneyBox.cost_signals_to_verify.map((item, index) => mapAnchoredSignal(item, index, 'cost-signal')).filter((item) => item.label)
+    : [];
   return {
     valuationAdjustments: policy.valuationAdjustments,
+    valuationDeductions,
     explicitCostMentions: policy.explicitBuyerCosts.map((item) => ({
       key: item.__policy_key,
       label: item.__policy_label,
@@ -415,12 +429,14 @@ const buildCostBuckets = (result) => {
       note: item.__policy_note,
       evidence: item.__policy_evidence || [],
     })),
-    groundedUnquantifiedBurdens: policy.groundedUnquantifiedBurdens.map((item) => ({
-      key: item.key,
-      label: item.label,
-      note: item.note,
-      evidence: item.evidence || [],
-    })),
+    groundedUnquantifiedBurdens: directCostSignals.length > 0
+      ? directCostSignals
+      : policy.groundedUnquantifiedBurdens.map((item) => ({
+          key: item.key,
+          label: item.label,
+          note: item.note,
+          evidence: item.evidence || [],
+        })),
     totalSummary: policy.totalSummary,
   };
 };

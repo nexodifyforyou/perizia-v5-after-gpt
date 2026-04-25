@@ -1159,6 +1159,340 @@ def _build_red_flags(issues: List[Dict[str, Any]], blocked_unreadable: bool) -> 
     return flags[:6]
 
 
+_MONEY_AMOUNT_RE = re.compile(
+    r"(?<!\d)"
+    r"(?:€\.?\s*)?"
+    r"([0-9]{4,}(?:,[0-9]{1,2})?|[0-9]{1,3}(?:[\.\s][0-9]{3})+(?:,[0-9]{1,2})?|[0-9]{1,3}(?:,[0-9]{1,2})?)"
+    r"(?:\s*€)?",
+    re.I,
+)
+
+_NON_ADDITIVE_VALUATION_NOTE = "Importo presente come deprezzamento/voce di stima; non equivale automaticamente a costo extra cash lato acquirente."
+_NON_ADDITIVE_TOTAL_NOTE = "Importi ancorati presenti come deprezzamenti/segnali di costo; non sommati come extra buyer-side senza prova testuale."
+_VERIFY_COST_SIGNAL_NOTE = "Segnale di costo ancorato in perizia da verificare; non sommato come extra buyer-side senza prova testuale di separata debenza."
+
+_ANCHORED_MONEY_TERMS = (
+    ("oneri_regolarizzazione_urbanistica", "Oneri di regolarizzazione urbanistica", r"oneri\s+di\s+regolarizzazione\s+urbanistica"),
+    ("rischio_mancata_garanzia", "Rischio assunto per mancata garanzia", r"rischio\s+assunto\s+per\s+mancata\s+garanzia(?:\s+per\s+vizi\s+occulti)?"),
+    ("completamento_lavori", "Completamento lavori", r"completamento\s+lavori"),
+    ("pratiche_abitabilita", "Pratiche per abitabilità", r"pratiche?\s+per\s+abitabilit[aà]"),
+    ("pratiche_agibilita", "Pratiche per agibilità", r"pratiche?\s+per\s+agibilit[aà]"),
+    ("conformita_impianti", "Conformità impianti", r"conformit[aà]\s+impianti"),
+    ("ape", "APE / attestato prestazione energetica", r"\b(?:ape|attestato\s+di\s+prestazione\s+energetica)\b"),
+    ("oblazione", "Oblazione / sanatoria", r"(?:costo\s+dell[’']oblazione|oblazione|sanatoria|condono)"),
+    ("regolarizzazione", "Regolarizzazione", r"\bregolarizzazione\b"),
+    ("spese_massima", "Spese di massima presunte", r"spese\s+di\s+massima\s+presunte"),
+)
+
+
+def _money_text_key(value: Any) -> str:
+    text = str(value or "").lower()
+    replacements = {
+        "à": "a",
+        "è": "e",
+        "é": "e",
+        "ì": "i",
+        "ò": "o",
+        "ù": "u",
+        "’": "'",
+    }
+    for src, dst in replacements.items():
+        text = text.replace(src, dst)
+    return re.sub(r"\s+", " ", text).strip()
+
+
+def _parse_it_money_amount(raw: Any) -> Optional[float]:
+    text = str(raw or "").strip()
+    if not text:
+        return None
+    cleaned = re.sub(r"[^\d,\.]", "", text)
+    if not cleaned:
+        return None
+    if "," in cleaned:
+        cleaned = cleaned.replace(".", "").replace(",", ".")
+    elif cleaned.count(".") > 1:
+        cleaned = cleaned.replace(".", "")
+    try:
+        amount = float(cleaned)
+    except Exception:
+        return None
+    if amount <= 0:
+        return None
+    return amount
+
+
+def _format_euro_it(amount: Optional[float]) -> str:
+    if not isinstance(amount, (int, float)):
+        return ""
+    return f"€ {int(round(float(amount))):,}".replace(",", ".")
+
+
+def _money_label_with_amount(label: str, amount: Optional[float]) -> str:
+    formatted = _format_euro_it(amount)
+    if formatted:
+        return f"{label}: {formatted}"
+    return label
+
+
+def _has_valuation_context(label: str, text: str) -> bool:
+    normalized = _money_text_key(f"{label} {text}")
+    if "rischio assunto per mancata garanzia" in _money_text_key(label):
+        return True
+    return any(
+        term in normalized
+        for term in (
+            "deprezz",
+            "valore finale di stima",
+            "riduzione cautelativa",
+            "riduzione del valore",
+            "voce di stima",
+        )
+    )
+
+
+def _classify_anchored_money_signal(label: str, text: str) -> str:
+    if "rischio assunto per mancata garanzia" in _money_text_key(label):
+        return "valuation_risk_deduction"
+    if _has_valuation_context(label, text):
+        return "valuation_deduction"
+    return "cost_signal_to_verify"
+
+
+def _money_note_for_signal(signal: Dict[str, Any]) -> str:
+    classification = str(signal.get("classification") or "")
+    note = _NON_ADDITIVE_VALUATION_NOTE if classification.startswith("valuation") else _VERIFY_COST_SIGNAL_NOTE
+    if signal.get("already_counted"):
+        note += " La perizia indica che la voce è già conteggiata."
+    return note
+
+
+def _extract_amount_after_term(text: str, term_pattern: str) -> Optional[float]:
+    term_match = re.search(term_pattern, text, flags=re.I)
+    if not term_match:
+        return None
+    window = text[term_match.end(): min(len(text), term_match.end() + 110)]
+    amount_match = _MONEY_AMOUNT_RE.search(window)
+    if amount_match:
+        return _parse_it_money_amount(amount_match.group(1))
+    before_window = text[max(0, term_match.start() - 45): term_match.start()]
+    before_matches = list(_MONEY_AMOUNT_RE.finditer(before_window))
+    if before_matches:
+        return _parse_it_money_amount(before_matches[-1].group(1))
+    return None
+
+
+def _extract_anchored_money_signals_from_text(text: Any, evidence: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    body = str(text or "")
+    if not body.strip():
+        return []
+    normalized = _money_text_key(body)
+    if not any(
+        term in normalized
+        for term in (
+            "regolarizzazione",
+            "sanatoria",
+            "oblazione",
+            "completamento lavori",
+            "abitabilita",
+            "agibilita",
+            "conformita impianti",
+            "ape",
+            "mancata garanzia",
+            "deprezz",
+            "valore finale di stima",
+        )
+    ):
+        return []
+    already_counted = "gia conteggiat" in normalized or "già conteggiat" in normalized
+    signals: List[Dict[str, Any]] = []
+    for term_key, label, pattern in _ANCHORED_MONEY_TERMS:
+        if term_key == "regolarizzazione" and re.search(r"oneri\s+di\s+regolarizzazione\s+urbanistica", body, flags=re.I):
+            continue
+        if not re.search(pattern, body, flags=re.I):
+            continue
+        amount = _extract_amount_after_term(body, pattern)
+        if amount is None and term_key in {"ape", "conformita_impianti", "regolarizzazione", "sanatoria"}:
+            continue
+        classification = _classify_anchored_money_signal(label, body)
+        signals.append(
+            {
+                "label_it": label,
+                "amount_eur": int(round(float(amount))) if isinstance(amount, (int, float)) else None,
+                "classification": classification,
+                "additive_to_extra_total": False,
+                "already_counted": already_counted,
+                "evidence": copy.deepcopy(evidence),
+            }
+        )
+    return signals
+
+
+def _iter_estratto_quality_items(result: Dict[str, Any]) -> List[Dict[str, Any]]:
+    estratto_quality = result.get("estratto_quality") if isinstance(result.get("estratto_quality"), dict) else {}
+    items: List[Dict[str, Any]] = []
+    sections = estratto_quality.get("sections") if isinstance(estratto_quality.get("sections"), list) else []
+    for section in sections:
+        if not isinstance(section, dict):
+            continue
+        section_items = section.get("items") if isinstance(section.get("items"), list) else []
+        for item in section_items:
+            if isinstance(item, dict):
+                items.append(item)
+    root_items = estratto_quality.get("items") if isinstance(estratto_quality.get("items"), list) else []
+    for item in root_items:
+        if isinstance(item, dict):
+            items.append(item)
+    return items
+
+
+def _signal_dedupe_key(signal: Dict[str, Any]) -> str:
+    amount = signal.get("amount_eur")
+    label = _money_text_key(signal.get("label_it"))
+    classification = str(signal.get("classification") or "")
+    return f"{classification}|{label}|{amount}"
+
+
+def _merge_anchored_signal(existing: Dict[str, Any], incoming: Dict[str, Any]) -> None:
+    existing["already_counted"] = bool(existing.get("already_counted") or incoming.get("already_counted"))
+    merged_evidence = _normalize_evidence_list(existing.get("evidence"), incoming.get("evidence"), limit=4)
+    existing["evidence"] = merged_evidence
+
+
+def _prefer_money_signal_classification(left: str, right: str) -> str:
+    priority = {
+        "valuation_risk_deduction": 3,
+        "valuation_deduction": 2,
+        "cost_signal_to_verify": 1,
+    }
+    return left if priority.get(left, 0) >= priority.get(right, 0) else right
+
+
+def _collapse_anchored_money_signal_duplicates(signals: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    collapsed: List[Dict[str, Any]] = []
+    by_label_amount: Dict[str, Dict[str, Any]] = {}
+    for signal in signals:
+        key = f"{_money_text_key(signal.get('label_it'))}|{signal.get('amount_eur')}"
+        existing = by_label_amount.get(key)
+        if not existing:
+            by_label_amount[key] = signal
+            collapsed.append(signal)
+            continue
+        existing["classification"] = _prefer_money_signal_classification(
+            str(existing.get("classification") or ""),
+            str(signal.get("classification") or ""),
+        )
+        _merge_anchored_signal(existing, signal)
+    amount_bearing_label_classes = {
+        f"{_money_text_key(signal.get('label_it'))}|{signal.get('classification')}"
+        for signal in collapsed
+        if isinstance(signal.get("amount_eur"), int)
+    }
+    return [
+        signal
+        for signal in collapsed
+        if isinstance(signal.get("amount_eur"), int)
+        or f"{_money_text_key(signal.get('label_it'))}|{signal.get('classification')}" not in amount_bearing_label_classes
+    ]
+
+
+def _anchored_money_signal_sort_key(signal: Dict[str, Any]) -> tuple:
+    classification = str(signal.get("classification") or "")
+    class_rank = 0 if classification.startswith("valuation") else 1
+    amount_rank = 0 if isinstance(signal.get("amount_eur"), int) else 1
+    evidence = signal.get("evidence") if isinstance(signal.get("evidence"), list) else []
+    first_page = 9999
+    if evidence and isinstance(evidence[0], dict) and isinstance(evidence[0].get("page"), int):
+        first_page = evidence[0]["page"]
+    return (class_rank, amount_rank, first_page, _money_text_key(signal.get("label_it")))
+
+
+def _collect_anchored_money_signals(result: Dict[str, Any], costs: Dict[str, Any]) -> List[Dict[str, Any]]:
+    signals: List[Dict[str, Any]] = []
+    by_key: Dict[str, Dict[str, Any]] = {}
+
+    def add_signal(signal: Dict[str, Any]) -> None:
+        if not signal.get("evidence"):
+            return
+        key = _signal_dedupe_key(signal)
+        if key in by_key:
+            _merge_anchored_signal(by_key[key], signal)
+            return
+        by_key[key] = signal
+        signals.append(signal)
+
+    for item in _iter_estratto_quality_items(result):
+        evidence = _normalize_evidence_list(item.get("evidence"), limit=2)
+        if not evidence:
+            continue
+        text_parts = [
+            item.get("label_it"),
+            item.get("label_en"),
+            item.get("detail_it"),
+            item.get("note_it"),
+        ]
+        text_parts.extend(ev.get("quote") for ev in evidence if isinstance(ev, dict))
+        text = " ".join(str(part or "") for part in text_parts)
+        for signal in _extract_anchored_money_signals_from_text(text, evidence):
+            add_signal(signal)
+
+    existing_amounts = {
+        signal.get("amount_eur")
+        for signal in signals
+        if str(signal.get("classification") or "").startswith("valuation")
+    }
+    valuation_adjustments = costs.get("valuation_adjustments") if isinstance(costs.get("valuation_adjustments"), list) else []
+    for adjustment in valuation_adjustments:
+        if not isinstance(adjustment, dict):
+            continue
+        amount = adjustment.get("amount")
+        if not isinstance(amount, (int, float)):
+            continue
+        amount_int = int(round(float(amount)))
+        if amount_int in existing_amounts:
+            continue
+        evidence = _normalize_evidence_list(adjustment.get("evidence"), limit=2)
+        if not evidence:
+            continue
+        quote_text = " ".join(ev.get("quote", "") for ev in evidence)
+        add_signal(
+            {
+                "label_it": "Deprezzamento / voce di stima",
+                "amount_eur": amount_int,
+                "classification": _classify_anchored_money_signal("Deprezzamento / voce di stima", quote_text),
+                "additive_to_extra_total": False,
+                "already_counted": False,
+                "evidence": evidence,
+            }
+        )
+    return sorted(_collapse_anchored_money_signal_duplicates(signals), key=_anchored_money_signal_sort_key)
+
+
+def _money_signal_customer_payload(signal: Dict[str, Any], index: int) -> Dict[str, Any]:
+    label = str(signal.get("label_it") or "Segnale di costo da verificare").strip()
+    amount = signal.get("amount_eur")
+    classification = str(signal.get("classification") or "cost_signal_to_verify")
+    note = _money_note_for_signal(signal)
+    # Canonical codes keep the existing PDF renderer from dropping non-additive rows
+    # with unknown stima_euro.
+    code = chr(ord("A") + ((index - 1) % 8))
+    evidence = _normalize_evidence_list(signal.get("evidence"), limit=4)
+    return {
+        "code": code,
+        "label_it": _money_label_with_amount(label, float(amount) if isinstance(amount, (int, float)) else None),
+        "label_en": _money_label_with_amount(label, float(amount) if isinstance(amount, (int, float)) else None),
+        "type": "ANCHORED_SIGNAL",
+        "classification": classification,
+        "amount_eur": amount if isinstance(amount, int) else None,
+        "stima_euro": None,
+        "stima_nota": note,
+        "note_it": note,
+        "additive_to_extra_total": False,
+        "action_required_it": "Verificare con tecnico/delegato prima dell'offerta.",
+        "evidence": evidence,
+        "fonte_perizia": {"value": "Perizia", "evidence": evidence},
+    }
+
+
 def _build_money_box(result: Dict[str, Any], issues: List[Dict[str, Any]], blocked_unreadable: bool) -> Dict[str, Any]:
     existing_money_box = result.get("money_box") if isinstance(result.get("money_box"), dict) else {}
     verifier_runtime = result.get("verifier_runtime") if isinstance(result.get("verifier_runtime"), dict) else {}
@@ -1190,11 +1524,30 @@ def _build_money_box(result: Dict[str, Any], issues: List[Dict[str, Any]], block
                 "customer_visible_amount_status": "quantified_estimate",
             }
         )
+    anchored_signals = _collect_anchored_money_signals(result, costs)
+    signal_items = [
+        _money_signal_customer_payload(signal, index)
+        for index, signal in enumerate(anchored_signals, start=1)
+    ]
+    valuation_deductions = [
+        copy.deepcopy(item)
+        for item in signal_items
+        if str(item.get("classification") or "").startswith("valuation")
+    ]
+    cost_signals_to_verify = [
+        copy.deepcopy(item)
+        for item in signal_items
+        if str(item.get("classification") or "") == "cost_signal_to_verify"
+    ]
+    all_items = items + signal_items
     if blocked_unreadable:
         blocked_note = "Documento/perizia non leggibile o estrazione bloccata: nessun totale extra difendibile può essere ricavato automaticamente; verifica manuale obbligatoria."
         return {
             "policy": "BLOCKED_UNREADABLE",
             "items": [],
+            "valuation_deductions": [],
+            "cost_signals_to_verify": [],
+            "qualitative_burdens": [],
             "total_extra_costs": {
                 "min": None,
                 "max": None,
@@ -1210,9 +1563,14 @@ def _build_money_box(result: Dict[str, Any], issues: List[Dict[str, Any]], block
         total_note = f"Totale stimato in perizia: € {int(round(float(explicit_total)))}."
         if items:
             total_note += " Le singole voci quantificate sotto sono componenti del totale e non un secondo totale autonomo."
+        if signal_items:
+            total_note += f" {_NON_ADDITIVE_TOTAL_NOTE}"
         return {
             "policy": "CANONICAL_RUNTIME",
-            "items": items,
+            "items": all_items,
+            "valuation_deductions": valuation_deductions,
+            "cost_signals_to_verify": cost_signals_to_verify,
+            "qualitative_burdens": cost_signals_to_verify,
             "total_extra_costs": {
                 "range": {"min": int(round(float(explicit_total))), "max": int(round(float(explicit_total)))},
                 "max_is_open": False,
@@ -1231,11 +1589,17 @@ def _build_money_box(result: Dict[str, Any], issues: List[Dict[str, Any]], block
     elif items:
         unresolved_note = "La perizia riporta voci di costo buyer-side ancorate, ma non consente di difendere un totale extra unico."
         unresolved_evidence = copy.deepcopy(items[0].get("evidence", []))
+    elif signal_items:
+        unresolved_note = _NON_ADDITIVE_TOTAL_NOTE
+        unresolved_evidence = copy.deepcopy(signal_items[0].get("evidence", []))
     if unresolved_note is None:
         unresolved_note = "La perizia non riporta un totale extra buyer-side numericamente difendibile; serve verifica manuale delle voci ancorate."
     return {
         "policy": "CONSERVATIVE",
-        "items": items,
+        "items": all_items,
+        "valuation_deductions": valuation_deductions,
+        "cost_signals_to_verify": cost_signals_to_verify,
+        "qualitative_burdens": cost_signals_to_verify,
         "total_extra_costs": {
             "min": None,
             "max": None,
@@ -1248,7 +1612,65 @@ def _build_money_box(result: Dict[str, Any], issues: List[Dict[str, Any]], block
     }
 
 
-def _build_summary_bundle(issues: List[Dict[str, Any]], semaforo: Dict[str, Any], blocked_unreadable: bool, document_quality: Dict[str, Any]) -> Dict[str, Any]:
+def _build_summary_bundle(issues: List[Dict[str, Any]], semaforo: Dict[str, Any], blocked_unreadable: bool, document_quality: Dict[str, Any], money_box: Any = None) -> Dict[str, Any]:
+    def clean_sentence(value: Any, limit: int = 260) -> str:
+        text = _clean_it_text(value) or ""
+        text = re.sub(r"\s+", " ", text).strip()
+        if len(text) > limit:
+            text = text[:limit].rsplit(" ", 1)[0].rstrip(" ,;:.") + "."
+        return text
+
+    def issue_headline(issue: Dict[str, Any]) -> str:
+        return clean_sentence(issue.get("headline_it") or issue.get("title_it") or issue.get("family"), limit=140)
+
+    def issue_id(issue: Dict[str, Any]) -> Any:
+        return issue.get("issue_id") or issue.get("id") or issue.get("family")
+
+    def unique_sentences(values: List[str], limit: int = 4) -> List[str]:
+        out: List[str] = []
+        seen = set()
+        for value in values:
+            text = clean_sentence(value, limit=160).rstrip(".")
+            key = _money_text_key(text)
+            if not text or key in seen:
+                continue
+            seen.add(key)
+            out.append(text)
+            if len(out) >= limit:
+                break
+        return out
+
+    def money_box_has_customer_signals(box: Any) -> bool:
+        if not isinstance(box, dict):
+            return False
+        for key in ("valuation_deductions", "cost_signals_to_verify", "qualitative_burdens", "items"):
+            items = box.get(key)
+            if isinstance(items, list) and any(isinstance(item, dict) for item in items):
+                return True
+        return False
+
+    def money_box_evidence(box: Any) -> List[Dict[str, Any]]:
+        out: List[Dict[str, Any]] = []
+        if not isinstance(box, dict):
+            return out
+        for key in ("valuation_deductions", "cost_signals_to_verify", "items"):
+            items = box.get(key)
+            if not isinstance(items, list):
+                continue
+            for item in items:
+                if not isinstance(item, dict):
+                    continue
+                for ev in _normalize_evidence_list(item.get("evidence"), item.get("fonte_perizia"), limit=2):
+                    if isinstance(ev, dict) and isinstance(ev.get("page"), int) and str(ev.get("quote") or "").strip():
+                        out.append({"page": ev["page"], "quote": str(ev["quote"])[:240]})
+                if out:
+                    return out[:2]
+        total = box.get("total_extra_costs") if isinstance(box.get("total_extra_costs"), dict) else {}
+        for ev in _normalize_evidence_list(total.get("evidence"), limit=2):
+            if isinstance(ev, dict) and isinstance(ev.get("page"), int) and str(ev.get("quote") or "").strip():
+                out.append({"page": ev["page"], "quote": str(ev["quote"])[:240]})
+        return out[:2]
+
     if blocked_unreadable:
         blocked_it = _clean_it_text(document_quality.get("customer_message_it")) or "Documento non leggibile o estrazione bloccata: non è possibile formulare conclusioni affidabili senza verifica manuale."
         return {
@@ -1265,34 +1687,87 @@ def _build_summary_bundle(issues: List[Dict[str, Any]], semaforo: Dict[str, Any]
             "evidence_snippets": [],
             "summary_trace": [{"sentence": blocked_it, "issue_ids": ["document_blocked_unreadable"]}],
         }
+
     top_issue = issues[0] if issues else None
-    top_issue_it = str(top_issue.get("headline_it") or "") if top_issue else ""
-    next_step_it = str(top_issue.get("verify_next_it") or "") if top_issue else ""
-    if not next_step_it and top_issue:
-        next_step_it = str(top_issue.get("explanation_it") or "")
-    decision_summary_it = top_issue_it or "Non emergono criticità materialmente ancorate."
-    evidence_snippets = []
+    top_issue_it = issue_headline(top_issue) if top_issue else ""
+    issue_blob = " ".join(
+        _money_text_key(f"{item.get('family')} {item.get('headline_it')} {item.get('theme')}")
+        for item in issues[:6]
+        if isinstance(item, dict)
+    )
+    action_steps: List[str] = []
+    if "occup" in issue_blob:
+        action_steps.append("verificare occupazione/opponibilità e tempi di liberazione")
+    if "agibil" in issue_blob or "urban" in issue_blob or "catastal" in issue_blob:
+        action_steps.append("controllare agibilità, conformità urbanistica/catastale e sanabilità")
+    if action_steps:
+        next_step_it = "; ".join(action_steps).capitalize() + "."
+    else:
+        next_step_it = "Verificare le criticità evidenziate con tecnico/delegato prima dell'offerta."
+
+    other_issue_headlines = unique_sentences(
+        [issue_headline(item) for item in issues[1:5] if isinstance(item, dict)],
+        limit=3,
+    )
+    has_money_signals = money_box_has_customer_signals(money_box)
+
+    if top_issue_it:
+        decision_parts = [top_issue_it.rstrip(".") + "."]
+        if other_issue_headlines:
+            decision_parts.append("Da verificare anche: " + "; ".join(other_issue_headlines) + ".")
+        if has_money_signals:
+            decision_parts.append("Sono presenti voci economiche ancorate nel Money Box, ma non vanno sommate automaticamente come extra buyer-side senza verifica tecnica.")
+        decision_summary_it = " ".join(decision_parts)
+    elif has_money_signals:
+        top_issue_it = "Voci economiche ancorate da verificare."
+        decision_summary_it = "Sono presenti voci economiche ancorate in perizia, non sommate automaticamente come extra lato acquirente."
+    else:
+        decision_summary_it = "Non emergono criticità materialmente ancorate."
+
+    if has_money_signals:
+        money_next = "Usare il Money Box come checklist economica: validare importi e separata debenza con tecnico/delegato prima dell'offerta."
+        next_step_it = f"{next_step_it} {money_next}".strip() if next_step_it else money_next
+
+    caution_points = unique_sentences(other_issue_headlines, limit=4)
+    if has_money_signals:
+        caution_points.append("Voci economiche ancorate presenti nel Money Box: non sommarle automaticamente al budget extra senza verifica.")
+
+    evidence_snippets: List[Dict[str, Any]] = []
     if top_issue:
         for ev in list(top_issue.get("evidence") or [])[:2]:
             if isinstance(ev, dict) and isinstance(ev.get("page"), int) and str(ev.get("quote") or "").strip():
                 evidence_snippets.append({"page": ev["page"], "quote": str(ev["quote"])[:240]})
+    evidence_snippets.extend(money_box_evidence(money_box))
+    deduped_evidence: List[Dict[str, Any]] = []
+    seen_evidence = set()
+    for ev in evidence_snippets:
+        key = (ev.get("page"), str(ev.get("quote") or "")[:80])
+        if key in seen_evidence:
+            continue
+        seen_evidence.add(key)
+        deduped_evidence.append(ev)
+        if len(deduped_evidence) >= 4:
+            break
+
+    linked_issue_ids = [issue_id(item) for item in issues[:4] if isinstance(item, dict)]
     summary_trace = []
     if decision_summary_it:
-        summary_trace.append({"sentence": decision_summary_it, "issue_ids": [top_issue.get("issue_id")] if top_issue else []})
+        summary_trace.append({"sentence": decision_summary_it, "issue_ids": linked_issue_ids})
     if next_step_it:
-        summary_trace.append({"sentence": next_step_it, "issue_ids": [top_issue.get("issue_id")] if top_issue else []})
+        summary_trace.append({"sentence": next_step_it, "issue_ids": linked_issue_ids})
+
     return {
         "top_issue_it": top_issue_it,
         "top_issue_en": "",
         "next_step_it": next_step_it,
         "next_step_en": "",
-        "caution_points_it": [str(item.get("headline_it") or "") for item in issues[1:3]],
+        "caution_points_it": caution_points,
         "user_messages_it": [],
         "document_quality_status": str(document_quality.get("status") or ""),
         "semaforo_status": str(semaforo.get("status") or ""),
         "decision_summary_it": decision_summary_it,
         "decision_summary_en": "",
-        "evidence_snippets": evidence_snippets,
+        "evidence_snippets": deduped_evidence,
         "summary_trace": summary_trace,
     }
 
@@ -1642,7 +2117,7 @@ def apply_customer_decision_contract(result: Dict[str, Any]) -> Dict[str, Any]:
     legal_meta["themes"] = themes
     legal_killers["resolver_meta"] = legal_meta
     money_box = _build_money_box(result, issues, blocked_unreadable)
-    summary_bundle = _build_summary_bundle(issues, semaforo, blocked_unreadable, document_quality)
+    summary_bundle = _build_summary_bundle(issues, semaforo, blocked_unreadable, document_quality, money_box)
     summary_for_client = {
         "summary_it": summary_bundle.get("decision_summary_it"),
         "summary_en": summary_bundle.get("decision_summary_en"),
