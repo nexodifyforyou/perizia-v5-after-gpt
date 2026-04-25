@@ -230,7 +230,9 @@ export const buildCustomerCostPolicy = (result) => {
 
   return {
     valuationAdjustments: {
-      amount: formatMoney(valuation?.deprezzamenti_eur),
+      amount: parseNumericEuro(valuation?.deprezzamenti_eur) !== null
+        ? formatMoney(valuation?.deprezzamenti_eur)
+        : '',
       amountNumeric: parseNumericEuro(valuation?.deprezzamenti_eur),
       evidence: getEvidence(valuation?.evidence?.deprezzamenti_eur),
       note: 'Deprezzamento di perizia: non equivale automaticamente a cassa extra lato acquirente.',

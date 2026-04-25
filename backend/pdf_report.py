@@ -224,8 +224,12 @@ def _first_non_empty(*values: Any, context: str = "generic") -> str:
 
 def _decision_payload(result: Dict[str, Any]) -> Dict[str, str]:
     section = result.get("decision_rapida_client") or result.get("section_2_decisione_rapida") or {}
+    bundle = result.get("summary_for_client_bundle") if isinstance(result.get("summary_for_client_bundle"), dict) else {}
     risk = _first_non_empty(section.get("risk_level_it"), section.get("risk_level"), context="status")
-    summary_it = _first_non_empty(section.get("summary_it"), section.get("summary"), section.get("value"), context="generic")
+    summary_it = sanitize_value(
+        bundle.get("summary_it") or bundle.get("decision_summary_it") or section.get("summary_it") or section.get("summary") or section.get("value"),
+        context="generic",
+    )
     summary_en = sanitize_value(section.get("summary_en") or "", context="generic")
     return {
         "risk": risk,
@@ -338,7 +342,14 @@ def _legal_killers_payload(result: Dict[str, Any]) -> List[Dict[str, str]]:
         if _is_placeholder(killer):
             continue
         status = sanitize_value(item.get("status_it") or item.get("status"), context="status")
-        action = sanitize_value(item.get("reason_it") or item.get("action_required_it") or item.get("action"), context="action")
+        action = sanitize_value(
+            item.get("explanation_it") or item.get("reason_it") or item.get("action_required_it") or item.get("action"),
+            context="action",
+        )
+        verify_next_raw = item.get("verify_next_it")
+        verify_next = sanitize_value(verify_next_raw, context="action") if verify_next_raw not in (None, "") else ""
+        if verify_next and not _is_placeholder(verify_next):
+            action = f"{action}\nVerifica: {verify_next}"
         evidence = " | ".join(_extract_evidence_snippets(item.get("evidence"), max_items=2))
         out.append(
             {
@@ -416,7 +427,10 @@ def _red_flags_payload(result: Dict[str, Any]) -> List[Dict[str, str]]:
         if not isinstance(item, dict):
             continue
         title = sanitize_value(item.get("label") or item.get("title_it") or item.get("title") or f"Red Flag {idx}", context="action")
-        detail = sanitize_value(item.get("explanation") or item.get("detail") or item.get("reason_it"), context="action")
+        detail = sanitize_value(
+            item.get("action_it") or item.get("explanation_it") or item.get("explanation") or item.get("detail") or item.get("reason_it"),
+            context="action",
+        )
         severity = _upper_text(item.get("severity") or item.get("status") or "AMBER")
         out.append({"title": title, "detail": detail, "severity": severity})
     return out
@@ -427,6 +441,7 @@ def _payload_from_result(analysis: Dict[str, Any], result: Dict[str, Any]) -> Di
     case_header = result.get("case_header") or report_header
     semaforo = result.get("section_1_semaforo_generale") or result.get("semaforo_generale") or {}
     summary = result.get("summary_for_client") or {}
+    bundle = result.get("summary_for_client_bundle") if isinstance(result.get("summary_for_client_bundle"), dict) else {}
     lots = _lots_payload(result)
     costs, costs_total = _money_items_payload(result)
 
@@ -447,7 +462,10 @@ def _payload_from_result(analysis: Dict[str, Any], result: Dict[str, Any]) -> Di
         "panoramica": {
             "semaforo": sanitize_value(semaforo.get("status") or semaforo.get("status_it"), context="status"),
             "driver": sanitize_value((semaforo.get("driver") or {}).get("value") if isinstance(semaforo.get("driver"), dict) else semaforo.get("reason_it"), context="action"),
-            "summary_it": sanitize_value(summary.get("summary_it") or summary.get("raccomandazione"), context="generic"),
+            "summary_it": sanitize_value(
+                bundle.get("summary_it") or bundle.get("decision_summary_it") or summary.get("summary_it") or summary.get("raccomandazione"),
+                context="generic",
+            ),
             "summary_en": sanitize_value(summary.get("summary_en"), context="generic"),
         },
         "decisione": _decision_payload(result),

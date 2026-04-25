@@ -83,6 +83,46 @@ export const safeRender = (value, fallback = MISSING_TEXT) => {
   return `${normalized}` || fallback;
 };
 
+const safeOptionalRender = (value) => {
+  const rendered = safeRender(value, '');
+  return rendered === MISSING_TEXT ? '' : rendered;
+};
+
+const pickCustomerFacingTitle = (value, fallback = '') => (
+  value?.headline_it ||
+  value?.flag_it ||
+  value?.label_it ||
+  value?.label ||
+  value?.title_it ||
+  value?.title ||
+  value?.killer ||
+  fallback
+);
+
+const pickCustomerIssueText = (value, fallback = '') => (
+  value?.explanation_it ||
+  value?.verify_next_it ||
+  value?.why_not_resolved ||
+  value?.explanation ||
+  value?.detail ||
+  value?.reason_it ||
+  value?.action_required_it ||
+  value?.action ||
+  fallback
+);
+
+const pickCustomerFlagText = (value, fallback = '') => (
+  value?.action_it ||
+  value?.explanation_it ||
+  value?.verify_next_it ||
+  value?.explanation ||
+  value?.detail ||
+  value?.reason_it ||
+  value?.action_required_it ||
+  value?.action ||
+  fallback
+);
+
 export const parseNumericEuro = (value) => {
   if (typeof value === 'number' && Number.isFinite(value)) return value;
   if (typeof value !== 'string') return null;
@@ -456,9 +496,9 @@ const buildLegalItems = (result) => {
   section9.forEach((item, index) => {
     pushItem(
       `section9-${index}`,
-      item?.killer || item?.label_it || item?.label,
+      pickCustomerFacingTitle(item),
       item?.status_it || item?.status,
-      item?.reason_it || item?.action_required_it || item?.action,
+      pickCustomerIssueText(item),
       item?.evidence
     );
   });
@@ -716,12 +756,12 @@ const buildFlags = (result, legalItems = []) => {
       pushItem(`flag-${index}`, `Segnalazione ${index + 1}`, flag, 'AMBER', []);
       return;
     }
-    const label = normalizeComparableText(flag?.flag_it || flag?.label || flag?.title_it || flag?.title);
+    const label = normalizeComparableText(pickCustomerFacingTitle(flag));
     if (label.includes('manual review') || label.includes('revisione manuale')) return;
     pushItem(
       `flag-${index}`,
-      flag?.flag_it || flag?.label || flag?.title_it || flag?.title,
-      flag?.action_it || flag?.explanation || flag?.detail || flag?.reason_it,
+      pickCustomerFacingTitle(flag),
+      pickCustomerFlagText(flag),
       flag?.severity || flag?.status || 'AMBER',
       flag?.evidence
     );
@@ -756,6 +796,7 @@ export const buildPeriziaPrintReportModel = (rawAnalysis) => {
     : {};
   const decision = result.decision_rapida_client || result.section_2_decisione_rapida || {};
   const summary = result.summary_for_client || {};
+  const summaryBundle = result.summary_for_client_bundle || {};
   const panoramicaContract = result.panoramica_contract || {};
   const lotSummary = panoramicaContract.lot_summary || {};
   const valuation = panoramicaContract.valuation_waterfall || {};
@@ -774,27 +815,33 @@ export const buildPeriziaPrintReportModel = (rawAnalysis) => {
   const rawCoverSummaryIt = safeRender(
     pickFirstNonEmpty(
       narratedDecision.it,
+      summaryBundle.decision_summary_it,
       decision.summary_it,
       summary.summary_it
     ),
     ''
   );
   const topAttentionLegalItem = pickCanonicalTopAttentionItem(legalItems);
-  const coverSummaryIt = topAttentionLegalItem
-    ? safeRender(topAttentionLegalItem.title, rawCoverSummaryIt)
-    : isWeakBackgroundLegalSummary(rawCoverSummaryIt)
-      ? safeRender(decision.summary_it || summary.summary_it, rawCoverSummaryIt)
-      : rawCoverSummaryIt;
-  const overviewDecisionIt = topAttentionLegalItem
-    ? safeRender(topAttentionLegalItem.title, rawCoverSummaryIt)
-    : safeRender(
-      pickFirstNonEmpty(
-        narratedDecision.it,
-        decision.summary_it,
-        summary.summary_it
-      ),
-      ''
-    );
+  const hasBundleDecisionSummary = Boolean(safeRender(summaryBundle.decision_summary_it, '').trim());
+  const coverSummaryIt = hasBundleDecisionSummary
+    ? safeRender(summaryBundle.decision_summary_it, rawCoverSummaryIt)
+    : topAttentionLegalItem
+      ? safeRender(topAttentionLegalItem.title, rawCoverSummaryIt)
+      : isWeakBackgroundLegalSummary(rawCoverSummaryIt)
+        ? safeRender(decision.summary_it || summary.summary_it, rawCoverSummaryIt)
+        : rawCoverSummaryIt;
+  const overviewDecisionIt = hasBundleDecisionSummary
+    ? safeRender(summaryBundle.decision_summary_it, rawCoverSummaryIt)
+    : topAttentionLegalItem
+      ? safeRender(topAttentionLegalItem.title, rawCoverSummaryIt)
+      : safeRender(
+        pickFirstNonEmpty(
+          narratedDecision.it,
+          decision.summary_it,
+          summary.summary_it
+        ),
+        ''
+      );
   const coverAddress = safeRender(
     pickFirstNonEmpty(
       lotSummary.ubicazione,
@@ -812,8 +859,8 @@ export const buildPeriziaPrintReportModel = (rawAnalysis) => {
     fileName: safeRender(analysis.file_name, ''),
     createdAt: analysis.created_at ? new Date(analysis.created_at).toLocaleString('it-IT') : '',
     cover: {
-      procedura: safeRender(reportHeader.procedure?.value || reportHeader.procedure || lotSummary.procedura, MISSING_TEXT),
-      tribunale: safeRender(reportHeader.tribunale?.value || reportHeader.tribunale || lotSummary.tribunale, MISSING_TEXT),
+      procedura: safeOptionalRender(reportHeader.procedure?.value || reportHeader.procedure || lotSummary.procedura),
+      tribunale: safeOptionalRender(reportHeader.tribunale?.value || reportHeader.tribunale || lotSummary.tribunale),
       lotto: safeRender(reportHeader.lotto?.value || reportHeader.lotto || lotSummary.lotto_label, MISSING_TEXT),
       indirizzo: coverAddress,
       semaforo: safeRender(semaforo.status_label || semaforo.status_it || semaforo.status, 'AMBER'),
@@ -825,7 +872,7 @@ export const buildPeriziaPrintReportModel = (rawAnalysis) => {
       metrics: [
         { label: 'Numero lotti', value: safeRender(panoramicaContract.lots_count, '') },
         { label: 'Valore di stima', value: formatMoney(valuation.valore_stima_eur) },
-        { label: 'Deprezzamenti', value: formatMoney(valuation.deprezzamenti_eur) },
+        { label: 'Deprezzamenti', value: safeOptionalRender(formatMoney(valuation.deprezzamenti_eur)) },
         { label: 'Valore finale', value: formatMoney(valuation.valore_finale_eur) },
         {
           label: 'Prezzo base',
