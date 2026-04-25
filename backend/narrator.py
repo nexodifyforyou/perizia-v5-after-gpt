@@ -226,6 +226,41 @@ def build_summary_for_client_bundle(result: Dict[str, Any]) -> Dict[str, Any]:
     verifier_runtime = result.get("verifier_runtime", {}) if isinstance(result.get("verifier_runtime"), dict) else {}
     canonical_case = verifier_runtime.get("canonical_case", {}) if isinstance(verifier_runtime.get("canonical_case"), dict) else {}
     verifier_bundle = canonical_case.get("summary_bundle", {}) if isinstance(canonical_case.get("summary_bundle"), dict) else {}
+    document_quality = result.get("document_quality", {}) if isinstance(result.get("document_quality"), dict) else {}
+    canonical_contract_state = result.get("canonical_contract_state", {}) if isinstance(result.get("canonical_contract_state"), dict) else {}
+    blocked_unreadable = (
+        str(result.get("analysis_status") or "").upper() == "UNREADABLE"
+        or str(document_quality.get("status") or "").upper() == "UNREADABLE"
+        or str(canonical_contract_state.get("reason") or "").lower() == "canonical_freeze_blocked_unreadable"
+    )
+    if blocked_unreadable:
+        blocked_it = _truncate_sentence(
+            _first_non_empty(
+                document_quality.get("customer_message_it"),
+                "Documento non leggibile o estrazione bloccata: non è possibile formulare conclusioni affidabili senza verifica manuale.",
+            ),
+            320,
+        )
+        blocked_en = _truncate_sentence(
+            _first_non_empty(
+                document_quality.get("customer_message_en"),
+                "Unreadable document or blocked extraction: no reliable conclusion can be produced without manual review.",
+            ),
+            320,
+        )
+        return {
+            "top_issue_it": "",
+            "top_issue_en": "",
+            "next_step_it": blocked_it,
+            "next_step_en": blocked_en,
+            "caution_points_it": ["Verifica manuale obbligatoria sul documento originale."],
+            "user_messages_it": [],
+            "document_quality_status": _truncate_sentence(document_quality.get("status"), 40),
+            "semaforo_status": "UNKNOWN",
+            "decision_summary_it": blocked_it,
+            "decision_summary_en": blocked_en,
+            "evidence_snippets": [],
+        }
     if verifier_bundle:
         return verifier_bundle
     decision = result.get("decision_rapida_client", {}) if isinstance(result.get("decision_rapida_client"), dict) else {}
@@ -237,7 +272,6 @@ def build_summary_for_client_bundle(result: Dict[str, Any]) -> Dict[str, Any]:
     if not isinstance(legal_items, list) or not legal_items:
         legal_items = section_legal.get("items", []) if isinstance(section_legal.get("items"), list) else []
     user_messages = result.get("user_messages", []) if isinstance(result.get("user_messages"), list) else []
-    document_quality = result.get("document_quality", {}) if isinstance(result.get("document_quality"), dict) else {}
 
     top_issue_it = ""
     top_issue_en = ""

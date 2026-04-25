@@ -653,6 +653,100 @@ def apply_verifier_to_result(result: Dict[str, Any], verifier_payload: Dict[str,
     if verifier_payload.get("reasoning_status") == "SUPPRESSED_UNREADABLE":
         return
 
+    grouped_explanations = freeze_grouped if isinstance(freeze_grouped, list) else []
+
+    def _find_freeze_entry_with_scope(family: str, field_type: str) -> tuple[Optional[str], Optional[Dict[str, Any]]]:
+        if not isinstance(freeze_contract, dict):
+            return None, None
+        direct = _freeze_contract_field_entry(freeze_contract, "document", family, field_type)
+        if isinstance(direct, dict):
+            return "document", direct
+        fields = freeze_contract.get("fields")
+        if not isinstance(fields, dict):
+            return None, None
+        preferred_scopes = ("lot:unico", "lotto:unico", "lot:1", "lotto:1")
+        for scope_key in preferred_scopes:
+            candidate = _freeze_contract_field_entry(freeze_contract, scope_key, family, field_type)
+            if isinstance(candidate, dict):
+                return scope_key, candidate
+        for scope_key, scope_payload in fields.items():
+            if not isinstance(scope_payload, dict):
+                continue
+            family_payload = scope_payload.get(family)
+            if isinstance(family_payload, dict) and isinstance(family_payload.get(field_type), dict):
+                return str(scope_key), family_payload.get(field_type)
+        return None, None
+
+    def _find_freeze_entry(family: str, field_type: str) -> Optional[Dict[str, Any]]:
+        _, entry = _find_freeze_entry_with_scope(family, field_type)
+        return entry
+
+    def _grouped_explanation(field_family: str) -> Optional[Dict[str, Any]]:
+        for entry in grouped_explanations:
+            if not isinstance(entry, dict):
+                continue
+            if str(entry.get("field_type") or "").strip().lower() == field_family:
+                return entry
+        return None
+
+    def _apply_contract_explanation(
+        field_key: str,
+        *,
+        family: str,
+        field_type: str,
+        default_status: Optional[str] = None,
+    ) -> None:
+        contract_entry = _find_freeze_entry(family, field_type)
+        grouped_entry = _grouped_explanation(family)
+        if not isinstance(contract_entry, dict) and not isinstance(grouped_entry, dict):
+            return
+
+        existing = field_states.get(field_key)
+        state = copy.deepcopy(existing) if isinstance(existing, dict) else {
+            "value": None,
+            "status": default_status or "LOW_CONFIDENCE",
+            "confidence": 0.45,
+            "evidence": [],
+            "searched_in": [],
+            "user_prompt_it": None,
+        }
+        if str(state.get("status") or "").upper() == "USER_PROVIDED":
+            return
+
+        contract_state = str((contract_entry or {}).get("state") or (grouped_entry or {}).get("llm_outcome") or "").strip()
+        contract_value = (contract_entry or {}).get("value")
+        if contract_value not in (None, "") and (
+            state.get("value") in (None, "", "DA VERIFICARE")
+            or str(state.get("status") or "").upper() in {"NOT_FOUND", "LOW_CONFIDENCE"}
+        ):
+            state["value"] = contract_value
+        if contract_state in {"deterministic_active", "llm_resolved", "resolved_with_context"} and state.get("value") not in (None, ""):
+            state["status"] = "LOW_CONFIDENCE" if is_degraded else "FOUND"
+        elif state.get("value") in (None, "") and str(state.get("status") or "").upper() == "NOT_FOUND":
+            state["status"] = default_status or "LOW_CONFIDENCE"
+
+        evidence = (contract_entry or {}).get("supporting_evidence")
+        if isinstance(evidence, list) and evidence and not state.get("evidence"):
+            state["evidence"] = copy.deepcopy(evidence)
+        if (contract_entry or {}).get("confidence_band") and not isinstance(state.get("confidence"), (int, float)):
+            state["confidence"] = 0.7 if contract_entry.get("confidence_band") == "high" else 0.45
+
+        explanation_payload = {
+            "contract_state": contract_state or state.get("contract_state"),
+            "explanation": (contract_entry or {}).get("explanation") or (grouped_entry or {}).get("user_visible_explanation"),
+            "context_qualification": (contract_entry or {}).get("context_qualification"),
+            "why_not_fully_certain": (contract_entry or {}).get("why_not_fully_certain"),
+            "why_not_resolved": (contract_entry or {}).get("why_not_resolved") or (grouped_entry or {}).get("why_not_resolved"),
+            "source_pages": (contract_entry or {}).get("source_pages") or (grouped_entry or {}).get("source_pages"),
+            "supporting_pages": (contract_entry or {}).get("supporting_pages") or (grouped_entry or {}).get("supporting_pages"),
+            "tension_pages": (contract_entry or {}).get("tension_pages") or (grouped_entry or {}).get("tension_pages"),
+            "needs_human_review": (contract_entry or {}).get("needs_human_review") or (grouped_entry or {}).get("needs_human_review"),
+        }
+        for meta_key, meta_value in explanation_payload.items():
+            if meta_value not in (None, "", []):
+                state[meta_key] = copy.deepcopy(meta_value)
+        field_states[field_key] = state
+
     is_degraded = verifier_payload.get("evidence_mode") == DEGRADED_TEXT
     if is_degraded:
         _apply_degraded_result_packaging(result)
@@ -714,17 +808,16 @@ def apply_verifier_to_result(result: Dict[str, Any], verifier_payload: Dict[str,
         if is_degraded:
             _annotate_degraded_output(field_states["prezzo_base_asta"])
     benchmark_value = pricing.get("benchmark_value")
-    benchmark_contract_entry = _freeze_contract_field_entry(
-        freeze_contract, "document", "valuation", "valore_stima_raw"
-    )
+    benchmark_scope_key, benchmark_contract_entry = _find_freeze_entry_with_scope("valuation", "valore_stima_raw")
     if (
         isinstance(benchmark_value, (int, float))
         and _benchmark_contract_entry_matches_pricing(benchmark_contract_entry, float(benchmark_value))
         and _should_promote_benchmark_value(field_states.get("valore_stima"), float(benchmark_value))
     ):
         previous_state = copy.deepcopy(field_states.get("valore_stima")) if isinstance(field_states.get("valore_stima"), dict) else None
+        canonical_benchmark_value = (benchmark_contract_entry or {}).get("value")
         benchmark_state = {
-            "value": benchmark_value,
+            "value": canonical_benchmark_value if canonical_benchmark_value not in (None, "") else benchmark_value,
             "status": "LOW_CONFIDENCE" if is_degraded else "FOUND",
             "confidence": float(((verifier_payload.get("judgments") or {}).get("pricing") or {}).get("confidence") or 0.0),
             "evidence": _pricing_evidence_for_benchmark_value(pricing, benchmark_contract_entry or {}),
@@ -732,18 +825,75 @@ def apply_verifier_to_result(result: Dict[str, Any], verifier_payload: Dict[str,
             "user_prompt_it": None,
             "resolver_meta": {
                 "resolver_version": "verifier_runtime_v1",
-                "source": "canonical_freeze_contract.fields.document.valuation.valore_stima_raw",
+                "source": f"canonical_freeze_contract.fields.{benchmark_scope_key}.valuation.valore_stima_raw" if benchmark_scope_key else None,
                 "source_state": (benchmark_contract_entry or {}).get("state"),
                 "canonical_pricing_source": "canonical_pricing.benchmark_value",
                 "previous_state": previous_state,
             },
         }
-        for context_key in ("explanation", "context_qualification", "why_not_fully_certain"):
+        for context_key in ("explanation", "context_qualification", "why_not_fully_certain", "why_not_resolved"):
             if (benchmark_contract_entry or {}).get(context_key):
                 benchmark_state[context_key] = (benchmark_contract_entry or {}).get(context_key)
         field_states["valore_stima"] = benchmark_state
         if is_degraded:
             _annotate_degraded_output(field_states["valore_stima"])
+    canonical_agibilita = canonical.get("agibilita", {}) if isinstance(canonical.get("agibilita"), dict) else {}
+    agibilita_status = str(canonical_agibilita.get("status") or "").strip().upper()
+    if agibilita_status in {"PRESENTE", "ASSENTE", "NON_VERIFICABILE"}:
+        previous_agibilita = copy.deepcopy(field_states.get("agibilita")) if isinstance(field_states.get("agibilita"), dict) else None
+        verification_trail = canonical_agibilita.get("verification_trail") if isinstance(canonical_agibilita.get("verification_trail"), dict) else {}
+        reason_unresolved = str(verification_trail.get("reason_unresolved") or "").strip() or None
+        verify_next = str(verification_trail.get("verify_next") or "").strip() or None
+        display_value = {
+            "PRESENTE": "PRESENTE",
+            "ASSENTE": "ASSENTE",
+            "NON_VERIFICABILE": "DA VERIFICARE",
+        }[agibilita_status]
+        field_status = "FOUND" if agibilita_status in {"PRESENTE", "ASSENTE"} and not is_degraded else "LOW_CONFIDENCE"
+        if agibilita_status == "NON_VERIFICABILE" and is_degraded:
+            field_status = "LOW_CONFIDENCE"
+        explanation_parts: List[str] = []
+        if agibilita_status == "NON_VERIFICABILE":
+            if reason_unresolved:
+                explanation_parts.append(reason_unresolved.rstrip("."))
+            if verify_next:
+                explanation_parts.append(verify_next.rstrip("."))
+        else:
+            explanation_parts.append(f"L'agibilità risulta {display_value.lower()} nel caso canonico verificato.")
+        agibilita_explanation = ". ".join(part for part in explanation_parts if part).strip()
+        if agibilita_explanation and not agibilita_explanation.endswith("."):
+            agibilita_explanation += "."
+        field_states["agibilita"] = {
+            "value": display_value,
+            "status": field_status,
+            "confidence": canonical_agibilita.get("confidence", 0.0),
+            "evidence": canonical_agibilita.get("evidence", []),
+            "searched_in": [],
+            "user_prompt_it": None,
+            "contract_state": canonical_agibilita.get("status"),
+            "why_not_resolved": reason_unresolved,
+            "explanation": agibilita_explanation or None,
+            "context_qualification": verify_next,
+            "resolver_meta": {
+                "resolver_version": "verifier_runtime_v1",
+                "source": "canonical_case.agibilita",
+                "guards": copy.deepcopy(canonical_agibilita.get("guards", [])) if isinstance(canonical_agibilita.get("guards"), list) else [],
+                "previous_state": previous_agibilita,
+            },
+        }
+        if is_degraded:
+            _annotate_degraded_output(field_states["agibilita"])
+        abusi = result.get("abusi_edilizi_conformita") if isinstance(result.get("abusi_edilizi_conformita"), dict) else {}
+        abusi["agibilita"] = {
+            "status": display_value,
+            "detail_it": display_value,
+            "evidence": canonical_agibilita.get("evidence", []),
+            "explanation_it": agibilita_explanation or None,
+            "why_not_resolved": reason_unresolved,
+            "context_qualification": verify_next,
+            "contract_state": canonical_agibilita.get("status"),
+        }
+        result["abusi_edilizi_conformita"] = abusi
     if occupancy.get("status"):
         field_states["stato_occupativo"] = {
             "value": occupancy.get("status"),
@@ -838,6 +988,24 @@ def apply_verifier_to_result(result: Dict[str, Any], verifier_payload: Dict[str,
         _annotate_degraded_output(money_box["verifier_costs_summary"])
     summary = result.setdefault("summary_for_client", {})
     summary["verifier_bundle"] = summary_bundle
+    if str(((result.get("canonical_contract_state") or {}) if isinstance(result.get("canonical_contract_state"), dict) else {}).get("reason") or "").lower() == "canonical_freeze_blocked_unreadable":
+        blocked_summary_it = "Documento non leggibile o estrazione bloccata: non è possibile formulare conclusioni affidabili sui profili legali o economici senza verifica manuale."
+        blocked_summary_en = "Unreadable document or blocked extraction: no reliable legal or cost conclusion can be produced without manual review."
+        summary_bundle = {
+            "top_issue_it": "",
+            "top_issue_en": "",
+            "next_step_it": blocked_summary_it,
+            "next_step_en": blocked_summary_en,
+            "caution_points_it": ["Verifica manuale obbligatoria sul documento originale."],
+            "user_messages_it": [],
+            "document_quality_status": "UNREADABLE",
+            "semaforo_status": "UNKNOWN",
+            "decision_summary_it": blocked_summary_it,
+            "decision_summary_en": blocked_summary_en,
+            "evidence_snippets": [],
+            "source": "canonical_freeze_blocked_unreadable",
+        }
+        summary["verifier_bundle"] = copy.deepcopy(summary_bundle)
     summary["summary_it"] = summary_bundle.get("decision_summary_it", summary.get("summary_it", ""))
     if summary_bundle.get("decision_summary_en"):
         summary["summary_en"] = summary_bundle.get("decision_summary_en")
@@ -847,3 +1015,23 @@ def apply_verifier_to_result(result: Dict[str, Any], verifier_payload: Dict[str,
     result["summary_for_client_bundle"] = summary_bundle
     if is_degraded and isinstance(result.get("summary_for_client_bundle"), dict):
         _annotate_degraded_output(result["summary_for_client_bundle"])
+
+    for field_key, family, field_type, default_status in (
+        ("stato_occupativo", "occupancy", "occupancy_status_raw", "LOW_CONFIDENCE"),
+        ("opponibilita_occupazione", "occupancy", "occupancy_opponibilita_raw", "LOW_CONFIDENCE"),
+        ("delivery_timeline", "occupancy", "occupancy_liberazione_raw", "LOW_CONFIDENCE"),
+        ("diritto_reale", "rights", "rights_diritto", "LOW_CONFIDENCE"),
+        ("prezzo_base_asta", "valuation", "prezzo_base_raw", "LOW_CONFIDENCE"),
+        ("valore_stima", "valuation", "valore_stima_raw", "LOW_CONFIDENCE"),
+        ("spese_condominiali_arretrate", "cost", "cost_condominiali_arretrati_raw", "NOT_FOUND"),
+        ("impianto_riscaldamento_status", "impianti", "impianto_riscaldamento_status", "LOW_CONFIDENCE"),
+        ("conformita_catastale", "cadastral", "conformita_catastale_raw", "LOW_CONFIDENCE"),
+        ("regolarita_urbanistica", "urbanistica", "urbanistica_status_raw", "LOW_CONFIDENCE"),
+        ("agibilita", "agibilita", "agibilita_raw", "NOT_FOUND"),
+    ):
+        _apply_contract_explanation(
+            field_key,
+            family=family,
+            field_type=field_type,
+            default_status=default_status,
+        )

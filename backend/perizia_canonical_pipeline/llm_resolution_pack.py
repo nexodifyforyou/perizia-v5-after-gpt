@@ -232,6 +232,12 @@ def _system_prompt() -> str:
         "checking, and never put a fake value into unresolved output. If one best "
         "conclusion is safe but needs mandatory qualification, return "
         "qualified_resolution with the value and context qualification. "
+        "Write customer-facing Italian only. Never use backend jargon or internal labels such as "
+        "“Per scope document”, “problema contesto raggruppato”, “bounded packet”, "
+        "or “valori concorrenti” as a standalone technical phrase. "
+        "For unresolved or context-only output, always explain in this order: "
+        "1) what the perizia says, 2) why that is insufficient or conflicted, "
+        "3) the exact document or check to verify next. "
         "Return only valid JSON."
     )
 
@@ -275,6 +281,8 @@ def _user_prompt(issue: Dict) -> str:
                 "Do not resolve from summary_or_index pages alone.",
                 "Do not choose a value from a transition_page unless target_section_entry_pages prove the same lot/bene scope.",
                 "For unresolved_explained, why_not_resolved must explain the conflict, ambiguity, or unsafe scope.",
+                "For unresolved_explained or upgraded_context, context_qualification or why_not_fully_certain must name the exact next document or check.",
+                "user_visible_explanation must be plain customer-grade Italian and must not contain backend wording.",
                 "Keep needs_human_review true unless confidence is high and resolved_value is directly quoted.",
             ],
             "output_schema": schema,
@@ -567,12 +575,12 @@ def _values_phrase(issue: Dict) -> str:
 
 def _issue_type_label(issue_type: object) -> str:
     labels = {
-        "FIELD_CONFLICT": "valori concorrenti",
-        "SUSPICIOUS_SILENCE": "assenza sospetta di un dato conclusivo",
-        "SCOPE_AMBIGUITY": "ambiguita di ambito tra bene e lotto",
-        "GROUPED_CONTEXT_NEEDS_EXPLANATION": "contesto raggruppato da spiegare",
-        "OCR_VARIANT_COLLISION": "varianti testuali dovute alla qualita OCR",
-        "TABLE_RECAP_DUPLICATE_UNCLEAR": "recap e tabella non allineati in modo sicuro",
+        "FIELD_CONFLICT": "frasi che indicano esiti diversi",
+        "SUSPICIOUS_SILENCE": "mancanza di un dato conclusivo",
+        "SCOPE_AMBIGUITY": "ambito non chiaro tra bene e lotto",
+        "GROUPED_CONTEXT_NEEDS_EXPLANATION": "contesto utile ma non conclusivo",
+        "OCR_VARIANT_COLLISION": "varianti testuali dovute alla qualità OCR",
+        "TABLE_RECAP_DUPLICATE_UNCLEAR": "riepilogo e tabella non allineati in modo sicuro",
     }
     return labels.get(str(issue_type or "").upper(), "ambiguita deterministica")
 
