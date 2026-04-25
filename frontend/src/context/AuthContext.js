@@ -31,7 +31,7 @@ export const AuthProvider = ({ children }) => {
   const login = () => {
     // REMINDER: DO NOT HARDCODE THE URL, OR ADD ANY FALLBACKS OR REDIRECT URLS, THIS BREAKS THE AUTH
     const redirectUrl = window.location.origin + '/dashboard';
-    window.location.href = `https://auth.emergentagent.com/?redirect=${encodeURIComponent(redirectUrl)}`;
+    window.location.href = `${API_URL}/api/auth/google/start?redirect=${encodeURIComponent(redirectUrl)}`;
   };
 
   const exchangeSession = async (sessionId) => {

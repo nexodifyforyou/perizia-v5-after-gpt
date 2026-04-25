@@ -1,5 +1,5 @@
 from fastapi import FastAPI, APIRouter, HTTPException, Request, UploadFile, File, Depends, Response
-from fastapi.responses import JSONResponse, StreamingResponse
+from fastapi.responses import JSONResponse, RedirectResponse, StreamingResponse
 from dotenv import load_dotenv
 from starlette.middleware.cors import CORSMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
@@ -7,6 +7,7 @@ import os
 import asyncio
 import logging
 import re
+import secrets
 import shutil
 import statistics
 import copy
@@ -54,6 +55,9 @@ STRIPE_PRICE_SOLO = os.environ.get("STRIPE_PRICE_SOLO", "").strip()
 STRIPE_PRICE_PRO = os.environ.get("STRIPE_PRICE_PRO", "").strip()
 STRIPE_SUCCESS_URL = os.environ.get("STRIPE_SUCCESS_URL", "").strip()
 STRIPE_CANCEL_URL = os.environ.get("STRIPE_CANCEL_URL", "").strip()
+GOOGLE_CLIENT_ID = os.environ.get("GOOGLE_CLIENT_ID", "").strip()
+GOOGLE_CLIENT_SECRET = os.environ.get("GOOGLE_CLIENT_SECRET", "").strip()
+GOOGLE_OAUTH_REDIRECT_URI = os.environ.get("GOOGLE_OAUTH_REDIRECT_URI", "").strip()
 MASTER_ADMIN_EMAIL = os.environ.get('MASTER_ADMIN_EMAIL', 'admin@nexodify.com')
 DOC_AI_TIMEOUT_SECONDS = int(os.environ.get('DOC_AI_TIMEOUT_SECONDS', '30'))
 LLM_TIMEOUT_SECONDS = int(os.environ.get('LLM_TIMEOUT_SECONDS', '45'))
@@ -118,6 +122,11 @@ OFFLINE_QA_FIXTURE_PATH = os.environ.get(
 )
 FRONTEND_URL = os.environ.get("FRONTEND_URL", "").strip().rstrip("/")
 PRINT_RENDER_TIMEOUT_SECONDS = int(os.environ.get("PRINT_RENDER_TIMEOUT_SECONDS", "120"))
+GOOGLE_OAUTH_AUTH_URL = "https://accounts.google.com/o/oauth2/v2/auth"
+GOOGLE_OAUTH_TOKEN_URL = "https://oauth2.googleapis.com/token"
+GOOGLE_OAUTH_USERINFO_URL = "https://openidconnect.googleapis.com/v1/userinfo"
+GOOGLE_OAUTH_SCOPE = "openid email profile"
+GOOGLE_OAUTH_STATE_TTL_MINUTES = 10
 
 
 class DocAIUnavailable(Exception):
@@ -12064,6 +12073,252 @@ ADMIN_QUOTA_FIELDS = {"perizia_scans_remaining", "image_scans_remaining", "assis
 # AUTH ENDPOINTS
 # ===================
 
+def _absolute_url_origin(url: str) -> Optional[str]:
+    parts = urlsplit(str(url or "").strip())
+    if parts.scheme not in {"http", "https"} or not parts.netloc:
+        return None
+    return f"{parts.scheme.lower()}://{parts.netloc.lower()}"
+
+
+def _default_oauth_redirect_url() -> str:
+    if not FRONTEND_URL:
+        raise HTTPException(status_code=503, detail="Frontend URL not configured")
+    return f"{FRONTEND_URL.rstrip('/')}/dashboard"
+
+
+def _allowed_oauth_redirect_origins() -> set:
+    origins = {"https://periziascan.nexodify.com"}
+    frontend_origin = _absolute_url_origin(FRONTEND_URL)
+    if frontend_origin:
+        origins.add(frontend_origin)
+    return origins
+
+
+def _validate_oauth_redirect_url(redirect_url: Optional[str]) -> str:
+    target = str(redirect_url or "").strip() or _default_oauth_redirect_url()
+    origin = _absolute_url_origin(target)
+    if not origin or origin not in _allowed_oauth_redirect_origins():
+        raise HTTPException(status_code=400, detail="Invalid redirect URL")
+    return target
+
+
+def _require_google_oauth_config() -> None:
+    if not (GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET and GOOGLE_OAUTH_REDIRECT_URI):
+        raise HTTPException(status_code=503, detail="Google OAuth not configured")
+
+
+def _google_email_is_verified(value: Any) -> bool:
+    if value is None:
+        return True
+    if isinstance(value, bool):
+        return value
+    return str(value).strip().lower() in {"1", "true", "yes"}
+
+
+async def _get_or_create_authenticated_user(email: str, name: Optional[str], picture: Optional[str]) -> User:
+    email = str(email or "").strip().lower()
+    if not email:
+        raise HTTPException(status_code=401, detail="Email required")
+
+    display_name = str(name or "").strip() or email
+    picture_url = str(picture or "").strip() or None
+
+    existing_user = await db.users.find_one({"email": email}, {"_id": 0})
+    is_master = _is_master_admin_email(email)
+
+    if existing_user:
+        user_id = existing_user["user_id"]
+        update_data = {"name": display_name, "picture": picture_url}
+        await db.users.update_one(
+            {"user_id": user_id},
+            {"$set": update_data}
+        )
+
+        updated_user = await db.users.find_one({"user_id": user_id}, {"_id": 0})
+        normalized_user = await _apply_normalized_account_state(updated_user, persist=True)
+        await _ensure_opening_balance_baseline_for_user_doc(normalized_user)
+        return User(**normalized_user)
+
+    user_id = f"user_{uuid.uuid4().hex[:12]}"
+    new_user = User(
+        user_id=user_id,
+        email=email,
+        name=display_name,
+        picture=picture_url,
+        plan="enterprise" if is_master else "free",
+        is_master_admin=is_master,
+        quota=SUBSCRIPTION_PLANS["enterprise" if is_master else "free"].quota.copy()
+    )
+    user_dict = new_user.model_dump()
+    user_dict["perizia_credits"] = _build_legacy_perizia_credit_wallet(
+        user_dict,
+        plan_id=user_dict.get("plan"),
+        is_master_admin=is_master,
+    )
+    user_dict["quota"]["perizia_scans_remaining"] = user_dict["perizia_credits"]["total_available"]
+    user_dict["created_at"] = user_dict["created_at"].isoformat()
+    await db.users.insert_one(user_dict)
+    await _ensure_opening_balance_baseline_for_user_doc(user_dict)
+    return User(**user_dict)
+
+
+async def _create_local_session_for_user(user: User) -> str:
+    session_token = f"sess_{uuid.uuid4().hex}"
+    expires_at = datetime.now(timezone.utc) + timedelta(days=7)
+
+    session = UserSession(
+        session_id=str(uuid.uuid4()),
+        user_id=user.user_id,
+        session_token=session_token,
+        expires_at=expires_at
+    )
+    session_dict = session.model_dump()
+    session_dict["expires_at"] = session_dict["expires_at"].isoformat()
+    session_dict["created_at"] = session_dict["created_at"].isoformat()
+    await db.user_sessions.insert_one(session_dict)
+    return session_token
+
+
+def _set_session_token_cookie(response: Response, session_token: str) -> None:
+    response.set_cookie(
+        key="session_token",
+        value=session_token,
+        httponly=True,
+        secure=True,
+        samesite="none",
+        path="/",
+        max_age=7 * 24 * 60 * 60
+    )
+
+
+async def _create_local_login(email: str, name: Optional[str], picture: Optional[str], response: Response) -> Tuple[User, str]:
+    user = await _get_or_create_authenticated_user(email=email, name=name, picture=picture)
+    session_token = await _create_local_session_for_user(user)
+
+    if user.is_master_admin:
+        await _write_admin_audit(
+            admin_user=user,
+            action="ADMIN_LOGIN",
+            meta={"event": "login"}
+        )
+
+    _set_session_token_cookie(response, session_token)
+    return user, session_token
+
+
+@api_router.head("/auth/google/start")
+@api_router.get("/auth/google/start")
+async def google_oauth_start(redirect: Optional[str] = None):
+    """Start backend-owned Google OAuth login."""
+    _require_google_oauth_config()
+    redirect_url = _validate_oauth_redirect_url(redirect)
+
+    state = secrets.token_urlsafe(32)
+    now = datetime.now(timezone.utc)
+    expires_at = now + timedelta(minutes=GOOGLE_OAUTH_STATE_TTL_MINUTES)
+    await db.oauth_states.insert_one({
+        "state": state,
+        "redirect_url": redirect_url,
+        "created_at": now,
+        "expires_at": expires_at,
+        "used": False,
+    })
+
+    params = {
+        "client_id": GOOGLE_CLIENT_ID,
+        "redirect_uri": GOOGLE_OAUTH_REDIRECT_URI,
+        "response_type": "code",
+        "scope": GOOGLE_OAUTH_SCOPE,
+        "state": state,
+    }
+    return RedirectResponse(url=f"{GOOGLE_OAUTH_AUTH_URL}?{urlencode(params)}")
+
+
+@api_router.get("/auth/google/callback")
+async def google_oauth_callback(
+    code: Optional[str] = None,
+    state: Optional[str] = None,
+    error: Optional[str] = None,
+):
+    """Complete backend-owned Google OAuth login and create a local session."""
+    if error:
+        raise HTTPException(status_code=400, detail="Google OAuth failed")
+    if not code or not state:
+        raise HTTPException(status_code=400, detail="OAuth code and state required")
+
+    state_doc = await db.oauth_states.find_one({"state": state}, {"_id": 0})
+    now = datetime.now(timezone.utc)
+    expires_at = _parse_dt((state_doc or {}).get("expires_at"))
+    if not state_doc or state_doc.get("used") or not expires_at or expires_at <= now:
+        raise HTTPException(status_code=400, detail="Invalid OAuth state")
+
+    redirect_url = _validate_oauth_redirect_url(state_doc.get("redirect_url"))
+    _require_google_oauth_config()
+
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            token_response = await client.post(
+                GOOGLE_OAUTH_TOKEN_URL,
+                data={
+                    "client_id": GOOGLE_CLIENT_ID,
+                    "client_secret": GOOGLE_CLIENT_SECRET,
+                    "code": code,
+                    "grant_type": "authorization_code",
+                    "redirect_uri": GOOGLE_OAUTH_REDIRECT_URI,
+                },
+                headers={"Content-Type": "application/x-www-form-urlencoded"},
+            )
+            if token_response.status_code != 200:
+                raise HTTPException(status_code=401, detail="Google token exchange failed")
+            token_data = token_response.json()
+            access_token = token_data.get("access_token")
+            if not access_token:
+                raise HTTPException(status_code=401, detail="Google token exchange failed")
+
+            userinfo_response = await client.get(
+                GOOGLE_OAUTH_USERINFO_URL,
+                headers={"Authorization": f"Bearer {access_token}"},
+            )
+            if userinfo_response.status_code != 200:
+                raise HTTPException(status_code=401, detail="Google userinfo failed")
+            userinfo = userinfo_response.json()
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.error(f"Google OAuth callback error: {exc}")
+        raise HTTPException(status_code=500, detail="Google authentication failed")
+
+    email = str(userinfo.get("email") or "").strip().lower()
+    if not email:
+        raise HTTPException(status_code=401, detail="Google email required")
+    if not _google_email_is_verified(userinfo.get("email_verified")):
+        raise HTTPException(status_code=401, detail="Google email not verified")
+
+    display_name = (
+        str(userinfo.get("name") or "").strip()
+        or " ".join(
+            part for part in [
+                str(userinfo.get("given_name") or "").strip(),
+                str(userinfo.get("family_name") or "").strip(),
+            ]
+            if part
+        )
+        or email
+    )
+    redirect_response = RedirectResponse(url=redirect_url, status_code=302)
+    await _create_local_login(
+        email=email,
+        name=display_name,
+        picture=userinfo.get("picture"),
+        response=redirect_response,
+    )
+    await db.oauth_states.update_one(
+        {"state": state},
+        {"$set": {"used": True, "used_at": datetime.now(timezone.utc)}}
+    )
+    return redirect_response
+
+
 @api_router.post("/auth/session")
 async def create_session(request: Request, response: Response):
     """Exchange session_id from Emergent Auth for session_token"""
@@ -12087,82 +12342,11 @@ async def create_session(request: Request, response: Response):
             logger.error(f"Auth error: {e}")
             raise HTTPException(status_code=500, detail="Authentication failed")
     
-    email = user_data.get("email")
-    name = user_data.get("name")
-    picture = user_data.get("picture")
-    
-    # Check if user exists or create new one
-    existing_user = await db.users.find_one({"email": email}, {"_id": 0})
-    is_master = _is_master_admin_email(email)
-    
-    if existing_user:
-        user_id = existing_user["user_id"]
-        # Update user data before normalizing persisted account state
-        update_data = {"name": name, "picture": picture}
-        await db.users.update_one(
-            {"user_id": user_id},
-            {"$set": update_data}
-        )
-
-        updated_user = await db.users.find_one({"user_id": user_id}, {"_id": 0})
-        normalized_user = await _apply_normalized_account_state(updated_user, persist=True)
-        await _ensure_opening_balance_baseline_for_user_doc(normalized_user)
-        user = User(**normalized_user)
-    else:
-        user_id = f"user_{uuid.uuid4().hex[:12]}"
-        
-        new_user = User(
-            user_id=user_id,
-            email=email,
-            name=name,
-            picture=picture,
-            plan="enterprise" if is_master else "free",
-            is_master_admin=is_master,
-            quota=SUBSCRIPTION_PLANS["enterprise" if is_master else "free"].quota.copy()
-        )
-        user_dict = new_user.model_dump()
-        user_dict["perizia_credits"] = _build_legacy_perizia_credit_wallet(
-            user_dict,
-            plan_id=user_dict.get("plan"),
-            is_master_admin=is_master,
-        )
-        user_dict["quota"]["perizia_scans_remaining"] = user_dict["perizia_credits"]["total_available"]
-        user_dict["created_at"] = user_dict["created_at"].isoformat()
-        await db.users.insert_one(user_dict)
-        await _ensure_opening_balance_baseline_for_user_doc(user_dict)
-        user = User(**user_dict)
-    
-    # Create session
-    session_token = f"sess_{uuid.uuid4().hex}"
-    expires_at = datetime.now(timezone.utc) + timedelta(days=7)
-    
-    session = UserSession(
-        session_id=str(uuid.uuid4()),
-        user_id=user_id,
-        session_token=session_token,
-        expires_at=expires_at
-    )
-    session_dict = session.model_dump()
-    session_dict["expires_at"] = session_dict["expires_at"].isoformat()
-    session_dict["created_at"] = session_dict["created_at"].isoformat()
-    await db.user_sessions.insert_one(session_dict)
-
-    if is_master:
-        await _write_admin_audit(
-            admin_user=user,
-            action="ADMIN_LOGIN",
-            meta={"event": "login"}
-        )
-    
-    # Set cookie
-    response.set_cookie(
-        key="session_token",
-        value=session_token,
-        httponly=True,
-        secure=True,
-        samesite="none",
-        path="/",
-        max_age=7 * 24 * 60 * 60
+    user, session_token = await _create_local_login(
+        email=user_data.get("email"),
+        name=user_data.get("name"),
+        picture=user_data.get("picture"),
+        response=response,
     )
     
     user_response = _build_user_response(user)
@@ -18995,6 +19179,8 @@ def custom_openapi():
         "/api/health",
         "/api/plans",
         "/api/auth/session",
+        "/api/auth/google/start",
+        "/api/auth/google/callback",
         "/api/webhook/stripe",
     }
 
@@ -19014,7 +19200,6 @@ def custom_openapi():
 app.openapi = custom_openapi
 
 # Get the frontend URL from environment for proper CORS configuration
-FRONTEND_URL = os.environ.get('FRONTEND_URL', '')
 CORS_ORIGINS = [
     "http://localhost:3000",
 ]
