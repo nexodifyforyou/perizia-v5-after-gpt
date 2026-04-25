@@ -91,10 +91,11 @@ const History = () => {
   const fetchHistory = async () => {
     setLoading(true);
     try {
+      const requestOptions = { withCredentials: true, timeout: 15000 };
       const [periziaRes, imageRes, assistantRes] = await Promise.all([
-        axios.get(`${API_URL}/api/history/perizia`, { withCredentials: true }),
-        axios.get(`${API_URL}/api/history/images`, { withCredentials: true }),
-        axios.get(`${API_URL}/api/history/assistant`, { withCredentials: true })
+        axios.get(`${API_URL}/api/history/perizia`, requestOptions),
+        axios.get(`${API_URL}/api/history/images`, requestOptions),
+        axios.get(`${API_URL}/api/history/assistant`, requestOptions)
       ]);
       
       setPeriziaHistory(periziaRes.data.analyses || []);

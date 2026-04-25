@@ -11,6 +11,7 @@ import secrets
 import shutil
 import statistics
 import copy
+import time
 from pathlib import Path
 from pydantic import BaseModel, Field, ConfigDict
 from typing import List, Optional, Dict, Any, Tuple
@@ -18439,22 +18440,74 @@ async def admin_transactions(
 # HISTORY ENDPOINTS
 # ===================
 
+def _extract_history_semaforo_status(analysis: Dict[str, Any]) -> Optional[str]:
+    if not isinstance(analysis, dict):
+        return None
+    candidates: List[Any] = [analysis.get("semaforo_status")]
+    result = analysis.get("result")
+    if isinstance(result, dict):
+        section1 = result.get("section_1_semaforo_generale")
+        if isinstance(section1, dict):
+            candidates.append(section1.get("status"))
+        semaforo = result.get("semaforo_generale")
+        if isinstance(semaforo, dict):
+            candidates.append(semaforo.get("status"))
+        summary = result.get("summary_for_client_bundle")
+        if isinstance(summary, dict):
+            candidates.append(summary.get("semaforo_status"))
+    for value in candidates:
+        status = str(value or "").upper().strip()
+        if status:
+            return status
+    return None
+
 @api_router.get("/history/perizia")
 async def get_perizia_history(request: Request, limit: int = 20, skip: int = 0):
     """Get user's perizia analysis history"""
     user = await require_auth(request)
+    safe_limit = max(1, min(int(limit or 20), 50))
+    safe_skip = max(0, int(skip or 0))
     
     analyses = await db.perizia_analyses.find(
         {"user_id": user.user_id},
-        {"_id": 0, "raw_text": 0}  # Exclude raw_text for performance
-    ).sort("created_at", -1).skip(skip).limit(limit).to_list(limit)
+        {
+            "_id": 0,
+            "analysis_id": 1,
+            "case_id": 1,
+            "case_title": 1,
+            "file_name": 1,
+            "created_at": 1,
+            "status": 1,
+            "pages_count": 1,
+            "semaforo_status": 1,
+            "result.section_1_semaforo_generale.status": 1,
+            "result.semaforo_generale.status": 1,
+            "result.summary_for_client_bundle.semaforo_status": 1,
+        },
+    ).sort("created_at", -1).skip(safe_skip).limit(safe_limit).to_list(safe_limit)
 
+    compact_rows: List[Dict[str, Any]] = []
     for analysis in analyses:
-        analysis["semaforo_status"] = _refresh_list_analysis_semaforo(analysis)
+        semaforo_status = _extract_history_semaforo_status(analysis)
+        compact_rows.append(
+            {
+                "analysis_id": analysis.get("analysis_id"),
+                "case_id": analysis.get("case_id"),
+                "case_title": analysis.get("case_title"),
+                "file_name": analysis.get("file_name"),
+                "created_at": analysis.get("created_at"),
+                "status": analysis.get("status"),
+                "pages_count": analysis.get("pages_count"),
+                "semaforo_status": semaforo_status,
+                "result": {
+                    "section_1_semaforo_generale": {"status": semaforo_status} if semaforo_status else {}
+                },
+            }
+        )
     
     total = await db.perizia_analyses.count_documents({"user_id": user.user_id})
     
-    return {"analyses": analyses, "total": total, "limit": limit, "skip": skip}
+    return {"analyses": compact_rows, "total": total, "limit": safe_limit, "skip": safe_skip}
 
 def _load_offline_persisted_analysis(path: Path) -> Optional[Dict[str, Any]]:
     if not path.exists():
@@ -18522,6 +18575,25 @@ async def _get_perizia_analysis_for_user_with_storage(
         return offline_analysis, "offline_file", offline_path
 
     raise HTTPException(status_code=404, detail="Analysis not found")
+
+def _has_persisted_customer_contract(result: Dict[str, Any]) -> bool:
+    if not isinstance(result, dict):
+        return False
+    required_dicts = (
+        "customer_decision_contract",
+        "summary_for_client_bundle",
+        "section_1_semaforo_generale",
+        "section_3_money_box",
+        "section_9_legal_killers",
+    )
+    for key in required_dicts:
+        if key not in result or not isinstance(result.get(key), dict):
+            return False
+    if "issues" not in result or not isinstance(result.get("issues"), list):
+        return False
+    if "section_11_red_flags" not in result or not isinstance(result.get("section_11_red_flags"), list):
+        return False
+    return True
 
 def _persist_offline_analysis(path: Path, analysis: Dict[str, Any]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -18899,10 +18971,19 @@ async def _save_field_overrides_for_analysis(
     raise HTTPException(status_code=500, detail="Unsupported analysis storage mode")
 
 async def _get_perizia_analysis_for_user(analysis_id: str, user: User) -> Dict[str, Any]:
+    started = time.perf_counter()
     analysis, _storage_mode, _storage_path = await _get_perizia_analysis_for_user_with_storage(analysis_id, user)
 
     result = analysis.get("result")
     if isinstance(result, dict):
+        if _has_persisted_customer_contract(result):
+            elapsed_ms = int((time.perf_counter() - started) * 1000)
+            logger.info(
+                "perizia_detail_read analysis_id=%s read_path_mode=persisted_customer_contract elapsed_ms=%s refresh=skipped",
+                analysis_id,
+                elapsed_ms,
+            )
+            return analysis
         pages_hint = int(analysis.get("pages_count", 0) or 0)
         pages_for_proof = _load_pages_for_analysis(analysis_id, pages_hint)
         _refresh_customer_facing_result_on_read(
@@ -18919,6 +19000,12 @@ async def _get_perizia_analysis_for_user(analysis_id: str, user: User) -> Dict[s
             states.pop("superficie_catastale", None)
             result["field_states"] = states
         analysis["result"] = result
+        elapsed_ms = int((time.perf_counter() - started) * 1000)
+        logger.info(
+            "perizia_detail_read analysis_id=%s read_path_mode=legacy_refresh elapsed_ms=%s refresh=run",
+            analysis_id,
+            elapsed_ms,
+        )
     return analysis
 
 def _refresh_list_analysis_semaforo(analysis: Dict[str, Any]) -> Optional[str]:
