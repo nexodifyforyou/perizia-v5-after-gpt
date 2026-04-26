@@ -59,6 +59,29 @@ const isDisplayInvalidValue = (value) => {
   return false;
 };
 
+const VALUATION_NARRATIVE_MARKERS = [
+  'valore commerciale dei beni pignorati',
+  'determinato sulla base',
+  'caratteristiche e peculiarità',
+  'caratteristiche e peculiarita',
+  'domanda e offerta',
+  'facilità di raggiungimento',
+  'facilita di raggiungimento',
+];
+
+const isValuationNarrative = (text) => {
+  if (typeof text !== 'string') return false;
+  const lower = text.toLowerCase();
+  return VALUATION_NARRATIVE_MARKERS.some((m) => lower.includes(m));
+};
+
+const sanitizeAddressDisplay = (rawAddress) => {
+  if (!rawAddress) return rawAddress;
+  const text = typeof rawAddress === 'object' ? (rawAddress.value || rawAddress.full || '') : rawAddress;
+  if (isValuationNarrative(text)) return 'Indirizzo da verificare';
+  return text || rawAddress;
+};
+
 const normalizeSpacedOCR = (value) => {
   if (typeof value !== 'string') return value;
   const tokens = value.split(/\s+/).filter(Boolean);
@@ -1164,6 +1187,13 @@ const AnalysisResult = () => {
   const caseHeader = reportHeader.procedure ? reportHeader : (result.case_header || {});
   const semaforo = section1.status ? section1 : (result.semaforo_generale || {});
   const decision = section2.summary_it ? section2 : (result.decision_rapida_client || {});
+  // Structured decision fields (added in Stage 5 backend patch; may be absent in older analyses)
+  const decisionMainRisk = safeRender(section2.main_risk_it || decision.main_risk_it, '');
+  const decisionChecks = Array.isArray(section2.checks_it) ? section2.checks_it.filter(Boolean)
+    : (Array.isArray(decision.checks_it) ? decision.checks_it.filter(Boolean) : []);
+  const decisionBeforeOffer = Array.isArray(section2.before_offer_it) ? section2.before_offer_it.filter(Boolean)
+    : (Array.isArray(decision.before_offer_it) ? decision.before_offer_it.filter(Boolean) : []);
+  const hasStructuredDecision = Boolean(decisionMainRisk || decisionChecks.length > 0 || decisionBeforeOffer.length > 0);
   const narratedDecision = (result.decision_rapida_narrated && typeof result.decision_rapida_narrated === 'object')
     ? result.decision_rapida_narrated
     : null;
@@ -2052,7 +2082,7 @@ const AnalysisResult = () => {
       case 'tribunale':
         return caseHeader.tribunale?.value || caseHeader.tribunale;
       case 'address':
-        return caseHeader.address?.value || caseHeader.address?.full || caseHeader.address;
+        return sanitizeAddressDisplay(caseHeader.address?.value || caseHeader.address?.full || caseHeader.address);
       default:
         return null;
     }
@@ -2133,6 +2163,10 @@ const AnalysisResult = () => {
       ? { min: moneyBoxTotalLegacyRangeMin, max: moneyBoxTotalLegacyRangeMax }
       : null;
   const hasMoneyBoxTotalRange = typeof moneyBoxTotalRange?.min_eur === 'number' && typeof moneyBoxTotalRange?.max_eur === 'number';
+  // True when Money Box has anchored signals but no defensible total (CONSERVATIVE policy or no total_extra_costs_range)
+  const moneyBoxSignals = Array.isArray(moneyBox.cost_signals_to_verify) ? moneyBox.cost_signals_to_verify
+    : (Array.isArray(moneyBox.items) ? moneyBox.items.filter((i) => i?.type === 'ANCHORED_SIGNAL') : []);
+  const hasMoneyBoxSignalsOnly = !hasMoneyBoxTotalRange && moneyBoxSignals.length > 0;
   const prezzoBaseValue =
     parseNumericEuro(selectedLot?.prezzo_base_value) ??
     parseNumericEuro(dati?.prezzo_base_asta?.value) ??
@@ -3197,7 +3231,7 @@ const AnalysisResult = () => {
                 />
                 <HeadlineInlineField
                   fieldKey="address"
-                  value={caseHeader.address?.value || caseHeader.address?.full || caseHeader.address}
+                  value={sanitizeAddressDisplay(caseHeader.address?.value || caseHeader.address?.full || caseHeader.address)}
                   evidence={getEvidence(caseHeader.address)}
                   className="text-zinc-400"
                 />
@@ -3269,7 +3303,28 @@ const AnalysisResult = () => {
                 </div>
                 <p className="text-lg font-semibold text-zinc-100">{displayDecisionItSafe}</p>
                 <p className="text-sm text-zinc-500 mt-1">{displayDecisionEnSafe}</p>
-                {displayedDecisionBullets.length > 0 && (
+                {/* Structured decision fields when backend provides them */}
+                {hasStructuredDecision && !hasNarratedDecision && (
+                  <div className="mt-3 space-y-2">
+                    {decisionChecks.length > 0 && (
+                      <div>
+                        <p className="text-xs font-mono uppercase text-zinc-500 mb-1">Da verificare:</p>
+                        <ul className="space-y-0.5 text-sm text-zinc-300 list-disc pl-4">
+                          {decisionChecks.map((check, i) => <li key={i}>{check}</li>)}
+                        </ul>
+                      </div>
+                    )}
+                    {decisionBeforeOffer.length > 0 && (
+                      <div>
+                        <p className="text-xs font-mono uppercase text-zinc-500 mb-1">Prima dell&apos;offerta:</p>
+                        <ul className="space-y-0.5 text-xs text-amber-300 list-disc pl-4">
+                          {decisionBeforeOffer.map((action, i) => <li key={i}>{action}</li>)}
+                        </ul>
+                      </div>
+                    )}
+                  </div>
+                )}
+                {!hasStructuredDecision && displayedDecisionBullets.length > 0 && (
                   <ul className="mt-3 space-y-1 text-sm text-zinc-300 list-disc pl-5">
                     {displayedDecisionBullets.map((item) => (
                       <li key={`it-bullet-${item.idx}`}>{safeRender(item.bullet, '')}</li>
@@ -3512,6 +3567,19 @@ const AnalysisResult = () => {
                   <p className="text-xs text-zinc-500 mt-2">
                     Quadro sintetico indicativo: non sostituisce la tassonomia costi completa del contratto.
                   </p>
+                </div>
+              ) : hasMoneyBoxSignalsOnly ? (
+                <div className="space-y-2">
+                  <p className="text-sm text-amber-300">Totale extra non quantificato in modo difendibile.</p>
+                  <p className="text-xs text-zinc-400">Segnali economici presenti nel Money Box da verificare:</p>
+                  <ul className="space-y-1">
+                    {moneyBoxSignals.slice(0, 4).map((sig, idx) => (
+                      <li key={sig.code || idx} className="text-xs text-zinc-300">
+                        • {safeRender(sig.label_it || sig.label, '')}
+                      </li>
+                    ))}
+                  </ul>
+                  <p className="text-xs text-zinc-500 mt-2">Verificare importi e separata debenza con tecnico/delegato prima dell&apos;offerta.</p>
                 </div>
               ) : (
                 <>
@@ -3899,7 +3967,7 @@ const AnalysisResult = () => {
                 <HeadlineFieldCard
                   label="Indirizzo"
                   fieldKey="address"
-                  value={caseHeader.address?.value || caseHeader.address?.full || caseHeader.address}
+                  value={sanitizeAddressDisplay(caseHeader.address?.value || caseHeader.address?.full || caseHeader.address)}
                   evidence={getEvidence(caseHeader.address)}
                 />
               </div>

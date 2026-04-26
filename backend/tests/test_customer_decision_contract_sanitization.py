@@ -9,6 +9,10 @@ from customer_decision_contract import (
     apply_customer_decision_contract,
     sanitize_customer_facing_result,
     separate_internal_runtime_from_customer_result,
+    _explicit_total_is_condo_periodic_sum,
+    _is_valuation_narrative,
+    _sanitize_address_contamination,
+    _project_certification_block_to_beni,
 )
 
 
@@ -570,3 +574,263 @@ def test_apply_customer_contract_surfaces_condominium_arrears_without_fake_sum()
     assert total["min"] is None
     assert total["max"] is None
     assert "non sommati" in total["note"]
+
+
+# ── Stage 1: Condo periodic sum guard ─────────────────────────────────────────
+
+def _make_condo_periodic_costs(include_priority_explicit_buyer=True):
+    """Build a canonical_case.costs fixture matching the Campogalliani pattern."""
+    priority = {}
+    if include_priority_explicit_buyer:
+        priority = {
+            "issues": [
+                {
+                    "code": "EXPLICIT_BUYER_COSTS",
+                    "title_it": "Costi espliciti a carico dell'acquirente: € 6.677,09",
+                    "severity": "AMBER",
+                    "category": "costs",
+                    "priority_score": 70.0,
+                    "evidence": [
+                        {
+                            "page": 10,
+                            "quote": (
+                                "Importo medio annuo delle spese condominiali: € 900,00\n"
+                                "Totale spese per l'anno in corso e precedente: € 5.777,09"
+                            ),
+                        }
+                    ],
+                    "summary_it": "La perizia riporta spese condominiali annue (€900) e totale anno corrente/precedente (€5.777,09).",
+                    "action_it": "Verificare con amministratore.",
+                }
+            ]
+        }
+    return {
+        "explicit_buyer_costs": [
+            {
+                "amount": 0.0,
+                "evidence": [{"page": 10, "quote": "Totale spese per l'anno in corso e precedente: € 5.777,09"}],
+                "label": "Totale spese per l'anno in corso e precedente: € 5.777,09",
+            },
+            {
+                "amount": 900.0,
+                "evidence": [{"page": 10, "quote": "Importo medio annuo delle spese condominiali: € 900,00"}],
+                "label": "Importo medio annuo delle spese condominiali: € 900,00",
+            },
+            {
+                "amount": 5777.09,
+                "evidence": [{"page": 10, "quote": "Totale spese per l'anno in corso e precedente: € 5.777,09"}],
+                "label": "Totale spese per l'anno in corso e precedente: € 5.777,09",
+            },
+        ],
+        "valuation_adjustments": [],
+        "explicit_total": 6677.09,
+        "explicit_total_low_confidence": None,
+        "guards": [],
+        "lines": [],
+        "priority": priority,
+    }
+
+
+def test_explicit_total_is_condo_periodic_sum_detects_annual_plus_year_total():
+    costs = _make_condo_periodic_costs()["costs"] if "costs" in _make_condo_periodic_costs() else _make_condo_periodic_costs()
+    # Build the costs dict directly
+    costs_dict = {
+        "explicit_buyer_costs": [
+            {"amount": 900.0, "evidence": [{"page": 10, "quote": "Importo medio annuo delle spese condominiali: € 900,00"}], "label": "Importo medio annuo..."},
+            {"amount": 5777.09, "evidence": [{"page": 10, "quote": "Totale spese per l'anno in corso e precedente: € 5.777,09"}], "label": "Totale spese anno..."},
+        ],
+        "explicit_total": 6677.09,
+    }
+    assert _explicit_total_is_condo_periodic_sum(costs_dict) is True
+
+
+def test_explicit_total_is_condo_periodic_sum_allows_real_buyer_cost():
+    costs_dict = {
+        "explicit_buyer_costs": [
+            {"amount": 2500.0, "evidence": [{"page": 10, "quote": "Oneri di regolarizzazione urbanistica: €2.500"}], "label": "Oneri regolarizzazione"},
+            {"amount": 6500.0, "evidence": [{"page": 11, "quote": "Spese condominiali insolute: €6.500"}], "label": "Spese condominiali insolute"},
+        ],
+        "explicit_total": 9000.0,
+    }
+    assert _explicit_total_is_condo_periodic_sum(costs_dict) is False
+
+
+def test_apply_contract_drops_fake_6677_from_issues_and_money_box():
+    """€6.677,09 derived from annual avg + year total must not appear in customer output."""
+    costs_data = _make_condo_periodic_costs()
+    priority_data = costs_data.pop("priority")
+    result = {
+        "field_states": {},
+        "estratto_quality": {"sections": [
+            {"heading_key": "costi", "items": [
+                {"item_id": "arrears", "label_it": "Spese condominiali insolute: €6.500",
+                 "evidence": [{"page": 11, "quote": "Spese condominiali insolute 6500,00 €"}]},
+                {"item_id": "reg", "label_it": "Oneri di regolarizzazione urbanistica: €2.500",
+                 "evidence": [{"page": 11, "quote": "Oneri di regolarizzazione urbanistica 2500,00 €"}]},
+            ]}
+        ]},
+        "verifier_runtime": {
+            "canonical_case": {
+                "costs": costs_data,
+                "priority": priority_data,
+            }
+        },
+    }
+
+    apply_customer_decision_contract(result)
+
+    # Only check customer-facing sections (verifier_runtime still holds raw data)
+    customer_payload = {
+        k: result[k]
+        for k in ("issues", "section_3_money_box", "money_box", "red_flags_operativi",
+                  "section_9_legal_killers", "section_2_decisione_rapida", "summary_for_client",
+                  "summary_for_client_bundle", "customer_decision_contract")
+        if k in result
+    }
+    serialized = json.dumps(customer_payload, ensure_ascii=False)
+    # No fake total anywhere in customer output
+    assert "6.677" not in serialized
+    assert "6677" not in serialized
+    # No "Costi espliciti a carico" issue in customer issues
+    assert "Costi espliciti a carico dell" not in serialized
+
+    # Money box must be CONSERVATIVE (no total)
+    mb = result.get("section_3_money_box", {})
+    assert mb.get("policy") == "CONSERVATIVE"
+    total = mb.get("total_extra_costs", {})
+    assert total.get("min") is None
+    assert total.get("max") is None
+
+    # Real signals still present
+    items_labels = [item.get("label_it", "") for item in mb.get("items", [])]
+    assert any("condominiali" in lbl.lower() or "regolarizzazione" in lbl.lower() for lbl in items_labels)
+
+
+# ── Stage 2: Certification projection to beni ─────────────────────────────────
+
+def test_project_certification_block_corrects_wrong_electric_declaration():
+    """When evidence says 'Esiste la dichiarazione di conformità dell'impianto elettrico',
+    a wrong 'Non esiste' in beni.dichiarazioni_impianti.elettrico must be corrected."""
+    result = {
+        "beni": [
+            {
+                "bene_number": 1,
+                "dichiarazioni_impianti": {"elettrico": "Non esiste", "termico": "Presente", "idrico": "Presente"},
+                "dichiarazioni": {
+                    "dichiarazione_impianto_elettrico": "Non esiste",
+                    "dichiarazione_impianto_termico": "Presente",
+                    "dichiarazione_impianto_idrico": "Presente",
+                },
+            }
+        ],
+        "lots": [],
+    }
+    issues = [
+        {
+            "severity": "AMBER",
+            "family": "legal",
+            "evidence": [
+                {
+                    "page": 10,
+                    "quote": (
+                        "Non esiste il certificato energetico dell'immobile / APE.\n"
+                        "Esiste la dichiarazione di conformità dell'impianto elettrico.\n"
+                        "Esiste la dichiarazione di conformità dell'impianto termico.\n"
+                        "Esiste la dichiarazione di conformità dell'impianto idrico."
+                    ),
+                }
+            ],
+        }
+    ]
+    _project_certification_block_to_beni(result, issues)
+
+    bene = result["beni"][0]
+    assert bene["dichiarazioni_impianti"]["elettrico"] == "Presente"
+    assert bene["dichiarazioni_impianti"]["termico"] == "Presente"
+    assert bene["dichiarazioni_impianti"]["idrico"] == "Presente"
+    assert bene["dichiarazioni"]["dichiarazione_impianto_elettrico"] == "Presente"
+    assert bene["dichiarazioni"]["dichiarazione_impianto_termico"] == "Presente"
+    assert bene["dichiarazioni"]["dichiarazione_impianto_idrico"] == "Presente"
+
+
+def test_project_certification_block_does_not_overwrite_correct_values():
+    """When beni already shows 'Presente', the projection must not change it."""
+    result = {
+        "beni": [
+            {"bene_number": 1, "dichiarazioni_impianti": {"elettrico": "Presente"}, "dichiarazioni": {}}
+        ],
+        "lots": [],
+    }
+    issues = [
+        {
+            "evidence": [
+                {"page": 10, "quote": "Esiste la dichiarazione di conformità dell'impianto elettrico."}
+            ]
+        }
+    ]
+    _project_certification_block_to_beni(result, issues)
+    assert result["beni"][0]["dichiarazioni_impianti"]["elettrico"] == "Presente"
+
+
+# ── Stage 3: Address contamination sanitization ────────────────────────────────
+
+def test_is_valuation_narrative_detects_marker_phrases():
+    assert _is_valuation_narrative("Il valore commerciale dei beni pignorati è stato determinato...")
+    assert _is_valuation_narrative("determinato sulla base delle seguenti variabili")
+    assert not _is_valuation_narrative("VIA GARIBALDI 10, MANTOVA")
+    assert not _is_valuation_narrative(None)
+
+
+def test_sanitize_address_contamination_replaces_narrative_with_beni_address():
+    result = {
+        "report_header": {
+            "address": {
+                "value": "Il valore commerciale dei beni pignorati è stato determinato sulla base",
+                "full": "Il valore commerciale dei beni pignorati è stato determinato sulla base",
+                "evidence": [],
+            }
+        },
+        "case_header": {
+            "address": {
+                "value": "Il valore commerciale dei beni pignorati è stato determinato sulla base",
+                "full": "Il valore commerciale dei beni pignorati è stato determinato sulla base",
+            }
+        },
+        "beni": [
+            {"bene_number": 1, "short_location": "AppartamentoMantova (MN) - VIA CAMPOGALLIANI N. 12"}
+        ],
+        "lots": [],
+    }
+    _sanitize_address_contamination(result)
+
+    rh_addr = result["report_header"]["address"]["value"]
+    ch_addr = result["case_header"]["address"]["value"]
+    assert "valore commerciale" not in rh_addr.lower()
+    assert "valore commerciale" not in ch_addr.lower()
+    # Should use the address from beni short_location
+    assert "CAMPOGALLIANI" in rh_addr.upper() or rh_addr == "Indirizzo da verificare"
+
+
+def test_sanitize_address_contamination_fallback_when_no_beni_address():
+    result = {
+        "report_header": {
+            "address": {"value": "Il valore commerciale dei beni pignorati è stato determinato."}
+        },
+        "case_header": {"address": {"value": "determinato sulla base delle variabili"}},
+        "beni": [],
+        "lots": [],
+    }
+    _sanitize_address_contamination(result)
+    assert result["report_header"]["address"]["value"] == "Indirizzo da verificare"
+    assert result["case_header"]["address"]["value"] == "Indirizzo da verificare"
+
+
+def test_sanitize_address_normalizes_camel_joined_short_location():
+    result = {
+        "report_header": {},
+        "case_header": {},
+        "beni": [{"short_location": "AppartamentoMantova (MN) - VIA GARIBALDI 10"}],
+        "lots": [],
+    }
+    _sanitize_address_contamination(result)
+    assert result["beni"][0]["short_location"] == "Appartamento Mantova (MN) - VIA GARIBALDI 10"

@@ -1398,12 +1398,183 @@ def _build_red_flags(issues: List[Dict[str, Any]], blocked_unreadable: bool) -> 
     return flags[:6]
 
 
+def _is_condo_periodic_explicit_buyer_cost(raw: Dict[str, Any]) -> bool:
+    """Return True if an explicit_buyer_costs item is a condominium periodic/aggregate amount.
+
+    Such amounts (annual average, current+previous year total) are NOT defensible as explicit
+    buyer-side obligations and must not be summed into a buyer-side total.
+    """
+    label = str(raw.get("label") or raw.get("label_it") or "")
+    evidence_blob = " ".join(str(ev.get("quote") or "") for ev in (raw.get("evidence") or []))
+    return bool(_CONDO_PERIODIC_COST_RE.search(label) or _CONDO_PERIODIC_COST_RE.search(evidence_blob))
+
+
+def _explicit_total_is_condo_periodic_sum(costs: Dict[str, Any]) -> bool:
+    """Return True when the explicit_total appears to be derived from summing condo periodic amounts.
+
+    Generic rule: if every non-zero explicit_buyer_costs item is a condominium periodic amount
+    (annual average or year-to-date total), the computed total is not a defensible buyer cost total.
+    """
+    raw_items = costs.get("explicit_buyer_costs") if isinstance(costs.get("explicit_buyer_costs"), list) else []
+    non_zero = [
+        raw for raw in raw_items
+        if isinstance(raw, dict) and isinstance(raw.get("amount"), (int, float)) and float(raw.get("amount", 0)) > 0
+    ]
+    if not non_zero:
+        return False
+    return all(_is_condo_periodic_explicit_buyer_cost(raw) for raw in non_zero)
+
+
+def _is_valuation_narrative(text: Any) -> bool:
+    """Return True if text contains valuation narrative phrases, not an actual address."""
+    if not isinstance(text, str):
+        return False
+    t = text.lower()
+    return any(marker in t for marker in _VALUATION_NARRATIVE_MARKERS)
+
+
+def _normalize_camel_join(text: str) -> str:
+    """Insert space between a lowercase and uppercase character run (e.g. 'AppartamentoMantova' → 'Appartamento Mantova')."""
+    if not isinstance(text, str):
+        return text
+    return re.sub(r"([a-z])([A-Z])", r"\1 \2", text)
+
+
+def _extract_address_from_beni(result: Dict[str, Any]) -> Optional[str]:
+    """Try to find a clean street address from beni short_location."""
+    for bene in (result.get("beni") or []):
+        if not isinstance(bene, dict):
+            continue
+        short = str(bene.get("short_location") or "").strip()
+        if not short or _is_valuation_narrative(short):
+            continue
+        short = _normalize_camel_join(short)
+        if " - " in short:
+            addr_part = short.split(" - ", 1)[-1].strip()
+            if re.search(r"\b(via|piazza|corso|vicolo|viale|largo|strada|contrada|localita|loc\.)\b", addr_part, re.I):
+                return addr_part
+        m = re.search(r"\b(via|piazza|corso|vicolo|viale|largo|strada|contrada|localita|loc\.)\b.{3,80}", short, re.I)
+        if m:
+            return short[m.start():]
+    return None
+
+
+def _sanitize_address_contamination(result: Dict[str, Any]) -> None:
+    """Replace valuation narrative text used as address/location with the actual address or a placeholder."""
+    actual_address = _extract_address_from_beni(result)
+    fallback = actual_address or "Indirizzo da verificare"
+
+    for container_key in ("report_header", "case_header"):
+        container = result.get(container_key)
+        if not isinstance(container, dict):
+            continue
+        addr = container.get("address")
+        if isinstance(addr, dict):
+            for field in ("value", "full"):
+                if _is_valuation_narrative(str(addr.get(field) or "")):
+                    addr[field] = fallback
+        elif isinstance(addr, str) and _is_valuation_narrative(addr):
+            container["address"] = {"value": fallback, "evidence": []}
+
+    for lot in (result.get("lots") or []):
+        if not isinstance(lot, dict):
+            continue
+        if _is_valuation_narrative(str(lot.get("ubicazione") or "")):
+            lot["ubicazione"] = fallback
+
+    # Also normalize joined typology+location strings in beni short_location
+    for bene in (result.get("beni") or []):
+        if not isinstance(bene, dict):
+            continue
+        sl = bene.get("short_location")
+        if isinstance(sl, str):
+            bene["short_location"] = _normalize_camel_join(sl)
+    for lot in (result.get("lots") or []):
+        if not isinstance(lot, dict):
+            continue
+        for bene in (lot.get("beni") or []):
+            if not isinstance(bene, dict):
+                continue
+            sl = bene.get("short_location")
+            if isinstance(sl, str):
+                bene["short_location"] = _normalize_camel_join(sl)
+
+
+def _patch_declaration_field(bene: Dict[str, Any], container_key: str, field_key: str, correct_value: str) -> None:
+    """Overwrite a wrong declaration value with the correct one derived from evidence."""
+    container = bene.get(container_key)
+    if not isinstance(container, dict):
+        return
+    existing = container.get(field_key)
+    if isinstance(existing, str) and existing.lower() in {"non esiste", "assente", "da verificare", "non trovato", "not found"}:
+        container[field_key] = correct_value
+
+
+def _project_certification_block_to_beni(result: Dict[str, Any], issues: List[Dict[str, Any]]) -> None:
+    """Fix upstream extraction errors where impianti declarations are wrongly set to 'Non esiste'.
+
+    When `_certification_block_status` confirms from evidence that declarations are PRESENT,
+    overwrite any wrong 'Non esiste' values in beni.dichiarazioni_impianti and beni.dichiarazioni.
+    """
+    all_evidence: List[Dict[str, Any]] = []
+    for issue in issues:
+        all_evidence.extend(_normalize_evidence_list(issue.get("evidence")))
+
+    if not all_evidence:
+        return
+
+    status = _certification_block_status(all_evidence)
+    if not status:
+        return
+
+    def patch_bene(bene: Dict[str, Any]) -> None:
+        if status.get("has_electric_present"):
+            _patch_declaration_field(bene, "dichiarazioni_impianti", "elettrico", "Presente")
+            _patch_declaration_field(bene, "dichiarazioni", "dichiarazione_impianto_elettrico", "Presente")
+        if status.get("has_thermal_present"):
+            _patch_declaration_field(bene, "dichiarazioni_impianti", "termico", "Presente")
+            _patch_declaration_field(bene, "dichiarazioni", "dichiarazione_impianto_termico", "Presente")
+        if status.get("has_water_present"):
+            _patch_declaration_field(bene, "dichiarazioni_impianti", "idrico", "Presente")
+            _patch_declaration_field(bene, "dichiarazioni", "dichiarazione_impianto_idrico", "Presente")
+
+    for bene in (result.get("beni") or []):
+        if isinstance(bene, dict):
+            patch_bene(bene)
+    for lot in (result.get("lots") or []):
+        if not isinstance(lot, dict):
+            continue
+        for bene in (lot.get("beni") or []):
+            if isinstance(bene, dict):
+                patch_bene(bene)
+
+
 _MONEY_AMOUNT_RE = re.compile(
     r"(?<!\d)"
     r"(?:€\.?\s*)?"
     r"([0-9]{4,}(?:,[0-9]{1,2})?|[0-9]{1,3}(?:[\.\s][0-9]{3})+(?:,[0-9]{1,2})?|[0-9]{1,3}(?:,[0-9]{1,2})?)"
     r"(?:\s*€)?",
     re.I,
+)
+
+# Matches condominium periodic/aggregate amounts that are NOT defensible as explicit buyer costs.
+# "importo medio annuo delle spese condominiali" = annual average (not a one-time buyer cost)
+# "totale spese per l'anno in corso e precedente" = bi-year running total (not a direct buyer obligation)
+_CONDO_PERIODIC_COST_RE = re.compile(
+    r"importo\s+medio\s+annuo\s+delle\s+spese\s+condominiali"
+    r"|totale\s+spese\s+per\s+l['']?anno\s+in\s+corso\s+e\s+precedente",
+    re.I,
+)
+
+# Address fields containing these phrases are valuation narratives, not actual addresses.
+_VALUATION_NARRATIVE_MARKERS = (
+    "valore commerciale dei beni pignorati",
+    "determinato sulla base",
+    "caratteristiche e peculiarità",
+    "caratteristiche e peculiarita",
+    "domanda e offerta",
+    "facilità di raggiungimento",
+    "facilita di raggiungimento",
 )
 
 _NON_ADDITIVE_VALUATION_NOTE = "Importo presente come deprezzamento/voce di stima; non equivale automaticamente a costo extra cash lato acquirente."
@@ -1860,6 +2031,19 @@ def _build_money_box(result: Dict[str, Any], issues: List[Dict[str, Any]], block
             "removed_pricing_amount_items": copy.deepcopy(existing_money_box.get("removed_pricing_amount_items", [])),
         }
     explicit_total = costs.get("explicit_total")
+    # Guard: if explicit_total is derived from summing condominium periodic amounts (annual average
+    # + current/previous year total), it is NOT a defensible buyer-side total. Downgrade to CONSERVATIVE.
+    if isinstance(explicit_total, (int, float)) and _explicit_total_is_condo_periodic_sum(costs):
+        explicit_total = None
+        # Also drop the condo periodic ESTIMATE items — they are bookkeeping aggregates,
+        # not defensible buyer-side obligations. Real condominium arrears surface via anchored signals.
+        items = [
+            item for item in items
+            if not _CONDO_PERIODIC_COST_RE.search(
+                str(item.get("label_it") or "") + " ".join(str(ev.get("quote", "")) for ev in (item.get("evidence") or []))
+            )
+        ]
+        all_items = items + signal_items
     if isinstance(explicit_total, (int, float)) and items:
         total_note = f"Totale stimato in perizia: € {int(round(float(explicit_total)))}."
         if items:
@@ -2057,6 +2241,19 @@ def _build_summary_bundle(issues: List[Dict[str, Any]], semaforo: Dict[str, Any]
     if next_step_it:
         summary_trace.append({"sentence": next_step_it, "issue_ids": linked_issue_ids})
 
+    # Structured fields for customer-grade rendering.
+    # main_risk_it: the primary issue in one clear sentence.
+    # checks_it[]: secondary checks the customer should validate.
+    # before_offer_it[]: explicit actions required before placing an offer.
+    main_risk_it = top_issue_it
+    checks_it = unique_sentences(other_issue_headlines, limit=4)
+    if has_money_signals:
+        checks_it.append("Voci economiche ancorate presenti: verificare importi e separata debenza con tecnico/delegato.")
+    before_offer_parts: List[str] = list(action_steps)
+    if has_money_signals and not any("money box" in s.lower() or "economich" in s.lower() for s in before_offer_parts):
+        before_offer_parts.append("Usare il Money Box come checklist economica prima dell'offerta.")
+    before_offer_it = [s.capitalize() + ("." if not s.rstrip().endswith(".") else "") for s in before_offer_parts if s]
+
     return {
         "top_issue_it": top_issue_it,
         "top_issue_en": "",
@@ -2070,6 +2267,9 @@ def _build_summary_bundle(issues: List[Dict[str, Any]], semaforo: Dict[str, Any]
         "decision_summary_en": "",
         "evidence_snippets": deduped_evidence,
         "summary_trace": summary_trace,
+        "main_risk_it": main_risk_it,
+        "checks_it": checks_it,
+        "before_offer_it": before_offer_it,
     }
 
 
@@ -2278,9 +2478,112 @@ def _apply_explanatory_resolution(
     return obj
 
 
+
+
+def _is_valuation_address_contamination(value: Any) -> bool:
+    """True when a supposed address is actually valuation narrative."""
+    text = _money_text_key(value)
+    if not text:
+        return False
+    markers = (
+        "valore commerciale dei beni pignorati",
+        "determinato sulla base",
+        "caratteristiche e peculiarita",
+        "domanda e offerta",
+        "facilita di raggiungimento",
+        "situazione del mercato",
+        "ubicazione dell'immobile, caratteristiche",
+    )
+    return any(marker in text for marker in markers)
+
+
+def _sanitize_lot_index_locations(result: Dict[str, Any]) -> None:
+    """Prevent valuation narrative from being displayed as lot location."""
+    lot_index = result.get("lot_index")
+    if not isinstance(lot_index, list):
+        return
+
+    lots = result.get("lots") if isinstance(result.get("lots"), list) else []
+    header_address = ""
+    report_header = result.get("report_header") if isinstance(result.get("report_header"), dict) else {}
+    address = report_header.get("address") if isinstance(report_header.get("address"), dict) else {}
+    if isinstance(address.get("value"), str):
+        header_address = address.get("value").strip()
+
+    lot_locations = []
+    for lot in lots:
+        if not isinstance(lot, dict):
+            continue
+        lot_locations.append(str(lot.get("ubicazione") or "").strip())
+
+    for idx, row in enumerate(lot_index):
+        if not isinstance(row, dict):
+            continue
+        current = str(row.get("ubicazione") or "").strip()
+        current_is_placeholder = _money_text_key(current) in {"indirizzo da verificare", "da verificare"}
+        if current and not current_is_placeholder and not _is_valuation_address_contamination(current):
+            continue
+
+        replacement = ""
+        if idx < len(lot_locations) and lot_locations[idx] and not _is_valuation_address_contamination(lot_locations[idx]):
+            replacement = lot_locations[idx]
+        elif header_address and not _is_valuation_address_contamination(header_address):
+            replacement = header_address
+        else:
+            replacement = "Indirizzo da verificare"
+
+        row["ubicazione"] = replacement
+
+
+def _money_box_has_no_defensible_extra_total(money_box: Any) -> bool:
+    if not isinstance(money_box, dict):
+        return False
+    total = money_box.get("total_extra_costs") if isinstance(money_box.get("total_extra_costs"), dict) else {}
+    min_value = total.get("min")
+    max_value = total.get("max")
+    if isinstance(total.get("range"), dict):
+        min_value = total["range"].get("min")
+        max_value = total["range"].get("max")
+    return min_value is None and max_value is None
+
+
+def _sanitize_cost_theme_driver_values(legal_killers: Dict[str, Any], money_box: Dict[str, Any]) -> Dict[str, Any]:
+    """Remove stale fake cost-total theme labels when Money Box is conservative/signals-only."""
+    if not isinstance(legal_killers, dict) or not _money_box_has_no_defensible_extra_total(money_box):
+        return legal_killers
+
+    cleaned = copy.deepcopy(legal_killers)
+    resolver_meta = cleaned.get("resolver_meta") if isinstance(cleaned.get("resolver_meta"), dict) else {}
+    themes = resolver_meta.get("themes") if isinstance(resolver_meta.get("themes"), list) else []
+    new_themes = []
+    for theme in themes:
+        if not isinstance(theme, dict):
+            continue
+        driver_value = str(theme.get("driver_value") or "")
+        driver_key = _money_text_key(driver_value)
+        if (
+            "costi espliciti a carico" in driver_key
+            or "6.677" in driver_value
+            or "6677" in driver_value
+        ):
+            # Keep the cost theme, but do not preserve the fake additive amount.
+            fixed = copy.deepcopy(theme)
+            fixed["theme"] = "costs"
+            fixed["driver_status"] = "DA_VERIFICARE"
+            fixed["driver_value"] = "Costi/oneri da verificare: totale extra non quantificato in modo difendibile"
+            new_themes.append(fixed)
+            continue
+        new_themes.append(theme)
+
+    resolver_meta["themes"] = new_themes
+    cleaned["resolver_meta"] = resolver_meta
+    return cleaned
+
+
 def apply_customer_decision_contract(result: Dict[str, Any]) -> Dict[str, Any]:
     if not isinstance(result, dict):
         return {}
+    _sanitize_lot_index_locations(result)
     document_quality = result.get("document_quality") if isinstance(result.get("document_quality"), dict) else {}
     canonical_contract_state = result.get("canonical_contract_state") if isinstance(result.get("canonical_contract_state"), dict) else {}
     blocked_unreadable = (
@@ -2306,8 +2609,20 @@ def apply_customer_decision_contract(result: Dict[str, Any]) -> Dict[str, Any]:
         if str(state.get("status") or "").upper() == "FOUND" or state.get("evidence")
     }
     priority = canonical_case.get("priority") if isinstance(canonical_case.get("priority"), dict) else {}
+    costs_for_guard = (
+        (verifier_runtime.get("canonical_case") or {}).get("costs") or {}
+        if isinstance(verifier_runtime.get("canonical_case"), dict) else {}
+    )
     issues: List[Dict[str, Any]] = []
     for raw in priority.get("issues") if isinstance(priority.get("issues"), list) else []:
+        # Drop cost issues that claim a total derived from condominium periodic sums —
+        # these are bookkeeping aggregates, not defensible buyer-side obligations.
+        if (
+            str(raw.get("code") or "").upper() == "EXPLICIT_BUYER_COSTS"
+            and str(raw.get("category") or "") == "costs"
+            and _explicit_total_is_condo_periodic_sum(costs_for_guard)
+        ):
+            continue
         issue = _issue_from_priority_item(raw, runtime_scopes)
         if issue:
             issues.append(issue)
@@ -2419,10 +2734,21 @@ def apply_customer_decision_contract(result: Dict[str, Any]) -> Dict[str, Any]:
                 "driver_value": all_normalized_states["conformita_catastale"].get("value"),
             }
         )
+    # Drop stale "costs" themes carried over from a previous MongoDB run when the
+    # condo periodic sum guard has already filtered the corresponding issue.
+    if _explicit_total_is_condo_periodic_sum(costs_for_guard):
+        themes = [
+            t for t in themes
+            if not (
+                isinstance(t, dict)
+                and "costi espliciti a carico" in str(t.get("driver_value") or "").lower()
+            )
+        ]
     legal_meta["themes"] = themes
     legal_killers["resolver_meta"] = legal_meta
     legal_killers = _sanitize_certification_block_legal_killers(legal_killers)
     money_box = _build_money_box(result, issues, blocked_unreadable)
+    legal_killers = _sanitize_cost_theme_driver_values(legal_killers, money_box)
     summary_bundle = _build_summary_bundle(issues, semaforo, blocked_unreadable, document_quality, money_box)
     summary_for_client = {
         "summary_it": summary_bundle.get("decision_summary_it"),
@@ -2481,12 +2807,24 @@ def apply_customer_decision_contract(result: Dict[str, Any]) -> Dict[str, Any]:
     result["red_flags_operativi"] = copy.deepcopy(contract["red_flags_operativi"])
     result["section_11_red_flags"] = copy.deepcopy(contract["red_flags_operativi"])
     result["section_9_legal_killers"] = copy.deepcopy(customer_legal_killers)
+    _sanitize_lot_index_locations(result)
     result["decision_rapida_client"] = decision
+    result["abusi_edilizi_conformita"] = copy.deepcopy(customer_abusi_projection)
     result["section_2_decisione_rapida"] = {
         "summary_it": decision.get("summary_it"),
         "summary_en": decision.get("summary_en"),
         "issue_ids": decision.get("issue_ids", []),
+        "main_risk_it": summary_bundle.get("main_risk_it"),
+        "checks_it": summary_bundle.get("checks_it", []),
+        "before_offer_it": summary_bundle.get("before_offer_it", []),
     }
-    result["abusi_edilizi_conformita"] = copy.deepcopy(customer_abusi_projection)
+    _project_certification_block_to_beni(result, issues)
+    _sanitize_address_contamination(result)
+
+    # Final display-field cleanup after all address/certification projections.
+    # _sanitize_address_contamination can replace polluted locations with placeholders,
+    # so lot_index must be cleaned after that using clean lot/header address candidates.
+    _sanitize_lot_index_locations(result)
+
     sanitize_customer_facing_result(result)
     return contract
