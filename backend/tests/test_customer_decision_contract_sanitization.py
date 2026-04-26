@@ -315,3 +315,258 @@ def test_apply_customer_contract_surfaces_anchored_money_signals_without_fake_ad
         "verifier_runtime",
     ):
         assert forbidden not in serialized_customer
+
+
+def test_apply_customer_contract_respects_explicit_opponible_lease():
+    result = {
+        "field_states": {
+            "stato_occupativo": {
+                "value": "OCCUPATO",
+                "status": "FOUND",
+                "confidence": 0.96,
+                "headline_it": "Stato occupativo: OCCUPATO.",
+                "evidence": [
+                    {
+                        "page": 14,
+                        "quote": "Stato di occupazione: Occupato da terzi con contratto di locazione opponibile",
+                    }
+                ],
+            },
+            "opponibilita_occupazione": {
+                "value": "NON VERIFICABILE",
+                "status": "LOW_CONFIDENCE",
+                "confidence": 0.6,
+                "headline_it": "Opponibilità occupazione: NON VERIFICABILE.",
+                "evidence": [
+                    {
+                        "page": 14,
+                        "quote": "Stato di occupazione: Occupato da terzi con contratto di locazione opponibile",
+                    }
+                ],
+                "why_not_resolved": "Vecchia logica troppo prudente.",
+            },
+        },
+        "verifier_runtime": {
+            "canonical_case": {
+                "priority": {
+                    "issues": [
+                        {
+                            "family": "occupancy",
+                            "severity": "RED",
+                            "headline_it": "Immobile occupato.",
+                            "evidence": [
+                                {
+                                    "page": 14,
+                                    "quote": "Stato di occupazione: Occupato da terzi con contratto di locazione opponibile",
+                                }
+                            ],
+                        }
+                    ]
+                },
+                "grouped_llm_explanations": [],
+            },
+            "scopes": {},
+        },
+    }
+
+    apply_customer_decision_contract(result)
+
+    opp = result["field_states"]["opponibilita_occupazione"]
+    assert opp["value"] == "OPPONIBILE"
+    assert opp["status"] == "FOUND"
+    assert "contratto di locazione opponibile" in opp["explanation_it"]
+
+    headlines = [issue["headline_it"] for issue in result["issues"]]
+    assert headlines[0] == "Occupato da terzi con contratto di locazione opponibile."
+    assert "Opponibilità occupazione: NON VERIFICABILE." not in headlines
+    assert "Stato occupativo: OCCUPATO." not in headlines
+    assert sum(1 for issue in result["issues"] if issue.get("family") == "occupancy") == 1
+
+    section2 = result["section_2_decisione_rapida"]
+    assert "contratto di locazione opponibile" in section2["summary_it"]
+
+
+def test_apply_customer_contract_separates_ape_absent_from_present_impianto_declarations():
+    quote = (
+        "Certificazioni energetiche e dichiarazioni di conformità\n"
+        "•Non esiste il certificato energetico dell'immobile / APE.\n"
+        "•Esiste la dichiarazione di conformità dell'impianto elettrico.\n"
+        "•Esiste la dichiarazione di conformità dell'impianto termico.\n"
+        "•Esiste la dichiarazione di conformità dell'impianto idrico."
+    )
+    result = {
+        "field_states": {},
+        "section_9_legal_killers": {
+            "top_items": [
+                {
+                    "killer": "Vincolo che resta a carico dell'acquirente",
+                    "status": "RED",
+                    "category": "legal",
+                    "action": "Verifica legale immediata prima dell'offerta.",
+                    "evidence": [{"page": 10, "quote": quote}],
+                }
+            ]
+        },
+        "verifier_runtime": {
+            "canonical_case": {
+                "priority": {},
+                "grouped_llm_explanations": [],
+            }
+        },
+    }
+
+    apply_customer_decision_contract(result)
+
+    legal_killers = result["section_9_legal_killers"]
+    serialized = json.dumps(legal_killers, ensure_ascii=False).lower()
+
+    assert "ape assente; dichiarazioni impianti indicate come presenti" in serialized
+    assert "non considerare mancanti le dichiarazioni elettrica, termica e idrica" in serialized
+    assert "vincolo che resta a carico dell'acquirente" not in serialized
+    assert "dichiarazione impianto elettrico: non esiste" not in serialized
+    assert "dichiarazione impianto termico: non esiste" not in serialized
+    assert "dichiarazione impianto idrico: non esiste" not in serialized
+
+
+def test_apply_customer_contract_rejects_date_fragment_money_and_dedupes_regolarizzazione():
+    result = {
+        "field_states": {},
+        "estratto_quality": {
+            "sections": [
+                {
+                    "heading_key": "abusi_agibilita",
+                    "items": [
+                        {
+                            "item_id": "ab_t_date_sanatoria",
+                            "label_it": "Sanatoria edilizia",
+                            "evidence": [
+                                {
+                                    "page": 9,
+                                    "quote": "concessione A SANATORIA per opere edilizie emessa il 20/06/2000 al n. 9197/93",
+                                }
+                            ],
+                        },
+                        {
+                            "item_id": "ab_cost_regolarizzazione_generic",
+                            "label_it": "Costo della regolarizzazione urbanistica in € 2.500,00",
+                            "evidence": [
+                                {
+                                    "page": 10,
+                                    "quote": "lo scrivente perito stima il costo della regolarizzazione urbanistica in € 2.500,00",
+                                }
+                            ],
+                        },
+                        {
+                            "item_id": "ab_cost_regolarizzazione_specific",
+                            "label_it": "Oneri di regolarizzazione urbanistica 2500,00 €",
+                            "evidence": [
+                                {
+                                    "page": 11,
+                                    "quote": "Spese condominiali insolute 6500,00 € Oneri di regolarizzazione urbanistica 2500,00 €",
+                                }
+                            ],
+                        },
+                    ],
+                }
+            ]
+        },
+        "verifier_runtime": {
+            "canonical_case": {
+                "costs": {
+                    "explicit_buyer_costs": [],
+                    "valuation_adjustments": [],
+                    "explicit_total": None,
+                },
+                "priority": {},
+                "grouped_llm_explanations": [],
+            }
+        },
+    }
+
+    apply_customer_decision_contract(result)
+
+    money_box = result["section_3_money_box"]
+    serialized = json.dumps(money_box, ensure_ascii=False).lower()
+
+    assert "oblazione / sanatoria: € 20" not in serialized
+    assert '"amount_eur": 20' not in serialized
+    assert "oblazione / sanatoria" not in serialized
+
+    labels = [item.get("label_it") for item in money_box.get("items", [])]
+    assert "Oneri di regolarizzazione urbanistica: € 2.500" in labels
+    assert "Spese condominiali insolute: € 6.500" in labels
+    assert "Regolarizzazione: € 2.500" not in labels
+
+    total = money_box["total_extra_costs"]
+    assert total["min"] is None
+    assert total["max"] is None
+    assert "non sommati" in total["note"]
+
+
+def test_apply_customer_contract_surfaces_condominium_arrears_without_fake_sum():
+    result = {
+        "field_states": {},
+        "estratto_quality": {
+            "sections": [
+                {
+                    "heading_key": "costi_condominiali",
+                    "items": [
+                        {
+                            "item_id": "condo_context",
+                            "label_it": "Spese condominiali",
+                            "evidence": [
+                                {
+                                    "page": 10,
+                                    "quote": (
+                                        "Importo medio annuo delle spese condominiali: € 900,00 "
+                                        "Totale spese per l'anno in corso e precedente: € 5.777,09 "
+                                        "Importo spese straordinarie già deliberate: € 0,00"
+                                    ),
+                                }
+                            ],
+                        },
+                        {
+                            "item_id": "condo_arrears",
+                            "label_it": "Spese condominiali insolute 6500,00 €",
+                            "evidence": [
+                                {
+                                    "page": 11,
+                                    "quote": "Spese condominiali insolute 6500,00 € Oneri di regolarizzazione urbanistica 2500,00 €",
+                                }
+                            ],
+                        },
+                    ],
+                }
+            ]
+        },
+        "verifier_runtime": {
+            "canonical_case": {
+                "costs": {
+                    "explicit_buyer_costs": [],
+                    "valuation_adjustments": [],
+                    "explicit_total": None,
+                },
+                "priority": {},
+                "grouped_llm_explanations": [],
+            }
+        },
+    }
+
+    apply_customer_decision_contract(result)
+
+    money_box = result["section_3_money_box"]
+    serialized = json.dumps(money_box, ensure_ascii=False).lower()
+
+    assert "spese condominiali insolute: € 6.500" in serialized
+    assert "oneri di regolarizzazione urbanistica: € 2.500" in serialized
+    assert "6.677" not in serialized
+    assert "6677" not in serialized
+
+    for item in money_box.get("items", []):
+        assert item.get("additive_to_extra_total") is False
+        assert item.get("stima_euro") is None
+
+    total = money_box["total_extra_costs"]
+    assert total["min"] is None
+    assert total["max"] is None
+    assert "non sommati" in total["note"]

@@ -471,6 +471,245 @@ def _is_explanatory_contract_state(contract_state: Any) -> bool:
     }
 
 
+
+_EXPLICIT_OPPONIBLE_LEASE_RE = re.compile(
+    r"\b(?:contratto\s+di\s+)?locazione\s+opponibile\b|\bcontratto\s+di\s+locazione\s+opponibile\b",
+    re.I,
+)
+
+
+def _evidence_contains_explicit_opponible_lease(evidence: Any) -> bool:
+    for item in evidence if isinstance(evidence, list) else []:
+        if not isinstance(item, dict):
+            continue
+        quote = str(item.get("quote") or "")
+        if _EXPLICIT_OPPONIBLE_LEASE_RE.search(quote):
+            return True
+    return False
+
+
+def _first_explicit_opponible_lease_evidence(states: Dict[str, Any]) -> List[Dict[str, Any]]:
+    evidence_pool: List[Dict[str, Any]] = []
+    for key in ("opponibilita_occupazione", "stato_occupativo"):
+        state = states.get(key) if isinstance(states.get(key), dict) else None
+        if not state:
+            continue
+        evidence = _normalize_evidence_list(state.get("evidence"), limit=4)
+        if _evidence_contains_explicit_opponible_lease(evidence):
+            evidence_pool.extend(evidence)
+    return _normalize_evidence_list(evidence_pool, limit=4)
+
+
+def _apply_explicit_opponible_lease_resolution(states: Dict[str, Any]) -> None:
+    """
+    Deterministic customer-contract guard.
+
+    If the perizia explicitly says "contratto di locazione opponibile" or
+    "locazione opponibile", the system must not downgrade opponibilità to
+    NON VERIFICABILE. Contract details still require legal verification, but the
+    field value itself is FOUND / OPPONIBILE because the source text says so.
+    """
+    evidence = _first_explicit_opponible_lease_evidence(states)
+    if not evidence:
+        return
+
+    current = states.get("opponibilita_occupazione")
+    if not isinstance(current, dict):
+        current = {}
+
+    current = copy.deepcopy(current)
+    current["value"] = "OPPONIBILE"
+    current["status"] = "FOUND"
+    current["confidence"] = max(float(current.get("confidence") or 0), 0.96)
+    current["contract_state"] = "deterministic_active"
+    current["headline_it"] = "Opponibilità occupazione: OPPONIBILE."
+    current["explanation_it"] = "La perizia indica espressamente un contratto di locazione opponibile."
+    current["why_not_resolved"] = None
+    current["verify_next_it"] = "Verificare durata, registrazione, rinnovo e opponibilità effettiva del contratto di locazione."
+    current["evidence"] = evidence
+    current["supporting_pages"] = _pages_from_evidence(evidence)
+    current["tension_pages"] = []
+    current["explanation_mode"] = "single_source"
+    current["llm_explanation_used"] = False
+    current["explanation_fallback_reason"] = None
+    states["opponibilita_occupazione"] = current
+
+
+def _issue_has_explicit_opponible_lease(issue: Dict[str, Any]) -> bool:
+    return _evidence_contains_explicit_opponible_lease(issue.get("evidence"))
+
+
+def _apply_explicit_opponible_lease_issue_resolution(
+    issues: List[Dict[str, Any]],
+    states: Dict[str, Any],
+    runtime_scopes: Dict[str, Any],
+) -> List[Dict[str, Any]]:
+    opp_state = states.get("opponibilita_occupazione") if isinstance(states.get("opponibilita_occupazione"), dict) else None
+    if not opp_state or str(opp_state.get("value") or "").upper().strip() != "OPPONIBILE":
+        return issues
+
+    evidence = _normalize_evidence_list(opp_state.get("evidence"), limit=4)
+    if not evidence:
+        return issues
+
+    pages = _pages_from_evidence(evidence)
+    scope = _build_scope("document", "document")
+    explicit_issue = {
+        "issue_id": "occupancy_" + hashlib.sha1(f"explicit_opponible_lease|{scope.get('scope_key')}".encode("utf-8")).hexdigest()[:12],
+        "family": "occupancy",
+        "scope": scope,
+        "status": "FOUND",
+        "severity": "RED",
+        "headline_it": "Occupato da terzi con contratto di locazione opponibile.",
+        "explanation_it": "La perizia indica espressamente che l'immobile è occupato da terzi con contratto di locazione opponibile.",
+        "why_not_resolved": None,
+        "verify_next_it": "Verificare durata, registrazione, rinnovo, opponibilità effettiva e tempi di liberazione.",
+        "evidence": evidence,
+        "supporting_pages": pages,
+        "tension_pages": [],
+        "theme": "occupancy",
+    }
+
+    cleaned: List[Dict[str, Any]] = [explicit_issue]
+    for issue in issues:
+        if not isinstance(issue, dict):
+            continue
+        family = str(issue.get("family") or "")
+        # Once explicit "locazione opponibile" is proven, the customer-facing
+        # issue list should not repeat weaker occupancy variants such as
+        # "Immobile occupato", "Stato occupativo: OCCUPATO", or
+        # "Opponibilità occupazione: OPPONIBILE". They add noise, not value.
+        if family == "occupancy":
+            continue
+        cleaned.append(issue)
+
+    return _dedupe_issues(cleaned)
+
+
+
+def _certification_block_status(evidence: Any) -> Optional[Dict[str, Any]]:
+    evidence_list = _normalize_evidence_list(evidence, limit=4)
+    blob = " ".join(str(item.get("quote") or "") for item in evidence_list).lower()
+    if not blob:
+        return None
+
+    has_ape_absent = (
+        ("non esiste" in blob or "non presente" in blob)
+        and ("certificato energetico" in blob or "ape" in blob or "prestazione energetica" in blob)
+    )
+    has_electric_present = "esiste la dichiarazione di conformità dell'impianto elettrico" in blob or "esiste la dichiarazione di conformita dell'impianto elettrico" in blob
+    has_thermal_present = "esiste la dichiarazione di conformità dell'impianto termico" in blob or "esiste la dichiarazione di conformita dell'impianto termico" in blob
+    has_water_present = "esiste la dichiarazione di conformità dell'impianto idrico" in blob or "esiste la dichiarazione di conformita dell'impianto idrico" in blob
+
+    if not has_ape_absent and not (has_electric_present or has_thermal_present or has_water_present):
+        return None
+
+    return {
+        "has_ape_absent": has_ape_absent,
+        "has_electric_present": has_electric_present,
+        "has_thermal_present": has_thermal_present,
+        "has_water_present": has_water_present,
+        "evidence": evidence_list,
+    }
+
+
+def _is_vague_certification_block_headline(value: Any) -> bool:
+    text = _money_text_key(value)
+    return (
+        "vincolo che resta a carico dell'acquirente" in text
+        or "dichiarazione impianto elettrico: non esiste" in text
+        or "dichiarazione impianto termico: non esiste" in text
+        or "dichiarazione impianto idrico: non esiste" in text
+    )
+
+
+def _rewrite_certification_block_issue(issue: Dict[str, Any]) -> Dict[str, Any]:
+    status = _certification_block_status(issue.get("evidence"))
+    if not status:
+        return issue
+
+    headline = str(issue.get("headline_it") or issue.get("killer") or issue.get("title_it") or "")
+    # Only rewrite vague/misleading labels. Do not disturb a precise urbanistica issue.
+    if not _is_vague_certification_block_headline(headline):
+        return issue
+
+    rewritten = copy.deepcopy(issue)
+    rewritten["family"] = "impianti"
+    rewritten["theme"] = "impianti"
+    rewritten["severity"] = "AMBER"
+    rewritten["status"] = "FOUND"
+    rewritten["headline_it"] = "APE assente; dichiarazioni impianti indicate come presenti."
+    rewritten["explanation_it"] = (
+        "La perizia indica che non esiste il certificato energetico/APE, "
+        "ma riporta presenti le dichiarazioni di conformità degli impianti elettrico, termico e idrico."
+    )
+    rewritten["why_not_resolved"] = None
+    rewritten["verify_next_it"] = (
+        "Verificare APE/certificato energetico prima dell'offerta; non trattare come assenti "
+        "le dichiarazioni impianti se la perizia le indica esistenti."
+    )
+    rewritten["evidence"] = status["evidence"]
+    rewritten["supporting_pages"] = _pages_from_evidence(status["evidence"])
+    rewritten["tension_pages"] = []
+    rewritten["issue_id"] = "impianti_" + hashlib.sha1(
+        ("ape_absent_declarations_present|" + "|".join(map(str, rewritten["supporting_pages"]))).encode("utf-8")
+    ).hexdigest()[:12]
+    return rewritten
+
+
+def _apply_certification_block_issue_resolution(issues: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    out: List[Dict[str, Any]] = []
+    for issue in issues:
+        if not isinstance(issue, dict):
+            continue
+        out.append(_rewrite_certification_block_issue(issue))
+    return _dedupe_issues(out)
+
+
+def _sanitize_certification_block_legal_killers(legal_killers: Dict[str, Any]) -> Dict[str, Any]:
+    if not isinstance(legal_killers, dict):
+        return legal_killers
+
+    cleaned = copy.deepcopy(legal_killers)
+    for list_key in ("top_items", "items", "killers"):
+        items = cleaned.get(list_key)
+        if not isinstance(items, list):
+            continue
+        new_items = []
+        for item in items:
+            if not isinstance(item, dict):
+                new_items.append(item)
+                continue
+            status = _certification_block_status(item.get("evidence"))
+            label = item.get("killer") or item.get("headline_it") or item.get("label_it") or item.get("title_it")
+            if status and _is_vague_certification_block_headline(label):
+                fixed = copy.deepcopy(item)
+                fixed["killer"] = "APE assente; dichiarazioni impianti indicate come presenti"
+                fixed["status"] = "AMBER"
+                fixed["category"] = "impianti"
+                fixed["action"] = (
+                    "Verificare APE/certificato energetico; non considerare mancanti "
+                    "le dichiarazioni elettrica, termica e idrica se la perizia le indica esistenti."
+                )
+                fixed["evidence"] = status["evidence"]
+                new_items.append(fixed)
+            else:
+                new_items.append(item)
+        cleaned[list_key] = new_items
+
+    resolver_meta = cleaned.get("resolver_meta") if isinstance(cleaned.get("resolver_meta"), dict) else {}
+    themes = resolver_meta.get("themes") if isinstance(resolver_meta.get("themes"), list) else []
+    for theme in themes:
+        if not isinstance(theme, dict):
+            continue
+        if _is_vague_certification_block_headline(theme.get("driver_value")):
+            theme["theme"] = "impianti"
+            theme["driver_status"] = "AMBER"
+            theme["driver_value"] = "APE assente; dichiarazioni impianti indicate come presenti"
+
+    return cleaned
+
+
 def _normalize_field_state(field_key: str, state: Dict[str, Any], blocked_unreadable: bool) -> Dict[str, Any]:
     status = str(state.get("status") or "NOT_FOUND").upper().strip()
     evidence = _normalize_evidence_list(
@@ -1182,6 +1421,10 @@ _ANCHORED_MONEY_TERMS = (
     ("oblazione", "Oblazione / sanatoria", r"(?:costo\s+dell[’']oblazione|oblazione|sanatoria|condono)"),
     ("regolarizzazione", "Regolarizzazione", r"\bregolarizzazione\b"),
     ("spese_massima", "Spese di massima presunte", r"spese\s+di\s+massima\s+presunte"),
+    ("spese_condominiali_insolute", "Spese condominiali insolute", r"spese\s+condominiali\s+insolute"),
+    ("spese_condominiali_arretrate", "Spese condominiali arretrate", r"spese\s+condominiali\s+arretrate"),
+    ("spese_condominiali_corrente_precedente", "Spese condominiali anno corrente e precedente", r"totale\s+spese\s+per\s+l['’]?anno\s+in\s+corso\s+e\s+precedente"),
+    ("spese_condominiali_medie_annue", "Spese condominiali medie annue", r"importo\s+medio\s+annuo\s+delle\s+spese\s+condominiali"),
 )
 
 
@@ -1221,6 +1464,37 @@ def _parse_it_money_amount(raw: Any) -> Optional[float]:
     return amount
 
 
+
+def _is_valid_money_amount_match(text: str, match: re.Match) -> bool:
+    raw = str(match.group(0) or "")
+    amount_text = str(match.group(1) or "")
+    start = match.start(1)
+    end = match.end(1)
+
+    prev_char = text[start - 1] if start > 0 else ""
+    next_char = text[end] if end < len(text) else ""
+    if prev_char == "/" or next_char == "/":
+        return False
+
+    before = text[max(0, start - 12):start].lower()
+    after = text[end:min(len(text), end + 12)].lower()
+    context = f"{before}{raw}{after}"
+
+    if "€" in context or "euro" in context:
+        return True
+
+    if re.search(r"\d{1,3}(?:[\.\s]\d{3})+(?:,\d{1,2})?", amount_text):
+        return True
+
+    if re.search(r"\d{4,},\d{1,2}", amount_text):
+        return True
+
+    if re.search(r"\d+,\d{1,2}", amount_text):
+        return True
+
+    return False
+
+
 def _format_euro_it(amount: Optional[float]) -> str:
     if not isinstance(amount, (int, float)):
         return ""
@@ -1255,6 +1529,9 @@ def _classify_anchored_money_signal(label: str, text: str) -> str:
         return "valuation_risk_deduction"
     if _has_valuation_context(label, text):
         return "valuation_deduction"
+    normalized = _money_text_key(f"{label} {text}")
+    if "spese condominiali medie annue" in normalized or "importo medio annuo" in normalized:
+        return "recurring_annual_context"
     return "cost_signal_to_verify"
 
 
@@ -1271,11 +1548,15 @@ def _extract_amount_after_term(text: str, term_pattern: str) -> Optional[float]:
     if not term_match:
         return None
     window = text[term_match.end(): min(len(text), term_match.end() + 110)]
-    amount_match = _MONEY_AMOUNT_RE.search(window)
-    if amount_match:
-        return _parse_it_money_amount(amount_match.group(1))
+    for amount_match in _MONEY_AMOUNT_RE.finditer(window):
+        if _is_valid_money_amount_match(window, amount_match):
+            return _parse_it_money_amount(amount_match.group(1))
     before_window = text[max(0, term_match.start() - 45): term_match.start()]
-    before_matches = list(_MONEY_AMOUNT_RE.finditer(before_window))
+    before_matches = [
+        amount_match
+        for amount_match in _MONEY_AMOUNT_RE.finditer(before_window)
+        if _is_valid_money_amount_match(before_window, amount_match)
+    ]
     if before_matches:
         return _parse_it_money_amount(before_matches[-1].group(1))
     return None
@@ -1300,6 +1581,9 @@ def _extract_anchored_money_signals_from_text(text: Any, evidence: List[Dict[str
             "mancata garanzia",
             "deprezz",
             "valore finale di stima",
+            "spese condominiali",
+            "condominiali insolute",
+            "condominiali arretrate",
         )
     ):
         return []
@@ -1311,7 +1595,7 @@ def _extract_anchored_money_signals_from_text(text: Any, evidence: List[Dict[str
         if not re.search(pattern, body, flags=re.I):
             continue
         amount = _extract_amount_after_term(body, pattern)
-        if amount is None and term_key in {"ape", "conformita_impianti", "regolarizzazione", "sanatoria"}:
+        if amount is None and term_key in {"ape", "conformita_impianti", "regolarizzazione", "sanatoria", "oblazione"}:
             continue
         classification = _classify_anchored_money_signal(label, body)
         signals.append(
@@ -1382,16 +1666,33 @@ def _collapse_anchored_money_signal_duplicates(signals: List[Dict[str, Any]]) ->
             str(signal.get("classification") or ""),
         )
         _merge_anchored_signal(existing, signal)
+
     amount_bearing_label_classes = {
         f"{_money_text_key(signal.get('label_it'))}|{signal.get('classification')}"
         for signal in collapsed
         if isinstance(signal.get("amount_eur"), int)
     }
-    return [
+    collapsed = [
         signal
         for signal in collapsed
         if isinstance(signal.get("amount_eur"), int)
         or f"{_money_text_key(signal.get('label_it'))}|{signal.get('classification')}" not in amount_bearing_label_classes
+    ]
+
+    specific_regolarizzazione_amounts = {
+        signal.get("amount_eur")
+        for signal in collapsed
+        if _money_text_key(signal.get("label_it")) == "oneri di regolarizzazione urbanistica"
+        and isinstance(signal.get("amount_eur"), int)
+    }
+
+    return [
+        signal
+        for signal in collapsed
+        if not (
+            _money_text_key(signal.get("label_it")) == "regolarizzazione"
+            and signal.get("amount_eur") in specific_regolarizzazione_amounts
+        )
     ]
 
 
@@ -1996,6 +2297,7 @@ def apply_customer_decision_contract(result: Dict[str, Any]) -> Dict[str, Any]:
         for field_key, state in existing_states.items()
         if isinstance(state, dict)
     }
+    _apply_explicit_opponible_lease_resolution(normalized_states)
     all_normalized_states = copy.deepcopy(normalized_states)
     runtime_scopes = verifier_runtime.get("scopes") if isinstance(verifier_runtime.get("scopes"), dict) else {}
     normalized_states = {
@@ -2021,6 +2323,7 @@ def apply_customer_decision_contract(result: Dict[str, Any]) -> Dict[str, Any]:
     if blocked_unreadable:
         issues.insert(0, _blocked_issue(document_quality))
     issues = _dedupe_issues(issues)
+    issues = _apply_explicit_opponible_lease_issue_resolution(issues, normalized_states, runtime_scopes)
     for field_key, state in normalized_states.items():
         if str(state.get("status") or "").upper() == "FOUND":
             continue
@@ -2065,6 +2368,8 @@ def apply_customer_decision_contract(result: Dict[str, Any]) -> Dict[str, Any]:
         if extra_issue:
             issues.append(extra_issue)
     issues = _dedupe_issues(issues)
+    issues = _apply_explicit_opponible_lease_issue_resolution(issues, normalized_states, runtime_scopes)
+    issues = _apply_certification_block_issue_resolution(issues)
     for issue in issues:
         _apply_explanatory_resolution(
             issue,
@@ -2116,6 +2421,7 @@ def apply_customer_decision_contract(result: Dict[str, Any]) -> Dict[str, Any]:
         )
     legal_meta["themes"] = themes
     legal_killers["resolver_meta"] = legal_meta
+    legal_killers = _sanitize_certification_block_legal_killers(legal_killers)
     money_box = _build_money_box(result, issues, blocked_unreadable)
     summary_bundle = _build_summary_bundle(issues, semaforo, blocked_unreadable, document_quality, money_box)
     summary_for_client = {
