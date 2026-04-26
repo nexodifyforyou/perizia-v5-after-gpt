@@ -1491,12 +1491,25 @@ def _record_safety_correction(
 
 
 # ---------------------------------------------------------------------------
+# Mongo key sanitization
+# ---------------------------------------------------------------------------
+
+def _mongo_safe(value: Any) -> Any:
+    """Recursively convert all dict keys to strings so BSON encoding never fails."""
+    if isinstance(value, dict):
+        return {str(k): _mongo_safe(v) for k, v in value.items()}
+    if isinstance(value, list):
+        return [_mongo_safe(v) for v in value]
+    return value
+
+
+# ---------------------------------------------------------------------------
 # Metadata attachment
 # ---------------------------------------------------------------------------
 
 def attach_qa_gate_metadata(result: Dict[str, Any], qa_report: Dict[str, Any]) -> None:
-    """Write qa_gate dict to result["qa_gate"]."""
-    result["qa_gate"] = {
+    """Write qa_gate dict to result["qa_gate"] with all dict keys stringified for Mongo."""
+    result["qa_gate"] = _mongo_safe({
         "version": QA_GATE_VERSION,
         "status": qa_report.get("status", "WARN"),
         "llm_used": qa_report.get("llm_used", False),
@@ -1509,7 +1522,7 @@ def attach_qa_gate_metadata(result: Dict[str, Any], qa_report: Dict[str, Any]) -
         "section_verdicts": qa_report.get("section_verdicts", {}),
         "errors": qa_report.get("errors", []),
         "context_debug": qa_report.get("context_debug", {}),
-    }
+    })
 
 
 # ---------------------------------------------------------------------------

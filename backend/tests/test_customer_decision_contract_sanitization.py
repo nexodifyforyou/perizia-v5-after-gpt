@@ -1028,6 +1028,8 @@ from customer_contract_qa_gate import (
     _regex_extract_beni,
     _is_placeholder_location,
     _apply_backfill_details,
+    attach_qa_gate_metadata,
+    _mongo_safe,
 )
 
 
@@ -1657,3 +1659,81 @@ def test_is_placeholder_location_identifies_all_known_placeholders():
     assert _is_placeholder_location("ND")
     assert not _is_placeholder_location("Via Roma 10, Milano")
     assert not _is_placeholder_location("VIA GARIBALDI 5")
+
+
+# ── Stage 13: Mongo key sanitization (BSON safety) ───────────────────────────
+
+def _all_dict_keys_are_strings(obj: Any) -> bool:
+    """Recursively verify every dict key in obj is a string."""
+    if isinstance(obj, dict):
+        return all(isinstance(k, str) and _all_dict_keys_are_strings(v) for k, v in obj.items())
+    if isinstance(obj, list):
+        return all(_all_dict_keys_are_strings(item) for item in obj)
+    return True
+
+
+def test_qa_gate_metadata_is_mongo_safe():
+    """After attach_qa_gate_metadata, result['qa_gate'] must have only string dict keys
+    and BSON.encode must succeed (int page keys in context_debug must be stringified)."""
+    from bson import BSON
+
+    qa_report = {
+        "status": "PASS",
+        "llm_used": False,
+        "model": "",
+        "context_mode": "PAGE_PACK",
+        "pages_reviewed": [1, 15],
+        "corrections_applied": [],
+        "contradictions_detected": [],
+        "invariants_checked": [],
+        "section_verdicts": {},
+        "errors": [],
+        "context_debug": {
+            "detected_page_count": 20,
+            "selected_pages": [1, 15],
+            "selected_pages_by_reason": {1: ["x"], 15: ["keyword_urbanistica"]},
+            "context_char_count": 5000,
+            "mode": "PAGE_PACK",
+        },
+    }
+    result: dict = {}
+    attach_qa_gate_metadata(result, qa_report)
+
+    qa_gate = result["qa_gate"]
+    assert _all_dict_keys_are_strings(qa_gate), (
+        "All dict keys in result['qa_gate'] must be strings for Mongo compatibility"
+    )
+
+    by_reason = qa_gate["context_debug"]["selected_pages_by_reason"]
+    assert "1" in by_reason, "Integer page key 1 must become string '1'"
+    assert "15" in by_reason, "Integer page key 15 must become string '15'"
+    assert 1 not in by_reason, "Original integer key 1 must not remain"
+
+    BSON.encode({"qa_gate": qa_gate})
+
+
+def test_qa_gate_full_result_is_bson_safe_after_gate():
+    """After apply_customer_contract_qa_gate runs, BSON.encode on the full result must not raise
+    even when context_debug contains integer page keys in selected_pages_by_reason."""
+    from bson import BSON
+
+    raw_text = _make_long_raw_text(total_pages=5)
+    result = _make_base_result_for_qa()
+
+    mocked_response = {
+        "qa_status": "PASS",
+        "overall_verdict_it": "Tutto ok.",
+        "context_used": {"mode": "FULL_DOCUMENT", "pages_reviewed": [1, 2, 3, 4, 5], "limitations_it": ""},
+        "contradictions_detected": [],
+        "corrections": [],
+        "section_verdicts": {},
+    }
+
+    with mock.patch("customer_contract_qa_gate.call_customer_qa_llm", return_value=mocked_response):
+        apply_customer_contract_qa_gate(result, raw_text=raw_text)
+
+    assert "qa_gate" in result
+    assert _all_dict_keys_are_strings(result["qa_gate"]), (
+        "All dict keys in result['qa_gate'] must be strings"
+    )
+    BSON.encode({"result": result})
