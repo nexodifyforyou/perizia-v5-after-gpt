@@ -111,6 +111,58 @@ _FALSE_LIBERO_MARKERS = [
     "libera professione",
 ]
 
+# ── Rule 2: buyer-side label patterns ────────────────────────────────────────
+_RE_BUYER_SIDE_LABEL = re.compile(r"Costo buyer-side esplicito|buyer.side esplicito", re.I)
+_RE_COSTI_ESPLICITI_LABEL = re.compile(
+    r"(?:La perizia indica\s+)?[Cc]osti espliciti a carico dell['’' ]acquirente",
+    re.I,
+)
+_SAFE_COST_BLOCKER = "Costi/oneri da verificare: totale extra non quantificato in modo difendibile."
+_SAFE_SIGNAL_LABEL_IT = "Segnale economico da verificare"
+_SAFE_SIGNAL_LABEL_EN = "Economic signal to verify"
+_SAFE_SIGNAL_NOTE = (
+    "Segnale economico ancorato alla perizia; non trattato come costo extra "
+    "buyer-side certo senza verifica di separata debenza."
+)
+
+# ── Rule 3: agibilità assente replacement ────────────────────────────────────
+_RE_AGIBILITA_ASSENTE = re.compile(
+    r"Agibilit[àa](?:/abitabilit[àa])?\s*(?:assente\s*/\s*non\s+rilasciata|"
+    r"assente(?!\s*/\s*abitabilit)|:\s*ASSENTE|ASSENTE(?!\s*/\s*VERIFIC))",
+    re.I,
+)
+_AGIBILITA_DA_VERIFICARE_SAFE = "Agibilità/abitabilità: DA VERIFICARE"
+_AGIBILITA_DA_VERIFICARE_EXPLANATION = (
+    "La perizia segnala porzioni/volumi non agibili, non accessibili o non autorizzati; "
+    "questo non prova da solo l'assenza globale del certificato di agibilità dell'intera unità."
+)
+
+# ── Rule 6: customer-facing scan keys (excluding qa_gate) ────────────────────
+_CUSTOMER_FACING_SCAN_KEYS = (
+    "issues",
+    "summary_for_client",
+    "summary_for_client_bundle",
+    "section_2_decisione_rapida",
+    "decision_rapida_client",
+    "section_3_money_box",
+    "money_box",
+    "section_9_legal_killers",
+    "red_flags_operativi",
+    "section_11_red_flags",
+    "semaforo_generale",
+    "section_1_semaforo_generale",
+    "lots",
+    "lot_index",
+    "beni",
+    "customer_decision_contract",
+)
+
+_BAD_TEXT_PATTERNS = {
+    "fake_528": re.compile(r"528[\.\s]?123|528123"),
+    "costi_espliciti": re.compile(r"Costi espliciti a carico|costi espliciti a carico"),
+    "buyer_side_label": re.compile(r"Costo buyer-side esplicito|buyer-side esplicito", re.I),
+}
+
 # ---------------------------------------------------------------------------
 # System prompt for the LLM QA adjudicator
 # ---------------------------------------------------------------------------
@@ -889,7 +941,11 @@ _NON_ADDITIVE_NOTE = (
 def _strip_fake_total_from_text(text: Any) -> str:
     if not isinstance(text, str):
         return str(text or "")
-    return _FAKE_TOTAL_PATTERN.sub(_NON_ADDITIVE_NOTE, text).strip()
+    text = _FAKE_TOTAL_PATTERN.sub(_NON_ADDITIVE_NOTE, text)
+    # Also remove generic costi/buyer-side phrases that have no amount suffix
+    text = _RE_COSTI_ESPLICITI_LABEL.sub(_SAFE_COST_BLOCKER, text)
+    text = _RE_BUYER_SIDE_LABEL.sub(_SAFE_SIGNAL_LABEL_IT, text)
+    return text.strip()
 
 
 def _apply_remove_exact_total(result: Dict[str, Any]) -> None:
@@ -938,6 +994,7 @@ def _strip_fake_total_from_result_text(container: Dict[str, Any]) -> None:
         "issues", "summary_for_client", "summary_for_client_bundle",
         "section_2_decisione_rapida", "decision_rapida_client",
         "section_9_legal_killers", "red_flags_operativi", "section_11_red_flags",
+        "semaforo_generale", "section_1_semaforo_generale",
     ):
         if key in container:
             container[key] = _walk(container[key])
@@ -1263,6 +1320,10 @@ def apply_final_safety_invariants(
     _inv6_backfill_beni(result, qa_report, raw_text=raw_text, page_map=page_map)
     invariants_checked.append("INV-6:beni_backfill")
 
+    # Customer-facing consistency sweep (Rules 2–5)
+    apply_customer_facing_consistency_sweep(result, qa_report)
+    invariants_checked.append("INV-7:customer_facing_consistency_sweep")
+
     qa_report["invariants_checked"] = invariants_checked
 
 
@@ -1433,18 +1494,245 @@ def _inv6_backfill_beni(
     )
 
 
+# ---------------------------------------------------------------------------
+# Customer-facing consistency sweep (Rules 2–5)
+# ---------------------------------------------------------------------------
+
+def _relabel_buyer_side_money_box_items(container: Dict[str, Any]) -> None:
+    """Rule 2B: Relabel money_box items whose label/note carries a fake buyer-side claim."""
+    for mb_key in ("section_3_money_box", "money_box"):
+        mb = container.get(mb_key)
+        if not isinstance(mb, dict):
+            continue
+        items = mb.get("items")
+        if not isinstance(items, list):
+            continue
+        for item in items:
+            if not isinstance(item, dict):
+                continue
+            # Only match on label fields — stima_nota can say "buyer-side" on legitimate items
+            combined = " ".join(str(item.get(f) or "") for f in ("label_it", "label_en"))
+            if _RE_BUYER_SIDE_LABEL.search(combined) or _RE_COSTI_ESPLICITI_LABEL.search(combined):
+                item["label_it"] = _SAFE_SIGNAL_LABEL_IT
+                item["label_en"] = _SAFE_SIGNAL_LABEL_EN
+                item["type"] = "NON_ADDITIVE_SIGNAL"
+                item["classification"] = "cost_signal_to_verify"
+                item["stima_nota"] = _SAFE_SIGNAL_NOTE
+                item["additive_to_extra_total"] = False
+
+
+def _clean_semaforo_top_blockers(container: Dict[str, Any]) -> None:
+    """Rule 2D: Replace fake buyer-side cost blockers in semaforo_generale top_blockers."""
+    for sem_key in ("semaforo_generale", "section_1_semaforo_generale"):
+        sem = container.get(sem_key)
+        if not isinstance(sem, dict):
+            continue
+        reason = sem.get("reason_it")
+        if isinstance(reason, str) and (
+            _RE_BUYER_SIDE_LABEL.search(reason) or _RE_COSTI_ESPLICITI_LABEL.search(reason)
+        ):
+            sem["reason_it"] = _SAFE_COST_BLOCKER
+        blockers = sem.get("top_blockers")
+        if not isinstance(blockers, list):
+            continue
+        for b in blockers:
+            if not isinstance(b, dict):
+                continue
+            for field in ("label_it", "label", "text", "description_it"):
+                val = b.get(field)
+                if not isinstance(val, str):
+                    continue
+                if _RE_BUYER_SIDE_LABEL.search(val) or _RE_COSTI_ESPLICITI_LABEL.search(val):
+                    b[field] = _SAFE_COST_BLOCKER
+
+
+def _propagate_agibilita_downgrade(container: Dict[str, Any]) -> None:
+    """Rule 3: Replace all ASSENTE agibilità claims in customer-facing text sections."""
+    def _walk(obj: Any) -> Any:
+        if isinstance(obj, str):
+            return _RE_AGIBILITA_ASSENTE.sub(_AGIBILITA_DA_VERIFICARE_SAFE, obj)
+        if isinstance(obj, list):
+            return [_walk(item) for item in obj]
+        if isinstance(obj, dict):
+            return {k: _walk(v) for k, v in obj.items()}
+        return obj
+
+    for key in (
+        "issues", "summary_for_client", "summary_for_client_bundle",
+        "section_2_decisione_rapida", "decision_rapida_client",
+        "section_9_legal_killers", "red_flags_operativi", "section_11_red_flags",
+        "semaforo_generale", "section_1_semaforo_generale",
+    ):
+        if key in container:
+            container[key] = _walk(container[key])
+
+
+def _propagate_occupancy_to_lots(result: Dict[str, Any]) -> None:
+    """Rule 4: If field_states.stato_occupativo=OCCUPATO, propagate to lots.
+
+    Skips lots whose evidence contains false libero markers — those were already
+    handled by INV-3 and should stay at DA VERIFICARE until manual review.
+    """
+    field_states = result.get("field_states") or {}
+    occ_state = field_states.get("stato_occupativo")
+    if not isinstance(occ_state, dict):
+        return
+    if str(occ_state.get("value") or "").upper() != "OCCUPATO":
+        return
+    for lot in (result.get("lots") or []):
+        if not isinstance(lot, dict):
+            continue
+        if str(lot.get("stato_occupativo") or "").upper() == "OCCUPATO":
+            continue
+        # Don't promote lots that have false libero marker evidence
+        lot_evidence = lot.get("evidence") or {}
+        occ_ev = lot_evidence.get("occupancy_status") or [] if isinstance(lot_evidence, dict) else []
+        has_false_marker = any(
+            any(m in str(ev.get("quote") or "").lower() for m in _FALSE_LIBERO_MARKERS)
+            for ev in (occ_ev if isinstance(occ_ev, list) else [])
+        )
+        if not has_false_marker:
+            lot["stato_occupativo"] = "OCCUPATO"
+            lot["occupancy_status"] = "OCCUPATO"
+
+
+def _sync_cdc_full_sections(result: Dict[str, Any]) -> None:
+    """Rule 5: Deep-sync customer_decision_contract with corrected root sections."""
+    cdc = result.get("customer_decision_contract")
+    if not isinstance(cdc, dict):
+        return
+    direct_mirror = (
+        "issues", "money_box", "section_3_money_box",
+        "red_flags_operativi", "section_11_red_flags",
+        "section_9_legal_killers",
+        "semaforo_generale", "section_1_semaforo_generale",
+        "lots", "lot_index", "beni",
+        "summary_for_client", "summary_for_client_bundle",
+    )
+    for key in direct_mirror:
+        if key in result and result[key] is not None:
+            cdc[key] = copy.deepcopy(result[key])
+    # CDC decision_rapida_client: prefer summary_for_client (most corrected), fall back to section_2
+    sfc = result.get("summary_for_client")
+    s2 = result.get("section_2_decisione_rapida")
+    if sfc is not None:
+        cdc["decision_rapida_client"] = copy.deepcopy(sfc)
+    elif s2 is not None:
+        cdc["decision_rapida_client"] = copy.deepcopy(s2)
+    # Full field_states mirror
+    root_fs = result.get("field_states")
+    if isinstance(root_fs, dict):
+        cdc["field_states"] = copy.deepcopy(root_fs)
+
+
+def apply_customer_facing_consistency_sweep(
+    result: Dict[str, Any],
+    qa_report: Optional[Dict[str, Any]] = None,
+) -> None:
+    """Purge stale derived projections from customer-facing sections after QA corrections.
+
+    Rule 2: relabel fake buyer-side money_box items; clean semaforo blockers.
+    Rule 3: replace ASSENTE agibilità claims when field state is DA VERIFICARE.
+    Rule 4: propagate OCCUPATO to lots when field state confirms it.
+    Rule 5: deep-sync customer_decision_contract with corrected root sections.
+    """
+    # Rule 2: buyer-side label cleanup in money_box items
+    _relabel_buyer_side_money_box_items(result)
+    # Rule 2D: semaforo blocker cleanup
+    _clean_semaforo_top_blockers(result)
+
+    # Rule 3: agibilità downgrade propagation
+    field_states = result.get("field_states") or {}
+    agib = field_states.get("agibilita")
+    if isinstance(agib, dict) and str(agib.get("value") or "").upper() == "DA VERIFICARE":
+        _propagate_agibilita_downgrade(result)
+
+    # Rule 4: occupancy propagation
+    _propagate_occupancy_to_lots(result)
+
+    # Rule 5: full CDC sync (must be last so it captures all prior corrections)
+    _sync_cdc_full_sections(result)
+
+    if qa_report is not None and qa_report.get("status") in ("PASS",):
+        qa_report["status"] = "FAIL_CORRECTED"
+
+
+# ---------------------------------------------------------------------------
+# Bad-text scan helper (Rule 6)
+# ---------------------------------------------------------------------------
+
+def _collect_customer_facing_bad_text_hits(result: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """Scan customer-facing sections (excluding qa_gate) for known bad text patterns.
+
+    Returns list of {"key": path, "pattern": pattern_name, "text_excerpt": str}.
+    """
+    field_states = result.get("field_states") or {}
+
+    active_patterns: Dict[str, Any] = dict(_BAD_TEXT_PATTERNS)
+
+    agib = field_states.get("agibilita")
+    if isinstance(agib, dict) and str(agib.get("value") or "").upper() == "DA VERIFICARE":
+        active_patterns["agibilita_assente_after_downgrade"] = re.compile(
+            r"Agibilit[àa].*?ASSENTE|Agibilit[àa]\s+assente", re.I
+        )
+
+    occ = field_states.get("stato_occupativo")
+    if isinstance(occ, dict) and str(occ.get("value") or "").upper() == "OCCUPATO":
+        active_patterns["stato_non_verificabile_after_occupied"] = re.compile(
+            r"Stato occupativo:\s*NON|stato occupativo.*NON_VERIFICABILE", re.I
+        )
+
+    hits: List[Dict[str, Any]] = []
+
+    def _scan_str(text: str, path: str) -> None:
+        for name, pat in active_patterns.items():
+            m = pat.search(text)
+            if m:
+                start = max(0, m.start() - 20)
+                hits.append({
+                    "key": path,
+                    "pattern": name,
+                    "text_excerpt": text[start: m.end() + 20],
+                })
+
+    def _walk(obj: Any, path: str) -> None:
+        if isinstance(obj, str):
+            _scan_str(obj, path)
+        elif isinstance(obj, dict):
+            for k, v in obj.items():
+                _walk(v, f"{path}.{k}")
+        elif isinstance(obj, list):
+            for i, item in enumerate(obj):
+                _walk(item, f"{path}[{i}]")
+
+    for key in _CUSTOMER_FACING_SCAN_KEYS:
+        val = result.get(key)
+        if val is not None:
+            _walk(val, key)
+
+    return hits
+
+
+_EXTENDED_FAKE_PHRASES = list(_FAKE_COST_PHRASES) + [
+    "costo buyer-side esplicito",
+    "buyer-side esplicito",
+]
+
+
 def _scan_for_fake_total_phrases(result: Dict[str, Any]) -> bool:
     customer_keys = (
         "issues", "summary_for_client", "summary_for_client_bundle",
         "section_2_decisione_rapida", "decision_rapida_client",
         "section_9_legal_killers", "red_flags_operativi", "section_11_red_flags",
+        "semaforo_generale", "section_1_semaforo_generale",
+        "money_box", "section_3_money_box",
     )
     for key in customer_keys:
         val = result.get(key)
         if val is None:
             continue
         text = json.dumps(val, ensure_ascii=False)
-        if any(phrase in text.lower() for phrase in _FAKE_COST_PHRASES):
+        if any(phrase in text.lower() for phrase in _EXTENDED_FAKE_PHRASES):
             return True
 
     cdc = result.get("customer_decision_contract")

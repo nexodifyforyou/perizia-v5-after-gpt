@@ -1030,6 +1030,8 @@ from customer_contract_qa_gate import (
     _apply_backfill_details,
     attach_qa_gate_metadata,
     _mongo_safe,
+    apply_customer_facing_consistency_sweep,
+    _collect_customer_facing_bad_text_hits,
 )
 
 
@@ -1737,3 +1739,377 @@ def test_qa_gate_full_result_is_bson_safe_after_gate():
         "All dict keys in result['qa_gate'] must be strings"
     )
     BSON.encode({"result": result})
+
+
+# ── Stage 14: Customer-facing consistency sweep ───────────────────────────────
+
+def _make_stale_528_result() -> dict:
+    """Result with €528.123,68 fake total scattered across customer-facing and CDC sections."""
+    result = _make_base_result_for_qa()
+    fake_label = "Costi espliciti a carico dell'acquirente: € 528.123,68."
+    result["semaforo_generale"] = {
+        "colore": "ROSSO",
+        "reason_it": fake_label,
+        "top_blockers": [
+            {"label_it": "Immobile occupato.", "severity": "HIGH"},
+            {"label_it": fake_label, "severity": "HIGH"},
+        ],
+    }
+    result["section_1_semaforo_generale"] = result["semaforo_generale"].copy()
+    result["issues"].append({
+        "headline_it": "Costi espliciti.",
+        "explanation_it": "La perizia indica costi espliciti a carico dell'acquirente.",
+        "severity": "AMBER",
+    })
+    result["customer_decision_contract"]["semaforo_generale"] = result["semaforo_generale"].copy()
+    result["customer_decision_contract"]["issues"] = result["issues"].copy()
+    return result
+
+
+def test_remove_exact_total_purges_customer_decision_contract_semaforo():
+    """REMOVE_EXACT_TOTAL must clear fake 528 total from CDC semaforo and issues."""
+    result = _make_stale_528_result()
+    result["section_3_money_box"]["total_extra_costs"]["min"] = 528124
+    result["section_3_money_box"]["total_extra_costs"]["max"] = 528124
+
+    mocked_response = {
+        "qa_status": "FAIL_CORRECTED",
+        "overall_verdict_it": "Totale falso rilevato.",
+        "context_used": {"mode": "EVIDENCE_ONLY", "pages_reviewed": [5], "limitations_it": ""},
+        "contradictions_detected": [
+            {
+                "id": "fake_528_contradiction",
+                "severity": "CRITICAL",
+                "problem_it": "Totale buyer-side falso: è VdM, non costo.",
+                "current_wrong_claim": "€ 528.123,68",
+                "evidence_pages": [5],
+                "evidence_quotes": ["Valore commerciale determinato in euro 528.123,68"],
+                "recommended_action": "REMOVE_EXACT_TOTAL",
+            }
+        ],
+        "corrections": [
+            {
+                "id": "fake_total_528",
+                "target": "money_box",
+                "action": "REMOVE_EXACT_TOTAL",
+                "safe_value_it": "Totale non quantificabile.",
+                "reason_it": "Importo è VdM.",
+                "evidence_pages": [5],
+                "evidence_quotes": ["Valore commerciale determinato in euro 528.123,68"],
+                "confidence": 0.95,
+            }
+        ],
+        "section_verdicts": {},
+    }
+
+    with mock.patch("customer_contract_qa_gate.call_customer_qa_llm", return_value=mocked_response):
+        qa_meta = apply_customer_contract_qa_gate(result, raw_text=None)
+
+    assert qa_meta["status"] == "FAIL_CORRECTED"
+
+    # qa_gate metadata is ALLOWED to keep the wrong claim
+    assert any(
+        "528" in json.dumps(c, ensure_ascii=False)
+        for c in result.get("qa_gate", {}).get("contradictions_detected", [])
+    ), "qa_gate contradictions_detected must preserve the original wrong claim"
+
+    # Customer-facing sections must have no fake 528
+    hits = _collect_customer_facing_bad_text_hits(result)
+    fake_hits = [h for h in hits if h["pattern"] == "fake_528"]
+    assert fake_hits == [], f"Fake 528 must not appear outside qa_gate: {fake_hits}"
+
+    costi_hits = [h for h in hits if h["pattern"] == "costi_espliciti"]
+    assert costi_hits == [], f"costi_espliciti must not appear outside qa_gate: {costi_hits}"
+
+    total = result["section_3_money_box"]["total_extra_costs"]
+    assert total["min"] is None
+    assert total["max"] is None
+
+
+def test_money_box_buyer_side_labels_are_relabelled_after_remove_exact_total():
+    """Money_box items with buyer-side explicit label must be relabelled as NON_ADDITIVE_SIGNAL."""
+    result = _make_base_result_for_qa()
+    stale_item = {
+        "code": "VR_COST_99",
+        "label_it": "Costo buyer-side esplicito da perizia",
+        "label_en": "Costo buyer-side esplicito da perizia",
+        "stima_nota": "Costo buyer-side esplicito rilevato nella perizia.",
+        "stima_euro": None,
+        "type": "BUYER_SIDE_COST",
+        "classification": "explicit_buyer_cost",
+        "additive_to_extra_total": True,
+    }
+    result["section_3_money_box"]["items"] = [stale_item.copy()]
+    result["money_box"]["items"] = [stale_item.copy()]
+    result["customer_decision_contract"]["money_box"]["items"] = [stale_item.copy()]
+
+    apply_customer_facing_consistency_sweep(result)
+
+    hits = _collect_customer_facing_bad_text_hits(result)
+    buyer_hits = [h for h in hits if h["pattern"] == "buyer_side_label"]
+    assert buyer_hits == [], f"buyer_side_label must not appear after sweep: {buyer_hits}"
+
+    for mb_key in ("section_3_money_box", "money_box"):
+        items = result[mb_key]["items"]
+        assert items, f"{mb_key}.items must not be empty"
+        item = items[0]
+        assert item["type"] == "NON_ADDITIVE_SIGNAL", f"{mb_key} item type must be NON_ADDITIVE_SIGNAL"
+        assert item["classification"] == "cost_signal_to_verify"
+        assert item["additive_to_extra_total"] is False
+        assert "buyer-side esplicito" not in item["label_it"].lower()
+
+
+def test_agibilita_downgrade_purges_summaries_redflags_legal_killers():
+    """When agibilita=DA VERIFICARE, all ASSENTE claims must be replaced in customer-facing sections."""
+    result = _make_base_result_for_qa()
+    result["field_states"]["agibilita"]["value"] = "DA VERIFICARE"
+    result["field_states"]["agibilita"]["status"] = "LOW_CONFIDENCE"
+
+    stale_text = "Agibilità: ASSENTE — certificato non rilasciato."
+    result["summary_for_client"]["summary_it"] = stale_text
+    result["section_2_decisione_rapida"]["summary_it"] = "Agibilità assente / non rilasciata."
+    result["red_flags_operativi"] = [
+        {"flag_it": "Agibilità: ASSENTE", "severity": "RED"}
+    ]
+    result["section_9_legal_killers"]["resolver_meta"]["themes"] = [
+        {"theme": "agibilita", "note": "Agibilità assente — non rilasciata."}
+    ]
+    result["semaforo_generale"] = {
+        "colore": "ROSSO",
+        "reason_it": "Agibilità: ASSENTE.",
+        "top_blockers": [{"label_it": "Agibilità assente / non rilasciata.", "severity": "HIGH"}],
+    }
+
+    apply_customer_facing_consistency_sweep(result)
+
+    hits = _collect_customer_facing_bad_text_hits(result)
+    agib_hits = [h for h in hits if h["pattern"] == "agibilita_assente_after_downgrade"]
+    assert agib_hits == [], f"No ASSENTE agibilità must survive after downgrade: {agib_hits}"
+
+    full_text = json.dumps({
+        k: result[k] for k in (
+            "summary_for_client", "section_2_decisione_rapida",
+            "red_flags_operativi", "semaforo_generale", "section_9_legal_killers",
+        )
+    }, ensure_ascii=False)
+    assert "DA VERIFICARE" in full_text, "DA VERIFICARE replacement must be present"
+
+
+def test_occupancy_correction_propagates_to_lots():
+    """When field_states.stato_occupativo=OCCUPATO, lots must be updated to OCCUPATO."""
+    result = _make_base_result_for_qa()
+    result["field_states"]["stato_occupativo"]["value"] = "OCCUPATO"
+    result["lots"] = [
+        {"lot_number": 1, "stato_occupativo": "DA VERIFICARE", "occupancy_status": "DA VERIFICARE"},
+        {"lot_number": 2, "stato_occupativo": "OCCUPATO", "occupancy_status": "OCCUPATO"},
+    ]
+    result["customer_decision_contract"]["lots"] = [
+        {"lot_number": 1, "stato_occupativo": "DA VERIFICARE", "occupancy_status": "DA VERIFICARE"},
+    ]
+
+    apply_customer_facing_consistency_sweep(result)
+
+    assert result["lots"][0]["stato_occupativo"] == "OCCUPATO", "DA VERIFICARE lot must become OCCUPATO"
+    assert result["lots"][0]["occupancy_status"] == "OCCUPATO"
+    assert result["lots"][1]["stato_occupativo"] == "OCCUPATO", "Already OCCUPATO lot must stay OCCUPATO"
+
+    # CDC lots must also be synced (Rule 5 sync)
+    cdc_lots = result["customer_decision_contract"].get("lots") or []
+    assert cdc_lots, "CDC lots must be synced"
+    assert cdc_lots[0]["stato_occupativo"] == "OCCUPATO", "CDC lot must be OCCUPATO after sync"
+
+    hits = _collect_customer_facing_bad_text_hits(result)
+    occ_hits = [h for h in hits if h["pattern"] == "stato_non_verificabile_after_occupied"]
+    assert occ_hits == [], f"No NON_VERIFICABILE occupancy must survive: {occ_hits}"
+
+
+def test_customer_decision_contract_mirrors_corrected_root_sections():
+    """After consistency sweep, CDC must mirror root money_box, summaries, field_states, lots, beni."""
+    result = _make_base_result_for_qa()
+    result["section_3_money_box"]["items"] = [
+        {"code": "SIG_001", "label_it": "Segnale economico da verificare", "stima_euro": None}
+    ]
+    result["money_box"]["items"] = [
+        {"code": "SIG_001", "label_it": "Segnale economico da verificare", "stima_euro": None}
+    ]
+    result["lots"] = [{"lot_number": 1, "stato_occupativo": "OCCUPATO", "ubicazione": "Via Roma 1"}]
+    result["beni"] = [{"bene_label": "Lotto A", "address": "Via Roma 1"}]
+    result["summary_for_client"]["summary_it"] = "Immobile occupato da verificare."
+    result["red_flags_operativi"] = [{"flag_it": "Urbanistica da verificare.", "severity": "AMBER"}]
+
+    # CDC starts stale / empty
+    result["customer_decision_contract"]["money_box"]["items"] = []
+    result["customer_decision_contract"]["lots"] = []
+    result["customer_decision_contract"]["beni"] = []
+
+    apply_customer_facing_consistency_sweep(result)
+
+    cdc = result["customer_decision_contract"]
+
+    # money_box synced
+    cdc_mb_items = cdc.get("money_box", {}).get("items") or []
+    assert len(cdc_mb_items) == 1, "CDC money_box.items must be synced from root"
+    assert cdc_mb_items[0]["label_it"] == "Segnale economico da verificare"
+
+    # lots synced
+    cdc_lots = cdc.get("lots") or []
+    assert cdc_lots, "CDC lots must be synced"
+    assert cdc_lots[0]["stato_occupativo"] == "OCCUPATO"
+
+    # beni synced
+    cdc_beni = cdc.get("beni") or []
+    assert cdc_beni, "CDC beni must be synced"
+    assert cdc_beni[0]["address"] == "Via Roma 1"
+
+    # summary synced
+    cdc_s2 = cdc.get("decision_rapida_client") or {}
+    assert "Immobile occupato" in cdc_s2.get("summary_it", ""), "CDC decision_rapida_client must mirror root summary"
+
+    # field_states synced
+    cdc_fs = cdc.get("field_states") or {}
+    assert cdc_fs.get("stato_occupativo", {}).get("value") == "OCCUPATO"
+
+
+def test_live_via_nuova_style_payload_has_no_customer_facing_bad_hits():
+    """Full analysis_f55750bc3f91-style payload must have zero bad hits after the gate sweep."""
+    result = _make_base_result_for_qa()
+
+    # Simulate stale customer-facing state matching the live bad hits
+    result["field_states"]["agibilita"]["value"] = "DA VERIFICARE"
+    result["field_states"]["agibilita"]["status"] = "LOW_CONFIDENCE"
+    result["field_states"]["stato_occupativo"]["value"] = "OCCUPATO"
+
+    fake_label = "Costi espliciti a carico dell'acquirente: € 528.123,68."
+    buyer_label = "Costo buyer-side esplicito da perizia"
+    buyer_nota = "Costo buyer-side esplicito rilevato nella perizia."
+
+    result["semaforo_generale"] = {
+        "colore": "ROSSO",
+        "reason_it": "Problemi rilevati.",
+        "top_blockers": [
+            {"label_it": "Immobile occupato.", "severity": "HIGH"},
+            {"label_it": "Agibilità: ASSENTE.", "severity": "HIGH"},
+            {"label_it": fake_label, "severity": "HIGH"},
+        ],
+    }
+    result["issues"] = [
+        {"headline_it": "Occupazione.", "explanation_it": "Immobile occupato.", "severity": "RED"},
+        {"headline_it": "Agibilità assente.", "explanation_it": "Agibilità: ASSENTE.", "severity": "RED"},
+        {
+            "headline_it": "Costi.",
+            "explanation_it": "La perizia indica costi espliciti a carico dell'acquirente.",
+            "severity": "AMBER",
+        },
+    ]
+    result["section_3_money_box"]["items"] = [
+        {
+            "code": "VR_COST_01",
+            "label_it": buyer_label,
+            "label_en": buyer_label,
+            "stima_nota": buyer_nota,
+            "stima_euro": None,
+            "type": "BUYER_SIDE_COST",
+            "additive_to_extra_total": True,
+        }
+    ]
+    result["money_box"]["items"] = list(result["section_3_money_box"]["items"])
+    result["red_flags_operativi"] = [
+        {"flag_it": "Agibilità assente / non rilasciata.", "severity": "RED"},
+    ]
+    result["lots"] = [
+        {"lot_number": 1, "stato_occupativo": "DA VERIFICARE", "occupancy_status": "DA VERIFICARE"}
+    ]
+    result["customer_decision_contract"].update({
+        "semaforo_generale": result["semaforo_generale"].copy(),
+        "issues": [i.copy() for i in result["issues"]],
+        "lots": [lot.copy() for lot in result["lots"]],
+    })
+
+    # qa_gate contradictions are allowed to retain wrong claims — simulate them
+    # (applied AFTER the sweep to confirm they're excluded from the scan)
+
+    mocked_response = {
+        "qa_status": "FAIL_CORRECTED",
+        "overall_verdict_it": "Multiple issues corrected.",
+        "context_used": {"mode": "EVIDENCE_ONLY", "pages_reviewed": [5, 8, 14], "limitations_it": ""},
+        "contradictions_detected": [
+            {
+                "id": "c1",
+                "severity": "CRITICAL",
+                "problem_it": "Totale buyer-side falso.",
+                "current_wrong_claim": "Costi espliciti a carico dell'acquirente: € 528.123,68",
+                "evidence_pages": [5],
+                "evidence_quotes": ["Valore di mercato 528.123,68"],
+                "recommended_action": "REMOVE_EXACT_TOTAL",
+            },
+            {
+                "id": "c2",
+                "severity": "HIGH",
+                "problem_it": "Agibilità overclaim.",
+                "current_wrong_claim": "Agibilità: ASSENTE",
+                "evidence_pages": [8],
+                "evidence_quotes": ["terrapieno non agibile"],
+                "recommended_action": "DOWNGRADE_TO_VERIFY",
+            },
+            {
+                "id": "c3",
+                "severity": "HIGH",
+                "problem_it": "Occupancy split.",
+                "current_wrong_claim": "DA VERIFICARE",
+                "evidence_pages": [14],
+                "evidence_quotes": ["immobile occupato"],
+                "recommended_action": "SPLIT_OCCUPANCY_OPPONIBILITY",
+            },
+        ],
+        "corrections": [
+            {
+                "id": "fake_total_528",
+                "target": "money_box",
+                "action": "REMOVE_EXACT_TOTAL",
+                "safe_value_it": "Totale non quantificabile.",
+                "reason_it": "VdM non è costo buyer-side.",
+                "evidence_pages": [5],
+                "evidence_quotes": ["Valore di mercato 528.123,68"],
+                "confidence": 0.95,
+            },
+            {
+                "id": "agib_down",
+                "target": "agibilita",
+                "action": "DOWNGRADE_TO_VERIFY",
+                "safe_value_it": "Solo terrapieno non agibile; certificato globale da verificare.",
+                "reason_it": "Scope locale.",
+                "evidence_pages": [8],
+                "evidence_quotes": ["terrapieno non agibile"],
+                "confidence": 0.88,
+            },
+        ],
+        "section_verdicts": {},
+    }
+
+    with mock.patch("customer_contract_qa_gate.call_customer_qa_llm", return_value=mocked_response):
+        qa_meta = apply_customer_contract_qa_gate(result, raw_text=None)
+
+    assert qa_meta["status"] == "FAIL_CORRECTED"
+    assert qa_meta["llm_used"] is True
+
+    # qa_gate contradictions_detected must preserve the original wrong claims (audit metadata)
+    qa_contradictions_text = json.dumps(result["qa_gate"]["contradictions_detected"], ensure_ascii=False)
+    assert "528" in qa_contradictions_text or "ASSENTE" in qa_contradictions_text, (
+        "qa_gate.contradictions_detected must preserve old wrong claims"
+    )
+
+    # Customer-facing sections must have zero bad hits
+    hits = _collect_customer_facing_bad_text_hits(result)
+    assert hits == [], (
+        f"Expected 0 customer-facing bad hits, got {len(hits)}:\n"
+        + "\n".join(f"  {h['pattern']} at {h['key']}: ...{h['text_excerpt']}..." for h in hits)
+    )
+
+    # Specific structural assertions
+    assert result["field_states"]["stato_occupativo"]["value"] == "OCCUPATO"
+    assert result["lots"][0]["stato_occupativo"] == "OCCUPATO"
+    assert result["lots"][0]["occupancy_status"] == "OCCUPATO"
+
+    total = result["section_3_money_box"]["total_extra_costs"]
+    assert total["min"] is None
+    assert total["max"] is None
