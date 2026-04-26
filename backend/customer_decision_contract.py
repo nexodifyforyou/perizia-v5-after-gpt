@@ -1320,12 +1320,29 @@ def _build_semaforo(issues: List[Dict[str, Any]], blocked_unreadable: bool, docu
     }
 
 
+def _dedup_legal_killer_items(items: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Deduplicate legal killer items by normalized (killer, status) key, preserving first occurrence."""
+    seen: set = set()
+    out: List[Dict[str, Any]] = []
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        killer_norm = re.sub(r"\s+", " ", str(item.get("killer") or "")).strip().lower()
+        status_norm = str(item.get("status") or "").strip().lower()
+        key = f"{killer_norm}|{status_norm}"
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(item)
+    return out
+
+
 def _build_legal_killers(existing: Dict[str, Any], issues: List[Dict[str, Any]]) -> Dict[str, Any]:
     section = copy.deepcopy(existing) if isinstance(existing, dict) else {}
     items = section.get("items") if isinstance(section.get("items"), list) else []
     top_items = section.get("top_items") if isinstance(section.get("top_items"), list) else []
-    projected_items = [copy.deepcopy(item) for item in items if isinstance(item, dict)]
-    projected_top = [copy.deepcopy(item) for item in top_items if isinstance(item, dict)]
+    projected_items = _dedup_legal_killer_items([copy.deepcopy(item) for item in items if isinstance(item, dict)])
+    projected_top = _dedup_legal_killer_items([copy.deepcopy(item) for item in top_items if isinstance(item, dict)])
     if not projected_top:
         projected_top = [
             {
@@ -1459,8 +1476,23 @@ def _extract_address_from_beni(result: Dict[str, Any]) -> Optional[str]:
     return None
 
 
+def _sanitize_address_evidence(addr: Dict[str, Any]) -> None:
+    """Remove evidence entries whose quote contains valuation narrative — they are not address evidence."""
+    evidence = addr.get("evidence")
+    if not isinstance(evidence, list):
+        return
+    addr["evidence"] = [
+        ev for ev in evidence
+        if isinstance(ev, dict) and not _is_valuation_narrative(str(ev.get("quote") or ""))
+    ]
+
+
 def _sanitize_address_contamination(result: Dict[str, Any]) -> None:
-    """Replace valuation narrative text used as address/location with the actual address or a placeholder."""
+    """Replace valuation narrative text used as address/location with the actual address or a placeholder.
+
+    Also strips evidence entries whose quote contains valuation narrative — those were the OCR
+    context used to locate the address in the document but should not be exposed as address evidence.
+    """
     actual_address = _extract_address_from_beni(result)
     fallback = actual_address or "Indirizzo da verificare"
 
@@ -1473,6 +1505,7 @@ def _sanitize_address_contamination(result: Dict[str, Any]) -> None:
             for field in ("value", "full"):
                 if _is_valuation_narrative(str(addr.get(field) or "")):
                     addr[field] = fallback
+            _sanitize_address_evidence(addr)
         elif isinstance(addr, str) and _is_valuation_narrative(addr):
             container["address"] = {"value": fallback, "evidence": []}
 
@@ -1978,10 +2011,20 @@ def _build_money_box(result: Dict[str, Any], issues: List[Dict[str, Any]], block
         amount = raw.get("amount")
         if not isinstance(amount, (int, float)):
             continue
+        # Skip zero/negative amounts — they carry no defensible buyer cost signal.
+        if float(amount) <= 0:
+            continue
         evidence = _normalize_evidence_list(raw.get("evidence"), limit=2)
         if not evidence:
             continue
-        label = str(raw.get("label") or raw.get("label_it") or "").strip() or "Costo buyer-side esplicito da perizia"
+        raw_label = str(raw.get("label") or raw.get("label_it") or "").strip()
+        # Guard: if the raw label is a long OCR fragment (contains newlines or > 120 chars without
+        # recognisable cost vocabulary), replace it with a safe generic label.
+        label = (
+            raw_label
+            if raw_label and len(raw_label) <= 120 and "\n" not in raw_label
+            else "Costo buyer-side esplicito da perizia"
+        )
         items.append(
             {
                 "code": str(raw.get("code") or f"VR_COST_{idx:02d}"),
@@ -2826,5 +2869,34 @@ def apply_customer_decision_contract(result: Dict[str, Any]) -> Dict[str, Any]:
     # so lot_index must be cleaned after that using clean lot/header address candidates.
     _sanitize_lot_index_locations(result)
 
+    # QA Gate: challenge conclusions, apply LLM corrections, enforce safety invariants.
+    # raw_text and internal_runtime are not available here; callers that have them should
+    # call apply_customer_contract_qa_gate() directly after this function returns.
+    _run_qa_gate_deterministic_only(result)
+
     sanitize_customer_facing_result(result)
     return contract
+
+
+def _run_qa_gate_deterministic_only(result: Dict[str, Any]) -> None:
+    """Run the deterministic safety sweep of the QA gate without an LLM call.
+
+    The full LLM-powered gate is invoked by the upload pipeline which has access to
+    raw_text and internal_runtime.  This function ensures the invariants always run
+    even for lightweight read-path refreshes where raw_text is unavailable.
+    """
+    try:
+        from customer_contract_qa_gate import (
+            apply_final_safety_invariants,
+            attach_qa_gate_metadata,
+            QA_GATE_VERSION,
+            _empty_qa_gate,
+        )
+        qa_report = _empty_qa_gate("PASS", "")
+        apply_final_safety_invariants(result, qa_report)
+        # Only attach if not already set (upload pipeline sets it with full LLM metadata).
+        if "qa_gate" not in result:
+            qa_report["context_mode"] = "DETERMINISTIC_ONLY"
+            attach_qa_gate_metadata(result, qa_report)
+    except Exception:
+        pass

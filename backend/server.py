@@ -36,6 +36,7 @@ from evidence_utils import normalize_evidence_quote
 from narrator import build_decisione_rapida_narration, build_deterministic_summary_for_client, build_summary_for_client_bundle
 from cost_market_ranges import market_range_for_item
 from customer_decision_contract import apply_customer_decision_contract, sanitize_customer_facing_result, separate_internal_runtime_from_customer_result
+from customer_contract_qa_gate import apply_customer_contract_qa_gate
 from perizia_runtime.runtime import apply_verifier_to_result, run_quality_verifier
 
 ROOT_DIR = Path(__file__).parent
@@ -16160,6 +16161,23 @@ async def analyze_perizia(request: Request, file: UploadFile = File(...)):
         result["decision_rapida_narrated"] = case_aware_narration
     apply_customer_decision_contract(result)
     logger.info(f"[{request_id}] narrator status={narrator_meta.get('status')} enabled={narrator_meta.get('enabled')}")
+
+    # QA Gate: LLM-powered challenge + deterministic safety sweep.
+    # raw_text (full_text) and internal_runtime are available here.
+    try:
+        qa_meta = apply_customer_contract_qa_gate(
+            result,
+            raw_text=full_text[:100000] if isinstance(full_text, str) else None,
+            internal_runtime=result.get("verifier_runtime"),
+        )
+        logger.info(
+            f"[{request_id}] qa_gate status={qa_meta.get('status')} "
+            f"llm_used={qa_meta.get('llm_used')} "
+            f"corrections={len(qa_meta.get('corrections_applied') or [])}"
+        )
+    except Exception as _qa_exc:
+        logger.warning(f"[{request_id}] qa_gate_failed: {_qa_exc}")
+
     result["debug"] = debug_obj
     _ensure_section_3_money_box_alias(result)
     scrubbed_placeholders = _scrub_visible_machine_placeholders(result)
