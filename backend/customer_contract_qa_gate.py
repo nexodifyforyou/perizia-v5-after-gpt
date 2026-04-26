@@ -126,20 +126,30 @@ _SAFE_SIGNAL_NOTE = (
 )
 
 # ── Rule 3: agibilità assente replacement ────────────────────────────────────
+_AGIBILITA_TERM_PATTERN = r"(?:agibilit[àa](?:/abitabilit[àa])?|abitabilit[àa])"
 _RE_AGIBILITA_ASSENTE = re.compile(
-    r"Agibilit[àa](?:/abitabilit[àa])?\s*(?:assente\s*/\s*non\s+rilasciata|"
-    r"assente(?!\s*/\s*abitabilit)|:\s*ASSENTE|ASSENTE(?!\s*/\s*VERIFIC))",
+    rf"(?:\bl['’]\s*)?{_AGIBILITA_TERM_PATTERN}\s*(?::\s*)?"
+    r"(?:risulta\s+)?assente(?:\s*(?:/|o)\s*non\s+rilasciat[ao])?\b",
     re.I,
+)
+_RE_AGIBILITA_NON_RILASCIATA_NEAR = re.compile(
+    rf"{_AGIBILITA_TERM_PATTERN}.{{0,80}}\bnon\s+rilasciat[ao]\b|"
+    rf"\bnon\s+rilasciat[ao]\b.{{0,80}}{_AGIBILITA_TERM_PATTERN}",
+    re.I | re.S,
 )
 _AGIBILITA_DA_VERIFICARE_SAFE = "Agibilità/abitabilità: DA VERIFICARE"
 _AGIBILITA_DA_VERIFICARE_EXPLANATION = (
     "La perizia segnala porzioni/volumi non agibili, non accessibili o non autorizzati; "
     "questo non prova da solo l'assenza globale del certificato di agibilità dell'intera unità."
 )
+_AGIBILITA_DA_VERIFICARE_SAFE_TEXT = (
+    f"{_AGIBILITA_DA_VERIFICARE_SAFE}. {_AGIBILITA_DA_VERIFICARE_EXPLANATION}"
+)
 
 # ── Rule 6: customer-facing scan keys (excluding qa_gate) ────────────────────
 _CUSTOMER_FACING_SCAN_KEYS = (
     "issues",
+    "field_states",
     "summary_for_client",
     "summary_for_client_bundle",
     "section_2_decisione_rapida",
@@ -154,6 +164,9 @@ _CUSTOMER_FACING_SCAN_KEYS = (
     "lots",
     "lot_index",
     "beni",
+    "checklist_pre_offerta",
+    "qa_pass",
+    "qa_checks",
     "customer_decision_contract",
 )
 
@@ -1546,23 +1559,40 @@ def _clean_semaforo_top_blockers(container: Dict[str, Any]) -> None:
                     b[field] = _SAFE_COST_BLOCKER
 
 
+def _find_agibilita_absence_overclaim(text: Any) -> Optional[re.Match[str]]:
+    if not isinstance(text, str):
+        return None
+    return (
+        _RE_AGIBILITA_ASSENTE.search(text)
+        or _RE_AGIBILITA_NON_RILASCIATA_NEAR.search(text)
+    )
+
+
+def _is_agibilita_absence_overclaim(text: Any) -> bool:
+    return _find_agibilita_absence_overclaim(text) is not None
+
+
+def _rewrite_agibilita_absence_overclaim(text: str) -> str:
+    if _is_agibilita_absence_overclaim(text):
+        return _AGIBILITA_DA_VERIFICARE_SAFE_TEXT
+    return text
+
+
 def _propagate_agibilita_downgrade(container: Dict[str, Any]) -> None:
     """Rule 3: Replace all ASSENTE agibilità claims in customer-facing text sections."""
     def _walk(obj: Any) -> Any:
         if isinstance(obj, str):
-            return _RE_AGIBILITA_ASSENTE.sub(_AGIBILITA_DA_VERIFICARE_SAFE, obj)
+            return _rewrite_agibilita_absence_overclaim(obj)
         if isinstance(obj, list):
             return [_walk(item) for item in obj]
         if isinstance(obj, dict):
-            return {k: _walk(v) for k, v in obj.items()}
+            return {
+                k: (v if str(k) == "qa_gate" else _walk(v))
+                for k, v in obj.items()
+            }
         return obj
 
-    for key in (
-        "issues", "summary_for_client", "summary_for_client_bundle",
-        "section_2_decisione_rapida", "decision_rapida_client",
-        "section_9_legal_killers", "red_flags_operativi", "section_11_red_flags",
-        "semaforo_generale", "section_1_semaforo_generale",
-    ):
+    for key in _CUSTOMER_FACING_SCAN_KEYS:
         if key in container:
             container[key] = _walk(container[key])
 
@@ -1672,9 +1702,7 @@ def _collect_customer_facing_bad_text_hits(result: Dict[str, Any]) -> List[Dict[
 
     agib = field_states.get("agibilita")
     if isinstance(agib, dict) and str(agib.get("value") or "").upper() == "DA VERIFICARE":
-        active_patterns["agibilita_assente_after_downgrade"] = re.compile(
-            r"Agibilit[àa].*?ASSENTE|Agibilit[àa]\s+assente", re.I
-        )
+        active_patterns["agibilita_assente_after_downgrade"] = None
 
     occ = field_states.get("stato_occupativo")
     if isinstance(occ, dict) and str(occ.get("value") or "").upper() == "OCCUPATO":
@@ -1686,7 +1714,10 @@ def _collect_customer_facing_bad_text_hits(result: Dict[str, Any]) -> List[Dict[
 
     def _scan_str(text: str, path: str) -> None:
         for name, pat in active_patterns.items():
-            m = pat.search(text)
+            if name == "agibilita_assente_after_downgrade":
+                m = _find_agibilita_absence_overclaim(text)
+            else:
+                m = pat.search(text)
             if m:
                 start = max(0, m.start() - 20)
                 hits.append({
@@ -1700,6 +1731,8 @@ def _collect_customer_facing_bad_text_hits(result: Dict[str, Any]) -> List[Dict[
             _scan_str(obj, path)
         elif isinstance(obj, dict):
             for k, v in obj.items():
+                if str(k) == "qa_gate":
+                    continue
                 _walk(v, f"{path}.{k}")
         elif isinstance(obj, list):
             for i, item in enumerate(obj):

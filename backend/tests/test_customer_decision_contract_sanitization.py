@@ -1895,6 +1895,91 @@ def test_agibilita_downgrade_purges_summaries_redflags_legal_killers():
     assert "DA VERIFICARE" in full_text, "DA VERIFICARE replacement must be present"
 
 
+def test_agibilita_downgrade_purges_explanation_and_action_text():
+    """Downgraded agibilita must purge stale explanation/action absence claims outside qa_gate."""
+    result = _make_base_result_for_qa()
+    result["field_states"]["agibilita"].update({
+        "value": "DA VERIFICARE",
+        "status": "LOW_CONFIDENCE",
+        "explanation": "L'agibilità risulta assente nel caso canonico verificato.",
+        "explanation_it": (
+            "L'agibilità risulta assente o non rilasciata e richiede verifica immediata "
+            "prima dell'offerta."
+        ),
+    })
+    result["issues"] = [
+        {
+            "headline_it": "Agibilità assente.",
+            "explanation_it": "L'agibilità risulta assente nel caso canonico verificato.",
+            "action_it": "L'agibilità risulta assente nel caso canonico verificato.",
+            "severity": "RED",
+        }
+    ]
+    result["red_flags_operativi"] = [
+        {
+            "flag_it": "Agibilità: ASSENTE",
+            "flag_en": "Agibilità: ASSENTE",
+            "action_it": "L'agibilità risulta assente nel caso canonico verificato.",
+            "severity": "RED",
+        }
+    ]
+    result["section_11_red_flags"] = [
+        {
+            "flag_it": "Agibilità assente o non rilasciata.",
+            "flag_en": "Agibilità: ASSENTE",
+            "action_it": "L'agibilità risulta assente nel caso canonico verificato.",
+            "severity": "RED",
+        }
+    ]
+    result["summary_for_client_bundle"].update({
+        "top_issue_it": "Agibilità assente o non rilasciata.",
+        "main_risk_it": "L'agibilità risulta assente nel caso canonico verificato.",
+        "caution_points_it": ["Agibilità: ASSENTE"],
+        "checks_it": ["Verificare agibilità non rilasciata prima dell'offerta."],
+        "decision_summary_it": "L'agibilità risulta assente nel caso canonico verificato.",
+    })
+    result["semaforo_generale"] = {
+        "colore": "ROSSO",
+        "reason_it": "L'agibilità risulta assente nel caso canonico verificato.",
+        "top_blockers": [{"label_it": "Agibilità: ASSENTE.", "severity": "HIGH"}],
+    }
+    result["section_9_legal_killers"]["resolver_meta"]["themes"] = [
+        {"theme": "agibilita", "note": "Agibilità assente — non rilasciata."}
+    ]
+    result["customer_decision_contract"].update({
+        "field_states": {"agibilita": result["field_states"]["agibilita"].copy()},
+        "issues": [issue.copy() for issue in result["issues"]],
+        "red_flags_operativi": [flag.copy() for flag in result["red_flags_operativi"]],
+        "section_11_red_flags": [flag.copy() for flag in result["section_11_red_flags"]],
+        "summary_for_client_bundle": result["summary_for_client_bundle"].copy(),
+    })
+    result["qa_gate"] = {
+        "contradictions_detected": [
+            {"current_wrong_claim": "L'agibilità risulta assente nel caso canonico verificato."}
+        ]
+    }
+
+    apply_customer_facing_consistency_sweep(result)
+
+    hits = _collect_customer_facing_bad_text_hits(result)
+    agib_hits = [h for h in hits if h["pattern"] == "agibilita_assente_after_downgrade"]
+    assert agib_hits == [], f"No stale agibilita absence claim must survive outside qa_gate: {agib_hits}"
+
+    customer_text = json.dumps({
+        "issues": result["issues"],
+        "field_states": result["field_states"],
+        "red_flags_operativi": result["red_flags_operativi"],
+        "section_11_red_flags": result["section_11_red_flags"],
+        "summary_for_client_bundle": result["summary_for_client_bundle"],
+        "semaforo_generale": result["semaforo_generale"],
+        "section_9_legal_killers": result["section_9_legal_killers"],
+        "customer_decision_contract": result["customer_decision_contract"],
+    }, ensure_ascii=False)
+    assert "Agibilità/abitabilità: DA VERIFICARE" in customer_text
+    assert "questo non prova da solo l'assenza globale" in customer_text
+    assert "L'agibilità risulta assente" in json.dumps(result["qa_gate"], ensure_ascii=False)
+
+
 def test_occupancy_correction_propagates_to_lots():
     """When field_states.stato_occupativo=OCCUPATO, lots must be updated to OCCUPATO."""
     result = _make_base_result_for_qa()
@@ -1977,6 +2062,9 @@ def test_live_via_nuova_style_payload_has_no_customer_facing_bad_hits():
     # Simulate stale customer-facing state matching the live bad hits
     result["field_states"]["agibilita"]["value"] = "DA VERIFICARE"
     result["field_states"]["agibilita"]["status"] = "LOW_CONFIDENCE"
+    result["field_states"]["agibilita"]["explanation"] = (
+        "L'agibilità risulta assente nel caso canonico verificato."
+    )
     result["field_states"]["stato_occupativo"]["value"] = "OCCUPATO"
 
     fake_label = "Costi espliciti a carico dell'acquirente: € 528.123,68."
@@ -1993,8 +2081,22 @@ def test_live_via_nuova_style_payload_has_no_customer_facing_bad_hits():
         ],
     }
     result["issues"] = [
+        {
+            "headline_it": "Agibilità assente.",
+            "explanation_it": (
+                "L'agibilità risulta assente o non rilasciata e richiede verifica immediata "
+                "prima dell'offerta."
+            ),
+            "action_it": "L'agibilità risulta assente nel caso canonico verificato.",
+            "severity": "RED",
+        },
+        {
+            "headline_it": "Agibilità.",
+            "explanation_it": "L'agibilità risulta assente nel caso canonico verificato.",
+            "action_it": "L'agibilità risulta assente nel caso canonico verificato.",
+            "severity": "RED",
+        },
         {"headline_it": "Occupazione.", "explanation_it": "Immobile occupato.", "severity": "RED"},
-        {"headline_it": "Agibilità assente.", "explanation_it": "Agibilità: ASSENTE.", "severity": "RED"},
         {
             "headline_it": "Costi.",
             "explanation_it": "La perizia indica costi espliciti a carico dell'acquirente.",
@@ -2014,8 +2116,43 @@ def test_live_via_nuova_style_payload_has_no_customer_facing_bad_hits():
     ]
     result["money_box"]["items"] = list(result["section_3_money_box"]["items"])
     result["red_flags_operativi"] = [
-        {"flag_it": "Agibilità assente / non rilasciata.", "severity": "RED"},
+        {
+            "flag_it": "Agibilità assente / non rilasciata.",
+            "flag_en": "Agibilità: ASSENTE",
+            "action_it": "L'agibilità risulta assente nel caso canonico verificato.",
+            "severity": "RED",
+        },
     ]
+    result["section_11_red_flags"] = [
+        {
+            "flag_it": "Agibilità assente / non rilasciata.",
+            "flag_en": "Agibilità: ASSENTE",
+            "action_it": "L'agibilità risulta assente nel caso canonico verificato.",
+            "severity": "RED",
+        },
+    ]
+    result["section_9_legal_killers"]["resolver_meta"]["themes"] = [
+        {
+            "theme": "agibilita",
+            "note": "L'agibilità risulta assente nel caso canonico verificato.",
+        }
+    ]
+    result["summary_for_client_bundle"].update({
+        "top_issue_it": "Agibilità assente o non rilasciata.",
+        "main_risk_it": "L'agibilità risulta assente nel caso canonico verificato.",
+        "caution_points_it": ["Agibilità: ASSENTE"],
+        "checks_it": ["Verificare agibilità non rilasciata prima dell'offerta."],
+        "decision_summary_it": "L'agibilità risulta assente nel caso canonico verificato.",
+    })
+    result["section_2_decisione_rapida"]["main_risk_it"] = (
+        "L'agibilità risulta assente nel caso canonico verificato."
+    )
+    result["section_2_decisione_rapida"]["checks_it"] = ["Agibilità: ASSENTE"]
+    result["decision_rapida_client"] = {
+        "summary_it": "L'agibilità risulta assente nel caso canonico verificato.",
+        "main_risk_it": "Agibilità assente o non rilasciata.",
+        "checks_it": ["Verificare agibilità non rilasciata prima dell'offerta."],
+    }
     result["lots"] = [
         {"lot_number": 1, "stato_occupativo": "DA VERIFICARE", "occupancy_status": "DA VERIFICARE"}
     ]
@@ -2023,6 +2160,11 @@ def test_live_via_nuova_style_payload_has_no_customer_facing_bad_hits():
         "semaforo_generale": result["semaforo_generale"].copy(),
         "issues": [i.copy() for i in result["issues"]],
         "lots": [lot.copy() for lot in result["lots"]],
+        "field_states": {"agibilita": result["field_states"]["agibilita"].copy()},
+        "red_flags_operativi": [flag.copy() for flag in result["red_flags_operativi"]],
+        "section_11_red_flags": [flag.copy() for flag in result["section_11_red_flags"]],
+        "summary_for_client_bundle": result["summary_for_client_bundle"].copy(),
+        "decision_rapida_client": result["decision_rapida_client"].copy(),
     })
 
     # qa_gate contradictions are allowed to retain wrong claims — simulate them
