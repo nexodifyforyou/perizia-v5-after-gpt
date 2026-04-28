@@ -36,7 +36,7 @@ QA_GATE_MODEL = (
 )
 QA_GATE_TIMEOUT_SECONDS = int(os.environ.get("QA_GATE_TIMEOUT_SECONDS", "45"))
 # Increased from 40k to 120k — a typical 20–40 page perizia is 60–100k chars.
-# 40k caused blind-spot failures (pages 14–25 cut off for Via Nuova 76k doc).
+# 40k caused blind-spot failures in later-page evidence for longer documents.
 QA_GATE_MAX_CONTEXT_CHARS = int(os.environ.get("QA_GATE_MAX_CONTEXT_CHARS", "120000"))
 QA_GATE_CONTEXT_MODE = os.environ.get("QA_GATE_CONTEXT_MODE", "auto").lower()
 QA_GATE_MIN_CONFIDENCE = float(os.environ.get("QA_GATE_MIN_CONFIDENCE", "0.65"))
@@ -54,8 +54,7 @@ _KEYWORD_GROUPS: Dict[str, List[str]] = {
     "keyword_beni_details": [
         "compendio", "lotto", "bene", "foglio", "fg.", "mappale", "mapp.",
         "particella", "subalterno", "sub.", "categoria", "a/2", "a/3", "a/4",
-        "c/6", "consistenza", "superficie", "scoperti", "via nuova", "carozzo",
-        "vezzano",
+        "c/6", "consistenza", "superficie", "scoperti",
     ],
     "keyword_occupancy": [
         "occupato", "occupazione", "possesso", "locazione", "canone",
@@ -144,6 +143,44 @@ _AGIBILITA_DA_VERIFICARE_EXPLANATION = (
 )
 _AGIBILITA_DA_VERIFICARE_SAFE_TEXT = (
     f"{_AGIBILITA_DA_VERIFICARE_SAFE}. {_AGIBILITA_DA_VERIFICARE_EXPLANATION}"
+)
+
+_OCCUPIED_HEADLINE_IT = "Stato occupativo: OCCUPATO."
+_OCCUPIED_EXPLANATION_IT = (
+    "La perizia indica che l'immobile risulta occupato. "
+    "L'opponibilità del titolo deve essere verificata separatamente."
+)
+_OCCUPIED_ACTION_IT = (
+    "Verificare separatamente opponibilità del titolo e tempi di liberazione prima dell'offerta."
+)
+_OCCUPANCY_STALE_UNRESOLVED_RE = re.compile(
+    r"resta\s+irrisolt[oa]|campo\s+resta\s+aperto|"
+    r"non\s+attribuisce\s+un\s+dato\s+finale|"
+    r"rinvio\s+o\s+contesto\s+locale\s+senza\s+valore\s+candidato",
+    re.I,
+)
+_OPPONIBILITA_UNKNOWN_SAFE_TEXT = (
+    "L'immobile risulta occupato; l'opponibilità del titolo non è determinabile in modo "
+    "difendibile dalle evidenze disponibili. Verificare titolo di occupazione, data certa, "
+    "registrazione e opponibilità verso la procedura."
+)
+_OPPONIBILITA_UNKNOWN_WHY_NOT_RESOLVED = (
+    "La perizia conferma l'occupazione, ma non basta per stabilire l'opponibilità del titolo. "
+    "Servono titolo, data certa, registrazione e rapporto con la procedura."
+)
+
+_URBANISTICA_GRAVE_HEADLINE_IT = "Regolarità urbanistica: NON CONFORME / GRAVE."
+_URBANISTICA_GRAVE_ACTION_IT = (
+    "Verificare sanabilità, costi di regolarizzazione/ripristino e conformità urbanistica "
+    "con tecnico prima dell'offerta."
+)
+_RE_URBANISTICA_DA_VERIFICARE = re.compile(
+    r"(?:Regolarit[àa]\s+urbanistica|urbanistica)\s*:\s*DA\s+VERIFICARE\.?",
+    re.I,
+)
+_RE_URBANISTICA_DA_VERIFICARE_SIMILAR = re.compile(
+    r"(?:Regolarit[àa]\s+urbanistica|urbanistica)\s+(?:resta\s+)?DA\s+VERIFICARE\.?",
+    re.I,
 )
 
 # ── Rule 6: customer-facing scan keys (excluding qa_gate) ────────────────────
@@ -1626,6 +1663,342 @@ def _propagate_occupancy_to_lots(result: Dict[str, Any]) -> None:
             lot["occupancy_status"] = "OCCUPATO"
 
 
+def _is_occupancy_status_related_text(text: Any, path: str = "") -> bool:
+    body = str(text or "").lower()
+    path_lower = str(path or "").lower()
+    if "stato_occupativo" in path_lower:
+        return True
+    if "stato occupativo" in body or "stato di occupazione" in body:
+        return True
+    if "immobile occupato" in body:
+        return True
+    if "opponibil" in body:
+        return False
+    return bool(re.search(r"\boccupat[oaie]?\b|\boccupazione\b", body, flags=re.I))
+
+
+def _normalize_occupied_field_state(result: Dict[str, Any]) -> None:
+    """Normalize stale customer-facing occupancy text after root stato_occupativo=OCCUPATO."""
+    field_states = result.get("field_states") or {}
+    occ = field_states.get("stato_occupativo")
+    if not isinstance(occ, dict):
+        return
+    if str(occ.get("value") or "").upper() != "OCCUPATO":
+        return
+
+    occ["headline_it"] = _OCCUPIED_HEADLINE_IT
+    occ["explanation_it"] = _OCCUPIED_EXPLANATION_IT
+    occ["why_not_resolved"] = None
+
+    def _replacement(path: str) -> str:
+        tail = path.rsplit(".", 1)[-1].lower()
+        if "action" in tail or "verify" in tail:
+            return _OCCUPIED_ACTION_IT
+        if "headline" in tail or "flag" in tail or "killer" in tail or "label" in tail:
+            return _OCCUPIED_HEADLINE_IT
+        return _OCCUPIED_EXPLANATION_IT
+
+    def _walk(obj: Any, path: str) -> Any:
+        path_lower = path.lower()
+        if "qa_gate" in path_lower or "opponibilita_occupazione" in path_lower:
+            return obj
+        if isinstance(obj, str):
+            if (
+                _OCCUPANCY_STALE_UNRESOLVED_RE.search(obj)
+                and _is_occupancy_status_related_text(obj, path)
+            ):
+                return _replacement(path)
+            return obj
+        if isinstance(obj, list):
+            return [_walk(item, f"{path}[{idx}]") for idx, item in enumerate(obj)]
+        if isinstance(obj, dict):
+            return {k: _walk(v, f"{path}.{k}") for k, v in obj.items()}
+        return obj
+
+    for key in _CUSTOMER_FACING_SCAN_KEYS:
+        if key in result:
+            result[key] = _walk(result[key], key)
+
+    for list_key in ("issues", "red_flags_operativi", "section_11_red_flags"):
+        items = result.get(list_key)
+        if not isinstance(items, list):
+            continue
+        for idx, item in enumerate(items):
+            if not isinstance(item, dict):
+                continue
+            title = _card_title_text(item)
+            if not _is_occupancy_status_related_text(title, f"{list_key}[{idx}]"):
+                continue
+            for field in (
+                "explanation_it", "explanation", "action_it", "action",
+                "verify_next_it", "why_not_resolved",
+            ):
+                val = item.get(field)
+                if not isinstance(val, str) or not _OCCUPANCY_STALE_UNRESOLVED_RE.search(val):
+                    continue
+                if field == "why_not_resolved":
+                    item[field] = None
+                elif "action" in field or "verify" in field:
+                    item[field] = _OCCUPIED_ACTION_IT
+                else:
+                    item[field] = _OCCUPIED_EXPLANATION_IT
+
+
+def _opponibilita_is_unknown(state: Dict[str, Any]) -> bool:
+    value = re.sub(r"[\s_]+", " ", str(state.get("value") or "").strip().upper())
+    status = re.sub(r"[\s_]+", " ", str(state.get("status") or "").strip().upper())
+    return (
+        value in ("NON VERIFICABILE", "DA VERIFICARE", "LOW CONFIDENCE", "")
+        or status in ("LOW CONFIDENCE", "NON VERIFICABILE", "DA VERIFICARE")
+    )
+
+
+def _normalize_opponibilita_when_occupied(result: Dict[str, Any]) -> None:
+    """Clean stale occupancy-resolution wording from opponibility when occupancy is confirmed."""
+    field_states = result.get("field_states") or {}
+    occ = field_states.get("stato_occupativo")
+    oppon = field_states.get("opponibilita_occupazione")
+    if not isinstance(occ, dict) or not isinstance(oppon, dict):
+        return
+    if str(occ.get("value") or "").upper() != "OCCUPATO":
+        return
+    if not _opponibilita_is_unknown(oppon):
+        return
+
+    for field in ("explanation", "explanation_it", "verify_next_it"):
+        value = oppon.get(field)
+        if isinstance(value, str) and _OCCUPANCY_STALE_UNRESOLVED_RE.search(value):
+            oppon[field] = _OPPONIBILITA_UNKNOWN_SAFE_TEXT
+
+    why_not_resolved = oppon.get("why_not_resolved")
+    if (
+        isinstance(why_not_resolved, str)
+        and _OCCUPANCY_STALE_UNRESOLVED_RE.search(why_not_resolved)
+    ):
+        oppon["why_not_resolved"] = _OPPONIBILITA_UNKNOWN_WHY_NOT_RESOLVED
+
+
+def _rewrite_urbanistica_projection_text(text: str) -> str:
+    rewritten = _RE_URBANISTICA_DA_VERIFICARE.sub(_URBANISTICA_GRAVE_HEADLINE_IT, text)
+    rewritten = _RE_URBANISTICA_DA_VERIFICARE_SIMILAR.sub(
+        _URBANISTICA_GRAVE_HEADLINE_IT,
+        rewritten,
+    )
+    return rewritten
+
+
+def _is_urbanistica_card(item: Any) -> bool:
+    if not isinstance(item, dict):
+        return False
+    structured = " ".join(
+        str(item.get(key) or "")
+        for key in ("family", "theme", "category", "code", "issue_id")
+    ).lower()
+    if "urbanistica" in structured or "conformita_urbanistica" in structured:
+        return True
+    labels = " ".join(
+        str(item.get(key) or "")
+        for key in ("headline_it", "flag_it", "killer", "title_it", "label_it", "check_it")
+    ).lower()
+    return any(
+        token in labels
+        for token in (
+            "regolarità urbanistica", "regolarita urbanistica", "urbanistica",
+            "difform", "sanatoria", "condono", "ripristino",
+        )
+    )
+
+
+def _rewrite_urbanistica_strings(obj: Any) -> Any:
+    if isinstance(obj, str):
+        return _rewrite_urbanistica_projection_text(obj)
+    if isinstance(obj, list):
+        return [_rewrite_urbanistica_strings(item) for item in obj]
+    if isinstance(obj, dict):
+        return {
+            k: (v if str(k) == "qa_gate" else _rewrite_urbanistica_strings(v))
+            for k, v in obj.items()
+        }
+    return obj
+
+
+def _mark_urbanistica_card_red(item: Any) -> None:
+    if not isinstance(item, dict) or not _is_urbanistica_card(item):
+        return
+    item["severity"] = "RED"
+    if "status" in item or "killer" in item:
+        item["status"] = "RED"
+    item["action_it"] = _URBANISTICA_GRAVE_ACTION_IT
+    if "action" in item:
+        item["action"] = _URBANISTICA_GRAVE_ACTION_IT
+
+
+def _sync_urbanistica_checks(container: Dict[str, Any]) -> None:
+    def _rewrite_checks(section: Any) -> None:
+        if not isinstance(section, dict):
+            return
+        checks = section.get("checks_it")
+        if not isinstance(checks, list):
+            return
+        section["checks_it"] = [
+            _rewrite_urbanistica_projection_text(str(check))
+            if isinstance(check, str) else check
+            for check in checks
+        ]
+
+    _rewrite_checks(container.get("section_2_decisione_rapida"))
+    _rewrite_checks(container.get("summary_for_client_bundle"))
+    _rewrite_checks(container.get("decision_rapida_client"))
+
+
+def _propagate_urbanistica_severity(result: Dict[str, Any]) -> None:
+    """Project NON CONFORME / GRAVE urbanistica root state into customer-facing cards."""
+    field_states = result.get("field_states") or {}
+    urb = field_states.get("regolarita_urbanistica")
+    if not isinstance(urb, dict):
+        return
+    if str(urb.get("value") or "").upper() != "NON CONFORME / GRAVE":
+        return
+
+    urb["headline_it"] = _URBANISTICA_GRAVE_HEADLINE_IT
+
+    for key in ("issues", "red_flags_operativi", "section_11_red_flags"):
+        items = result.get(key)
+        if not isinstance(items, list):
+            continue
+        rewritten_items = _rewrite_urbanistica_strings(items)
+        if isinstance(rewritten_items, list):
+            result[key] = rewritten_items
+        for item in result.get(key) or []:
+            _mark_urbanistica_card_red(item)
+
+    legal_killers = result.get("section_9_legal_killers")
+    if isinstance(legal_killers, dict):
+        result["section_9_legal_killers"] = _rewrite_urbanistica_strings(legal_killers)
+        legal_killers = result.get("section_9_legal_killers")
+        if isinstance(legal_killers, dict):
+            for list_key in ("items", "top_items"):
+                for item in (legal_killers.get(list_key) or []):
+                    _mark_urbanistica_card_red(item)
+            resolver_meta = legal_killers.get("resolver_meta")
+            if isinstance(resolver_meta, dict):
+                for theme in (resolver_meta.get("themes") or []):
+                    if isinstance(theme, dict) and _is_urbanistica_card(theme):
+                        theme["severity"] = "RED"
+                        theme["action_it"] = _URBANISTICA_GRAVE_ACTION_IT
+
+    for key in ("section_2_decisione_rapida", "summary_for_client_bundle", "decision_rapida_client"):
+        section = result.get(key)
+        if isinstance(section, dict):
+            result[key] = _rewrite_urbanistica_strings(section)
+    _sync_urbanistica_checks(result)
+
+
+def _card_title_text(item: Dict[str, Any]) -> str:
+    return str(
+        item.get("headline_it")
+        or item.get("flag_it")
+        or item.get("killer")
+        or item.get("title_it")
+        or item.get("label_it")
+        or ""
+    ).strip()
+
+
+def _normalized_card_title(item: Dict[str, Any]) -> str:
+    title = _card_title_text(item)
+    title = re.sub(r"\s+", " ", title).strip().lower()
+    return title.rstrip(" .")
+
+
+def _is_exact_primary_occupancy_card(item: Dict[str, Any]) -> bool:
+    return _normalized_card_title(item) == "immobile occupato"
+
+
+def _is_exact_occupancy_status_card(item: Dict[str, Any]) -> bool:
+    title = _normalized_card_title(item)
+    return re.fullmatch(r"stato\s+occupativo\s*:\s*occupato", title, flags=re.I) is not None
+
+
+def _is_opponibility_non_verifiable_card(item: Dict[str, Any]) -> bool:
+    return re.fullmatch(
+        r"Opponibilit[àa]\s+occupazione\s*:\s*(?:NON\s+VERIFICABILE|DA\s+VERIFICARE)\.?",
+        _card_title_text(item),
+        flags=re.I,
+    ) is not None
+
+
+def _title_has_per_bene_details(item: Dict[str, Any]) -> bool:
+    title = _normalized_card_title(item)
+    return re.search(
+        r"\b(?:bene|lotto|lot)\s*(?:n\.?|n[°º]|numero)?\s*\d+\b",
+        title,
+        flags=re.I,
+    ) is not None
+
+
+def _has_per_bene_details(item: Dict[str, Any]) -> bool:
+    scope = item.get("scope")
+    if isinstance(scope, dict):
+        level = str(scope.get("level") or "").lower()
+        if level in ("bene", "lot", "lotto"):
+            return True
+        if scope.get("bene_number") or scope.get("lot_number"):
+            return True
+    return (
+        any(item.get(key) for key in ("bene_number", "lot_number", "bene_label", "lot_label"))
+        or _title_has_per_bene_details(item)
+    )
+
+
+def _set_card_title(item: Dict[str, Any], title: str) -> None:
+    for key in ("headline_it", "flag_it", "killer", "title_it", "label_it"):
+        if key in item:
+            item[key] = title
+            return
+    item["headline_it"] = title
+
+
+def _dedup_occupancy_cards(items: List[Any]) -> List[Any]:
+    """Deduplicate generic occupancy cards by title while preserving distinct issue families."""
+    has_primary = any(
+        isinstance(item, dict)
+        and _is_exact_primary_occupancy_card(item)
+        and not _title_has_per_bene_details(item)
+        for item in items
+    )
+    out: List[Any] = []
+    for item in items:
+        if not isinstance(item, dict):
+            out.append(item)
+            continue
+        if _is_exact_primary_occupancy_card(item):
+            _set_card_title(item, "Immobile occupato.")
+            item["severity"] = "RED"
+            out.append(item)
+            continue
+        if _is_opponibility_non_verifiable_card(item):
+            item["severity"] = "AMBER"
+            out.append(item)
+            continue
+        if (
+            has_primary
+            and _is_exact_occupancy_status_card(item)
+            and not _title_has_per_bene_details(item)
+        ):
+            continue
+        out.append(item)
+    return out
+
+
+def _dedup_semantic_issue_cards(result: Dict[str, Any]) -> None:
+    """Remove generic duplicate occupancy projections while preserving opponibility and per-bene cards."""
+    for key in ("issues", "red_flags_operativi", "section_11_red_flags"):
+        items = result.get(key)
+        if isinstance(items, list):
+            result[key] = _dedup_occupancy_cards(items)
+
+
 def _sync_cdc_full_sections(result: Dict[str, Any]) -> None:
     """Rule 5: Deep-sync customer_decision_contract with corrected root sections."""
     cdc = result.get("customer_decision_contract")
@@ -1646,7 +2019,12 @@ def _sync_cdc_full_sections(result: Dict[str, Any]) -> None:
     sfc = result.get("summary_for_client")
     s2 = result.get("section_2_decisione_rapida")
     if sfc is not None:
-        cdc["decision_rapida_client"] = copy.deepcopy(sfc)
+        decision = copy.deepcopy(sfc)
+        if isinstance(decision, dict) and isinstance(s2, dict):
+            for key in ("checks_it", "main_risk_it"):
+                if key not in decision and key in s2:
+                    decision[key] = copy.deepcopy(s2[key])
+        cdc["decision_rapida_client"] = decision
     elif s2 is not None:
         cdc["decision_rapida_client"] = copy.deepcopy(s2)
     # Full field_states mirror
@@ -1663,7 +2041,9 @@ def apply_customer_facing_consistency_sweep(
 
     Rule 2: relabel fake buyer-side money_box items; clean semaforo blockers.
     Rule 3: replace ASSENTE agibilità claims when field state is DA VERIFICARE.
-    Rule 4: propagate OCCUPATO to lots when field state confirms it.
+    Rule 4: normalize OCCUPATO projections and propagate OCCUPATO to lots.
+    Rule 4B: normalize opponibility text when occupancy is known but opponibility is unknown.
+    Rule 4C: project severe urbanistica and deduplicate semantic occupancy cards.
     Rule 5: deep-sync customer_decision_contract with corrected root sections.
     """
     # Rule 2: buyer-side label cleanup in money_box items
@@ -1677,8 +2057,18 @@ def apply_customer_facing_consistency_sweep(
     if isinstance(agib, dict) and str(agib.get("value") or "").upper() == "DA VERIFICARE":
         _propagate_agibilita_downgrade(result)
 
-    # Rule 4: occupancy propagation
+    # Rule 4: root-state projection cleanup for customer-facing occupancy cards
+    _normalize_occupied_field_state(result)
+
+    # Rule 4B: opponibility text cleanup after occupied root state is final
+    _normalize_opponibilita_when_occupied(result)
+
+    # Existing lot projection remains before CDC sync.
     _propagate_occupancy_to_lots(result)
+
+    # Rule 4C: remaining root-state projection cleanup
+    _propagate_urbanistica_severity(result)
+    _dedup_semantic_issue_cards(result)
 
     # Rule 5: full CDC sync (must be last so it captures all prior corrections)
     _sync_cdc_full_sections(result)
@@ -1709,6 +2099,14 @@ def _collect_customer_facing_bad_text_hits(result: Dict[str, Any]) -> List[Dict[
         active_patterns["stato_non_verificabile_after_occupied"] = re.compile(
             r"Stato occupativo:\s*NON|stato occupativo.*NON_VERIFICABILE", re.I
         )
+        active_patterns["occupancy_stale_unresolved_after_occupied"] = None
+
+    urb = field_states.get("regolarita_urbanistica")
+    if isinstance(urb, dict) and str(urb.get("value") or "").upper() == "NON CONFORME / GRAVE":
+        active_patterns["urbanistica_da_verificare_after_grave"] = re.compile(
+            r"Regolarit[àa]\s+urbanistica\s*:\s*DA\s+VERIFICARE|urbanistica\s*:\s*DA\s+VERIFICARE",
+            re.I,
+        )
 
     hits: List[Dict[str, Any]] = []
 
@@ -1716,6 +2114,12 @@ def _collect_customer_facing_bad_text_hits(result: Dict[str, Any]) -> List[Dict[
         for name, pat in active_patterns.items():
             if name == "agibilita_assente_after_downgrade":
                 m = _find_agibilita_absence_overclaim(text)
+            elif name == "occupancy_stale_unresolved_after_occupied":
+                m = (
+                    _OCCUPANCY_STALE_UNRESOLVED_RE.search(text)
+                    if _is_occupancy_status_related_text(text, path)
+                    else None
+                )
             else:
                 m = pat.search(text)
             if m:

@@ -2055,6 +2055,424 @@ def test_customer_decision_contract_mirrors_corrected_root_sections():
     assert cdc_fs.get("stato_occupativo", {}).get("value") == "OCCUPATO"
 
 
+def test_occupied_field_state_purges_stale_unresolved_text():
+    result = _make_base_result_for_qa()
+    result["field_states"]["stato_occupativo"].update({
+        "value": "OCCUPATO",
+        "headline_it": "Stato occupativo: DA VERIFICARE.",
+        "explanation_it": "Lo stato di occupazione resta irrisolto.",
+        "why_not_resolved": "Il campo resta aperto.",
+        "action_it": "Il campo resta aperto perché la perizia non attribuisce un dato finale.",
+    })
+    original_opponibilita = {
+        "value": "NON VERIFICABILE",
+        "status": "LOW_CONFIDENCE",
+        "headline_it": "Opponibilità occupazione: NON VERIFICABILE.",
+        "explanation_it": "Titolo e opponibilità devono essere verificati separatamente.",
+    }
+    result["field_states"]["opponibilita_occupazione"] = original_opponibilita.copy()
+    result["issues"] = [
+        {
+            "headline_it": "Stato occupativo: OCCUPATO.",
+            "explanation_it": "Lo stato di occupazione resta irrisolto.",
+            "action_it": "Il campo resta aperto prima dell'offerta.",
+            "severity": "RED",
+        }
+    ]
+    result["red_flags_operativi"] = [
+        {
+            "flag_it": "Stato occupativo: OCCUPATO.",
+            "action_it": "La perizia non attribuisce un dato finale sullo stato di occupazione.",
+            "severity": "RED",
+        }
+    ]
+
+    apply_customer_facing_consistency_sweep(result)
+
+    occ = result["field_states"]["stato_occupativo"]
+    assert occ["headline_it"] == "Stato occupativo: OCCUPATO."
+    assert occ["explanation_it"] == (
+        "La perizia indica che l'immobile risulta occupato. "
+        "L'opponibilità del titolo deve essere verificata separatamente."
+    )
+    assert occ["why_not_resolved"] is None
+    assert result["field_states"]["opponibilita_occupazione"] == original_opponibilita
+
+    customer_text = json.dumps({
+        "field_states": result["field_states"],
+        "issues": result["issues"],
+        "red_flags_operativi": result["red_flags_operativi"],
+        "customer_decision_contract": result["customer_decision_contract"],
+    }, ensure_ascii=False).lower()
+    assert "resta irrisolto" not in customer_text
+    assert "campo resta aperto" not in customer_text
+    assert "non attribuisce un dato finale" not in customer_text
+
+
+def test_urbanistica_non_conforme_propagates_to_issue_cards():
+    result = _make_base_result_for_qa()
+    result["field_states"]["regolarita_urbanistica"].update({
+        "value": "NON CONFORME / GRAVE",
+        "status": "FOUND",
+        "headline_it": "Regolarità urbanistica: NON CONFORME / GRAVE.",
+    })
+    result["issues"] = [
+        {
+            "family": "urbanistica",
+            "headline_it": "Regolarità urbanistica: DA VERIFICARE.",
+            "explanation_it": "Regolarità urbanistica: DA VERIFICARE.",
+            "severity": "AMBER",
+            "action_it": "Verificare genericamente.",
+        }
+    ]
+    result["red_flags_operativi"] = [
+        {
+            "category": "urbanistica",
+            "flag_it": "Regolarità urbanistica: DA VERIFICARE.",
+            "severity": "AMBER",
+        }
+    ]
+    result["section_11_red_flags"] = [
+        {
+            "code": "URBANISTICA_VERIFY",
+            "flag_it": "urbanistica: DA VERIFICARE.",
+            "severity": "AMBER",
+        }
+    ]
+    result["section_9_legal_killers"]["items"] = [
+        {
+            "category": "urbanistica",
+            "killer": "Regolarità urbanistica: DA VERIFICARE.",
+            "status": "AMBER",
+        }
+    ]
+    result["section_2_decisione_rapida"]["checks_it"] = [
+        "Regolarità urbanistica: DA VERIFICARE.",
+        "Verificare occupazione.",
+    ]
+    result["summary_for_client_bundle"]["checks_it"] = [
+        "urbanistica: DA VERIFICARE.",
+    ]
+
+    apply_customer_facing_consistency_sweep(result)
+
+    assert result["issues"][0]["headline_it"] == "Regolarità urbanistica: NON CONFORME / GRAVE."
+    assert result["issues"][0]["severity"] == "RED"
+    assert result["issues"][0]["action_it"] == (
+        "Verificare sanabilità, costi di regolarizzazione/ripristino e conformità urbanistica "
+        "con tecnico prima dell'offerta."
+    )
+    assert result["red_flags_operativi"][0]["severity"] == "RED"
+    assert result["section_11_red_flags"][0]["flag_it"] == "Regolarità urbanistica: NON CONFORME / GRAVE."
+    assert result["section_9_legal_killers"]["items"][0]["status"] == "RED"
+    assert result["section_2_decisione_rapida"]["checks_it"][0] == (
+        "Regolarità urbanistica: NON CONFORME / GRAVE."
+    )
+    assert result["summary_for_client_bundle"]["checks_it"][0] == (
+        "Regolarità urbanistica: NON CONFORME / GRAVE."
+    )
+
+    hits = _collect_customer_facing_bad_text_hits(result)
+    assert [h for h in hits if h["pattern"] == "urbanistica_da_verificare_after_grave"] == []
+
+
+def test_opponibilita_text_cleaned_when_occupied_but_opponibility_unknown():
+    result = _make_base_result_for_qa()
+    result["field_states"]["stato_occupativo"]["value"] = "OCCUPATO"
+    result["field_states"]["opponibilita_occupazione"].update({
+        "value": "NON VERIFICABILE",
+        "status": "LOW_CONFIDENCE",
+        "headline_it": "Opponibilità occupazione: NON VERIFICABILE.",
+        "explanation": "Lo stato di occupazione resta irrisolto.",
+        "explanation_it": "Il campo resta aperto perché la perizia non attribuisce un dato finale.",
+        "verify_next_it": "Rinvio o contesto locale senza valore candidato.",
+        "why_not_resolved": "Lo stato di occupazione resta irrisolto.",
+    })
+    result["customer_decision_contract"]["field_states"] = {
+        "stato_occupativo": {"value": "DA VERIFICARE"},
+        "opponibilita_occupazione": {
+            "value": "NON VERIFICABILE",
+            "status": "LOW_CONFIDENCE",
+            "explanation": "Lo stato di occupazione resta irrisolto.",
+        },
+    }
+
+    apply_customer_facing_consistency_sweep(result)
+
+    oppon = result["field_states"]["opponibilita_occupazione"]
+    assert oppon["value"] == "NON VERIFICABILE"
+    assert oppon["status"] == "LOW_CONFIDENCE"
+    safe_text = (
+        "L'immobile risulta occupato; l'opponibilità del titolo non è determinabile in modo "
+        "difendibile dalle evidenze disponibili. Verificare titolo di occupazione, data certa, "
+        "registrazione e opponibilità verso la procedura."
+    )
+    assert oppon["explanation"] == safe_text
+    assert oppon["explanation_it"] == safe_text
+    assert oppon["verify_next_it"] == safe_text
+    assert oppon["why_not_resolved"] == (
+        "La perizia conferma l'occupazione, ma non basta per stabilire l'opponibilità del titolo. "
+        "Servono titolo, data certa, registrazione e rapporto con la procedura."
+    )
+    assert result["customer_decision_contract"]["field_states"]["opponibilita_occupazione"] == oppon
+    assert _collect_customer_facing_bad_text_hits(result) == []
+
+
+def test_semantic_dedup_keeps_occupato_and_opponibilita_separate():
+    result = _make_base_result_for_qa()
+    duplicate_cards = [
+        {"headline_it": "Immobile occupato.", "severity": "AMBER", "family": "occupancy"},
+        {"headline_it": "Stato occupativo: OCCUPATO.", "severity": "RED", "family": "occupancy"},
+        {
+            "headline_it": "Opponibilità occupazione: NON VERIFICABILE.",
+            "severity": "RED",
+            "family": "occupancy",
+        },
+        {
+            "headline_it": "Stato occupativo: OCCUPATO - Bene 2.",
+            "severity": "RED",
+            "family": "occupancy",
+            "scope": {"level": "bene", "bene_number": 2},
+        },
+        {"headline_it": "Regolarità urbanistica: DA VERIFICARE.", "severity": "AMBER", "family": "urbanistica"},
+    ]
+    result["issues"] = [card.copy() for card in duplicate_cards]
+    result["red_flags_operativi"] = [
+        {"flag_it": "Immobile occupato.", "severity": "AMBER", "category": "occupancy"},
+        {"flag_it": "Stato occupativo: OCCUPATO.", "severity": "RED", "category": "occupancy"},
+        {"flag_it": "Opponibilità occupazione: NON VERIFICABILE.", "severity": "RED", "category": "occupancy"},
+    ]
+    result["section_11_red_flags"] = [
+        {"flag_it": "Immobile occupato.", "severity": "AMBER", "category": "occupancy"},
+        {"flag_it": "Stato occupativo: OCCUPATO.", "severity": "RED", "category": "occupancy"},
+    ]
+
+    apply_customer_facing_consistency_sweep(result)
+
+    issue_headlines = [issue["headline_it"] for issue in result["issues"]]
+    assert issue_headlines.count("Immobile occupato.") == 1
+    assert "Stato occupativo: OCCUPATO." not in issue_headlines
+    assert "Opponibilità occupazione: NON VERIFICABILE." in issue_headlines
+    assert "Stato occupativo: OCCUPATO - Bene 2." in issue_headlines
+    assert "Regolarità urbanistica: DA VERIFICARE." in issue_headlines
+    assert result["issues"][0]["severity"] == "RED"
+    opp_issue = next(i for i in result["issues"] if i["headline_it"].startswith("Opponibilità"))
+    assert opp_issue["severity"] == "AMBER"
+
+    red_flag_titles = [flag["flag_it"] for flag in result["red_flags_operativi"]]
+    assert red_flag_titles == [
+        "Immobile occupato.",
+        "Opponibilità occupazione: NON VERIFICABILE.",
+    ]
+    assert result["red_flags_operativi"][0]["severity"] == "RED"
+    assert result["red_flags_operativi"][1]["severity"] == "AMBER"
+
+    section_11_titles = [flag["flag_it"] for flag in result["section_11_red_flags"]]
+    assert section_11_titles == ["Immobile occupato."]
+
+
+def test_issues_occupancy_duplicate_removed_but_opponibilita_kept():
+    result = _make_base_result_for_qa()
+    result["issues"] = [
+        {
+            "headline_it": "Immobile occupato.",
+            "severity": "RED",
+        },
+        {"headline_it": "Stato occupativo: OCCUPATO.", "severity": "RED"},
+        {
+            "headline_it": "Opponibilità occupazione: NON VERIFICABILE.",
+            "severity": "AMBER",
+        },
+        {"headline_it": "Agibilità/abitabilità: DA VERIFICARE.", "severity": "AMBER"},
+        {"headline_it": "Regolarità urbanistica: DA VERIFICARE.", "severity": "AMBER"},
+    ]
+
+    apply_customer_facing_consistency_sweep(result)
+
+    headlines = [issue["headline_it"] for issue in result["issues"]]
+    assert headlines == [
+        "Immobile occupato.",
+        "Opponibilità occupazione: NON VERIFICABILE.",
+        "Agibilità/abitabilità: DA VERIFICARE.",
+        "Regolarità urbanistica: DA VERIFICARE.",
+    ]
+    cdc_headlines = [
+        issue["headline_it"]
+        for issue in result["customer_decision_contract"]["issues"]
+    ]
+    assert cdc_headlines == headlines
+
+
+def test_plain_issue_cards_dedup_occupancy_by_title_ignores_evidence_bene():
+    result = _make_base_result_for_qa()
+    result["issues"] = [
+        {
+            "headline_it": "Immobile occupato.",
+            "severity": "RED",
+            "evidence": [{"page": 1, "quote": "BENE N° 1 - immobile occupato."}],
+        },
+        {
+            "headline_it": "Stato occupativo: OCCUPATO.",
+            "severity": "RED",
+            "evidence": [{"page": 1, "quote": "BENE N° 1 - stato occupativo occupato."}],
+        },
+        {"headline_it": "Agibilità: DA VERIFICARE.", "severity": "AMBER"},
+        {"headline_it": "Opponibilità occupazione: NON VERIFICABILE.", "severity": "AMBER"},
+        {"headline_it": "Regolarità urbanistica: NON CONFORME / GRAVE.", "severity": "RED"},
+    ]
+
+    apply_customer_facing_consistency_sweep(result)
+
+    headlines = [issue["headline_it"] for issue in result["issues"]]
+    occupancy_headlines = [
+        headline
+        for headline in headlines
+        if headline in ("Immobile occupato.", "Stato occupativo: OCCUPATO.")
+    ]
+    assert occupancy_headlines == ["Immobile occupato."]
+    assert "Opponibilità occupazione: NON VERIFICABILE." in headlines
+    assert "Agibilità: DA VERIFICARE." in headlines
+    assert "Regolarità urbanistica: NON CONFORME / GRAVE." in headlines
+
+
+def test_plain_issue_cards_keep_true_per_bene_titled_occupancy_cards():
+    result = _make_base_result_for_qa()
+    result["issues"] = [
+        {"headline_it": "Immobile occupato.", "severity": "RED"},
+        {"headline_it": "Bene N° 2 occupato.", "severity": "RED"},
+    ]
+
+    apply_customer_facing_consistency_sweep(result)
+
+    headlines = [issue["headline_it"] for issue in result["issues"]]
+    assert "Immobile occupato." in headlines
+    assert "Bene N° 2 occupato." in headlines
+
+
+def test_issues_occupancy_duplicate_removed_even_without_code_or_category():
+    result = _make_base_result_for_qa()
+    result["issues"] = [
+        {"headline_it": "Immobile occupato.", "severity": "AMBER"},
+        {"headline_it": "Stato occupativo: OCCUPATO.", "severity": "RED"},
+        {"headline_it": "Opponibilità occupazione: NON VERIFICABILE.", "severity": "RED"},
+        {"headline_it": "Stato occupativo: OCCUPATO - Bene 2.", "severity": "RED"},
+    ]
+
+    apply_customer_facing_consistency_sweep(result)
+
+    headlines = [issue["headline_it"] for issue in result["issues"]]
+    assert headlines == [
+        "Immobile occupato.",
+        "Opponibilità occupazione: NON VERIFICABILE.",
+        "Stato occupativo: OCCUPATO - Bene 2.",
+    ]
+    assert result["issues"][0]["severity"] == "RED"
+    assert result["issues"][1]["severity"] == "AMBER"
+    cdc_headlines = [
+        issue["headline_it"]
+        for issue in result["customer_decision_contract"]["issues"]
+    ]
+    assert cdc_headlines == headlines
+
+
+def test_customer_bad_hits_detects_stale_occupancy_and_urbanistica_projection():
+    result = _make_base_result_for_qa()
+    result["field_states"]["stato_occupativo"]["value"] = "OCCUPATO"
+    result["field_states"]["regolarita_urbanistica"]["value"] = "NON CONFORME / GRAVE"
+    result["issues"] = [
+        {
+            "headline_it": "Stato occupativo.",
+            "explanation_it": "Lo stato di occupazione resta irrisolto.",
+            "severity": "RED",
+        },
+        {
+            "headline_it": "Regolarità urbanistica: DA VERIFICARE.",
+            "severity": "AMBER",
+        },
+    ]
+
+    hits = _collect_customer_facing_bad_text_hits(result)
+    patterns = {hit["pattern"] for hit in hits}
+    assert "occupancy_stale_unresolved_after_occupied" in patterns
+    assert "urbanistica_da_verificare_after_grave" in patterns
+
+
+def test_full_consistency_sweep_syncs_cdc_after_projection_fixes():
+    result = _make_base_result_for_qa()
+    result["field_states"]["stato_occupativo"].update({
+        "value": "OCCUPATO",
+        "explanation_it": "Lo stato di occupazione resta irrisolto.",
+        "why_not_resolved": "Campo resta aperto.",
+    })
+    result["field_states"]["opponibilita_occupazione"].update({
+        "value": "NON VERIFICABILE",
+        "status": "LOW_CONFIDENCE",
+        "explanation_it": "Lo stato di occupazione resta irrisolto.",
+        "why_not_resolved": "Rinvio o contesto locale senza valore candidato.",
+    })
+    result["field_states"]["regolarita_urbanistica"].update({
+        "value": "NON CONFORME / GRAVE",
+        "status": "FOUND",
+    })
+    result["issues"] = [
+        {"headline_it": "Immobile occupato.", "severity": "AMBER", "family": "occupancy"},
+        {"headline_it": "Stato occupativo: OCCUPATO.", "severity": "RED", "family": "occupancy"},
+        {"headline_it": "Regolarità urbanistica: DA VERIFICARE.", "severity": "AMBER", "family": "urbanistica"},
+    ]
+    result["red_flags_operativi"] = [
+        {"flag_it": "Regolarità urbanistica: DA VERIFICARE.", "severity": "AMBER", "category": "urbanistica"}
+    ]
+    result["section_2_decisione_rapida"]["checks_it"] = ["Regolarità urbanistica: DA VERIFICARE."]
+    result["summary_for_client_bundle"]["checks_it"] = ["Regolarità urbanistica: DA VERIFICARE."]
+    result["customer_decision_contract"].update({
+        "field_states": {
+            "stato_occupativo": {"value": "DA VERIFICARE", "explanation_it": "Stale"},
+            "opponibilita_occupazione": {
+                "value": "NON VERIFICABILE",
+                "status": "LOW_CONFIDENCE",
+                "explanation_it": "Lo stato di occupazione resta irrisolto.",
+            },
+            "regolarita_urbanistica": {"value": "DA VERIFICARE"},
+        },
+        "issues": [{"headline_it": "Stato occupativo: OCCUPATO.", "severity": "RED"}],
+        "red_flags_operativi": [{"flag_it": "Regolarità urbanistica: DA VERIFICARE.", "severity": "AMBER"}],
+        "summary_for_client_bundle": {"checks_it": ["Regolarità urbanistica: DA VERIFICARE."]},
+    })
+
+    apply_customer_facing_consistency_sweep(result)
+
+    cdc = result["customer_decision_contract"]
+    assert cdc["field_states"]["stato_occupativo"]["explanation_it"] == (
+        "La perizia indica che l'immobile risulta occupato. "
+        "L'opponibilità del titolo deve essere verificata separatamente."
+    )
+    assert cdc["field_states"]["regolarita_urbanistica"]["value"] == "NON CONFORME / GRAVE"
+    assert cdc["field_states"]["opponibilita_occupazione"]["explanation_it"] == (
+        "L'immobile risulta occupato; l'opponibilità del titolo non è determinabile in modo "
+        "difendibile dalle evidenze disponibili. Verificare titolo di occupazione, data certa, "
+        "registrazione e opponibilità verso la procedura."
+    )
+    assert cdc["field_states"]["opponibilita_occupazione"]["why_not_resolved"] == (
+        "La perizia conferma l'occupazione, ma non basta per stabilire l'opponibilità del titolo. "
+        "Servono titolo, data certa, registrazione e rapporto con la procedura."
+    )
+    cdc_issue_titles = [issue["headline_it"] for issue in cdc["issues"]]
+    assert cdc_issue_titles == [
+        "Immobile occupato.",
+        "Regolarità urbanistica: NON CONFORME / GRAVE.",
+    ]
+    assert cdc["red_flags_operativi"][0]["severity"] == "RED"
+    assert cdc["summary_for_client_bundle"]["checks_it"] == [
+        "Regolarità urbanistica: NON CONFORME / GRAVE."
+    ]
+    assert cdc["decision_rapida_client"]["checks_it"] == [
+        "Regolarità urbanistica: NON CONFORME / GRAVE."
+    ]
+
+    hits = _collect_customer_facing_bad_text_hits(result)
+    assert hits == []
+
+
 def test_live_via_nuova_style_payload_has_no_customer_facing_bad_hits():
     """Full analysis_f55750bc3f91-style payload must have zero bad hits after the gate sweep."""
     result = _make_base_result_for_qa()

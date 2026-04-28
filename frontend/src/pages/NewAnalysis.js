@@ -239,7 +239,7 @@ const NewAnalysis = () => {
         headers: {
           'Content-Type': 'multipart/form-data',
         },
-        timeout: 300000 // 5 minute timeout for large documents
+        timeout: 720000 // 12 minute timeout for large/OCR-heavy perizie
       });
 
       clearUploadTimers();
@@ -356,24 +356,24 @@ const NewAnalysis = () => {
                         Tempo trascorso: <span className="font-mono text-gold">{formatElapsed(elapsedSec)}</span>
                       </p>
                       <p className="text-xs text-zinc-500">Elapsed: {formatElapsed(elapsedSec)}</p>
-                      <p className="text-sm text-zinc-300">Tempo tipico: 45–120s</p>
-                      <p className="text-xs text-zinc-500">Typical time: 45–120s</p>
+                      <p className="text-sm text-zinc-300">Tempo tipico: alcuni minuti per documenti lunghi o con OCR</p>
+                      <p className="text-xs text-zinc-500">Typical time: several minutes for long or OCR-heavy documents</p>
                       {awaitingResponse && elapsedSec > 120 ? (
                         <>
                           <p className="text-sm text-amber-300">
-                            Sta richiedendo più del solito. Documento complesso o server occupato.
+                            Analisi in corso. Per perizie lunghe o con OCR può richiedere alcuni minuti. Non chiudere questa pagina.
                           </p>
                           <p className="text-xs text-amber-200/80">
-                            Taking longer than usual. Complex document or server busy.
+                            Analysis in progress. Large or OCR-heavy reports may take several minutes. Do not close this page.
                           </p>
                         </>
                       ) : (
                         <>
                           <p className="text-sm text-zinc-300">
-                            La durata dipende da pagine, qualità del PDF e carico del server.
+                            Analisi in corso. Per perizie lunghe o con OCR può richiedere alcuni minuti. Non chiudere questa pagina.
                           </p>
                           <p className="text-xs text-zinc-500">
-                            Duration depends on pages, PDF quality, and server load.
+                            Analysis in progress. Large or OCR-heavy reports may take several minutes. Do not close this page.
                           </p>
                         </>
                       )}
