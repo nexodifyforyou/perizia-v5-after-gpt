@@ -16167,7 +16167,7 @@ async def analyze_perizia(request: Request, file: UploadFile = File(...)):
     try:
         qa_meta = apply_customer_contract_qa_gate(
             result,
-            raw_text=full_text[:100000] if isinstance(full_text, str) else None,
+            raw_text=full_text if isinstance(full_text, str) else None,
             internal_runtime=result.get("verifier_runtime"),
         )
         logger.info(

@@ -20,6 +20,8 @@ import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Set, Tuple
 
+from semantic_repair_gates import apply_semantic_repair_gates
+
 # ---------------------------------------------------------------------------
 # Environment configuration (all overridable via env vars)
 # ---------------------------------------------------------------------------
@@ -325,7 +327,7 @@ def apply_customer_contract_qa_gate(
         meta = _empty_qa_gate("PASS", "QA_GATE_ENABLED=0 — gate disabled by configuration")
         meta["llm_used"] = False
         attach_qa_gate_metadata(result, meta)
-        apply_final_safety_invariants(result, meta)
+        apply_final_safety_invariants(result, meta, raw_text=raw_text)
         return meta
 
     qa_report: Dict[str, Any] = _empty_qa_gate("PASS", "")
@@ -1370,9 +1372,23 @@ def apply_final_safety_invariants(
     _inv6_backfill_beni(result, qa_report, raw_text=raw_text, page_map=page_map)
     invariants_checked.append("INV-6:beni_backfill")
 
+    # INV-7 — semantic repair gates (repair-first money and asset inventory reconciliation)
+    semantic_meta = apply_semantic_repair_gates(result, raw_text=raw_text, page_map=page_map)
+    if semantic_meta.get("changed"):
+        qa_report["semantic_repair_gates"] = semantic_meta
+        _record_safety_correction(
+            qa_report,
+            "INV-7",
+            "SEMANTIC_REPAIR_GATES",
+            "Money and/or asset inventory projections were repaired from source evidence before final CDC sync.",
+        )
+        if qa_report.get("status") in ("PASS", "WARN"):
+            qa_report["status"] = "FAIL_CORRECTED"
+    invariants_checked.append("INV-7:semantic_repair_gates")
+
     # Customer-facing consistency sweep (Rules 2–5)
     apply_customer_facing_consistency_sweep(result, qa_report)
-    invariants_checked.append("INV-7:customer_facing_consistency_sweep")
+    invariants_checked.append("INV-8:customer_facing_consistency_sweep")
 
     qa_report["invariants_checked"] = invariants_checked
 
@@ -1900,15 +1916,30 @@ def _card_title_text(item: Dict[str, Any]) -> str:
         or item.get("flag_it")
         or item.get("killer")
         or item.get("title_it")
+        or item.get("title")
         or item.get("label_it")
+        or item.get("label")
         or ""
     ).strip()
 
 
+def _semantic_text_key(value: Any) -> str:
+    text = str(value or "").strip().lower()
+    text = (
+        text.replace("à", "a")
+        .replace("è", "e")
+        .replace("é", "e")
+        .replace("ì", "i")
+        .replace("ò", "o")
+        .replace("ù", "u")
+    )
+    text = re.sub(r"\s+", " ", text)
+    text = re.sub(r"[^\w\s:/€.-]", "", text)
+    return text.strip().rstrip(" .")
+
+
 def _normalized_card_title(item: Dict[str, Any]) -> str:
-    title = _card_title_text(item)
-    title = re.sub(r"\s+", " ", title).strip().lower()
-    return title.rstrip(" .")
+    return _semantic_text_key(_card_title_text(item))
 
 
 def _is_exact_primary_occupancy_card(item: Dict[str, Any]) -> bool:
@@ -1949,6 +1980,312 @@ def _has_per_bene_details(item: Dict[str, Any]) -> bool:
         any(item.get(key) for key in ("bene_number", "lot_number", "bene_label", "lot_label"))
         or _title_has_per_bene_details(item)
     )
+
+
+_SEMANTIC_CARD_SEVERITY_RANK = {
+    "BLOCKER": 50,
+    "CRITICAL": 50,
+    "RED": 40,
+    "ROSSO": 40,
+    "HIGH": 40,
+    "GRAVE": 40,
+    "AMBER": 30,
+    "YELLOW": 30,
+    "MEDIUM": 30,
+    "ATTENZIONE": 30,
+    "LOW": 20,
+    "INFO": 10,
+    "GREEN": 0,
+    "VERDE": 0,
+}
+
+
+def _semantic_card_severity_rank(value: Any) -> Optional[int]:
+    key = _semantic_text_key(value).replace(" ", "_").upper()
+    return _SEMANTIC_CARD_SEVERITY_RANK.get(key)
+
+
+def _semantic_card_family(item: Dict[str, Any]) -> str:
+    title = _semantic_text_key(_card_title_text(item))
+    structured = _semantic_text_key(
+        " ".join(
+            str(item.get(key) or "")
+            for key in ("family", "category", "theme", "type", "code", "issue_id")
+        )
+    )
+    blob = f"{structured} {title}"
+    if "opponibil" in blob:
+        return "opponibilita_occupazione"
+    if "agibil" in blob or "abitabil" in blob:
+        return "agibilita"
+    if "urbanistica" in blob or "difform" in blob or "sanatoria" in blob or "condono" in blob:
+        return "urbanistica"
+    if "occupat" in blob or "stato occupativo" in blob or "occupazione" in blob:
+        return "occupancy"
+    if "catastal" in blob or "catasto" in blob:
+        return "catastale"
+    explicit = _semantic_text_key(item.get("family") or item.get("category") or item.get("theme"))
+    return "" if explicit in ("", "legal", "issue", "red_flag", "redflag") else explicit
+
+
+def _is_money_or_cost_semantic_card(item: Dict[str, Any]) -> bool:
+    family = _semantic_text_key(item.get("family") or item.get("category") or item.get("theme") or item.get("type"))
+    title = _semantic_text_key(_card_title_text(item))
+    code = _semantic_text_key(item.get("code") or item.get("issue_id"))
+    blob = f"{family} {title} {code}"
+    return any(
+        token in blob
+        for token in (
+            "money", "cost", "costi", "costo", "oneri", "spese", "euro", "eur",
+            "€", "stima", "prezzo", "valore", "pricing", "valuation",
+        )
+    )
+
+
+def _coerce_page(value: Any) -> Optional[int]:
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        return value
+    if isinstance(value, float) and value.is_integer():
+        return int(value)
+    if isinstance(value, str):
+        stripped = value.strip()
+        if re.fullmatch(r"\d+", stripped):
+            return int(stripped)
+    return None
+
+
+def _merge_pages_from_value(value: Any, pages: List[int]) -> None:
+    page = _coerce_page(value)
+    if page is not None:
+        pages.append(page)
+        return
+    if isinstance(value, list):
+        for child in value:
+            _merge_pages_from_value(child, pages)
+    elif isinstance(value, dict):
+        for key, child in value.items():
+            if str(key).lower() in ("page", "pagina", "page_number"):
+                _merge_pages_from_value(child, pages)
+
+
+def _semantic_card_page_set(item: Dict[str, Any]) -> Tuple[int, ...]:
+    pages: List[int] = []
+    for key in ("page", "pagina", "page_number", "supporting_pages", "evidence_pages", "pages", "searched_pages"):
+        if key in item:
+            _merge_pages_from_value(item.get(key), pages)
+    evidence = item.get("evidence")
+    if isinstance(evidence, (list, dict)):
+        _merge_pages_from_value(evidence, pages)
+    return tuple(sorted({page for page in pages if page > 0}))
+
+
+def _semantic_card_asset_signature(item: Dict[str, Any]) -> Tuple[str, ...]:
+    refs: Set[str] = set()
+    scope = item.get("scope")
+    if isinstance(scope, dict):
+        for key, prefix in (("bene_number", "bene"), ("lot_number", "lotto")):
+            value = scope.get(key)
+            if value not in (None, ""):
+                refs.add(f"{prefix}:{value}")
+        scope_key = str(scope.get("scope_key") or "")
+        for prefix, number in re.findall(r"\b(bene|lotto|lot)\s*:?\s*(\d+)\b", scope_key, flags=re.I):
+            refs.add(f"{'lotto' if prefix.lower() == 'lot' else prefix.lower()}:{number}")
+
+    for key, prefix in (("bene_number", "bene"), ("lot_number", "lotto")):
+        value = item.get(key)
+        if value not in (None, ""):
+            refs.add(f"{prefix}:{value}")
+
+    texts: List[str] = [_card_title_text(item)]
+    for ev in item.get("evidence") or []:
+        if isinstance(ev, dict):
+            texts.append(str(ev.get("quote") or ev.get("text") or ev.get("snippet") or ""))
+    blob = _semantic_text_key(" ".join(texts))
+    for prefix, number in re.findall(
+        r"\b(bene|lotto|lot)\s*(?:n\.?|n[°º]|numero)?\s*(\d+)\b",
+        blob,
+        flags=re.I,
+    ):
+        refs.add(f"{'lotto' if prefix.lower() == 'lot' else prefix.lower()}:{number}")
+    return tuple(sorted(refs))
+
+
+def _semantic_card_status_partition(item: Dict[str, Any]) -> str:
+    if _semantic_card_severity_rank(item.get("severity")) is not None:
+        return ""
+    if _semantic_card_severity_rank(item.get("status")) is not None:
+        return ""
+    return _semantic_text_key(item.get("status"))
+
+
+def _semantic_card_dedup_key(item: Dict[str, Any]) -> Optional[Tuple[str, str, Tuple[int, ...], Tuple[str, ...], str]]:
+    title = _normalized_card_title(item)
+    if not title or _is_money_or_cost_semantic_card(item):
+        return None
+    return (
+        _semantic_card_family(item),
+        title,
+        _semantic_card_page_set(item),
+        _semantic_card_asset_signature(item),
+        _semantic_card_status_partition(item),
+    )
+
+
+def _semantic_card_quality(item: Dict[str, Any]) -> Tuple[int, int, int, int]:
+    evidence_count = len(item.get("evidence") or []) if isinstance(item.get("evidence"), list) else 0
+    page_count = len(_semantic_card_page_set(item))
+    action_score = max(_semantic_card_action_quality(item, key) for key in ("action_it", "action", "verify_next_it"))
+    detail_len = max(
+        len(str(item.get(key) or ""))
+        for key in ("explanation_it", "explanation", "detail_it", "reason_it")
+    )
+    return (evidence_count, page_count, action_score, detail_len)
+
+
+def _semantic_card_action_quality(item: Dict[str, Any], key: str) -> int:
+    value = str(item.get(key) or "").strip()
+    if not value:
+        return 0
+    title = _normalized_card_title(item)
+    action = _semantic_text_key(value)
+    if not action:
+        return 0
+    if action == title:
+        return 1
+    if len(action) <= 12:
+        return 1
+    if action in title or title in action:
+        return 2
+    return 3
+
+
+def _merge_semantic_evidence(first: Any, second: Any) -> List[Any]:
+    merged: List[Any] = []
+    seen: Set[Tuple[Any, str]] = set()
+    first_items = first if isinstance(first, list) else []
+    second_items = second if isinstance(second, list) else []
+    for ev in first_items + second_items:
+        if not isinstance(ev, dict):
+            key = (None, _semantic_text_key(ev))
+        else:
+            key = (
+                _coerce_page(ev.get("page") or ev.get("pagina") or ev.get("page_number")),
+                _semantic_text_key(ev.get("quote") or ev.get("text") or ev.get("snippet") or ev),
+            )
+        if key in seen:
+            continue
+        seen.add(key)
+        merged.append(copy.deepcopy(ev))
+    return merged
+
+
+def _merged_page_list(first: Any, second: Any) -> List[int]:
+    pages: List[int] = []
+    _merge_pages_from_value(first, pages)
+    _merge_pages_from_value(second, pages)
+    out: List[int] = []
+    seen: Set[int] = set()
+    for page in pages:
+        if page <= 0 or page in seen:
+            continue
+        seen.add(page)
+        out.append(page)
+    return out
+
+
+def _merge_string_list(first: Any, second: Any) -> List[str]:
+    out: List[str] = []
+    seen: Set[str] = set()
+    first_items = first if isinstance(first, list) else []
+    second_items = second if isinstance(second, list) else []
+    for value in first_items + second_items:
+        if not isinstance(value, str):
+            continue
+        key = _semantic_text_key(value)
+        if not key or key in seen:
+            continue
+        seen.add(key)
+        out.append(value)
+    return out
+
+
+def _stronger_semantic_severity(first: Any, second: Any) -> Any:
+    first_rank = _semantic_card_severity_rank(first)
+    second_rank = _semantic_card_severity_rank(second)
+    if first_rank is None:
+        return second if second_rank is not None else first
+    if second_rank is None:
+        return first
+    return second if second_rank > first_rank else first
+
+
+def _merge_semantic_duplicate_card(existing: Dict[str, Any], duplicate: Dict[str, Any]) -> Dict[str, Any]:
+    if _semantic_card_quality(duplicate) > _semantic_card_quality(existing):
+        merged = copy.deepcopy(duplicate)
+        other = existing
+    else:
+        merged = copy.deepcopy(existing)
+        other = duplicate
+
+    if "severity" in existing or "severity" in duplicate:
+        merged["severity"] = _stronger_semantic_severity(existing.get("severity"), duplicate.get("severity"))
+    if "status" in existing or "status" in duplicate:
+        stronger_status = _stronger_semantic_severity(existing.get("status"), duplicate.get("status"))
+        if stronger_status not in (None, ""):
+            merged["status"] = stronger_status
+
+    if isinstance(existing.get("evidence"), list) or isinstance(duplicate.get("evidence"), list):
+        merged["evidence"] = _merge_semantic_evidence(existing.get("evidence"), duplicate.get("evidence"))
+    for key in ("supporting_pages", "evidence_pages", "pages", "searched_pages"):
+        if key in existing or key in duplicate:
+            merged[key] = _merged_page_list(existing.get(key), duplicate.get(key))
+    for key in ("evidence_quotes", "quotes"):
+        if key in existing or key in duplicate:
+            merged[key] = _merge_string_list(existing.get(key), duplicate.get(key))
+
+    for key in ("action_it", "action", "verify_next_it", "verify_next"):
+        if _semantic_card_action_quality(other, key) > _semantic_card_action_quality(merged, key):
+            merged[key] = other.get(key)
+
+    return merged
+
+
+def _dedup_customer_semantic_card_list(items: List[Any]) -> List[Any]:
+    out: List[Any] = []
+    index_by_key: Dict[Tuple[str, str, Tuple[int, ...], Tuple[str, ...], str], int] = {}
+    for item in items:
+        if not isinstance(item, dict):
+            out.append(item)
+            continue
+        key = _semantic_card_dedup_key(item)
+        if key is None:
+            out.append(item)
+            continue
+        existing_index = index_by_key.get(key)
+        if existing_index is None:
+            index_by_key[key] = len(out)
+            out.append(item)
+            continue
+        existing = out[existing_index]
+        if isinstance(existing, dict):
+            out[existing_index] = _merge_semantic_duplicate_card(existing, item)
+    return out
+
+
+def _dedup_final_customer_semantic_cards(result: Dict[str, Any]) -> None:
+    for key in ("issues", "red_flags_operativi", "section_11_red_flags"):
+        items = result.get(key)
+        if isinstance(items, list):
+            result[key] = _dedup_customer_semantic_card_list(items)
+
+    legal_killers = result.get("section_9_legal_killers")
+    if isinstance(legal_killers, dict):
+        for list_key in ("items", "top_items"):
+            items = legal_killers.get(list_key)
+            if isinstance(items, list):
+                legal_killers[list_key] = _dedup_customer_semantic_card_list(items)
 
 
 def _set_card_title(item: Dict[str, Any], title: str) -> None:
@@ -1992,11 +2329,12 @@ def _dedup_occupancy_cards(items: List[Any]) -> List[Any]:
 
 
 def _dedup_semantic_issue_cards(result: Dict[str, Any]) -> None:
-    """Remove generic duplicate occupancy projections while preserving opponibility and per-bene cards."""
+    """Remove duplicate customer-facing semantic cards without collapsing distinct legal facts."""
     for key in ("issues", "red_flags_operativi", "section_11_red_flags"):
         items = result.get(key)
         if isinstance(items, list):
             result[key] = _dedup_occupancy_cards(items)
+    _dedup_final_customer_semantic_cards(result)
 
 
 def _sync_cdc_full_sections(result: Dict[str, Any]) -> None:
@@ -2009,7 +2347,8 @@ def _sync_cdc_full_sections(result: Dict[str, Any]) -> None:
         "red_flags_operativi", "section_11_red_flags",
         "section_9_legal_killers",
         "semaforo_generale", "section_1_semaforo_generale",
-        "lots", "lot_index", "beni",
+        "lots", "lot_index", "beni", "lots_count", "is_multi_lot", "detail_scope",
+        "case_header", "report_header", "asset_inventory_repair", "money_semantic_repair",
         "summary_for_client", "summary_for_client_bundle",
     )
     for key in direct_mirror:
@@ -2043,7 +2382,7 @@ def apply_customer_facing_consistency_sweep(
     Rule 3: replace ASSENTE agibilità claims when field state is DA VERIFICARE.
     Rule 4: normalize OCCUPATO projections and propagate OCCUPATO to lots.
     Rule 4B: normalize opponibility text when occupancy is known but opponibility is unknown.
-    Rule 4C: project severe urbanistica and deduplicate semantic occupancy cards.
+    Rule 4C: project severe urbanistica and deduplicate final customer-facing semantic cards.
     Rule 5: deep-sync customer_decision_contract with corrected root sections.
     """
     # Rule 2: buyer-side label cleanup in money_box items
@@ -2244,6 +2583,7 @@ def attach_qa_gate_metadata(result: Dict[str, Any], qa_report: Dict[str, Any]) -
         "corrections_applied": qa_report.get("corrections_applied", []),
         "contradictions_detected": qa_report.get("contradictions_detected", []),
         "invariants_checked": qa_report.get("invariants_checked", []),
+        "semantic_repair_gates": qa_report.get("semantic_repair_gates", {}),
         "section_verdicts": qa_report.get("section_verdicts", {}),
         "errors": qa_report.get("errors", []),
         "context_debug": qa_report.get("context_debug", {}),

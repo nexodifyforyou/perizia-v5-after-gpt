@@ -1589,6 +1589,19 @@ _MONEY_AMOUNT_RE = re.compile(
     r"(?:\s*€)?",
     re.I,
 )
+_EXPLICIT_EURO_AMOUNT_RE = re.compile(
+    r"(?i)(?:"
+    r"(?:€\.?\s*|(?:euro|eur)\s+)"
+    r"(?P<prefix>[0-9]{1,3}(?:[\.\s][0-9]{3})*(?:,[0-9]{1,2})?|[0-9]{4,}(?:,[0-9]{1,2})?|[0-9]{1,3}(?:,[0-9]{1,2})?)"
+    r"|(?P<suffix>[0-9]{1,3}(?:[\.\s][0-9]{3})*(?:,[0-9]{1,2})?|[0-9]{4,}(?:,[0-9]{1,2})?|[0-9]{1,3}(?:,[0-9]{1,2})?)"
+    r"\s*(?:€|(?:euro|eur)\b)"
+    r")",
+    re.I,
+)
+_MONEY_IDENTIFIER_CONTEXT_RE = re.compile(
+    r"(?i)\b(?:sub\.?|subaltern[oi]|fg\.?|foglio|part\.?|particella|mapp\.?|mappale|"
+    r"lotto|bene\s*(?:n\.?|n[°º])?|pag\.?|pagina|cat(?:egoria)?\.?|classe)\b"
+)
 
 # Matches condominium periodic/aggregate amounts that are NOT defensible as explicit buyer costs.
 # "importo medio annuo delle spese condominiali" = annual average (not a one-time buyer cost)
@@ -1684,7 +1697,17 @@ def _is_valid_money_amount_match(text: str, match: re.Match) -> bool:
     after = text[end:min(len(text), end + 12)].lower()
     context = f"{before}{raw}{after}"
 
-    if "€" in context or "euro" in context:
+    identifier_context = text[max(0, start - 24): min(len(text), end + 24)]
+    if _MONEY_IDENTIFIER_CONTEXT_RE.search(identifier_context) and not ("€" in raw or re.search(r"(?i)\beuro\b|\beur\b", raw)):
+        return False
+
+    direct_currency = (
+        "€" in raw
+        or re.search(r"(?i)(?:euro|eur)\s*$", before) is not None
+        or re.search(r"(?i)^\s*(?:€|euro|eur)\b", after) is not None
+    )
+
+    if direct_currency:
         return True
 
     if re.search(r"\d{1,3}(?:[\.\s]\d{3})+(?:,\d{1,2})?", amount_text):
@@ -1752,17 +1775,15 @@ def _extract_amount_after_term(text: str, term_pattern: str) -> Optional[float]:
     if not term_match:
         return None
     window = text[term_match.end(): min(len(text), term_match.end() + 110)]
-    for amount_match in _MONEY_AMOUNT_RE.finditer(window):
-        if _is_valid_money_amount_match(window, amount_match):
-            return _parse_it_money_amount(amount_match.group(1))
+    for amount_match in _EXPLICIT_EURO_AMOUNT_RE.finditer(window):
+        raw_amount = amount_match.group("prefix") or amount_match.group("suffix")
+        if raw_amount:
+            return _parse_it_money_amount(raw_amount)
     before_window = text[max(0, term_match.start() - 45): term_match.start()]
-    before_matches = [
-        amount_match
-        for amount_match in _MONEY_AMOUNT_RE.finditer(before_window)
-        if _is_valid_money_amount_match(before_window, amount_match)
-    ]
+    before_matches = list(_EXPLICIT_EURO_AMOUNT_RE.finditer(before_window))
     if before_matches:
-        return _parse_it_money_amount(before_matches[-1].group(1))
+        raw_amount = before_matches[-1].group("prefix") or before_matches[-1].group("suffix")
+        return _parse_it_money_amount(raw_amount)
     return None
 
 

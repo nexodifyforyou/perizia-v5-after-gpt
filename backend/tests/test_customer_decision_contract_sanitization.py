@@ -1,4 +1,5 @@
 import json
+import copy
 import sys
 import unittest.mock as mock
 from pathlib import Path
@@ -17,6 +18,7 @@ from customer_decision_contract import (
     _project_certification_block_to_beni,
     _dedup_legal_killer_items,
     _build_legal_killers,
+    _extract_amount_after_term,
 )
 
 
@@ -1077,6 +1079,294 @@ def _make_base_result_for_qa(**overrides) -> dict:
     }
     base.update(overrides)
     return base
+
+
+def _money_customer_label_values(item: dict) -> list[str]:
+    values = []
+    for key, value in item.items():
+        if not isinstance(key, str) or not isinstance(value, str):
+            continue
+        if any(blocked in key.lower() for blocked in ("evidence", "quote", "source", "fonte")):
+            continue
+        if any(marker in key.lower() for marker in ("label", "title", "headline", "display")):
+            values.append(value)
+    return values
+
+
+def _assert_money_labels_contain_only_amount(item: dict, expected_amount: str, *stale_amounts: str) -> None:
+    values = _money_customer_label_values(item)
+    assert values
+    for value in values:
+        assert expected_amount in value
+        for stale_amount in stale_amounts:
+            assert stale_amount not in value
+
+
+def _assert_money_labels_have_no_amount(item: dict, *stale_amounts: str) -> None:
+    values = _money_customer_label_values(item)
+    assert values
+    for value in values:
+        for stale_amount in stale_amounts:
+            assert stale_amount not in value
+        assert "€" not in value
+
+
+def test_upstream_money_extraction_prefers_explicit_euro_over_identifier_numbers():
+    text = "Regolarizzazione urbanistica sub. 6, foglio 31, particella 433: € 3.000,00."
+    assert _extract_amount_after_term(text, r"regolarizzazione\s+urbanistica") == 3000
+
+    text = "Oneri di regolarizzazione urbanistica sub. 31: Euro 5.032,00."
+    assert _extract_amount_after_term(text, r"oneri\s+di\s+regolarizzazione\s+urbanistica") == 5032
+
+    text = "Regolarizzazione urbanistica: sub. 6, foglio 31, categoria A/2, pag. 16."
+    assert _extract_amount_after_term(text, r"regolarizzazione\s+urbanistica") is None
+
+
+def test_money_semantic_repair_gate_repairs_sub31_identifier_amount_and_all_display_labels():
+    result = _make_base_result_for_qa(
+        lots=[{"lot_number": 1, "titolo": "Lotto unico"}],
+        lot_index=[{"lot": 1, "label": "Lotto unico"}],
+        lots_count=1,
+        is_multi_lot=False,
+    )
+    quote = "Oneri di regolarizzazione urbanistica relativi al sub. 31: €.5.032,00."
+    bad_item = {
+        "label_it": "Regolarizzazione: € 31",
+        "label_en": "Regolarizzazione: € 31",
+        "label": "Regolarizzazione: € 31",
+        "title": "Regolarizzazione: € 31",
+        "title_it": "Regolarizzazione: € 31",
+        "title_en": "Regolarizzazione: € 31",
+        "headline_it": "Regolarizzazione: € 31",
+        "headline_en": "Regolarizzazione: € 31",
+        "display_label": "Regolarizzazione: € 31",
+        "customer_display_label": "Regolarizzazione: € 31",
+        "classification": "cost_signal_to_verify",
+        "amount_eur": 31,
+        "stima_euro": None,
+        "additive_to_extra_total": False,
+        "evidence": [{"page": 3, "quote": quote}],
+    }
+    result["section_3_money_box"]["items"] = [copy.deepcopy(bad_item)]
+    result["section_3_money_box"]["cost_signals_to_verify"] = [copy.deepcopy(bad_item)]
+    result["money_box"]["items"] = [copy.deepcopy(bad_item)]
+    result["money_box"]["cost_signals_to_verify"] = [copy.deepcopy(bad_item)]
+    result["customer_decision_contract"]["money_box"]["items"] = [copy.deepcopy(bad_item)]
+    result["customer_decision_contract"]["section_3_money_box"] = {"items": [copy.deepcopy(bad_item)]}
+
+    qa_report = {"status": "PASS", "corrections_applied": [], "errors": []}
+    apply_final_safety_invariants(
+        result,
+        qa_report,
+        page_map={3: quote},
+    )
+
+    for container in (result, result["customer_decision_contract"]):
+        for box_key in ("section_3_money_box", "money_box"):
+            item = container[box_key]["items"][0]
+            assert item["amount_eur"] == 5032
+            assert item["amount_status"] == "ANCHORED_EXPLICIT_EURO"
+            assert item["searched_pages"] == [3]
+            assert item["evidence"][0]["quote"] == quote
+            _assert_money_labels_contain_only_amount(item, "€ 5.032", "€ 31", "€31")
+
+    assert qa_report["status"] == "FAIL_CORRECTED"
+
+
+def test_money_semantic_repair_gate_repairs_sub6_identifier_amount_and_all_display_labels():
+    result = _make_base_result_for_qa()
+    quote = "Oneri di regolarizzazione urbanistica relativi al sub. 6 pari a € 3.000,00."
+    bad_item = {
+        "label_it": "Regolarizzazione: € 6",
+        "label_en": "Regolarizzazione: € 6",
+        "title": "Regolarizzazione: € 6",
+        "headline_en": "Regolarizzazione: € 6",
+        "display_label": "Regolarizzazione: € 6",
+        "classification": "cost_signal_to_verify",
+        "amount_eur": 6,
+        "stima_euro": None,
+        "additive_to_extra_total": False,
+        "evidence": [{"page": 3, "quote": quote}],
+    }
+    result["section_3_money_box"]["items"] = [copy.deepcopy(bad_item)]
+    result["section_3_money_box"]["qualitative_burdens"] = [copy.deepcopy(bad_item)]
+    result["money_box"]["items"] = [copy.deepcopy(bad_item)]
+    result["money_box"]["qualitative_burdens"] = [copy.deepcopy(bad_item)]
+
+    apply_final_safety_invariants(
+        result,
+        {"status": "PASS", "corrections_applied": [], "errors": []},
+        page_map={3: quote},
+    )
+
+    for container in (result, result["customer_decision_contract"]):
+        for box_key in ("section_3_money_box", "money_box"):
+            for list_key in ("items", "qualitative_burdens"):
+                item = container[box_key][list_key][0]
+                assert item["amount_eur"] == 3000
+                assert item["amount_status"] == "ANCHORED_EXPLICIT_EURO"
+                assert item["evidence"][0]["quote"] == quote
+                _assert_money_labels_contain_only_amount(item, "€ 3.000", "€ 6", "€6")
+
+
+def test_money_semantic_repair_gate_downgrades_identifier_without_defensible_euro_anchor():
+    result = _make_base_result_for_qa()
+    quote = "Regolarizzazione da verificare: foglio 31, particella 433, sub. 6, categoria C/6, pag. 16."
+    bad_item = {
+        "label_it": "Regolarizzazione urbanistica: € 6",
+        "label_en": "Regolarizzazione urbanistica: € 6",
+        "title": "Regolarizzazione urbanistica: € 6",
+        "title_en": "Regolarizzazione urbanistica: € 6",
+        "headline_it": "Regolarizzazione urbanistica: € 6",
+        "headline_en": "Regolarizzazione urbanistica: € 6",
+        "display_label": "Regolarizzazione urbanistica: € 6",
+        "classification": "cost_signal_to_verify",
+        "amount_eur": 6,
+        "evidence": [{"page": 7, "quote": quote}],
+    }
+    result["section_3_money_box"]["items"] = [copy.deepcopy(bad_item)]
+    result["section_3_money_box"]["cost_signals_to_verify"] = [copy.deepcopy(bad_item)]
+    result["money_box"]["items"] = [copy.deepcopy(bad_item)]
+    result["money_box"]["cost_signals_to_verify"] = [copy.deepcopy(bad_item)]
+
+    apply_final_safety_invariants(
+        result,
+        {"status": "PASS", "corrections_applied": [], "errors": []},
+        page_map={7: f"{quote} Data 01.05.2003."},
+    )
+
+    item = result["section_3_money_box"]["items"][0]
+    assert item["amount_eur"] is None
+    assert item["stima_euro"] is None
+    assert item["amount_status"] == "NON_QUANTIFICATO_IN_MODO_DIFENDIBILE"
+    assert item["searched_pages"] == [7]
+    assert item["manual_check_hint_it"]
+    assert item["evidence"][0]["page"] == 7
+    assert item["evidence"][0]["quote"] == quote
+    assert item["reason_it"]
+    for container in (result, result["customer_decision_contract"]):
+        for box_key in ("section_3_money_box", "money_box"):
+            for list_key in ("items", "cost_signals_to_verify"):
+                _assert_money_labels_have_no_amount(container[box_key][list_key][0], "€ 6", "€6")
+
+
+def test_money_semantic_repair_gate_keeps_valid_explicit_euro_amount():
+    result = _make_base_result_for_qa()
+    valid_item = {
+        "label_it": "Regolarizzazione urbanistica: € 5.032",
+        "classification": "cost_signal_to_verify",
+        "amount_eur": 5032,
+        "evidence": [{"page": 4, "quote": "Regolarizzazione urbanistica Euro 5.032,00."}],
+    }
+    result["section_3_money_box"]["items"] = [copy.deepcopy(valid_item)]
+    result["money_box"]["items"] = [copy.deepcopy(valid_item)]
+
+    apply_final_safety_invariants(
+        result,
+        {"status": "PASS", "corrections_applied": [], "errors": []},
+        page_map={4: "Regolarizzazione urbanistica Euro 5.032,00."},
+    )
+
+    item = result["section_3_money_box"]["items"][0]
+    assert item["amount_eur"] == 5032
+    assert item["amount_status"] == "ANCHORED_EXPLICIT_EURO"
+    assert "manual_check_hint_it" not in item
+
+
+def test_asset_inventory_repair_gate_rebuilds_multilot_apartment_and_garage_inventory():
+    result = _make_base_result_for_qa(
+        lots=[
+            {
+                "lot_number": 1,
+                "lot": 1,
+                "titolo": "Lotto Unico",
+                "tipologia": "Garage",
+                "beni": [{"bene_number": 1, "tipologia": "Garage"}],
+            }
+        ],
+        beni=[{"bene_number": 1, "tipologia": "Garage"}],
+        lot_index=[{"lot": 1, "label": "Lotto Unico", "tipologia": "Garage"}],
+        lots_count=1,
+        is_multi_lot=False,
+        detail_scope="SINGLE_ASSET",
+        case_header={"lotto": "Lotto Unico"},
+        report_header={"lotto": {"value": "Lotto Unico"}},
+    )
+
+    page_map = {
+        1: "LOTTO N. 1\nBene N° 1 - Appartamento in Via Roma, superficie mq 80, foglio 10 particella 20 sub. 6.",
+        2: "LOTTO N. 2\nBene N° 1 - Garage in Via Roma, superficie mq 18, foglio 10 particella 20 sub. 31.",
+    }
+    apply_final_safety_invariants(result, {"status": "PASS", "corrections_applied": [], "errors": []}, page_map=page_map)
+
+    assert result["lots_count"] == 2
+    assert result["is_multi_lot"] is True
+    assert result["detail_scope"] == "LOT_FIRST"
+    assert "unico" not in str(result["case_header"]["lotto"]).lower()
+    serialized_assets = json.dumps({"lots": result["lots"], "beni": result["beni"], "lot_index": result["lot_index"]}, ensure_ascii=False).lower()
+    assert "appartamento" in serialized_assets
+    assert "garage" in serialized_assets
+    assert len(result["lot_index"]) == 2
+    assert result["customer_decision_contract"]["lots_count"] == 2
+    assert result["customer_decision_contract"]["is_multi_lot"] is True
+
+
+def test_asset_inventory_repair_gate_keeps_single_lot_pertinenze_in_same_lot():
+    result = _make_base_result_for_qa(
+        lots=[{"lot_number": 1, "lot": 1, "titolo": "Lotto unico", "beni": [{"tipologia": "Appartamento"}]}],
+        beni=[{"tipologia": "Appartamento"}],
+        lot_index=[{"lot": 1, "label": "Lotto unico", "tipologia": "Appartamento"}],
+        lots_count=1,
+        is_multi_lot=False,
+        detail_scope="SINGLE_ASSET",
+    )
+    page_map = {
+        1: "LOTTO UNICO\nBene N° 1 - Appartamento con garage e cantina pertinenziale, superficie mq 90.",
+    }
+
+    apply_final_safety_invariants(result, {"status": "PASS", "corrections_applied": [], "errors": []}, page_map=page_map)
+
+    assert result["lots_count"] == 1
+    assert result["is_multi_lot"] is False
+    assert result["detail_scope"] == "BENE_FIRST"
+    serialized_assets = json.dumps({"lots": result["lots"], "beni": result["beni"]}, ensure_ascii=False).lower()
+    assert "appartamento" in serialized_assets
+    assert "garage" in serialized_assets
+    assert "cantina" in serialized_assets
+
+
+def test_asset_inventory_repair_gate_falls_back_when_lot_structure_is_ambiguous():
+    result = _make_base_result_for_qa(lots=[], beni=[], lot_index=[], lots_count=0, is_multi_lot=False)
+    page_map = {
+        1: "LOTTO UNICO - descrizione iniziale del compendio.",
+        2: "LOTTO N. 1 - Bene N° 1 Appartamento.",
+        3: "LOTTO N. 2 - Bene N° 1 Box.",
+    }
+
+    apply_final_safety_invariants(result, {"status": "PASS", "corrections_applied": [], "errors": []}, page_map=page_map)
+
+    fallback = result["asset_inventory_repair"]
+    assert fallback["asset_inventory_status"] == "NON_RISOLTO_IN_MODO_DIFENDIBILE"
+    assert fallback["searched_pages"] == [1, 2, 3]
+    assert fallback["detected_candidates"]
+    assert fallback["manual_check_hint_it"]
+
+
+def test_qa_gate_metadata_preserves_semantic_repair_details():
+    result = {}
+    attach_qa_gate_metadata(
+        result,
+        {
+            "status": "FAIL_CORRECTED",
+            "semantic_repair_gates": {
+                "changed": True,
+                "asset_inventory": {"status": "REPAIRED_SINGLE_LOT_ASSETS"},
+            },
+        },
+    )
+
+    assert result["qa_gate"]["semantic_repair_gates"]["changed"] is True
+    assert result["qa_gate"]["semantic_repair_gates"]["asset_inventory"]["status"] == "REPAIRED_SINGLE_LOT_ASSETS"
 
 
 # Test 1: LLM detects fake buyer-side total
@@ -2373,6 +2663,193 @@ def test_issues_occupancy_duplicate_removed_even_without_code_or_category():
         for issue in result["customer_decision_contract"]["issues"]
     ]
     assert cdc_headlines == headlines
+
+
+def test_final_semantic_dedup_collapses_duplicate_agibilita_issues_same_title_page_family():
+    result = _make_base_result_for_qa()
+    title = "Agibilità/abitabilità: DA VERIFICARE..."
+    result["issues"] = [
+        {
+            "issue_id": "agibilita_43af1d2775db",
+            "family": "agibilita",
+            "headline_it": title,
+            "severity": "AMBER",
+            "action_it": title,
+            "evidence": [{"page": 46, "quote": "Agibilità da verificare."}],
+            "supporting_pages": [46],
+        },
+        {
+            "issue_id": "agibilita_9187f8133f07",
+            "family": "agibilita",
+            "headline_it": title,
+            "severity": "AMBER",
+            "action_it": title,
+            "evidence": [{"page": 46, "quote": "Abitabilità da verificare."}],
+            "supporting_pages": [46],
+        },
+    ]
+
+    apply_customer_facing_consistency_sweep(result)
+
+    agibilita_issues = [
+        issue for issue in result["issues"]
+        if issue.get("family") == "agibilita" and issue.get("headline_it") == title
+    ]
+    assert len(agibilita_issues) == 1
+    assert agibilita_issues[0]["issue_id"] == "agibilita_43af1d2775db"
+    assert agibilita_issues[0]["supporting_pages"] == [46]
+    assert [ev["quote"] for ev in agibilita_issues[0]["evidence"]] == [
+        "Agibilità da verificare.",
+        "Abitabilità da verificare.",
+    ]
+
+
+def test_final_semantic_dedup_collapses_duplicate_agibilita_red_flags_and_section_11():
+    result = _make_base_result_for_qa()
+    title = "Agibilità/abitabilità: DA VERIFICARE..."
+    duplicate_flags = [
+        {
+            "flag_it": title,
+            "category": "agibilita",
+            "severity": "AMBER",
+            "evidence": [{"page": 46, "quote": "Agibilità da verificare."}],
+        },
+        {
+            "flag_it": title,
+            "category": "agibilita",
+            "severity": "RED",
+            "evidence": [{"page": 46, "quote": "Abitabilità da verificare."}],
+        },
+    ]
+    result["red_flags_operativi"] = [copy.deepcopy(flag) for flag in duplicate_flags]
+    result["section_11_red_flags"] = [copy.deepcopy(flag) for flag in duplicate_flags]
+
+    apply_customer_facing_consistency_sweep(result)
+
+    assert [flag["flag_it"] for flag in result["red_flags_operativi"]].count(title) == 1
+    assert [flag["flag_it"] for flag in result["section_11_red_flags"]].count(title) == 1
+    assert result["red_flags_operativi"][0]["severity"] == "RED"
+    assert result["section_11_red_flags"][0]["severity"] == "RED"
+    assert len(result["red_flags_operativi"][0]["evidence"]) == 2
+    assert len(result["section_11_red_flags"][0]["evidence"]) == 2
+
+
+def test_final_semantic_dedup_preserves_useful_action_over_copied_title_action():
+    result = _make_base_result_for_qa()
+    title = "Agibilità/abitabilità: DA VERIFICARE..."
+    useful_action = "Richiedere al custode o al tecnico il certificato di agibilità/abitabilità prima dell'offerta."
+    result["issues"] = [
+        {
+            "family": "agibilita",
+            "headline_it": title,
+            "severity": "AMBER",
+            "action_it": title,
+            "evidence": [{"page": 46, "quote": "Agibilità da verificare."}],
+        },
+        {
+            "family": "agibilita",
+            "headline_it": title,
+            "severity": "AMBER",
+            "action_it": useful_action,
+            "evidence": [{"page": 46, "quote": "Agibilità da verificare."}],
+        },
+    ]
+
+    apply_customer_facing_consistency_sweep(result)
+
+    agibilita_issue = next(issue for issue in result["issues"] if issue.get("family") == "agibilita")
+    assert agibilita_issue["action_it"] == useful_action
+
+
+def test_final_semantic_dedup_keeps_occupancy_and_opponibility_separate():
+    result = _make_base_result_for_qa()
+    result["issues"] = [
+        {
+            "headline_it": "Immobile occupato.",
+            "family": "occupancy",
+            "severity": "RED",
+            "evidence": [{"page": 12, "quote": "L'immobile risulta occupato."}],
+        },
+        {
+            "headline_it": "Opponibilità occupazione: NON VERIFICABILE.",
+            "family": "occupancy",
+            "severity": "AMBER",
+            "evidence": [{"page": 12, "quote": "Titolo di occupazione da verificare."}],
+        },
+    ]
+
+    apply_customer_facing_consistency_sweep(result)
+
+    headlines = [issue["headline_it"] for issue in result["issues"]]
+    assert "Immobile occupato." in headlines
+    assert "Opponibilità occupazione: NON VERIFICABILE." in headlines
+    assert len(headlines) == 2
+
+
+def test_final_semantic_dedup_keeps_per_bene_agibilita_cards_separate():
+    result = _make_base_result_for_qa()
+    title = "Agibilità/abitabilità: DA VERIFICARE..."
+    result["issues"] = [
+        {
+            "family": "agibilita",
+            "headline_it": title,
+            "severity": "AMBER",
+            "evidence": [{"page": 46, "quote": "Bene N° 1: agibilità da verificare."}],
+        },
+        {
+            "family": "agibilita",
+            "headline_it": title,
+            "severity": "AMBER",
+            "evidence": [{"page": 46, "quote": "Bene N° 2: agibilità da verificare."}],
+        },
+    ]
+
+    apply_customer_facing_consistency_sweep(result)
+
+    agibilita_issues = [issue for issue in result["issues"] if issue.get("family") == "agibilita"]
+    assert len(agibilita_issues) == 2
+    assert {issue["evidence"][0]["quote"] for issue in agibilita_issues} == {
+        "Bene N° 1: agibilità da verificare.",
+        "Bene N° 2: agibilità da verificare.",
+    }
+
+
+def test_final_semantic_dedup_syncs_customer_decision_contract_mirrors():
+    result = _make_base_result_for_qa()
+    title = "Agibilità/abitabilità: DA VERIFICARE..."
+    result["issues"] = [
+        {"family": "agibilita", "headline_it": title, "severity": "AMBER", "evidence": [{"page": 46, "quote": "Agibilità da verificare."}]},
+        {"family": "agibilita", "headline_it": title, "severity": "RED", "evidence": [{"page": 46, "quote": "Abitabilità da verificare."}]},
+    ]
+    result["red_flags_operativi"] = [
+        {"category": "agibilita", "flag_it": title, "severity": "AMBER", "evidence": [{"page": 46, "quote": "Agibilità da verificare."}]},
+        {"category": "agibilita", "flag_it": title, "severity": "RED", "evidence": [{"page": 46, "quote": "Abitabilità da verificare."}]},
+    ]
+    result["section_11_red_flags"] = [copy.deepcopy(flag) for flag in result["red_flags_operativi"]]
+    result["section_9_legal_killers"]["items"] = [
+        {"category": "agibilita", "killer": title, "status": "AMBER", "action": title, "evidence": [{"page": 46, "quote": "Agibilità da verificare."}]},
+        {"category": "agibilita", "killer": title, "status": "RED", "action": "Verificare agibilità/abitabilità.", "evidence": [{"page": 46, "quote": "Abitabilità da verificare."}]},
+    ]
+    result["section_9_legal_killers"]["top_items"] = [copy.deepcopy(item) for item in result["section_9_legal_killers"]["items"]]
+    result["customer_decision_contract"].update({
+        "issues": [copy.deepcopy(issue) for issue in result["issues"]],
+        "red_flags_operativi": [copy.deepcopy(flag) for flag in result["red_flags_operativi"]],
+        "section_11_red_flags": [copy.deepcopy(flag) for flag in result["section_11_red_flags"]],
+        "section_9_legal_killers": copy.deepcopy(result["section_9_legal_killers"]),
+    })
+
+    apply_customer_facing_consistency_sweep(result)
+
+    cdc = result["customer_decision_contract"]
+    assert cdc["issues"] == result["issues"]
+    assert cdc["red_flags_operativi"] == result["red_flags_operativi"]
+    assert cdc["section_11_red_flags"] == result["section_11_red_flags"]
+    assert cdc["section_9_legal_killers"] == result["section_9_legal_killers"]
+    assert len(cdc["issues"]) == 1
+    assert len(cdc["red_flags_operativi"]) == 1
+    assert len(cdc["section_11_red_flags"]) == 1
+    assert len(cdc["section_9_legal_killers"]["items"]) == 1
+    assert len(cdc["section_9_legal_killers"]["top_items"]) == 1
 
 
 def test_customer_bad_hits_detects_stale_occupancy_and_urbanistica_projection():
