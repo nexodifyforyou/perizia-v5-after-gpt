@@ -1174,6 +1174,7 @@ const AnalysisResult = () => {
   const section12 = result.section_12_checklist_pre_offerta || [];
   const summaryData = result.summary_for_client || {};
   const summaryBundle = result.summary_for_client_bundle || {};
+  const decisionClient = result.decision_rapida_client || {};
   const qaPass = result.qa_pass || {};
   
   // Get lots array for multi-lot support
@@ -1186,7 +1187,9 @@ const AnalysisResult = () => {
   // Map to display variables - prioritize NEW format, fallback to OLD
   const caseHeader = reportHeader.procedure ? reportHeader : (result.case_header || {});
   const semaforo = section1.status ? section1 : (result.semaforo_generale || {});
-  const decision = section2.summary_it ? section2 : (result.decision_rapida_client || {});
+  const decision = (decisionClient.decisione_rapida_it || decisionClient.summary_it || decisionClient.summary_en)
+    ? decisionClient
+    : (section2.summary_it ? section2 : decisionClient);
   // Structured decision fields (added in Stage 5 backend patch; may be absent in older analyses)
   const decisionMainRisk = safeRender(section2.main_risk_it || decision.main_risk_it, '');
   const decisionChecks = Array.isArray(section2.checks_it) ? section2.checks_it.filter(Boolean)
@@ -1197,14 +1200,27 @@ const AnalysisResult = () => {
   const narratedDecision = (result.decision_rapida_narrated && typeof result.decision_rapida_narrated === 'object')
     ? result.decision_rapida_narrated
     : null;
-  const hasNarratedDecision = Boolean(narratedDecision && (narratedDecision.it || narratedDecision.en));
+  const hasNarratedDecision = Boolean(narratedDecision && (narratedDecision.decisione_rapida_it || narratedDecision.it || narratedDecision.en));
   const decisionSourceLabel = hasNarratedDecision ? 'Narrated' : 'Deterministic';
-  const decisionIt = hasNarratedDecision
-    ? safeRender(narratedDecision.it, 'Analisi completata')
-    : safeRender(decision.summary_it, 'Analisi completata');
-  const decisionEn = hasNarratedDecision
-    ? safeRender(narratedDecision.en, '')
-    : safeRender(decision.summary_en, '');
+  const decisionIt = safeRender(
+    pickFirstNonEmpty(
+      decisionClient.decisione_rapida_it,
+      decisionClient.summary_it,
+      section2.summary_it,
+      narratedDecision?.decisione_rapida_it,
+      narratedDecision?.it
+    ),
+    'Analisi completata'
+  );
+  const hasExplicitDecisionGuidance = Boolean(safeRender(decisionClient.decisione_rapida_it, '').trim());
+  const decisionEn = safeRender(
+    pickFirstNonEmpty(
+      decisionClient.summary_en,
+      section2.summary_en,
+      narratedDecision?.en
+    ),
+    ''
+  );
   const decisionBulletsIt = hasNarratedDecision && Array.isArray(narratedDecision.bullets_it)
     ? narratedDecision.bullets_it.filter((b) => typeof b === 'string' && b.trim())
     : [];
@@ -2868,7 +2884,9 @@ const AnalysisResult = () => {
     .map((item) => item.driver)
     .slice(0, 4);
   const topAttentionLegalItem = pickCanonicalTopAttentionItem(topLegalChecklistItems);
-  const displayDecisionIt = topAttentionLegalItem
+  const displayDecisionIt = hasExplicitDecisionGuidance
+    ? decisionIt
+    : topAttentionLegalItem
     ? getCanonicalTopAttentionText({
         topAttentionItem: topAttentionLegalItem,
         primaryText: decisionIt,
@@ -2912,21 +2930,19 @@ const AnalysisResult = () => {
   const summaryFallbackEn = [displayHeaderSummaryEn, decisionBulletsEn[0]].filter(Boolean).join('. ').trim();
   const bundleSummaryIt = safeRender(summaryBundle.decision_summary_it, '');
   const bundleSummaryEn = safeRender(summaryBundle.decision_summary_en, '');
-  const displayDecisionItSafe = bundleSummaryIt || displayDecisionIt;
-  const displayDecisionEnSafe = bundleSummaryEn || displayDecisionEn;
+  const displayDecisionItSafe = displayDecisionIt || bundleSummaryIt;
+  const displayDecisionEnSafe = displayDecisionEn || bundleSummaryEn;
   const displayHeaderDriverItSafe = bundleSummaryIt || displayHeaderDriverIt;
   const displayHeaderSummaryItSafe = bundleSummaryIt || displayHeaderSummaryIt;
   const displayHeaderSummaryEnSafe = bundleSummaryEn || displayHeaderSummaryEn;
-  const displaySummaryForClientIt = bundleSummaryIt
-    ? bundleSummaryIt
-    : shouldUseCanonicalSummaryFallback
-    ? summaryFallbackIt
-    : safeRender(summary.summary_it, 'Analisi documento completata.');
-  const displaySummaryForClientEn = bundleSummaryEn
-    ? bundleSummaryEn
-    : shouldUseCanonicalSummaryFallback
-    ? summaryFallbackEn
-    : safeRender(summary.summary_en, '');
+  const displaySummaryForClientIt = safeRender(
+    summary.summary_it,
+    shouldUseCanonicalSummaryFallback ? summaryFallbackIt : 'Analisi documento completata.'
+  );
+  const displaySummaryForClientEn = safeRender(
+    summary.summary_en,
+    shouldUseCanonicalSummaryFallback ? summaryFallbackEn : ''
+  );
 
   // Debug logging for troubleshooting
   if (process.env.NODE_ENV === 'development') {

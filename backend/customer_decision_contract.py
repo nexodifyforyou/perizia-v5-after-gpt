@@ -233,7 +233,7 @@ def _field_label_it(field_type: str) -> str:
     aliases = {
         "valuation": "Valore di stima",
         "occupancy": "Stato occupativo",
-        "costs": "Costi a carico dell'acquirente",
+        "costs": "Oneri economici da verificare",
         "rights": "Diritti reali",
         "catastale": "Conformità catastale",
         "urbanistica": "Regolarità urbanistica",
@@ -267,7 +267,7 @@ def _default_verify_next_it(field_family: str, field_type: str) -> str:
     if field_family == "valuation":
         return "Verificare nel capitolo di stima e nel riepilogo finale il valore di stima conclusivo del lotto o del bene."
     if field_family == "costs":
-        return "Verificare oneri, spese condominiali, sanatorie e preventivi richiamati in perizia per quantificare il costo a carico dell'acquirente."
+        return "Verificare oneri, spese condominiali, sanatorie e preventivi richiamati in perizia per verificare l'eventuale incidenza economica per l'acquirente prima dell'offerta."
     if field_family == "rights":
         return "Verificare titolo di provenienza, quota e diritti reali richiamati in perizia."
     if field_family == "impianti":

@@ -33,7 +33,14 @@ from openai import AsyncOpenAI
 from candidate_miner import run_candidate_miner_for_analysis
 from section_builder import build_estratto_quality
 from evidence_utils import normalize_evidence_quote
-from narrator import build_decisione_rapida_narration, build_deterministic_summary_for_client, build_summary_for_client_bundle
+from narrator import (
+    apply_narrated_payload_to_result,
+    build_decisione_rapida_narration,
+    build_deterministic_separated_fallback_payload,
+    build_deterministic_summary_for_client,
+    build_summary_for_client_bundle,
+    scrub_customer_facing_stale_money_labels,
+)
 from cost_market_ranges import market_range_for_item
 from customer_decision_contract import apply_customer_decision_contract, sanitize_customer_facing_result, separate_internal_runtime_from_customer_result
 from customer_contract_qa_gate import apply_customer_contract_qa_gate
@@ -7804,6 +7811,69 @@ def _build_case_aware_narration_payload(result: Dict[str, Any]) -> Optional[Dict
     }
 
 
+def _is_gemini_narrator_success(result: Dict[str, Any]) -> bool:
+    meta = result.get("narrator_meta") if isinstance(result.get("narrator_meta"), dict) else {}
+    payload = result.get("decision_rapida_narrated") if isinstance(result.get("decision_rapida_narrated"), dict) else {}
+    return (
+        str(meta.get("provider") or "").lower() == "gemini"
+        and str(meta.get("status") or "").upper() == "OK"
+        and str(payload.get("generation_mode") or "") == "gemini_clean_contract"
+        and bool(payload.get("summary_it"))
+        and bool(payload.get("decisione_rapida_it"))
+    )
+
+
+def _decision_narrator_config() -> Tuple[str, bool, Optional[str], Optional[str], Optional[float]]:
+    provider = str(os.environ.get("DECISIONE_RAPIDA_PROVIDER") or "").strip().lower()
+    if not provider:
+        provider = "openai" if os.environ.get("NARRATOR_ENABLED", "0").strip() == "1" else "disabled"
+    enabled = provider not in {"", "disabled", "none", "off", "0", "false"}
+    if provider in {"gemini", "google", "google_gemini"}:
+        model = str(os.environ.get("GEMINI_DECISION_MODEL") or "gemini-2.5-flash").strip()
+        api_key = str(os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY") or "").strip() or None
+        try:
+            timeout_seconds = float(os.environ.get("DECISIONE_RAPIDA_TIMEOUT_SECONDS", "45") or 45)
+        except Exception:
+            timeout_seconds = 45.0
+        return "gemini", enabled, model, api_key, timeout_seconds
+    model = str(os.environ.get("NARRATOR_MODEL") or "").strip() or None
+    return provider, enabled, model, OPENAI_API_KEY, None
+
+
+async def _apply_post_qa_decision_narrator(result: Dict[str, Any], *, request_id: str) -> Dict[str, Any]:
+    provider, enabled, model, api_key, timeout_seconds = _decision_narrator_config()
+    scrub_customer_facing_stale_money_labels(result)
+    narrated_payload, narrator_meta = await build_decisione_rapida_narration(
+        result=result,
+        request_id=request_id,
+        enabled=enabled,
+        provider=provider,
+        model=model,
+        api_key=api_key,
+        timeout_seconds=timeout_seconds,
+    )
+    result["narrator_meta"] = narrator_meta
+    if (
+        narrated_payload
+        and str(narrator_meta.get("status") or "").upper() == "OK"
+        and isinstance(narrated_payload, dict)
+        and narrated_payload.get("summary_it")
+        and narrated_payload.get("decisione_rapida_it")
+    ):
+        apply_narrated_payload_to_result(result, narrated_payload, narrator_meta)
+        return narrator_meta
+
+    # Gemini disabled/error/rejected still needs separated customer copy. The
+    # legacy case-aware text is no longer allowed to overwrite this projection.
+    fallback_meta = dict(narrator_meta)
+    fallback_meta["fallback_applied"] = True
+    fallback_meta["fallback_generation_mode"] = "deterministic_separated_fallback"
+    fallback_payload = build_deterministic_separated_fallback_payload(result, fallback_meta)
+    apply_narrated_payload_to_result(result, fallback_payload, fallback_meta)
+    result["narrator_meta"] = fallback_meta
+    return fallback_meta
+
+
 def _refresh_red_flags_operativi(result: Dict[str, Any]) -> None:
     blocked_unreadable = (
         str(result.get("analysis_status") or "").upper() == "UNREADABLE"
@@ -8035,8 +8105,30 @@ def _refresh_customer_facing_result_on_read(
     if _is_runtime_authoritative_result(result):
         _promote_verifier_pricing_field_state(result)
         _prune_verifier_pricing_amounts_from_money_box(result)
+        scrub_customer_facing_stale_money_labels(result)
         apply_customer_decision_contract(result)
         _apply_headline_overrides(result, headline_overrides or {})
+        if _is_gemini_narrator_success(result):
+            apply_narrated_payload_to_result(
+                result,
+                result.get("decision_rapida_narrated", {}),
+                result.get("narrator_meta") if isinstance(result.get("narrator_meta"), dict) else None,
+            )
+        else:
+            meta = result.get("narrator_meta") if isinstance(result.get("narrator_meta"), dict) else {}
+            fallback_meta = dict(meta)
+            fallback_meta.setdefault("enabled", False)
+            fallback_meta.setdefault("provider", "deterministic")
+            fallback_meta.setdefault("model", None)
+            fallback_meta.setdefault("status", "SKIPPED")
+            fallback_meta.setdefault("errors", [])
+            fallback_meta.setdefault("error", None)
+            if str(fallback_meta.get("status") or "").upper() == "OK":
+                fallback_meta["status"] = "FALLBACK"
+            fallback_meta["fallback_applied"] = True
+            fallback_meta["fallback_generation_mode"] = "deterministic_separated_fallback"
+            fallback_payload = build_deterministic_separated_fallback_payload(result, fallback_meta)
+            apply_narrated_payload_to_result(result, fallback_payload, fallback_meta)
         if analysis_id and not isinstance(result.get("user_messages"), list):
             result["user_messages"] = []
         scrubbed_placeholders = _scrub_visible_machine_placeholders(result)
@@ -8080,16 +8172,10 @@ def _refresh_customer_facing_result_on_read(
     document_quality = result.get("document_quality", {}) if isinstance(result.get("document_quality"), dict) else {}
     _apply_unreadable_hard_stop(result, document_quality)
 
-    case_aware_narration = _build_case_aware_narration_payload(result)
-    if case_aware_narration:
-        result["decision_rapida_narrated"] = case_aware_narration
-    else:
-        result.pop("decision_rapida_narrated", None)
-
     summary = result.get("summary_for_client") if isinstance(result.get("summary_for_client"), dict) else {}
     generation_mode = str(summary.get("generation_mode") or "").strip()
     deterministic_summary = build_deterministic_summary_for_client(result)
-    if generation_mode != "llm_canonical_bundle":
+    if generation_mode not in {"llm_canonical_bundle", "gemini_clean_contract"}:
         summary["summary_it"] = deterministic_summary.get("summary_it", summary.get("summary_it", ""))
         summary["summary_en"] = deterministic_summary.get("summary_en", summary.get("summary_en", ""))
         summary["generation_mode"] = "deterministic_canonical_bundle"
@@ -8098,10 +8184,32 @@ def _refresh_customer_facing_result_on_read(
     result["summary_for_client"] = summary
 
     _refresh_red_flags_operativi(result)
+    if _is_gemini_narrator_success(result):
+        apply_narrated_payload_to_result(
+            result,
+            result.get("decision_rapida_narrated", {}),
+            result.get("narrator_meta") if isinstance(result.get("narrator_meta"), dict) else None,
+        )
+    else:
+        meta = result.get("narrator_meta") if isinstance(result.get("narrator_meta"), dict) else {}
+        fallback_meta = dict(meta)
+        fallback_meta.setdefault("enabled", False)
+        fallback_meta.setdefault("provider", "deterministic")
+        fallback_meta.setdefault("model", None)
+        fallback_meta.setdefault("status", "SKIPPED")
+        fallback_meta.setdefault("errors", [])
+        fallback_meta.setdefault("error", None)
+        if str(fallback_meta.get("status") or "").upper() == "OK":
+            fallback_meta["status"] = "FALLBACK"
+        fallback_meta["fallback_applied"] = True
+        fallback_meta["fallback_generation_mode"] = "deterministic_separated_fallback"
+        fallback_payload = build_deterministic_separated_fallback_payload(result, fallback_meta)
+        apply_narrated_payload_to_result(result, fallback_payload, fallback_meta)
 
     if analysis_id:
         result["user_messages"] = _build_user_messages(result, {}, analysis_id=analysis_id)
     _ensure_section_3_money_box_alias(result)
+    scrub_customer_facing_stale_money_labels(result)
     scrubbed_placeholders = _scrub_visible_machine_placeholders(result)
     if scrubbed_placeholders:
         debug_obj = result.get("debug") if isinstance(result.get("debug"), dict) else {}
@@ -16142,25 +16250,6 @@ async def analyze_perizia(request: Request, file: UploadFile = File(...)):
     _prune_verifier_pricing_amounts_from_money_box(result)
     apply_customer_decision_contract(result)
     result["user_messages"] = _build_user_messages(result, extraction_payload, analysis_id=analysis_id)
-    narrator_enabled = os.environ.get("NARRATOR_ENABLED", "0").strip() == "1"
-    narrator_model = str(os.environ.get("NARRATOR_MODEL") or "").strip() or None
-    narrated_payload, narrator_meta = await build_decisione_rapida_narration(
-        result=result,
-        request_id=request_id,
-        enabled=narrator_enabled,
-        model=narrator_model,
-        api_key=OPENAI_API_KEY,
-    )
-    result["narrator_meta"] = narrator_meta
-    if narrated_payload:
-        result["decision_rapida_narrated"] = narrated_payload
-    else:
-        result.pop("decision_rapida_narrated", None)
-    case_aware_narration = _build_case_aware_narration_payload(result)
-    if case_aware_narration:
-        result["decision_rapida_narrated"] = case_aware_narration
-    apply_customer_decision_contract(result)
-    logger.info(f"[{request_id}] narrator status={narrator_meta.get('status')} enabled={narrator_meta.get('enabled')}")
 
     # QA Gate: LLM-powered challenge + deterministic safety sweep.
     # raw_text (full_text) and internal_runtime are available here.
@@ -16178,8 +16267,32 @@ async def analyze_perizia(request: Request, file: UploadFile = File(...)):
     except Exception as _qa_exc:
         logger.warning(f"[{request_id}] qa_gate_failed: {_qa_exc}")
 
+    # Rebuild the deterministic customer contract after QA/semantic repair, then
+    # let Gemini write only narrative copy from that final cleaned contract.
+    apply_customer_decision_contract(result)
+    try:
+        narrator_meta = await _apply_post_qa_decision_narrator(result, request_id=request_id)
+    except Exception as _narrator_exc:
+        narrator_meta = {
+            "enabled": True,
+            "provider": os.environ.get("DECISIONE_RAPIDA_PROVIDER", "gemini"),
+            "model": os.environ.get("GEMINI_DECISION_MODEL") or os.environ.get("NARRATOR_MODEL"),
+            "status": "ERROR",
+            "error": str(_narrator_exc)[:240],
+            "errors": [str(_narrator_exc)[:240]],
+            "fallback_applied": True,
+            "fallback_generation_mode": "deterministic_separated_fallback",
+        }
+        fallback_payload = build_deterministic_separated_fallback_payload(result, narrator_meta)
+        apply_narrated_payload_to_result(result, fallback_payload, narrator_meta)
+    logger.info(
+        f"[{request_id}] narrator status={narrator_meta.get('status')} "
+        f"provider={narrator_meta.get('provider')} enabled={narrator_meta.get('enabled')}"
+    )
+
     result["debug"] = debug_obj
     _ensure_section_3_money_box_alias(result)
+    scrub_customer_facing_stale_money_labels(result)
     scrubbed_placeholders = _scrub_visible_machine_placeholders(result)
     if scrubbed_placeholders:
         debug_obj["visible_machine_placeholders_scrubbed"] = scrubbed_placeholders

@@ -134,15 +134,16 @@ describe('AnalysisResult customer-facing render', () => {
           },
         },
         section_2_decisione_rapida: {
-          summary_it: 'INTERNAL DIRTY action',
+          summary_it: 'Clean decision guidance',
           summary_en: 'Dirty EN',
         },
         decision_rapida_client: {
-          summary_it: 'INTERNAL DIRTY action',
+          decisione_rapida_it: 'Clean decision guidance',
+          summary_it: 'Clean decision guidance',
           summary_en: 'Dirty EN',
         },
         summary_for_client: {
-          summary_it: 'INTERNAL DIRTY explanation',
+          summary_it: 'Clean factual summary',
           summary_en: 'Dirty summary en',
           disclaimer_it: 'Disclaimer',
           disclaimer_en: 'Disclaimer EN',
@@ -223,6 +224,8 @@ describe('AnalysisResult customer-facing render', () => {
     await renderAnalysisResult();
 
     expectTextPresent('Clean bundle summary');
+    expectTextPresent('Clean factual summary');
+    expectTextPresent('Clean decision guidance');
     expectTextAbsent('INTERNAL DIRTY summary');
     expectTextAbsent('INTERNAL DIRTY action');
     expectTextAbsent('INTERNAL DIRTY explanation');
