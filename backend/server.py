@@ -44,7 +44,6 @@ from narrator import (
 from cost_market_ranges import market_range_for_item
 from customer_decision_contract import apply_customer_decision_contract, sanitize_customer_facing_result, separate_internal_runtime_from_customer_result
 from customer_contract_qa_gate import apply_customer_contract_qa_gate
-from perizia_section_authority import build_section_authority_map, summarize_authority_map
 from perizia_runtime.runtime import apply_verifier_to_result, run_quality_verifier
 
 ROOT_DIR = Path(__file__).parent
@@ -15144,14 +15143,6 @@ def _write_extraction_pack(analysis_id: str, payload: Dict[str, Any], document_q
         json.dump(payload.get("ocr_plan", []), f, ensure_ascii=False, indent=2)
     with open(extract_dir / "quality.json", "w", encoding="utf-8") as f:
         json.dump(document_quality, f, ensure_ascii=False, indent=2)
-    section_authority = payload.get("section_authority")
-    if isinstance(section_authority, dict):
-        with open(extract_dir / "section_authority.json", "w", encoding="utf-8") as f:
-            json.dump(section_authority, f, ensure_ascii=False, indent=2)
-    section_authority_summary = payload.get("section_authority_summary")
-    if isinstance(section_authority_summary, dict):
-        with open(extract_dir / "section_authority_summary.json", "w", encoding="utf-8") as f:
-            json.dump(section_authority_summary, f, ensure_ascii=False, indent=2)
 
     return str(extract_dir)
 
@@ -16146,24 +16137,6 @@ async def analyze_perizia(request: Request, file: UploadFile = File(...)):
         if not pages:
             pages = [{"page_number": 1, "text": "", "tables": [], "form_fields": [], "char_count": 0}]
 
-        try:
-            section_authority_map = build_section_authority_map(pages)
-            section_authority_summary = summarize_authority_map(section_authority_map)
-            section_authority_map["summary"] = section_authority_summary
-            extraction_payload["section_authority"] = section_authority_map
-            extraction_payload["section_authority_summary"] = section_authority_summary
-            logger.info(
-                f"[{request_id}] section_authority_shadow_built "
-                f"pages={section_authority_summary.get('pages_total')} "
-                f"instruction={len(section_authority_summary.get('instruction_pages') or [])} "
-                f"answer={len(section_authority_summary.get('answer_pages') or [])} "
-                f"final_lot={len(section_authority_summary.get('final_lot_formation_pages') or [])} "
-                f"final_valuation={len(section_authority_summary.get('final_valuation_pages') or [])}"
-            )
-        except Exception as authority_err:
-            logger.warning(f"[{request_id}] section_authority_shadow_failed err={authority_err}")
-            extraction_payload["section_authority_error"] = str(authority_err)[:240]
-
         # Analysis stage
         logger.info(f"[{request_id}] deterministic_analysis_start")
         extracted_lots = _extract_lots_from_schema_riassuntivo(pages)
@@ -16212,10 +16185,6 @@ async def analyze_perizia(request: Request, file: UploadFile = File(...)):
     debug_obj["extraction_summary"] = summary
     if isinstance(extraction_payload.get("ocr_execution"), dict):
         debug_obj["ocr_execution"] = extraction_payload.get("ocr_execution")
-    if isinstance(extraction_payload.get("section_authority_summary"), dict):
-        debug_obj["section_authority_summary"] = extraction_payload.get("section_authority_summary")
-    if extraction_payload.get("section_authority_error"):
-        debug_obj["section_authority_error"] = extraction_payload.get("section_authority_error")
     result["debug"] = debug_obj
 
     _write_extraction_pack(analysis_id, extraction_payload, document_quality)

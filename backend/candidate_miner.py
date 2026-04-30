@@ -4,8 +4,6 @@ import re
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Set, Tuple
 
-from perizia_section_authority import classify_quote_authority
-
 RUNS_ROOT = Path("/srv/perizia/_qa/runs")
 
 _AMOUNT_TOKEN_RE = re.compile(r"\d{1,3}(?:\.\d{3})*(?:,\d{2})?|\d+(?:,\d{2})?")
@@ -129,12 +127,6 @@ def _load_step1_inputs(analysis_id: str) -> Tuple[List[Dict[str, Any]], List[Dic
     metrics = _read_json(extract_dir / "metrics.json", [])
     ocr_plan = _read_json(extract_dir / "ocr_plan.json", [])
     return pages_raw if isinstance(pages_raw, list) else [], metrics if isinstance(metrics, list) else [], ocr_plan if isinstance(ocr_plan, list) else []
-
-
-def _load_section_authority_map(analysis_id: str) -> Dict[str, Any]:
-    extract_dir = RUNS_ROOT / analysis_id / "extract"
-    section_map = _read_json(extract_dir / "section_authority.json", {})
-    return section_map if isinstance(section_map, dict) else {}
 
 
 def _low_quality_pages(metrics: List[Dict[str, Any]], ocr_plan: List[Dict[str, Any]]) -> List[int]:
@@ -399,73 +391,6 @@ def _mine_triggers(pages_raw: List[Dict[str, Any]], low_pages: Set[int]) -> List
     return out
 
 
-def _authority_domain_for_trigger_family(family: str) -> str:
-    mapping = {
-        "occupancy": "occupancy",
-        "energy": "agibilita",
-        "agibilita": "agibilita",
-        "impianti": "urbanistica",
-        "catasto": "catasto",
-        "abusi": "urbanistica",
-        "legal": "legal_formalities",
-    }
-    return mapping.get(str(family or ""), str(family or "") or "unknown")
-
-
-def _attach_authority_shadow(
-    candidates: List[Dict[str, Any]],
-    section_map: Dict[str, Any],
-    *,
-    default_domain: Optional[str] = None,
-) -> Dict[str, Any]:
-    if not isinstance(section_map, dict) or not isinstance(section_map.get("pages"), list):
-        return {"enabled": False, "tagged_count": 0, "missing_map": True}
-
-    tagged = 0
-    authority_levels: Dict[str, int] = {}
-    zones: Dict[str, int] = {}
-    for candidate in candidates:
-        if not isinstance(candidate, dict):
-            continue
-        try:
-            page = int(candidate.get("page"))
-        except Exception:
-            continue
-        quote = str(candidate.get("quote") or candidate.get("context") or "")
-        if not quote.strip():
-            continue
-        domain = default_domain
-        if default_domain is None and candidate.get("family"):
-            domain = _authority_domain_for_trigger_family(str(candidate.get("family") or ""))
-        authority = classify_quote_authority(page, quote, section_map, domain=domain)
-        for key in (
-            "section_zone",
-            "authority_level",
-            "authority_score",
-            "domain_hints",
-            "answer_point",
-            "is_instruction_like",
-            "is_answer_like",
-            "reason_for_authority",
-        ):
-            candidate[key] = authority.get(key)
-        if authority.get("domain_hint") is not None:
-            candidate["domain_hint"] = authority.get("domain_hint")
-        tagged += 1
-        level = str(candidate.get("authority_level") or "UNKNOWN")
-        zone = str(candidate.get("section_zone") or "UNKNOWN_FACTUAL")
-        authority_levels[level] = authority_levels.get(level, 0) + 1
-        zones[zone] = zones.get(zone, 0) + 1
-
-    return {
-        "enabled": True,
-        "tagged_count": tagged,
-        "missing_map": False,
-        "authority_level_counts": dict(sorted(authority_levels.items())),
-        "section_zone_counts": dict(sorted(zones.items())),
-    }
-
-
 def run_candidate_miner_for_analysis(analysis_id: str) -> Dict[str, Any]:
     pages_raw, metrics, ocr_plan = _load_step1_inputs(analysis_id)
     low_quality_list = _low_quality_pages(metrics, ocr_plan)
@@ -474,9 +399,6 @@ def run_candidate_miner_for_analysis(analysis_id: str) -> Dict[str, Any]:
     money = _mine_money(pages_raw, low_quality_set)
     dates = _mine_dates(pages_raw, low_quality_set)
     triggers = _mine_triggers(pages_raw, low_quality_set)
-    section_map = _load_section_authority_map(analysis_id)
-    money_authority_summary = _attach_authority_shadow(money, section_map, default_domain="money")
-    trigger_authority_summary = _attach_authority_shadow(triggers, section_map)
 
     candidates_dir = RUNS_ROOT / analysis_id / "candidates"
     if candidates_dir.exists():
@@ -493,10 +415,6 @@ def run_candidate_miner_for_analysis(analysis_id: str) -> Dict[str, Any]:
         "date_count": len(dates),
         "trigger_count": len(triggers),
         "low_quality_pages": low_quality_list,
-        "authority_tagging": {
-            "money": money_authority_summary,
-            "triggers": trigger_authority_summary,
-        },
         "files": {
             "candidates_money": str(candidates_dir / "candidates_money.json"),
             "candidates_dates": str(candidates_dir / "candidates_dates.json"),
@@ -517,10 +435,6 @@ def run_candidate_miner_for_analysis(analysis_id: str) -> Dict[str, Any]:
             "money": money,
             "dates": dates,
             "triggers": triggers,
-            "authority_tagging": {
-                "money": money_authority_summary,
-                "triggers": trigger_authority_summary,
-            },
         },
     )
 
@@ -530,8 +444,4 @@ def run_candidate_miner_for_analysis(analysis_id: str) -> Dict[str, Any]:
         "trigger_count": len(triggers),
         "low_quality_pages": low_quality_list,
         "candidates_folder": f"{candidates_dir}/",
-        "authority_tagging": {
-            "money": money_authority_summary,
-            "triggers": trigger_authority_summary,
-        },
     }
