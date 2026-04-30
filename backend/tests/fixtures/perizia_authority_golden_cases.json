@@ -1,0 +1,112 @@
+[
+  {
+    "id": "1859886_c_perizia",
+    "label": "1859886_c_perizia.pdf",
+    "expected_class": "PASS_SINGLE_LOT",
+    "paths": [
+      "/srv/perizia/app/backend/tests/fixtures/perizie/1859886_c_perizia.pdf",
+      "/srv/perizia/app/uploads/1859886_c_perizia.pdf"
+    ],
+    "expectations": {
+      "pages_total_min": 45,
+      "requires_high_lotto_unico": true,
+      "forbids_high_lotto_n": true,
+      "min_final_lot_formation_pages": 1,
+      "min_final_valuation_pages": 1,
+      "min_formalities_pages": 1,
+      "min_money_rendita_catastale_pages": 1,
+      "min_money_valuation_pages": 1,
+      "allow_warn": false
+    },
+    "notes": "True LOTTO UNICO; schema page includes prezzo base and occupancy wording."
+  },
+  {
+    "id": "multilot_69_2024",
+    "label": "perizia_multilot_69_2024 / Perizia-PT-EI-69-2024-C-2 family",
+    "expected_class": "PASS_MULTI_LOT",
+    "paths": [
+      "/srv/perizia/app/uploads/perizia_multilot_69_2024.pdf",
+      "/home/syedtajmeelshah/Perizia-PT-EI-69-2024-C-2.pdf",
+      "/home/syedtajmeelshah/Perizia-PT-EI-69-2024-C-2_(1).pdf",
+      "/home/syedtajmeelshah/Perizia-PT-EI-69-2024-C-2_(2).pdf"
+    ],
+    "expectations": {
+      "pages_total_min": 60,
+      "requires_high_lot_numbers": [1, 2, 3],
+      "forbids_high_lotto_unico": true,
+      "min_final_lot_formation_pages": 3,
+      "min_final_valuation_pages": 1,
+      "min_formalities_pages": 1,
+      "min_money_rendita_catastale_pages": 1,
+      "min_money_valuation_pages": 1,
+      "allow_warn": false
+    },
+    "notes": "True multi-lot with LOTTO 1/2/3 prezzo base schema pages."
+  },
+  {
+    "id": "ostuni_via_viterbo_2",
+    "label": "Ostuni, Via Viterbo 2.pdf",
+    "expected_class": "PASS_AUTHORITY_HARDENING",
+    "paths": [
+      "/home/syedtajmeelshah/Ostuni, Via Viterbo 2.pdf"
+    ],
+    "expectations": {
+      "pages_total_min": 80,
+      "min_final_lot_formation_pages": 1,
+      "min_final_valuation_pages": 10,
+      "max_instruction_false_positive_suspects": 0,
+      "max_answer_pages": 5,
+      "min_formalities_pages": 1,
+      "allow_warn": false
+    },
+    "notes": "Guards broad answer propagation and factual 'incarico a professionista' handling."
+  },
+  {
+    "id": "via_umbria",
+    "label": "Via Umbria / VIA UMBRIA N. 26.pdf",
+    "expected_class": "PASS_IF_AVAILABLE",
+    "paths": [
+      "/home/syedtajmeelshah/VIA UMBRIA N. 26.pdf",
+      "/home/syedtajmeelshah/Via Umbria.pdf",
+      "/srv/perizia/app/uploads/VIA_UMBRIA_N_26.pdf",
+      "/srv/perizia/app/uploads/Via_Umbria.pdf"
+    ],
+    "expectations": {
+      "pages_total_min": 1,
+      "min_final_lot_formation_pages": 1,
+      "max_instruction_false_positive_suspects": 1,
+      "allow_warn": true
+    },
+    "notes": "Optional local corpus member; skipped only when the PDF is absent."
+  },
+  {
+    "id": "via_nuova_19_1",
+    "label": "Via Nuova 19_1.pdf",
+    "expected_class": "WARN_INCOMPLETE_AUTHORITY_MAP",
+    "paths": [
+      "/home/syedtajmeelshah/Via Nuova 19_1.pdf",
+      "/srv/perizia/app/uploads/Via_Nuova_19_1.pdf"
+    ],
+    "expectations": {
+      "pages_total_min": 1,
+      "allow_warn": true,
+      "expected_status": "WARN"
+    },
+    "notes": "Scanned/low-text style file may remain mostly UNKNOWN; must not crash or leak."
+  },
+  {
+    "id": "via_del_mare_4591_4593",
+    "label": "Via del Mare 4591-4593.pdf",
+    "expected_class": "WARN_INCOMPLETE_AUTHORITY_MAP",
+    "paths": [
+      "/home/syedtajmeelshah/Via del Mare 4591-4593.pdf",
+      "/srv/perizia/app/uploads/via_del_mare_4591_4593.pdf"
+    ],
+    "expectations": {
+      "pages_total_min": 1,
+      "allow_warn": true,
+      "expected_status": "WARN"
+    },
+    "notes": "Scanned/low-text style file may remain mostly UNKNOWN; must not crash or leak."
+  }
+]

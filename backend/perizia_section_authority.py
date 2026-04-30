@@ -446,6 +446,8 @@ def detect_domain_hints(text: str) -> List[str]:
     for role in detect_money_role_hints(text):
         if role not in hints:
             hints.append(role)
+    if "money_formalities" in hints and "money_cost_signal" in hints:
+        hints = [hint for hint in hints if hint != "money_cost_signal"]
     return hints
 
 

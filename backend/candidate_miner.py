@@ -133,8 +133,23 @@ def _load_step1_inputs(analysis_id: str) -> Tuple[List[Dict[str, Any]], List[Dic
 
 def _load_section_authority_map(analysis_id: str) -> Dict[str, Any]:
     extract_dir = RUNS_ROOT / analysis_id / "extract"
-    section_map = _read_json(extract_dir / "section_authority.json", {})
-    return section_map if isinstance(section_map, dict) else {}
+    path = extract_dir / "section_authority.json"
+    if not path.exists():
+        return {"_authority_tagging_status": "missing_map"}
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            section_map = json.load(f)
+    except Exception as exc:
+        return {
+            "_authority_tagging_status": "corrupt_map",
+            "_authority_tagging_error": str(exc)[:240],
+        }
+    if not isinstance(section_map, dict):
+        return {
+            "_authority_tagging_status": "corrupt_map",
+            "_authority_tagging_error": "section_authority.json root is not an object",
+        }
+    return section_map
 
 
 def _low_quality_pages(metrics: List[Dict[str, Any]], ocr_plan: List[Dict[str, Any]]) -> List[int]:
@@ -418,10 +433,24 @@ def _attach_authority_shadow(
     *,
     default_domain: Optional[str] = None,
 ) -> Dict[str, Any]:
+    status = str(section_map.get("_authority_tagging_status") or "").strip() if isinstance(section_map, dict) else ""
+    if status == "missing_map":
+        return {"enabled": False, "status": "missing_map", "tagged_count": 0, "missing_map": True}
+    if status == "corrupt_map":
+        return {
+            "enabled": False,
+            "status": "corrupt_map",
+            "tagged_count": 0,
+            "missing_map": False,
+            "corrupt_map": True,
+            "error": str(section_map.get("_authority_tagging_error") or "")[:240],
+        }
     if not isinstance(section_map, dict) or not isinstance(section_map.get("pages"), list):
-        return {"enabled": False, "tagged_count": 0, "missing_map": True}
+        return {"enabled": False, "status": "invalid_map", "tagged_count": 0, "missing_map": False, "invalid_map": True}
 
     tagged = 0
+    failed = 0
+    first_error: Optional[str] = None
     authority_levels: Dict[str, int] = {}
     zones: Dict[str, int] = {}
     for candidate in candidates:
@@ -437,7 +466,14 @@ def _attach_authority_shadow(
         domain = default_domain
         if default_domain is None and candidate.get("family"):
             domain = _authority_domain_for_trigger_family(str(candidate.get("family") or ""))
-        authority = classify_quote_authority(page, quote, section_map, domain=domain)
+        try:
+            authority = classify_quote_authority(page, quote, section_map, domain=domain)
+        except Exception as exc:
+            failed += 1
+            if first_error is None:
+                first_error = str(exc)[:240]
+            candidate["authority_tagging_error"] = "authority_shadow_failed_open"
+            continue
         for key in (
             "section_zone",
             "authority_level",
@@ -457,13 +493,18 @@ def _attach_authority_shadow(
         authority_levels[level] = authority_levels.get(level, 0) + 1
         zones[zone] = zones.get(zone, 0) + 1
 
-    return {
+    summary = {
         "enabled": True,
+        "status": "partial" if failed else "tagged",
         "tagged_count": tagged,
+        "failed_count": failed,
         "missing_map": False,
         "authority_level_counts": dict(sorted(authority_levels.items())),
         "section_zone_counts": dict(sorted(zones.items())),
     }
+    if first_error:
+        summary["first_error"] = first_error
+    return summary
 
 
 def run_candidate_miner_for_analysis(analysis_id: str) -> Dict[str, Any]:

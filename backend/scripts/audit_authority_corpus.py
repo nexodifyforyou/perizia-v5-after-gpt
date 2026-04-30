@@ -1,43 +1,56 @@
 #!/usr/bin/env python3
 import argparse
+import json
+import random
 import re
 import subprocess
 import sys
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Sequence
 
 BACKEND_DIR = Path(__file__).resolve().parents[1]
 if str(BACKEND_DIR) not in sys.path:
     sys.path.insert(0, str(BACKEND_DIR))
 
 from perizia_section_authority import (  # noqa: E402
+    AUTH_HIGH,
+    AUTH_LOW,
+    ZONE_CONTEXT,
+    ZONE_FINAL_LOT,
+    ZONE_FINAL_VALUATION,
+    ZONE_FORMALITIES,
+    ZONE_INSTRUCTION,
+    ZONE_QUESTION,
+    ZONE_TOC,
     build_section_authority_map,
     summarize_authority_map,
 )
 
 
-DISCOVERY_GLOBS = [
-    "/home/syedtajmeelshah/*.pdf",
-    "/srv/perizia/app/uploads/*.pdf",
-    "/srv/perizia/app/backend/tests/fixtures/perizie/*.pdf",
+DEFAULT_DISCOVERY_PATHS = [
+    Path("/home/syedtajmeelshah"),
+    Path("/srv/perizia/app/uploads"),
+    Path("/srv/perizia/app/backend/tests/fixtures/perizie"),
 ]
 
-
-def _extract_pdf_pages(pdf_path: Path) -> List[Dict[str, Any]]:
-    try:
-        from PyPDF2 import PdfReader
-
-        reader = PdfReader(str(pdf_path))
-    except Exception:
-        return _extract_pdf_pages_with_cli(pdf_path)
-    pages: List[Dict[str, Any]] = []
-    for idx, page in enumerate(reader.pages, start=1):
-        try:
-            text = page.extract_text() or ""
-        except Exception:
-            text = ""
-        pages.append({"page_number": idx, "text": text, "char_count": len(text)})
-    return pages
+TABLE_HEADERS = [
+    "file",
+    "pages_total",
+    "instruction_pages_count",
+    "answer_pages_count",
+    "final_lot_formation_count",
+    "final_valuation_count",
+    "formalities_count",
+    "high_authority_lotto_unico",
+    "high_authority_multilot",
+    "contextual_lotto_mentions_count",
+    "money_cost_signal_count",
+    "money_valuation_count",
+    "money_rendita_catastale_count",
+    "instruction_false_positive_suspects_count",
+    "status",
+    "notes",
+]
 
 
 def _run_text_command(cmd: List[str]) -> Optional[str]:
@@ -59,21 +72,61 @@ def _extract_pdf_pages_with_cli(pdf_path: Path) -> List[Dict[str, Any]]:
     pages: List[Dict[str, Any]] = []
     for idx in range(1, total_pages + 1):
         text = _run_text_command(["pdftotext", "-f", str(idx), "-l", str(idx), "-raw", str(pdf_path), "-"])
-        text = text or ""
+        pages.append({"page_number": idx, "text": text or "", "char_count": len(text or "")})
+    return pages
+
+
+def _extract_pdf_pages(pdf_path: Path) -> List[Dict[str, Any]]:
+    try:
+        from PyPDF2 import PdfReader
+
+        reader = PdfReader(str(pdf_path))
+    except Exception:
+        return _extract_pdf_pages_with_cli(pdf_path)
+    pages: List[Dict[str, Any]] = []
+    for idx, page in enumerate(reader.pages, start=1):
+        try:
+            text = page.extract_text() or ""
+        except Exception:
+            text = ""
         pages.append({"page_number": idx, "text": text, "char_count": len(text)})
     return pages
 
 
-def _discover_pdfs(limit: int | None = None) -> List[Path]:
+def _path_pdfs(path: Path) -> List[Path]:
+    expanded = path.expanduser()
+    if expanded.is_file() and expanded.suffix.lower() == ".pdf":
+        return [expanded.resolve()]
+    if expanded.is_dir():
+        return sorted((p.resolve() for p in expanded.rglob("*.pdf") if p.is_file()), key=lambda p: str(p).lower())
+    if any(ch in str(expanded) for ch in "*?["):
+        return sorted((p.resolve() for p in expanded.parent.glob(expanded.name) if p.is_file() and p.suffix.lower() == ".pdf"), key=lambda p: str(p).lower())
+    return []
+
+
+def _resolve_input_paths(paths: Optional[Sequence[str]]) -> List[Path]:
+    roots = [Path(p) for p in paths] if paths else DEFAULT_DISCOVERY_PATHS
     found: Dict[str, Path] = {}
-    for pattern in DISCOVERY_GLOBS:
-        for path in Path("/").glob(pattern.lstrip("/")):
-            if path.is_file():
-                found[str(path.resolve())] = path.resolve()
-    ordered = sorted(found.values(), key=lambda p: str(p).lower())
-    if limit is not None:
-        return ordered[:limit]
-    return ordered
+    for root in roots:
+        for pdf in _path_pdfs(root):
+            found[str(pdf)] = pdf
+    return sorted(found.values(), key=lambda p: str(p).lower())
+
+
+def _sample_paths(paths: List[Path], sample: Optional[int], seed: int) -> List[Path]:
+    if sample is None or sample >= len(paths):
+        return paths
+    rng = random.Random(seed)
+    shuffled = list(paths)
+    rng.shuffle(shuffled)
+    return sorted(shuffled[:sample], key=lambda p: str(p).lower())
+
+
+def _page_num(page: Dict[str, Any], default: int) -> int:
+    try:
+        return int(page.get("page") or page.get("page_number") or default)
+    except Exception:
+        return default
 
 
 def _page_text(page: Dict[str, Any]) -> str:
@@ -84,11 +137,54 @@ def _contains(text: str, pattern: str) -> bool:
     return bool(re.search(pattern, text or "", flags=re.IGNORECASE | re.UNICODE))
 
 
-def _page_num(page: Dict[str, Any], default: int) -> int:
-    try:
-        return int(page.get("page") or page.get("page_number") or default)
-    except Exception:
-        return default
+def _page_text_by_number(pages: List[Dict[str, Any]]) -> Dict[int, str]:
+    return {_page_num(page, idx): _page_text(page) for idx, page in enumerate(pages, start=1) if isinstance(page, dict)}
+
+
+def _as_int_list(value: Any) -> List[int]:
+    if not isinstance(value, list):
+        return []
+    out: List[int] = []
+    for item in value:
+        try:
+            out.append(int(item))
+        except Exception:
+            continue
+    return out
+
+
+def _lot_numbers_from_text(text: str) -> List[int]:
+    numbers: List[int] = []
+    for match in re.finditer(r"\blotto\s*(?:n\.?|nr\.?|numero)?\s*([1-9]\d*)\b", text or "", flags=re.IGNORECASE | re.UNICODE):
+        try:
+            number = int(match.group(1))
+        except Exception:
+            continue
+        if number not in numbers:
+            numbers.append(number)
+    return numbers
+
+
+def _authority_status(
+    pages_total: int,
+    unknown_count: int,
+    major_section_count: int,
+    unsafe_low_zone_high_count: int,
+    notes: List[str],
+) -> str:
+    if pages_total <= 0:
+        notes.append("no_pages")
+        return "FAIL"
+    if unsafe_low_zone_high_count:
+        notes.append(f"low_zone_high_authority={unsafe_low_zone_high_count}")
+        return "FAIL"
+    if pages_total and unknown_count / pages_total > 0.75:
+        notes.append("mostly_unknown")
+        return "WARN"
+    if major_section_count == 0:
+        notes.append("no_major_authority_sections")
+        return "WARN"
+    return "PASS"
 
 
 def _audit_pdf(path: Path) -> Dict[str, Any]:
@@ -97,61 +193,56 @@ def _audit_pdf(path: Path) -> Dict[str, Any]:
     except Exception as exc:
         return {
             "file": str(path),
-            "pages": 0,
+            "pages_total": 0,
             "instruction_pages_count": 0,
             "answer_pages_count": 0,
-            "final_valuation_pages": "",
-            "final_lot_formation_pages": "",
-            "formalities_pages": "",
-            "has_lotto_unico_high_authority": "NO",
+            "final_lot_formation_count": 0,
+            "final_valuation_count": 0,
+            "formalities_count": 0,
+            "high_authority_lotto_unico": "NO",
+            "high_authority_multilot": "NO",
             "contextual_lotto_mentions_count": 0,
-            "occupancy_answer_pages": "",
-            "money_answer_pages": "",
-            "money_cost_signal_pages": "",
-            "money_valuation_pages": "",
-            "money_rendita_pages": "",
-            "answer_point_count": 0,
-            "instruction_false_positive_suspects": 0,
-            "authority_map_status": "FAIL",
-            "notes": f"extract_failed:{str(exc)[:80]}",
+            "money_cost_signal_count": 0,
+            "money_valuation_count": 0,
+            "money_rendita_catastale_count": 0,
+            "instruction_false_positive_suspects_count": 0,
+            "status": "FAIL",
+            "notes": f"extract_failed:{str(exc)[:120]}",
         }
 
     section_map = build_section_authority_map(pages)
     summary = summarize_authority_map(section_map)
-    section_pages = section_map.get("pages") if isinstance(section_map.get("pages"), list) else []
-    page_text_by_num = {_page_num(page, idx): _page_text(page) for idx, page in enumerate(pages, start=1)}
+    section_pages = [row for row in section_map.get("pages", []) if isinstance(row, dict)]
+    page_texts = _page_text_by_number(pages)
 
     high_lotto_unico = False
+    high_lot_numbers: List[int] = []
     contextual_lotto_mentions = 0
-    occupancy_answer_pages: List[int] = []
-    money_answer_pages: List[int] = []
     money_cost_signal_pages: List[int] = []
     money_valuation_pages: List[int] = []
     money_rendita_pages: List[int] = []
     instruction_false_positive_suspects = 0
-    answer_point_count = 0
+    unsafe_low_zone_high = 0
 
     for row in section_pages:
-        if not isinstance(row, dict):
-            continue
         page_num = int(row.get("page") or 0)
-        text = page_text_by_num.get(page_num, "")
+        text = page_texts.get(page_num, "")
         zone = str(row.get("zone") or "")
         level = str(row.get("authority_level") or "")
         hints = set(row.get("domain_hints") or [])
-        if row.get("answer_point") is not None:
-            answer_point_count += 1
-        if row.get("is_instruction_like") and zone not in {"INSTRUCTION_BLOCK", "QUESTION_BLOCK"} and level == "HIGH_FACTUAL":
-            instruction_false_positive_suspects += 1
 
-        if _contains(text, r"\blotto\s+unico\b") and level == "HIGH_FACTUAL":
+        if zone in {ZONE_TOC, ZONE_INSTRUCTION, ZONE_QUESTION} and level != AUTH_LOW:
+            unsafe_low_zone_high += 1
+        if row.get("is_instruction_like") and zone not in {ZONE_INSTRUCTION, ZONE_QUESTION} and level == AUTH_HIGH:
+            instruction_false_positive_suspects += 1
+        if _contains(text, r"\blotto\s+unico\b") and zone == ZONE_FINAL_LOT and level == AUTH_HIGH:
             high_lotto_unico = True
-        if _contains(text, r"\blotto\s+(n\.?\s*)?\d+\b") and ("procedure_context" in hints or zone == "ANNEX_OR_CONTEXT"):
+        if zone == ZONE_FINAL_LOT and level == AUTH_HIGH:
+            for number in _lot_numbers_from_text(text):
+                if number not in high_lot_numbers:
+                    high_lot_numbers.append(number)
+        if _contains(text, r"\blotto\b") and (zone == ZONE_CONTEXT or "procedure_context" in hints):
             contextual_lotto_mentions += 1
-        if "occupancy" in hints and zone in {"ANSWER_BLOCK", "FINAL_LOT_FORMATION", "FINAL_VALUATION"}:
-            occupancy_answer_pages.append(page_num)
-        if any(hint.startswith("money_") for hint in hints) and zone in {"ANSWER_BLOCK", "FINAL_LOT_FORMATION", "FINAL_VALUATION"}:
-            money_answer_pages.append(page_num)
         if "money_cost_signal" in hints:
             money_cost_signal_pages.append(page_num)
         if "money_valuation" in hints or "money_price" in hints:
@@ -159,96 +250,108 @@ def _audit_pdf(path: Path) -> Dict[str, Any]:
         if "money_rendita_catastale" in hints:
             money_rendita_pages.append(page_num)
 
-    unknown_count = len(summary.get("unknown_pages") or [])
     pages_total = int(summary.get("pages_total") or 0)
+    final_lot_pages = _as_int_list(summary.get("final_lot_formation_pages"))
+    final_valuation_pages = _as_int_list(summary.get("final_valuation_pages"))
+    formalities_pages = _as_int_list(summary.get("formalities_pages"))
+    major_section_count = (
+        len(summary.get("instruction_pages") or [])
+        + len(summary.get("answer_pages") or [])
+        + len(final_lot_pages)
+        + len(final_valuation_pages)
+        + len(formalities_pages)
+    )
     notes_parts: List[str] = []
-    if pages_total and not summary.get("final_valuation_pages"):
-        notes_parts.append("no_final_valuation")
-    if pages_total and not summary.get("final_lot_formation_pages"):
+    if pages_total and not final_lot_pages:
         notes_parts.append("no_final_lot_formation")
+    if pages_total and not final_valuation_pages:
+        notes_parts.append("no_final_valuation")
+    status = _authority_status(
+        pages_total,
+        len(summary.get("unknown_pages") or []),
+        major_section_count,
+        unsafe_low_zone_high,
+        notes_parts,
+    )
     if instruction_false_positive_suspects:
         notes_parts.append(f"instruction_suspects={instruction_false_positive_suspects}")
 
-    if pages_total <= 0:
-        status = "FAIL"
-        notes = "no_pages"
-    elif pages_total and unknown_count / pages_total > 0.75:
-        status = "WARN"
-        notes_parts.append("mostly_unknown")
-        notes = ",".join(notes_parts)
-    elif not (
-        summary.get("instruction_pages")
-        or summary.get("answer_pages")
-        or summary.get("final_valuation_pages")
-        or summary.get("final_lot_formation_pages")
-        or summary.get("formalities_pages")
-    ):
-        status = "WARN"
-        notes_parts.append("no_major_authority_sections")
-        notes = ",".join(notes_parts)
-    elif notes_parts and ("no_final_valuation" in notes_parts and "no_final_lot_formation" in notes_parts):
-        status = "WARN"
-        notes = ",".join(notes_parts)
-    else:
-        status = "PASS"
-        notes = ",".join(notes_parts)
-
-    return {
+    high_lot_numbers.sort()
+    row = {
         "file": str(path),
-        "pages": pages_total,
+        "pages_total": pages_total,
         "instruction_pages_count": len(summary.get("instruction_pages") or []),
         "answer_pages_count": len(summary.get("answer_pages") or []),
-        "final_valuation_pages": ",".join(str(p) for p in summary.get("final_valuation_pages") or []),
-        "final_lot_formation_pages": ",".join(str(p) for p in summary.get("final_lot_formation_pages") or []),
-        "formalities_pages": ",".join(str(p) for p in summary.get("formalities_pages") or []),
-        "has_lotto_unico_high_authority": "YES" if high_lotto_unico else "NO",
+        "final_lot_formation_count": len(final_lot_pages),
+        "final_valuation_count": len(final_valuation_pages),
+        "formalities_count": len(formalities_pages),
+        "high_authority_lotto_unico": "YES" if high_lotto_unico else "NO",
+        "high_authority_multilot": "YES" if len(high_lot_numbers) >= 2 else "NO",
         "contextual_lotto_mentions_count": contextual_lotto_mentions,
-        "occupancy_answer_pages": ",".join(str(p) for p in sorted(set(occupancy_answer_pages))),
-        "money_answer_pages": ",".join(str(p) for p in sorted(set(money_answer_pages))),
-        "money_cost_signal_pages": ",".join(str(p) for p in sorted(set(money_cost_signal_pages))),
-        "money_valuation_pages": ",".join(str(p) for p in sorted(set(money_valuation_pages))),
-        "money_rendita_pages": ",".join(str(p) for p in sorted(set(money_rendita_pages))),
-        "answer_point_count": answer_point_count,
-        "instruction_false_positive_suspects": instruction_false_positive_suspects,
-        "authority_map_status": status,
-        "notes": notes,
+        "money_cost_signal_count": len(set(money_cost_signal_pages)),
+        "money_valuation_count": len(set(money_valuation_pages)),
+        "money_rendita_catastale_count": len(set(money_rendita_pages)),
+        "instruction_false_positive_suspects_count": instruction_false_positive_suspects,
+        "status": status,
+        "notes": ",".join(dict.fromkeys(part for part in notes_parts if part)),
+        "final_lot_formation_pages": final_lot_pages,
+        "final_valuation_pages": final_valuation_pages,
+        "formalities_pages": formalities_pages,
+        "high_authority_lot_numbers": high_lot_numbers,
+        "money_cost_signal_pages": sorted(set(money_cost_signal_pages)),
+        "money_valuation_pages": sorted(set(money_valuation_pages)),
+        "money_rendita_catastale_pages": sorted(set(money_rendita_pages)),
     }
+    return row
 
 
 def _print_table(rows: List[Dict[str, Any]]) -> None:
-    headers = [
-        "file",
-        "pages",
-        "instruction_pages_count",
-        "answer_pages_count",
-        "final_valuation_pages",
-        "final_lot_formation_pages",
-        "formalities_pages",
-        "has_lotto_unico_high_authority",
-        "contextual_lotto_mentions_count",
-        "occupancy_answer_pages",
-        "money_answer_pages",
-        "money_cost_signal_pages",
-        "money_valuation_pages",
-        "money_rendita_pages",
-        "answer_point_count",
-        "instruction_false_positive_suspects",
-        "authority_map_status",
-        "notes",
-    ]
-    print("\t".join(headers))
+    print("\t".join(TABLE_HEADERS))
     for row in rows:
-        print("\t".join(str(row.get(header, "")) for header in headers))
+        print("\t".join(str(row.get(header, "")) for header in TABLE_HEADERS))
+
+
+def _write_json(path: Path, rows: List[Dict[str, Any]]) -> None:
+    summary = {
+        "total": len(rows),
+        "pass": sum(1 for row in rows if row.get("status") == "PASS"),
+        "warn": sum(1 for row in rows if row.get("status") == "WARN"),
+        "fail": sum(1 for row in rows if row.get("status") == "FAIL"),
+    }
+    payload = {"summary": summary, "rows": rows}
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(payload, f, ensure_ascii=False, indent=2)
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Corpus audit for Perizia section authority maps.")
-    parser.add_argument("--limit", type=int, default=None, help="Optional maximum number of PDFs to audit.")
+    parser.add_argument("files", nargs="*", help="Explicit PDF files to audit.")
+    parser.add_argument("--paths", nargs="*", help="PDF files or directories to scan. Defaults to the known local corpus roots.")
+    parser.add_argument("--sample", type=int, default=None, help="Deterministic sample size after path discovery.")
+    parser.add_argument("--seed", type=int, default=42, help="Seed used with --sample.")
+    parser.add_argument("--limit", type=int, default=None, help="Backwards-compatible alias for auditing the first N discovered PDFs.")
+    parser.add_argument("--json-out", help="Optional JSON output path.")
     args = parser.parse_args()
 
-    pdfs = _discover_pdfs(limit=args.limit)
+    requested_paths: List[str] = []
+    if args.paths:
+        requested_paths.extend(args.paths)
+    if args.files:
+        requested_paths.extend(args.files)
+    pdfs = _resolve_input_paths(requested_paths or None)
+    if args.sample is not None:
+        pdfs = _sample_paths(pdfs, args.sample, args.seed)
+    elif args.limit is not None:
+        pdfs = pdfs[: args.limit]
+
     rows = [_audit_pdf(path) for path in pdfs]
     _print_table(rows)
+    if args.json_out:
+        _write_json(Path(args.json_out).expanduser().resolve(), rows)
+
+    if any(row.get("status") == "FAIL" for row in rows):
+        sys.exit(1)
 
 
 if __name__ == "__main__":

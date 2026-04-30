@@ -956,6 +956,15 @@ def _normalize_issue_pages(issue: Dict[str, Any]) -> Dict[str, Any]:
 
 
 _CUSTOMER_INTERNAL_CONTROL_KEYS = {
+    "answer_point",
+    "domain_hint",
+    "domain_hints",
+    "extractor_version",
+    "is_answer_like",
+    "is_instruction_like",
+    "reason_for_authority",
+    "section_zone",
+    "source_stage",
     "contract_state",
     "explanation_fallback_reason",
     "explanation_mode",
@@ -1010,6 +1019,18 @@ _CUSTOMER_INTERNAL_PROVENANCE_KEYS = {
     "resolver_version",
 }
 
+_CUSTOMER_INTERNAL_AUTHORITY_KEYS = {
+    "answer_point",
+    "domain_hint",
+    "domain_hints",
+    "extractor_version",
+    "is_answer_like",
+    "is_instruction_like",
+    "reason_for_authority",
+    "section_zone",
+    "source_stage",
+}
+
 _CUSTOMER_FACING_RESULT_KEYS = {
     "issues",
     "field_states",
@@ -1017,9 +1038,18 @@ _CUSTOMER_FACING_RESULT_KEYS = {
     "section_3_money_box",
     "money_box",
     "section_9_legal_killers",
+    "legal_killers",
     "abusi_edilizi_conformita",
     "red_flags_operativi",
     "section_11_red_flags",
+    "semaforo_generale",
+    "section_1_semaforo_generale",
+    "section_2_decisione_rapida",
+    "summary_for_client",
+    "summary_for_client_bundle",
+    "decision_rapida_client",
+    "decision_rapida_narrated",
+    "user_messages",
     "customer_decision_contract",
 }
 
@@ -1048,7 +1078,7 @@ def _strip_customer_internal_controls(value: Any) -> Any:
         cleaned: Dict[str, Any] = {}
         for key, child in value.items():
             key_text = str(key)
-            if key_text in _CUSTOMER_INTERNAL_CONTROL_KEYS:
+            if key_text in _CUSTOMER_INTERNAL_CONTROL_KEYS or key_text.startswith("authority_"):
                 continue
             if _is_customer_internal_provenance(key_text, child):
                 continue
@@ -1095,6 +1125,10 @@ def _strip_customer_internal_provenance(value: Any) -> Any:
 def sanitize_customer_facing_result(result: Dict[str, Any]) -> Dict[str, Any]:
     if not isinstance(result, dict):
         return result
+    for key in list(result.keys()):
+        key_text = str(key)
+        if key_text in _CUSTOMER_INTERNAL_AUTHORITY_KEYS or key_text.startswith("authority_"):
+            result.pop(key, None)
     for key in _CUSTOMER_FACING_RESULT_KEYS:
         if key in result:
             result[key] = _strip_customer_internal_controls(result[key])
