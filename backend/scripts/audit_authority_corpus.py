@@ -12,6 +12,7 @@ BACKEND_DIR = Path(__file__).resolve().parents[1]
 if str(BACKEND_DIR) not in sys.path:
     sys.path.insert(0, str(BACKEND_DIR))
 
+from perizia_authority_resolvers import build_authority_shadow_resolvers  # noqa: E402
 from perizia_section_authority import (  # noqa: E402
     AUTH_HIGH,
     AUTH_LOW,
@@ -35,6 +36,17 @@ DEFAULT_DISCOVERY_PATHS = [
 
 TABLE_HEADERS = [
     "file",
+    "expected_lot_mode",
+    "shadow_lot_mode",
+    "legacy_lot_mode_if_available",
+    "shadow_occupancy",
+    "shadow_opponibilita",
+    "money_role_counts",
+    "formalities_table_detected",
+    "instruction_leak_count",
+    "fail_open",
+    "warnings",
+    "verdict",
     "pages_total",
     "instruction_pages_count",
     "answer_pages_count",
@@ -165,6 +177,73 @@ def _lot_numbers_from_text(text: str) -> List[int]:
     return numbers
 
 
+def _expected_lot_mode_for_path(path: Path) -> str:
+    name = path.name.lower()
+    if "1859886" in name:
+        return "single_lot"
+    if "multilot" in name or "69-2024" in name or "69_2024" in name:
+        return "multi_lot"
+    return ""
+
+
+def _legacy_lot_mode_if_available(high_lotto_unico: bool, high_lot_numbers: List[int]) -> str:
+    if len(high_lot_numbers) >= 2:
+        return "multi_lot"
+    if high_lotto_unico:
+        return "single_lot"
+    return ""
+
+
+def _shadow_value(shadow: Dict[str, Any], domain: str) -> Dict[str, Any]:
+    row = shadow.get(domain) if isinstance(shadow, dict) else {}
+    value = row.get("value") if isinstance(row, dict) else {}
+    return value if isinstance(value, dict) else {}
+
+
+def _shadow_fail_open(shadow: Dict[str, Any]) -> bool:
+    if not isinstance(shadow, dict):
+        return True
+    if bool(shadow.get("fail_open")):
+        return True
+    for key in ("lot_structure", "occupancy", "opponibilita", "legal_formalities", "money_roles"):
+        row = shadow.get(key)
+        if isinstance(row, dict) and bool(row.get("fail_open")):
+            return True
+    return False
+
+
+def _shadow_warnings(shadow: Dict[str, Any]) -> List[str]:
+    if not isinstance(shadow, dict):
+        return ["shadow_unavailable"]
+    warnings = [str(item) for item in shadow.get("warnings") or [] if str(item or "").strip()]
+    for key in ("lot_structure", "occupancy", "opponibilita", "legal_formalities", "money_roles"):
+        row = shadow.get(key)
+        if not isinstance(row, dict):
+            warnings.append(f"{key}:missing")
+            continue
+        if row.get("status") not in {"OK", None}:
+            warnings.append(f"{key}:{row.get('status')}")
+    return list(dict.fromkeys(warnings))
+
+
+def _instruction_leak_count(shadow: Dict[str, Any]) -> int:
+    opp = _shadow_value(shadow, "opponibilita")
+    legal = _shadow_value(shadow, "legal_formalities")
+    return len(opp.get("instruction_only_mentions") or []) + len(legal.get("instruction_only_legal_mentions") or [])
+
+
+def _shadow_verdict(base_status: str, expected_lot_mode: str, shadow: Dict[str, Any]) -> str:
+    if base_status == "FAIL":
+        return "FAIL"
+    warnings = _shadow_warnings(shadow)
+    lot_mode = str(_shadow_value(shadow, "lot_structure").get("shadow_lot_mode") or "")
+    if expected_lot_mode and lot_mode and lot_mode != "unknown" and lot_mode != expected_lot_mode:
+        return "FAIL"
+    if _shadow_fail_open(shadow) or warnings or base_status == "WARN":
+        return "WARN"
+    return "PASS"
+
+
 def _authority_status(
     pages_total: int,
     unknown_count: int,
@@ -193,6 +272,17 @@ def _audit_pdf(path: Path) -> Dict[str, Any]:
     except Exception as exc:
         return {
             "file": str(path),
+            "expected_lot_mode": _expected_lot_mode_for_path(path),
+            "shadow_lot_mode": "",
+            "legacy_lot_mode_if_available": "",
+            "shadow_occupancy": "",
+            "shadow_opponibilita": "",
+            "money_role_counts": "{}",
+            "formalities_table_detected": "NO",
+            "instruction_leak_count": 0,
+            "fail_open": "YES",
+            "warnings": f"extract_failed:{str(exc)[:120]}",
+            "verdict": "FAIL",
             "pages_total": 0,
             "instruction_pages_count": 0,
             "answer_pages_count": 0,
@@ -277,8 +367,30 @@ def _audit_pdf(path: Path) -> Dict[str, Any]:
         notes_parts.append(f"instruction_suspects={instruction_false_positive_suspects}")
 
     high_lot_numbers.sort()
+    shadow = build_authority_shadow_resolvers(pages, section_map)
+    shadow_lot_value = _shadow_value(shadow, "lot_structure")
+    shadow_occupancy_value = _shadow_value(shadow, "occupancy")
+    shadow_opponibilita_value = _shadow_value(shadow, "opponibilita")
+    shadow_legal_value = _shadow_value(shadow, "legal_formalities")
+    shadow_money_value = _shadow_value(shadow, "money_roles")
+    expected_lot_mode = _expected_lot_mode_for_path(path)
+    shadow_warnings = _shadow_warnings(shadow)
+    verdict = _shadow_verdict(status, expected_lot_mode, shadow)
     row = {
         "file": str(path),
+        "expected_lot_mode": expected_lot_mode,
+        "shadow_lot_mode": shadow_lot_value.get("shadow_lot_mode", ""),
+        "legacy_lot_mode_if_available": _legacy_lot_mode_if_available(high_lotto_unico, high_lot_numbers),
+        "shadow_occupancy": shadow_occupancy_value.get("shadow_occupancy_status", ""),
+        "shadow_opponibilita": shadow_opponibilita_value.get("shadow_opponibilita_status", ""),
+        "money_role_counts": json.dumps(shadow_money_value.get("money_role_counts") or {}, ensure_ascii=False, sort_keys=True),
+        "formalities_table_detected": "YES"
+        if shadow_legal_value.get("formalities_to_cancel") or shadow_legal_value.get("surviving_formalities")
+        else "NO",
+        "instruction_leak_count": _instruction_leak_count(shadow),
+        "fail_open": "YES" if _shadow_fail_open(shadow) else "NO",
+        "warnings": ",".join(shadow_warnings),
+        "verdict": verdict,
         "pages_total": pages_total,
         "instruction_pages_count": len(summary.get("instruction_pages") or []),
         "answer_pages_count": len(summary.get("answer_pages") or []),
@@ -301,6 +413,7 @@ def _audit_pdf(path: Path) -> Dict[str, Any]:
         "money_cost_signal_pages": sorted(set(money_cost_signal_pages)),
         "money_valuation_pages": sorted(set(money_valuation_pages)),
         "money_rendita_catastale_pages": sorted(set(money_rendita_pages)),
+        "authority_shadow_resolvers": shadow,
     }
     return row
 
@@ -327,6 +440,7 @@ def _write_json(path: Path, rows: List[Dict[str, Any]]) -> None:
 def main() -> None:
     parser = argparse.ArgumentParser(description="Corpus audit for Perizia section authority maps.")
     parser.add_argument("files", nargs="*", help="Explicit PDF files to audit.")
+    parser.add_argument("--file", dest="single_file", help="Audit one explicit PDF file.")
     parser.add_argument("--paths", nargs="*", help="PDF files or directories to scan. Defaults to the known local corpus roots.")
     parser.add_argument("--sample", type=int, default=None, help="Deterministic sample size after path discovery.")
     parser.add_argument("--seed", type=int, default=42, help="Seed used with --sample.")
@@ -335,6 +449,8 @@ def main() -> None:
     args = parser.parse_args()
 
     requested_paths: List[str] = []
+    if args.single_file:
+        requested_paths.append(args.single_file)
     if args.paths:
         requested_paths.extend(args.paths)
     if args.files:

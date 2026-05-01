@@ -44,6 +44,7 @@ from narrator import (
 from cost_market_ranges import market_range_for_item
 from customer_decision_contract import apply_customer_decision_contract, sanitize_customer_facing_result, separate_internal_runtime_from_customer_result
 from customer_contract_qa_gate import apply_customer_contract_qa_gate
+from perizia_authority_resolvers import build_authority_shadow_resolvers
 from perizia_section_authority import build_section_authority_map, summarize_authority_map
 from perizia_runtime.runtime import apply_verifier_to_result, run_quality_verifier
 
@@ -16233,6 +16234,21 @@ async def analyze_perizia(request: Request, file: UploadFile = File(...)):
             "error": "candidate_miner_failed",
         }
     debug_obj["candidate_summary"] = candidate_summary
+    try:
+        debug_obj["authority_shadow_resolvers"] = build_authority_shadow_resolvers(
+            pages,
+            extraction_payload.get("section_authority"),
+            candidates_folder=candidate_summary.get("candidates_folder"),
+        )
+    except Exception as e:
+        logger.exception(f"[{request_id}] authority_shadow_resolvers_failed analysis_id={analysis_id} err={e}")
+        debug_obj["authority_shadow_resolvers"] = {
+            "schema_version": "perizia_authority_resolvers_v1",
+            "status": "FAIL_OPEN",
+            "fail_open": True,
+            "warnings": ["authority_shadow_resolvers_failed"],
+            "error": str(e)[:240],
+        }
     preserved_money_box = copy.deepcopy(result.get("money_box")) if isinstance(result.get("money_box"), dict) else None
     preserved_section_3_money_box = copy.deepcopy(result.get("section_3_money_box")) if isinstance(result.get("section_3_money_box"), dict) else None
     try:

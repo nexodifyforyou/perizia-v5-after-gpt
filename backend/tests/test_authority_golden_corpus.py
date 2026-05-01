@@ -17,6 +17,7 @@ from customer_decision_contract import (  # noqa: E402
     sanitize_customer_facing_result,
     separate_internal_runtime_from_customer_result,
 )
+from perizia_authority_resolvers import build_authority_shadow_resolvers  # noqa: E402
 from perizia_section_authority import (  # noqa: E402
     AUTH_HIGH,
     AUTH_LOW,
@@ -49,6 +50,9 @@ AUTHORITY_INTERNAL_KEYS = {
     "is_answer_like",
     "source_stage",
     "extractor_version",
+    "shadow_authority",
+    "authority_resolver",
+    "authority_shadow_resolvers",
 }
 
 
@@ -108,6 +112,10 @@ def _case_state(path_str: str) -> Dict[str, Any]:
     }
 
 
+def _shadow_for_state(state: Dict[str, Any]) -> Dict[str, Any]:
+    return build_authority_shadow_resolvers(state["pages"], state["section_map"])
+
+
 def _high_final_lotto_unico(state: Dict[str, Any]) -> bool:
     for page, row in state["rows"].items():
         if row.get("zone") != ZONE_FINAL_LOT or row.get("authority_level") != AUTH_HIGH:
@@ -157,6 +165,9 @@ def _tainted_leaf() -> Dict[str, Any]:
         "source_stage": "candidate_miner",
         "extractor_version": "shadow-test",
         "authority_shadow": {"page": 1},
+        "shadow_authority": {"page": 1},
+        "authority_resolver": {"domain": "money"},
+        "authority_shadow_resolvers": {"domain": "debug"},
     }
 
 
@@ -223,6 +234,47 @@ def test_golden_corpus_authority_expectations(case: Dict[str, Any]):
     ]
     if expectations.get("min_final_valuation_pages", 0) or expectations.get("min_final_lot_formation_pages", 0):
         assert high_price_or_value_pages
+
+
+@pytest.mark.parametrize("case", _load_cases(), ids=lambda case: case["id"])
+def test_golden_corpus_shadow_resolver_outputs(case: Dict[str, Any]):
+    pdf_path = _resolve_case_path(case)
+    if pdf_path is None:
+        pytest.skip(f"golden PDF not available for {case['id']}: {case.get('paths')}")
+
+    state = _case_state(str(pdf_path))
+    shadow = _shadow_for_state(state)
+    for domain in ("lot_structure", "occupancy", "opponibilita", "legal_formalities", "money_roles"):
+        assert isinstance(shadow.get(domain), dict)
+        assert shadow[domain]["domain"]
+        assert shadow[domain]["status"] in {"OK", "WARN", "FAIL_OPEN", "INSUFFICIENT_EVIDENCE"}
+        assert isinstance(shadow[domain]["value"], dict)
+        assert 0.0 <= float(shadow[domain]["confidence"]) <= 1.0
+        assert isinstance(shadow[domain]["authority_basis"], dict)
+
+    lot = shadow["lot_structure"]["value"]
+    case_id = case["id"]
+    if case_id == "1859886_c_perizia":
+        assert lot["shadow_lot_mode"] == "single_lot"
+        assert lot["has_high_authority_lotto_unico"] is True
+        assert lot["has_high_authority_multilot"] is False
+        assert shadow["lot_structure"]["confidence"] >= 0.85
+    elif case_id == "multilot_69_2024":
+        assert lot["shadow_lot_mode"] == "multi_lot"
+        assert set(lot["detected_lot_numbers"]).issuperset({1, 2, 3})
+        assert lot["has_high_authority_lotto_unico"] is False
+    elif case_id == "ostuni_via_viterbo_2":
+        assert shadow["status"] in {"OK", "WARN", "INSUFFICIENT_EVIDENCE", "FAIL_OPEN"}
+        for domain in ("occupancy", "opponibilita", "legal_formalities", "money_roles"):
+            assert shadow[domain]["status"] in {"OK", "WARN", "INSUFFICIENT_EVIDENCE", "FAIL_OPEN"}
+    elif case_id in {"via_nuova_19_1", "via_del_mare_4591_4593"}:
+        assert shadow["fail_open"] is True or shadow["lot_structure"]["confidence"] <= 0.35
+        assert lot["shadow_lot_mode"] in {"unknown", "single_lot", "multi_lot"}
+        if lot["shadow_lot_mode"] != "unknown":
+            assert shadow["lot_structure"]["confidence"] < 0.5
+    elif case_id == "via_umbria":
+        money_counts = shadow["money_roles"]["value"].get("money_role_counts") or {}
+        assert "buyer_cost" not in money_counts
 
 
 def test_error_class_instruction_context_lot_money_and_formalities_rules():

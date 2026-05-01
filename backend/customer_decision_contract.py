@@ -965,6 +965,7 @@ _CUSTOMER_INTERNAL_CONTROL_KEYS = {
     "reason_for_authority",
     "section_zone",
     "source_stage",
+    "shadow_authority",
     "contract_state",
     "explanation_fallback_reason",
     "explanation_mode",
@@ -1029,6 +1030,7 @@ _CUSTOMER_INTERNAL_AUTHORITY_KEYS = {
     "reason_for_authority",
     "section_zone",
     "source_stage",
+    "shadow_authority",
 }
 
 _CUSTOMER_FACING_RESULT_KEYS = {
