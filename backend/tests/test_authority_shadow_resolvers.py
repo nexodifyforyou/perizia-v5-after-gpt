@@ -87,6 +87,16 @@ def test_lot_toc_multilot_final_unico_wins():
     assert any(ev.get("lot_number") in {1, 2, 3} for ev in payload["lot_structure"]["rejected_conflicts"])
 
 
+def test_lot_toc_only_repeated_lot_numbers_do_not_create_multilot():
+    payload = _build("INDICE\nLOTTO 1 ........ 2\nLOTTO 2 ........ 18\nLOTTO 3 ........ 29")
+
+    lot_result = payload["lot_structure"]
+    lot = lot_result["value"]
+    assert lot["shadow_lot_mode"] == "unknown"
+    assert lot["has_high_authority_multilot"] is False
+    assert lot_result["confidence"] < 0.5
+
+
 def test_lot_low_authority_unico_only_is_not_confident_single_lot():
     payload = _build("INDICE\nLOTTO UNICO ........ 2\nDescrizione ........ 3\nStima ........ 4")
 
@@ -102,6 +112,79 @@ def test_lot_final_formazione_lotti_unico_is_high_confidence_single_lot():
     lot_result = payload["lot_structure"]
     assert lot_result["value"]["shadow_lot_mode"] == "single_lot"
     assert lot_result["confidence"] >= 0.85
+
+
+def test_lot_chapter_based_multilot_topology_is_high_confidence_multilot():
+    payload = _build(
+        "TRIBUNALE ORDINARIO\nLOTTO 1\n"
+        "1. IDENTIFICAZIONE DEI BENI IMMOBILI OGGETTO DI VENDITA:\n"
+        "A appartamento in Via Roma, della superficie commerciale di 80 mq per la quota di 1/1.\n"
+        "3. STATO DI POSSESSO AL MOMENTO DEL SOPRALLUOGO: occupato.\n"
+        "4. VINCOLI ED ONERI GIURIDICI.\n"
+        "VALUTAZIONE: valore di mercato Euro 100.000,00.",
+        "TRIBUNALE ORDINARIO\nLOTTO 2\n"
+        "1. IDENTIFICAZIONE DEI BENI IMMOBILI OGGETTO DI VENDITA:\n"
+        "A box auto in Via Roma, della superficie commerciale di 20 mq per la quota di 1/1.\n"
+        "GIUDIZI DI CONFORMITA urbanistica e catastale.\n"
+        "VALUTAZIONE: valore di mercato Euro 20.000,00.",
+        "TRIBUNALE ORDINARIO\nLOTTO 3\n"
+        "1. IDENTIFICAZIONE DEI BENI IMMOBILI OGGETTO DI VENDITA:\n"
+        "A deposito in Via Roma, della superficie commerciale di 12 mq per la quota di 1/1.\n"
+        "VINCOLI ED ONERI GIURIDICI: nessuno.\n"
+        "VALUTAZIONE: valore di mercato Euro 10.000,00.",
+    )
+
+    lot_result = payload["lot_structure"]
+    lot = lot_result["value"]
+    assert lot["shadow_lot_mode"] == "multi_lot"
+    assert set(lot["detected_lot_numbers"]) == {1, 2, 3}
+    assert set(lot["chapter_lot_numbers"]) == {1, 2, 3}
+    assert lot["has_high_authority_multilot"] is True
+    assert lot_result["confidence"] >= 0.85
+    assert "chapter_based_multi_lot_topology" in lot_result["authority_basis"]["rules_triggered"]
+
+
+def test_lot_context_only_lotto_references_do_not_create_chapter_multilot():
+    payload = _build(
+        "Nella descrizione si richiama lo stesso Lotto 1 della procedura riunita.",
+        "Il CTU cita il Lotto 2 di una precedente perizia senza aprire un capitolo autonomo.",
+    )
+
+    lot_result = payload["lot_structure"]
+    assert lot_result["value"]["shadow_lot_mode"] == "unknown"
+    assert lot_result["value"]["has_high_authority_multilot"] is False
+
+
+def test_lot_unico_with_multiple_beni_is_not_chapter_multilot():
+    payload = _build(
+        "STIMA / FORMAZIONE LOTTI\nLOTTO UNICO\n"
+        "Bene N. 1 - appartamento.\n"
+        "Bene N. 2 - autorimessa.\n"
+        "Il compendio e vendibile in unico lotto."
+    )
+
+    lot_result = payload["lot_structure"]
+    assert lot_result["value"]["shadow_lot_mode"] == "single_lot"
+    assert lot_result["value"]["chapter_lot_numbers"] == []
+    assert lot_result["value"]["has_high_authority_multilot"] is False
+
+
+def test_lot_chapter_multilot_conflicting_with_high_lotto_unico_stays_unknown():
+    payload = _build(
+        "STIMA / FORMAZIONE LOTTI\nLOTTO UNICO\nIl compendio e vendibile in un unico lotto.",
+        "LOTTO 1\n1. IDENTIFICAZIONE DEI BENI IMMOBILI OGGETTO DI VENDITA:\n"
+        "A appartamento in Via Roma, della superficie commerciale di 80 mq per la quota di 1/1.\n"
+        "VALUTAZIONE: Euro 100.000,00.",
+        "LOTTO 2\n1. IDENTIFICAZIONE DEI BENI IMMOBILI OGGETTO DI VENDITA:\n"
+        "A box in Via Roma, della superficie commerciale di 20 mq per la quota di 1/1.\n"
+        "VALUTAZIONE: Euro 20.000,00.",
+    )
+
+    lot_result = payload["lot_structure"]
+    lot = lot_result["value"]
+    assert lot["shadow_lot_mode"] == "unknown"
+    assert lot["chapter_topology_conflicts"]
+    assert lot_result["status"] == "WARN"
 
 
 def test_occupancy_instruction_only_does_not_create_factual_status():
@@ -277,4 +360,3 @@ def test_customer_payload_invariance_strips_shadow_authority_keys():
 
     assert _collect_forbidden(result) == []
     assert internal_runtime["debug"]["authority_shadow_resolvers"]["schema_version"] == shadow.SCHEMA_VERSION
-

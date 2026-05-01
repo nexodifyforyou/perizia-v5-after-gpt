@@ -44,6 +44,7 @@ from narrator import (
 from cost_market_ranges import market_range_for_item
 from customer_decision_contract import apply_customer_decision_contract, sanitize_customer_facing_result, separate_internal_runtime_from_customer_result
 from customer_contract_qa_gate import apply_customer_contract_qa_gate
+from perizia_authority_lot_projection import apply_authority_lot_projection_if_enabled
 from perizia_authority_resolvers import build_authority_shadow_resolvers
 from perizia_section_authority import build_section_authority_map, summarize_authority_map
 from perizia_runtime.runtime import apply_verifier_to_result, run_quality_verifier
@@ -16295,6 +16296,27 @@ async def analyze_perizia(request: Request, file: UploadFile = File(...)):
         debug_obj["verifier_runtime"] = {"error": "verifier_runtime_failed", "message": str(e)[:240]}
     _promote_verifier_pricing_field_state(result)
     _prune_verifier_pricing_amounts_from_money_box(result)
+    try:
+        debug_obj["authority_lot_projection"] = apply_authority_lot_projection_if_enabled(
+            result,
+            debug_obj.get("authority_shadow_resolvers"),
+            request_id=request_id,
+        )
+    except Exception as e:
+        logger.exception(f"[{request_id}] authority_lot_projection_failed analysis_id={analysis_id} err={e}")
+        debug_obj["authority_lot_projection"] = {
+            "enabled": os.environ.get("AUTHORITY_LOT_PROJECTION_ENABLED") == "1",
+            "status": "FAIL_OPEN",
+            "applied": False,
+            "reason": "authority_lot_projection_failed",
+            "legacy_lot_mode": "unknown",
+            "authority_lot_mode": "unknown",
+            "authority_confidence": 0.0,
+            "detected_lot_numbers": [],
+            "source_pages": [],
+            "changed_fields": [],
+            "error": str(e)[:240],
+        }
     apply_customer_decision_contract(result)
     result["user_messages"] = _build_user_messages(result, extraction_payload, analysis_id=analysis_id)
 

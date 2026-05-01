@@ -264,9 +264,14 @@ def test_golden_corpus_shadow_resolver_outputs(case: Dict[str, Any]):
         assert set(lot["detected_lot_numbers"]).issuperset({1, 2, 3})
         assert lot["has_high_authority_lotto_unico"] is False
     elif case_id == "ostuni_via_viterbo_2":
-        assert shadow["status"] in {"OK", "WARN", "INSUFFICIENT_EVIDENCE", "FAIL_OPEN"}
-        for domain in ("occupancy", "opponibilita", "legal_formalities", "money_roles"):
-            assert shadow[domain]["status"] in {"OK", "WARN", "INSUFFICIENT_EVIDENCE", "FAIL_OPEN"}
+        expected_numbers = set((case.get("expectations") or {}).get("requires_chapter_lot_numbers") or [])
+        assert lot["shadow_lot_mode"] == "multi_lot"
+        assert set(lot["detected_lot_numbers"]).issuperset(expected_numbers)
+        assert set(lot["chapter_lot_numbers"]).issuperset(expected_numbers)
+        assert len(lot["chapter_lot_start_pages"]) >= int((case.get("expectations") or {}).get("expected_min_lots_detected") or 0)
+        assert shadow["lot_structure"]["confidence"] >= 0.85
+        assert "chapter_based_multi_lot_topology" in shadow["lot_structure"]["authority_basis"]["rules_triggered"]
+        assert lot["has_high_authority_lotto_unico"] is False
     elif case_id in {"via_nuova_19_1", "via_del_mare_4591_4593"}:
         assert shadow["fail_open"] is True or shadow["lot_structure"]["confidence"] <= 0.35
         assert lot["shadow_lot_mode"] in {"unknown", "single_lot", "multi_lot"}

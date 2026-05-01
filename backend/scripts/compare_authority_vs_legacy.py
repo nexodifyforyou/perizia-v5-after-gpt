@@ -1,14 +1,17 @@
 #!/usr/bin/env python3
 """Compare legacy customer outputs with Phase 3A authority-shadow outputs.
 
-This is Phase 3B only: it reports differences and error classes. It does not
-replace customer-facing facts or mutate saved analyses.
+This reports differences and error classes. The optional Phase 3C lot-projection
+flag simulates the feature-flagged lot-only projection without mutating saved
+analyses.
 """
 
 from __future__ import annotations
 
 import argparse
+import copy
 import json
+import os
 import re
 import sys
 from pathlib import Path
@@ -24,6 +27,7 @@ except Exception:  # pragma: no cover - direct script execution fallback
     from audit_authority_corpus import _extract_pdf_pages
 
 from perizia_authority_resolvers import build_authority_shadow_resolvers
+from perizia_authority_lot_projection import FEATURE_FLAG, apply_authority_lot_projection_if_enabled
 from perizia_section_authority import build_section_authority_map
 
 
@@ -90,6 +94,13 @@ TABLE_HEADERS = [
     "customer_authority_key_leak",
     "comparison_verdict",
     "notes",
+]
+
+PROJECTION_HEADERS = [
+    "projected_lot_mode",
+    "projection_status",
+    "projection_applied",
+    "projection_verdict",
 ]
 
 
@@ -235,10 +246,17 @@ def _resolve_case_path(case: Dict[str, Any]) -> Tuple[Optional[Path], str]:
 def _expected_from_case(case: Dict[str, Any]) -> Dict[str, str]:
     expectations = case.get("expectations") if isinstance(case.get("expectations"), dict) else {}
     expected_class = str(case.get("expected_class") or "")
-    expected_lot_mode = ""
-    if expectations.get("requires_high_lotto_unico") or "SINGLE_LOT" in expected_class:
+    expected_lot_mode = str(expectations.get("expected_lot_mode") or "")
+    if expected_lot_mode:
+        pass
+    elif expectations.get("requires_high_lotto_unico") or "SINGLE_LOT" in expected_class:
         expected_lot_mode = "single_lot"
-    elif len(expectations.get("requires_high_lot_numbers") or []) >= 2 or "MULTI_LOT" in expected_class:
+    elif (
+        len(expectations.get("requires_high_lot_numbers") or []) >= 2
+        or len(expectations.get("requires_chapter_lot_numbers") or []) >= 2
+        or int(expectations.get("expected_min_lots_detected") or 0) >= 2
+        or "MULTI_LOT" in expected_class
+    ):
         expected_lot_mode = "multi_lot"
 
     case_id = str(case.get("id") or "")
@@ -747,10 +765,89 @@ def _row_from_components(
         "comparison_verdict": verdict,
         "error_classes": classes,
         "notes": ";".join(dict.fromkeys(str(note) for note in all_notes if str(note or "").strip())),
+        "_projection_source": {
+            "shadow": shadow if isinstance(shadow, dict) else {},
+            "customer_result": customer_result if isinstance(customer_result, dict) else {},
+        },
     }
 
 
-def compare_pdf(path: Path, *, expected: Optional[Dict[str, str]] = None, analysis_payload: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+def _synthetic_result_for_projection(legacy_lot_mode: str) -> Dict[str, Any]:
+    if legacy_lot_mode == "multi_lot":
+        return {
+            "lots": [{"lot_number": 1, "lot_id": "1"}, {"lot_number": 2, "lot_id": "2"}],
+            "lots_count": 2,
+            "lot_count": 2,
+            "is_multi_lot": True,
+            "case_header": {"lotto": "Lotti 1, 2"},
+            "report_header": {"lotto": {"value": "Lotti 1, 2"}, "is_multi_lot": True},
+        }
+    return {
+        "lots": [{"lot_number": 1, "lot_id": "1"}],
+        "lots_count": 1,
+        "lot_count": 1,
+        "is_multi_lot": False,
+        "case_header": {"lotto": "Lotto Unico"},
+        "report_header": {"lotto": {"value": "Lotto Unico"}, "is_multi_lot": False},
+    }
+
+
+def _projected_lot_mode(result: Dict[str, Any]) -> str:
+    lots = result.get("lots")
+    if isinstance(lots, list) and len([lot for lot in lots if isinstance(lot, dict)]) >= 2:
+        return "multi_lot"
+    if result.get("is_multi_lot") is True:
+        return "multi_lot"
+    for key in ("lots_count", "lot_count"):
+        try:
+            count = int(result.get(key))
+        except Exception:
+            continue
+        if count >= 2:
+            return "multi_lot"
+        if count == 1:
+            return "single_lot"
+    return _normalize_lot_mode(_first_text_value(result.get("case_header"), result.get("report_header")))
+
+
+def add_projection_columns(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    previous = os.environ.get(FEATURE_FLAG)
+    os.environ[FEATURE_FLAG] = "1"
+    try:
+        projected_rows: List[Dict[str, Any]] = []
+        for row in rows:
+            source = row.get("_projection_source") if isinstance(row.get("_projection_source"), dict) else {}
+            shadow = source.get("shadow") if isinstance(source.get("shadow"), dict) else {}
+            customer_result = source.get("customer_result") if isinstance(source.get("customer_result"), dict) else None
+            result = copy.deepcopy(customer_result) if isinstance(customer_result, dict) else _synthetic_result_for_projection(str(row.get("legacy_lot_mode") or "unknown"))
+            meta = apply_authority_lot_projection_if_enabled(result, shadow)
+            out = {key: value for key, value in row.items() if key != "_projection_source"}
+            out["projected_lot_mode"] = _projected_lot_mode(result)
+            out["projection_status"] = meta.get("status")
+            out["projection_applied"] = bool(meta.get("applied"))
+            if meta.get("applied"):
+                out["projection_verdict"] = "APPLIED"
+            elif meta.get("status") == "ALREADY_MATCHES":
+                out["projection_verdict"] = "ALREADY_MATCHES"
+            elif str(meta.get("status") or "").startswith("FAIL_OPEN"):
+                out["projection_verdict"] = "FAIL_OPEN"
+            else:
+                out["projection_verdict"] = "NOT_APPLIED"
+            projected_rows.append(out)
+        return projected_rows
+    finally:
+        if previous is None:
+            os.environ.pop(FEATURE_FLAG, None)
+        else:
+            os.environ[FEATURE_FLAG] = previous
+
+
+def compare_pdf(
+    path: Path,
+    *,
+    expected: Optional[Dict[str, str]] = None,
+    analysis_payload: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
     if not path.exists() or not path.is_file():
         return {
             "file": str(path),
@@ -792,7 +889,7 @@ def compare_pdf(path: Path, *, expected: Optional[Dict[str, str]] = None, analys
     )
 
 
-def compare_analysis_id(analysis_id: str) -> Dict[str, Any]:
+def compare_analysis_id(analysis_id: str, *, expected: Optional[Dict[str, str]] = None) -> Dict[str, Any]:
     extract_dir = RUNS_ROOT / analysis_id / "extract"
     pages_payload = _read_json(extract_dir / "pages_raw.json", [])
     pages = _normalize_pages(pages_payload if isinstance(pages_payload, list) else [])
@@ -805,7 +902,7 @@ def compare_analysis_id(analysis_id: str) -> Dict[str, Any]:
     result = saved.get("result") if isinstance(saved, dict) else None
     legacy = _extract_legacy_from_result(result) or _extract_legacy_from_pages(pages)
     file_label = str((saved or {}).get("file_name") or (saved or {}).get("case_title") or analysis_id)
-    expected = _expectations_for_file(Path(file_label))
+    expected = expected or _expectations_for_file(Path(file_label))
     return _row_from_components(
         file_label=file_label,
         analysis_id=analysis_id,
@@ -823,6 +920,11 @@ def compare_corpus() -> List[Dict[str, Any]]:
         expected = _expected_from_case(case)
         path, missing_reason = _resolve_case_path(case)
         if path is None:
+            analysis_ids = [str(item) for item in case.get("analysis_ids") or [] if str(item or "").strip()]
+            if analysis_ids:
+                for analysis_id in analysis_ids:
+                    rows.append(compare_analysis_id(analysis_id, expected=expected))
+                continue
             saved = None
             if str(case.get("id") or "") == "via_umbria":
                 saved = _find_saved_analysis_payload(file_hint="umbria")
@@ -850,13 +952,22 @@ def compare_corpus() -> List[Dict[str, Any]]:
     return rows
 
 
-def _print_table(rows: List[Dict[str, Any]]) -> None:
-    print("\t".join(TABLE_HEADERS))
+def _public_row(row: Dict[str, Any]) -> Dict[str, Any]:
+    return {key: value for key, value in row.items() if key != "_projection_source"}
+
+
+def _public_rows(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    return [_public_row(row) for row in rows]
+
+
+def _print_table(rows: List[Dict[str, Any]], *, include_projection: bool = False) -> None:
+    headers = TABLE_HEADERS + (PROJECTION_HEADERS if include_projection else [])
+    print("\t".join(headers))
     for row in rows:
-        printable = dict(row)
+        printable = _public_row(row)
         printable["legacy_money_summary"] = _json_summary(row.get("legacy_money_summary") or {})
         printable["authority_money_role_counts"] = _json_summary(row.get("authority_money_role_counts") or {})
-        print("\t".join(str(printable.get(header, "")) for header in TABLE_HEADERS))
+        print("\t".join(str(printable.get(header, "")) for header in headers))
 
 
 def _write_json(path: Path, rows: List[Dict[str, Any]]) -> None:
@@ -870,7 +981,7 @@ def _write_json(path: Path, rows: List[Dict[str, Any]]) -> None:
     }
     path.parent.mkdir(parents=True, exist_ok=True)
     with open(path, "w", encoding="utf-8") as f:
-        json.dump({"summary": summary, "rows": rows}, f, ensure_ascii=False, indent=2)
+        json.dump({"summary": summary, "rows": _public_rows(rows)}, f, ensure_ascii=False, indent=2)
 
 
 def main(argv: Optional[Sequence[str]] = None) -> int:
@@ -881,6 +992,11 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     mode.add_argument("--analysis-id", help="Compare one saved extraction/analysis id.")
     parser.add_argument("--json", action="store_true", help="Print JSON instead of TSV.")
     parser.add_argument("--json-out", help="Optional JSON report path.")
+    parser.add_argument(
+        "--enable-authority-lot-projection",
+        action="store_true",
+        help="Simulate AUTHORITY_LOT_PROJECTION_ENABLED=1 and add projected lot columns.",
+    )
     args = parser.parse_args(argv)
 
     if args.corpus:
@@ -891,12 +1007,15 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     else:
         rows = [compare_analysis_id(str(args.analysis_id or "").strip())]
 
+    if args.enable_authority_lot_projection:
+        rows = add_projection_columns(rows)
+
     if args.json or args.json_out:
-        payload = {"rows": rows}
+        payload = {"rows": _public_rows(rows)}
         if args.json:
             print(json.dumps(payload, ensure_ascii=False, indent=2))
     if not args.json:
-        _print_table(rows)
+        _print_table(rows, include_projection=args.enable_authority_lot_projection)
     if args.json_out:
         _write_json(Path(args.json_out).expanduser().resolve(), rows)
     return 0

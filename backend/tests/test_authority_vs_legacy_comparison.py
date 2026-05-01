@@ -15,6 +15,7 @@ from scripts import compare_authority_vs_legacy as compare  # noqa: E402
 
 SINGLE_LOT_PDF = BACKEND_DIR / "tests" / "fixtures" / "perizie" / "1859886_c_perizia.pdf"
 MULTILOT_PDF = Path("/srv/perizia/app/uploads/perizia_multilot_69_2024.pdf")
+OSTUNI_PDF = Path("/home/syedtajmeelshah/Ostuni, Via Viterbo 2.pdf")
 
 
 def test_comparison_script_produces_stable_table_and_json_row():
@@ -65,6 +66,36 @@ def test_known_multilot_case_compares_correctly():
     assert row["authority_shadow_lot_mode"] == "multi_lot"
     assert row["authority_shadow_lot_mode"] != "single_lot"
     assert row["customer_authority_key_leak"] == 0
+
+
+def test_chapter_based_multilot_case_compares_correctly():
+    if not OSTUNI_PDF.exists():
+        pytest.skip(f"Ostuni PDF not available: {OSTUNI_PDF}")
+
+    row = compare.compare_pdf(
+        OSTUNI_PDF,
+        expected={"expected_lot_mode": "multi_lot", "expected_occupancy": "", "expected_opponibilita": ""},
+        analysis_payload=None,
+    )
+
+    assert row["expected_lot_mode"] == "multi_lot"
+    assert row["authority_shadow_lot_mode"] == "multi_lot"
+    assert row["customer_authority_key_leak"] == 0
+
+
+def test_casa_ai_venti_saved_extraction_stays_single_lot_when_available():
+    extract_pages = Path("/srv/perizia/_qa/runs/analysis_6b3ab6865dca/extract/pages_raw.json")
+    if not extract_pages.exists():
+        pytest.skip("Casa ai Venti saved extraction not available")
+
+    row = compare.compare_analysis_id(
+        "analysis_6b3ab6865dca",
+        expected={"expected_lot_mode": "single_lot", "expected_occupancy": "", "expected_opponibilita": ""},
+    )
+
+    assert row["expected_lot_mode"] == "single_lot"
+    assert row["authority_shadow_lot_mode"] == "single_lot"
+    assert row["authority_shadow_lot_mode"] != "multi_lot"
 
 
 def test_unknown_incomplete_cases_do_not_fail_only_because_authority_is_unknown():
@@ -198,4 +229,3 @@ def test_via_umbria_stale_money_check_is_included_when_payload_has_stale_label()
     assert verdict == "AUTHORITY_BETTER_THAN_LEGACY"
     assert "valuation_as_buyer_cost" in classes
     assert "stale_via_umbria_regolarizzazione_label_detected" in notes
-
