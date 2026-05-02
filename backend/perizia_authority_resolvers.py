@@ -50,6 +50,37 @@ LOT_NUMBER_RE = re.compile(
     r"\blotto\s*(?:n\.?|nr\.?|numero)?\s*([1-9]\d*)\b",
     flags=re.IGNORECASE | re.UNICODE,
 )
+CHAPTER_LOT_HEADING_RE = re.compile(
+    r"(?im)^\s*lotto\s*(?:n\.?|nr\.?|numero)?\s*([1-9]\d*)\s*$",
+    flags=re.IGNORECASE | re.UNICODE | re.MULTILINE,
+)
+CHAPTER_IDENTIFICATION_RE = re.compile(
+    r"\b1\s*[\.\)]\s*identificazione\s+dei\s+beni\s+immobili\s+oggetto\s+di\s+vendita\b",
+    flags=re.IGNORECASE | re.UNICODE,
+)
+CHAPTER_ASSET_QUOTA_RE = re.compile(
+    r"\b(appartamento|abitazione|box|garage|autorimessa|cantina|deposito|fabbricato|terreno|locale|unita\s+immobiliare|negozio|ufficio|magazzino)\b"
+    r".{0,260}\bquota\s+di\b",
+    flags=re.IGNORECASE | re.UNICODE | re.DOTALL,
+)
+CHAPTER_SUPPORT_PATTERNS = {
+    "valuation": re.compile(
+        r"\b(valutazione|valore\s+di\s+mercato|valore\s+di\s+vendita\s+giudiziaria|valore\s+di\s+stima|data\s+della\s+valutazione)\b",
+        flags=re.IGNORECASE | re.UNICODE,
+    ),
+    "possession": re.compile(
+        r"\b(stato\s+di\s+possesso|al\s+momento\s+del\s+sopralluogo|sopralluogo|occupat\w*|liber[oaie])\b",
+        flags=re.IGNORECASE | re.UNICODE,
+    ),
+    "conformity": re.compile(
+        r"\b(conformit[àa]|regolarit[àa]\s+(?:urbanistica|edilizia|catastale)|identificazione\s+catastale|catasto)\b",
+        flags=re.IGNORECASE | re.UNICODE,
+    ),
+    "legal": re.compile(
+        r"\b(vincoli\s+ed\s+oneri\s+giuridici|formalit[àa]|pignorament\w*|ipotec\w*)\b",
+        flags=re.IGNORECASE | re.UNICODE,
+    ),
+}
 MONEY_AMOUNT_RE = re.compile(
     r"(?:\u20ac|\beuro\b)\s*\d{1,3}(?:\.\d{3})*(?:,\d{2})?|"
     r"\d{1,3}(?:\.\d{3})*(?:,\d{2})?\s*(?:\u20ac|\beuro\b)|"
@@ -360,6 +391,10 @@ def _empty_lot_value() -> Dict[str, Any]:
         "final_lot_formation_pages": [],
         "schema_riassuntivo_pages": [],
         "riepilogo_bando_pages": [],
+        "chapter_lot_numbers": [],
+        "chapter_lot_start_pages": [],
+        "chapter_lot_evidence": [],
+        "chapter_topology_conflicts": [],
     }
 
 
@@ -395,6 +430,92 @@ def _pages_matching(pages: Sequence[Dict[str, Any]], pattern: str) -> List[int]:
         if re.search(pattern, page.get("text", ""), flags=re.IGNORECASE | re.UNICODE):
             out.append(int(page["page"]))
     return sorted(dict.fromkeys(out))
+
+
+def _chapter_local_window(pages: Sequence[Dict[str, Any]], index: int, start: int, max_next_pages: int = 2) -> str:
+    chunks: List[str] = []
+    current = pages[index]
+    chunks.append(str(current.get("text") or "")[start:])
+    for next_page in pages[index + 1 : index + 1 + max_next_pages]:
+        chunks.append(str(next_page.get("text") or ""))
+    window = "\n".join(chunks)
+    next_heading = CHAPTER_LOT_HEADING_RE.search(window, pos=8)
+    if next_heading:
+        window = window[: next_heading.start()]
+    return window[:12000]
+
+
+def _chapter_support_signals(window: str) -> List[str]:
+    signals: List[str] = []
+    if CHAPTER_IDENTIFICATION_RE.search(window):
+        signals.append("identificazione_beni_oggetto_di_vendita")
+    if CHAPTER_ASSET_QUOTA_RE.search(_normalize_text(window)):
+        signals.append("asset_type_address_quota")
+    for key, pattern in CHAPTER_SUPPORT_PATTERNS.items():
+        if pattern.search(window):
+            signals.append(key)
+    return list(dict.fromkeys(signals))
+
+
+def _chapter_snippet(window: str) -> str:
+    return re.sub(r"\s+", " ", str(window or "")).strip()[:520]
+
+
+def _is_toc_like_text(text: str) -> bool:
+    normalized = _normalize_text(text)
+    if re.search(r"\b(indice|sommario|elenco\s+lott[oi])\b", normalized[:600]):
+        return True
+    lines = [line.strip() for line in str(text or "").splitlines() if line.strip()]
+    dotted_refs = sum(1 for line in lines if re.search(r"\.{3,}\s*\d+\s*$", line))
+    return dotted_refs >= 3
+
+
+def _scan_chapter_lot_topology(
+    pages: Sequence[Dict[str, Any]],
+    section_map: Dict[str, Any],
+    rows: Dict[int, Dict[str, Any]],
+) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]], List[str]]:
+    strong: List[Dict[str, Any]] = []
+    rejected: List[Dict[str, Any]] = []
+    failures: List[str] = []
+    seen_numbers: set[int] = set()
+    for idx, page in enumerate(pages):
+        page_num = int(page["page"])
+        text = str(page.get("text") or "")
+        page_row = rows.get(page_num, {})
+        page_zone = str(page_row.get("zone") or ZONE_UNKNOWN)
+        if page_zone in {ZONE_TOC, ZONE_INSTRUCTION, ZONE_QUESTION} or _is_toc_like_text(text):
+            continue
+        for match in CHAPTER_LOT_HEADING_RE.finditer(text):
+            try:
+                lot_number = int(match.group(1))
+            except Exception:
+                continue
+            window = _chapter_local_window(pages, idx, match.start())
+            snippet = _chapter_snippet(window)
+            if _looks_like_toc_lot_reference({"quote": snippet}):
+                continue
+            authority, failed, err = _quote_authority(page_num, snippet, section_map, rows, domain="lots")
+            if failed and err:
+                failures.append(f"page_{page_num}:{err}")
+            ev = _make_evidence(
+                page_num,
+                snippet,
+                authority,
+                signal="chapter_lot_start",
+                lot_number=lot_number,
+            )
+            ev["supporting_signals"] = _chapter_support_signals(window)
+            ev["chapter_start_page"] = page_num
+            if ev["supporting_signals"]:
+                if lot_number in seen_numbers:
+                    rejected.append(ev)
+                    continue
+                seen_numbers.add(lot_number)
+                strong.append(ev)
+            else:
+                rejected.append(ev)
+    return _dedupe_evidence(strong, limit=30), _dedupe_evidence(rejected, limit=30), failures
 
 
 def resolve_lot_structure_shadow(pages: Sequence[Dict[str, Any]], section_map: Any) -> Dict[str, Any]:
@@ -444,14 +565,31 @@ def resolve_lot_structure_shadow(pages: Sequence[Dict[str, Any]], section_map: A
                 )
             )
 
+    chapter_evidence, weak_chapter_evidence, chapter_failures = _scan_chapter_lot_topology(normalized_pages, section_map, rows)
+    partial_failures.extend(chapter_failures)
     high_single = [ev for ev in single_evidence if _is_high_final_lot_evidence(ev)]
     high_numbers = [ev for ev in number_evidence if _is_high_final_lot_evidence(ev)]
     high_lot_numbers = sorted({int(ev["lot_number"]) for ev in high_numbers if ev.get("lot_number")})
+    chapter_lot_numbers = sorted({int(ev["lot_number"]) for ev in chapter_evidence if ev.get("lot_number")})
     all_lot_numbers = sorted({int(ev["lot_number"]) for ev in number_evidence if ev.get("lot_number")})
 
-    value["detected_lot_numbers"] = high_lot_numbers or all_lot_numbers
+    value["chapter_lot_numbers"] = chapter_lot_numbers
+    value["chapter_lot_start_pages"] = sorted(
+        {
+            int(ev["chapter_start_page"])
+            for ev in chapter_evidence
+            if ev.get("chapter_start_page")
+        }
+    )
+    value["chapter_lot_evidence"] = _dedupe_evidence(chapter_evidence, limit=20)
+    if len(high_lot_numbers) >= 2:
+        value["detected_lot_numbers"] = high_lot_numbers
+    elif len(chapter_lot_numbers) >= 2:
+        value["detected_lot_numbers"] = chapter_lot_numbers
+    else:
+        value["detected_lot_numbers"] = high_lot_numbers or chapter_lot_numbers or all_lot_numbers
     value["has_high_authority_lotto_unico"] = bool(high_single)
-    value["has_high_authority_multilot"] = len(high_lot_numbers) >= 2
+    value["has_high_authority_multilot"] = len(high_lot_numbers) >= 2 or len(chapter_lot_numbers) >= 2
 
     rejected: List[Dict[str, Any]] = []
     rules: List[str] = []
@@ -462,21 +600,44 @@ def resolve_lot_structure_shadow(pages: Sequence[Dict[str, Any]], section_map: A
     if len(high_lot_numbers) >= 2:
         value["shadow_lot_mode"] = "multi_lot"
         winning = [ev for ev in high_numbers if ev.get("lot_number") in high_lot_numbers]
-        rejected = high_single + [ev for ev in single_evidence if _is_low_or_context(ev) or _looks_like_toc_lot_reference(ev)]
+        rejected = high_single + weak_chapter_evidence + [ev for ev in single_evidence if _is_low_or_context(ev) or _looks_like_toc_lot_reference(ev)]
         rules = ["high_authority_multilot_beats_toc_context_and_generic_lot_mentions"]
         status = STATUS_WARN if fail_open else STATUS_OK
         confidence = 0.92
+    elif len(chapter_lot_numbers) >= 2 and high_single:
+        value["shadow_lot_mode"] = "unknown"
+        value["chapter_topology_conflicts"] = [
+            {
+                "type": "chapter_multilot_conflicts_with_high_lotto_unico",
+                "chapter_lot_numbers": chapter_lot_numbers,
+                "chapter_lot_start_pages": value["chapter_lot_start_pages"],
+                "lotto_unico_pages": sorted({int(ev.get("page")) for ev in high_single if ev.get("page")}),
+            }
+        ]
+        winning = chapter_evidence + high_single
+        rejected = weak_chapter_evidence
+        rules = ["chapter_based_multi_lot_topology_conflicts_with_high_lotto_unico"]
+        notes.append("chapter_based_multilot_conflicts_with_high_lotto_unico")
+        status = STATUS_WARN
+        confidence = 0.45
+    elif len(chapter_lot_numbers) >= 2:
+        value["shadow_lot_mode"] = "multi_lot"
+        winning = chapter_evidence
+        rejected = high_single + weak_chapter_evidence + [ev for ev in number_evidence if _is_low_or_context(ev) or _looks_like_toc_lot_reference(ev)]
+        rules = ["chapter_based_multi_lot_topology"]
+        status = STATUS_WARN if fail_open else STATUS_OK
+        confidence = 0.9 if len(chapter_lot_numbers) >= 3 else 0.88
     elif high_single:
         value["shadow_lot_mode"] = "single_lot"
         winning = high_single
-        rejected = [ev for ev in number_evidence if _is_low_or_context(ev) or not _is_high_final_lot_evidence(ev)]
+        rejected = weak_chapter_evidence + [ev for ev in number_evidence if _is_low_or_context(ev) or not _is_high_final_lot_evidence(ev)]
         rules = ["high_authority_lotto_unico_beats_toc_context_and_generic_lot_mentions"]
         status = STATUS_WARN if fail_open else STATUS_OK
         confidence = 0.9
     else:
         winning = []
-        rejected = single_evidence + number_evidence
-        if single_evidence or number_evidence:
+        rejected = single_evidence + number_evidence + weak_chapter_evidence
+        if single_evidence or number_evidence or weak_chapter_evidence:
             notes.append("only_low_or_nonfinal_lot_evidence")
         else:
             notes.append("no_lot_structure_evidence")

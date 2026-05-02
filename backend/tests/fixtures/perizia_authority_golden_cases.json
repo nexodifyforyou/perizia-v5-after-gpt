@@ -46,11 +46,14 @@
   {
     "id": "ostuni_via_viterbo_2",
     "label": "Ostuni, Via Viterbo 2.pdf",
-    "expected_class": "PASS_AUTHORITY_HARDENING",
+    "expected_class": "PASS_MULTI_LOT_CHAPTER_TOPOLOGY",
     "paths": [
       "/home/syedtajmeelshah/Ostuni, Via Viterbo 2.pdf"
     ],
     "expectations": {
+      "expected_lot_mode": "multi_lot",
+      "requires_chapter_lot_numbers": [1, 2, 3, 4, 5, 6, 7],
+      "expected_min_lots_detected": 7,
       "pages_total_min": 80,
       "min_final_lot_formation_pages": 1,
       "min_final_valuation_pages": 10,
@@ -78,6 +81,20 @@
       "allow_warn": true
     },
     "notes": "Optional local corpus member; skipped only when the PDF is absent."
+  },
+  {
+    "id": "casa_ai_venti",
+    "label": "Casa ai Venti saved extraction",
+    "expected_class": "PASS_SINGLE_LOT_CONTEXT_GUARD",
+    "paths": [],
+    "analysis_ids": [
+      "analysis_6b3ab6865dca"
+    ],
+    "expectations": {
+      "expected_lot_mode": "single_lot",
+      "allow_warn": true
+    },
+    "notes": "Saved extraction only; guards LOTTO UNICO against procedural/contextual Lotto references."
   },
   {
     "id": "via_nuova_19_1",

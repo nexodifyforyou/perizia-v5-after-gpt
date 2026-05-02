@@ -33,6 +33,7 @@ DEFAULT_DISCOVERY_PATHS = [
     Path("/srv/perizia/app/uploads"),
     Path("/srv/perizia/app/backend/tests/fixtures/perizie"),
 ]
+FIXTURE_PATH = BACKEND_DIR / "tests" / "fixtures" / "perizia_authority_golden_cases.json"
 
 TABLE_HEADERS = [
     "file",
@@ -55,6 +56,8 @@ TABLE_HEADERS = [
     "formalities_count",
     "high_authority_lotto_unico",
     "high_authority_multilot",
+    "chapter_lot_numbers",
+    "chapter_lot_start_pages",
     "contextual_lotto_mentions_count",
     "money_cost_signal_count",
     "money_valuation_count",
@@ -63,6 +66,37 @@ TABLE_HEADERS = [
     "status",
     "notes",
 ]
+
+
+def _read_json(path: Path, fallback: Any = None) -> Any:
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except Exception:
+        return fallback
+
+
+def _load_golden_cases() -> List[Dict[str, Any]]:
+    payload = _read_json(FIXTURE_PATH, [])
+    return payload if isinstance(payload, list) else []
+
+
+def _expected_lot_mode_from_case(case: Dict[str, Any]) -> str:
+    expectations = case.get("expectations") if isinstance(case.get("expectations"), dict) else {}
+    expected = str(expectations.get("expected_lot_mode") or "")
+    if expected:
+        return expected
+    expected_class = str(case.get("expected_class") or "")
+    if expectations.get("requires_high_lotto_unico") or "SINGLE_LOT" in expected_class:
+        return "single_lot"
+    if (
+        len(expectations.get("requires_high_lot_numbers") or []) >= 2
+        or len(expectations.get("requires_chapter_lot_numbers") or []) >= 2
+        or int(expectations.get("expected_min_lots_detected") or 0) >= 2
+        or "MULTI_LOT" in expected_class
+    ):
+        return "multi_lot"
+    return ""
 
 
 def _run_text_command(cmd: List[str]) -> Optional[str]:
@@ -178,6 +212,12 @@ def _lot_numbers_from_text(text: str) -> List[int]:
 
 
 def _expected_lot_mode_for_path(path: Path) -> str:
+    resolved = str(path.resolve()) if path.exists() else str(path)
+    for case in _load_golden_cases():
+        for raw in case.get("paths") or []:
+            candidate = Path(str(raw)).expanduser()
+            if str(candidate) == resolved or (candidate.exists() and str(candidate.resolve()) == resolved):
+                return _expected_lot_mode_from_case(case)
     name = path.name.lower()
     if "1859886" in name:
         return "single_lot"
@@ -239,6 +279,8 @@ def _shadow_verdict(base_status: str, expected_lot_mode: str, shadow: Dict[str, 
     lot_mode = str(_shadow_value(shadow, "lot_structure").get("shadow_lot_mode") or "")
     if expected_lot_mode and lot_mode and lot_mode != "unknown" and lot_mode != expected_lot_mode:
         return "FAIL"
+    if expected_lot_mode and lot_mode == expected_lot_mode and not _shadow_fail_open(shadow) and base_status == "PASS":
+        return "PASS"
     if _shadow_fail_open(shadow) or warnings or base_status == "WARN":
         return "WARN"
     return "PASS"
@@ -288,10 +330,12 @@ def _audit_pdf(path: Path) -> Dict[str, Any]:
             "answer_pages_count": 0,
             "final_lot_formation_count": 0,
             "final_valuation_count": 0,
-            "formalities_count": 0,
-            "high_authority_lotto_unico": "NO",
-            "high_authority_multilot": "NO",
-            "contextual_lotto_mentions_count": 0,
+        "formalities_count": 0,
+        "high_authority_lotto_unico": "NO",
+        "high_authority_multilot": "NO",
+        "chapter_lot_numbers": "[]",
+        "chapter_lot_start_pages": "[]",
+        "contextual_lotto_mentions_count": 0,
             "money_cost_signal_count": 0,
             "money_valuation_count": 0,
             "money_rendita_catastale_count": 0,
@@ -398,7 +442,9 @@ def _audit_pdf(path: Path) -> Dict[str, Any]:
         "final_valuation_count": len(final_valuation_pages),
         "formalities_count": len(formalities_pages),
         "high_authority_lotto_unico": "YES" if high_lotto_unico else "NO",
-        "high_authority_multilot": "YES" if len(high_lot_numbers) >= 2 else "NO",
+        "high_authority_multilot": "YES" if shadow_lot_value.get("has_high_authority_multilot") else "NO",
+        "chapter_lot_numbers": json.dumps(shadow_lot_value.get("chapter_lot_numbers") or [], ensure_ascii=False),
+        "chapter_lot_start_pages": json.dumps(shadow_lot_value.get("chapter_lot_start_pages") or [], ensure_ascii=False),
         "contextual_lotto_mentions_count": contextual_lotto_mentions,
         "money_cost_signal_count": len(set(money_cost_signal_pages)),
         "money_valuation_count": len(set(money_valuation_pages)),

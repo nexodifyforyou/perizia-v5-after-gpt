@@ -44,7 +44,7 @@ from narrator import (
 from cost_market_ranges import market_range_for_item
 from customer_decision_contract import apply_customer_decision_contract, sanitize_customer_facing_result, separate_internal_runtime_from_customer_result
 from customer_contract_qa_gate import apply_customer_contract_qa_gate
-from perizia_authority_lot_projection import apply_authority_lot_projection_if_enabled
+from perizia_authority_lot_projection import FEATURE_FLAG as AUTHORITY_LOT_PROJECTION_FLAG, apply_authority_lot_projection_if_enabled
 from perizia_authority_resolvers import build_authority_shadow_resolvers
 from perizia_section_authority import build_section_authority_map, summarize_authority_map
 from perizia_runtime.runtime import apply_verifier_to_result, run_quality_verifier
@@ -18795,6 +18795,231 @@ def _has_persisted_customer_contract(result: Dict[str, Any]) -> bool:
         return False
     return True
 
+def _authority_shadow_fail_open_payload(reason: str) -> Dict[str, Any]:
+    reason_text = str(reason or "authority_read_path_fail_open").strip() or "authority_read_path_fail_open"
+    return {
+        "schema_version": "perizia_authority_resolvers_v1",
+        "status": "FAIL_OPEN",
+        "fail_open": True,
+        "warnings": [reason_text],
+        "lot_structure": {
+            "domain": "lot_structure",
+            "status": "FAIL_OPEN",
+            "value": {
+                "shadow_lot_mode": "unknown",
+                "detected_lot_numbers": [],
+                "has_high_authority_lotto_unico": False,
+                "has_high_authority_multilot": False,
+            },
+            "confidence": 0.0,
+            "winning_evidence": [],
+            "rejected_conflicts": [],
+            "authority_basis": {
+                "zones_used": [],
+                "authority_levels_used": [],
+                "pages_used": [],
+                "rules_triggered": [],
+            },
+            "fail_open": True,
+            "notes": [reason_text],
+        },
+    }
+
+def _load_json_for_authority_read_path(path: Path) -> Any:
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except Exception:
+        return None
+
+def _load_authority_shadow_for_detail_read(analysis_id: str, analysis: Dict[str, Any]) -> Dict[str, Any]:
+    if not analysis_id:
+        return _authority_shadow_fail_open_payload("missing_analysis_id")
+
+    internal_runtime = analysis.get("internal_runtime") if isinstance(analysis.get("internal_runtime"), dict) else {}
+    debug = internal_runtime.get("debug") if isinstance(internal_runtime.get("debug"), dict) else {}
+    existing_shadow = debug.get("authority_shadow_resolvers")
+    if isinstance(existing_shadow, dict) and isinstance(existing_shadow.get("lot_structure"), dict):
+        return copy.deepcopy(existing_shadow)
+
+    extract_dir = Path("/srv/perizia/_qa/runs") / str(analysis_id) / "extract"
+    pages_payload = _load_json_for_authority_read_path(extract_dir / "pages_raw.json")
+    if not isinstance(pages_payload, list) or not pages_payload:
+        return _authority_shadow_fail_open_payload("missing_or_invalid_pages_raw")
+
+    section_map = _load_json_for_authority_read_path(extract_dir / "section_authority.json")
+    try:
+        if not isinstance(section_map, dict):
+            section_map = build_section_authority_map(pages_payload)
+        return build_authority_shadow_resolvers(
+            pages_payload,
+            section_map,
+            candidates_folder=Path("/srv/perizia/_qa/runs") / str(analysis_id) / "candidates",
+        )
+    except Exception as e:
+        logger.exception("authority_lot_projection_read_shadow_failed analysis_id=%s err=%s", analysis_id, e)
+        return _authority_shadow_fail_open_payload("authority_read_shadow_failed")
+
+def _sync_authority_lot_projection_mirror_fields(
+    result: Dict[str, Any],
+    customer_contract: Dict[str, Any],
+) -> List[str]:
+    changed: List[str] = []
+    for key in ("lots", "lots_count", "lot_count", "is_multi_lot", "lot_index"):
+        if key not in result or key not in customer_contract:
+            continue
+        projected_value = copy.deepcopy(customer_contract.get(key))
+        if result.get(key) != projected_value:
+            changed.append(key)
+        result[key] = projected_value
+
+    result_case_header = result.get("case_header")
+    contract_case_header = customer_contract.get("case_header")
+    if (
+        isinstance(result_case_header, dict)
+        and isinstance(contract_case_header, dict)
+        and "lotto" in result_case_header
+        and "lotto" in contract_case_header
+    ):
+        projected_lotto = copy.deepcopy(contract_case_header.get("lotto"))
+        if result_case_header.get("lotto") != projected_lotto:
+            changed.append("case_header.lotto")
+        result_case_header["lotto"] = projected_lotto
+
+    result_report_header = result.get("report_header")
+    contract_report_header = customer_contract.get("report_header")
+    if isinstance(result_report_header, dict) and isinstance(contract_report_header, dict):
+        if "lotto" in result_report_header and "lotto" in contract_report_header:
+            projected_lotto = copy.deepcopy(contract_report_header.get("lotto"))
+            if result_report_header.get("lotto") != projected_lotto:
+                changed.append("report_header.lotto")
+            result_report_header["lotto"] = projected_lotto
+        elif (
+            isinstance(result_report_header.get("lotto"), dict)
+            and isinstance(contract_report_header.get("lotto"), dict)
+            and "value" in result_report_header["lotto"]
+            and "value" in contract_report_header["lotto"]
+        ):
+            projected_lotto_value = copy.deepcopy(contract_report_header["lotto"].get("value"))
+            if result_report_header["lotto"].get("value") != projected_lotto_value:
+                changed.append("report_header.lotto.value")
+            result_report_header["lotto"]["value"] = projected_lotto_value
+        if "is_multi_lot" in result_report_header and "is_multi_lot" in contract_report_header:
+            projected_multi = bool(contract_report_header.get("is_multi_lot"))
+            if result_report_header.get("is_multi_lot") != projected_multi:
+                changed.append("report_header.is_multi_lot")
+            result_report_header["is_multi_lot"] = projected_multi
+
+    return list(dict.fromkeys(changed))
+
+_CUSTOMER_RESPONSE_INTERNAL_KEYS = {
+    "debug",
+    "internal_runtime",
+    "authority_lot_projection",
+    "authority_shadow_resolvers",
+    "section_zone",
+    "authority_level",
+    "authority_score",
+    "domain_hints",
+    "answer_point",
+    "reason_for_authority",
+    "is_instruction_like",
+    "is_answer_like",
+    "source_stage",
+    "extractor_version",
+}
+
+def _strip_internal_keys_from_customer_response(value: Any) -> Any:
+    if isinstance(value, dict):
+        cleaned: Dict[str, Any] = {}
+        for key, child in value.items():
+            key_text = str(key)
+            if (
+                key_text in _CUSTOMER_RESPONSE_INTERNAL_KEYS
+                or key_text.startswith("authority_")
+                or "shadow_" in key_text
+            ):
+                continue
+            cleaned[key] = _strip_internal_keys_from_customer_response(child)
+        return cleaned
+    if isinstance(value, list):
+        return [_strip_internal_keys_from_customer_response(item) for item in value]
+    return value
+
+def _sanitize_perizia_detail_response(analysis: Dict[str, Any]) -> Dict[str, Any]:
+    response_analysis = copy.deepcopy(analysis) if isinstance(analysis, dict) else {}
+    result = response_analysis.get("result")
+    if isinstance(result, dict):
+        sanitize_customer_facing_result(result)
+        separate_internal_runtime_from_customer_result(result)
+        response_analysis["result"] = result
+    return _strip_internal_keys_from_customer_response(response_analysis)
+
+def _apply_authority_lot_projection_to_detail_response_if_enabled(
+    analysis: Dict[str, Any],
+    *,
+    analysis_id: str,
+) -> Dict[str, Any]:
+    if not isinstance(analysis, dict):
+        return {}
+    response_analysis = copy.deepcopy(analysis)
+    result = response_analysis.get("result")
+    if os.environ.get(AUTHORITY_LOT_PROJECTION_FLAG) != "1":
+        return _sanitize_perizia_detail_response(response_analysis)
+    if not isinstance(analysis, dict) or not isinstance(result, dict):
+        return _sanitize_perizia_detail_response(response_analysis)
+    if not isinstance(result, dict):
+        return _sanitize_perizia_detail_response(response_analysis)
+
+    authority_shadow = _load_authority_shadow_for_detail_read(analysis_id, analysis)
+    customer_contract = result.get("customer_decision_contract")
+    projection_target = customer_contract if isinstance(customer_contract, dict) else result
+    try:
+        projection_meta = apply_authority_lot_projection_if_enabled(
+            projection_target,
+            authority_shadow,
+            request_id=f"detail_read:{analysis_id}",
+        )
+        projection_meta["target"] = "customer_decision_contract" if projection_target is customer_contract else "result"
+        if isinstance(customer_contract, dict) and (
+            projection_meta.get("applied") is True or projection_meta.get("status") == "ALREADY_MATCHES"
+        ):
+            mirror_changed = _sync_authority_lot_projection_mirror_fields(result, customer_contract)
+            if mirror_changed:
+                projection_meta["changed_fields"] = list(
+                    dict.fromkeys((projection_meta.get("changed_fields") or []) + [f"result.{field}" for field in mirror_changed])
+                )
+                projection_meta["mirror_changed_fields"] = mirror_changed
+    except Exception as e:
+        logger.exception("authority_lot_projection_read_failed analysis_id=%s err=%s", analysis_id, e)
+        projection_meta = {
+            "enabled": True,
+            "status": "FAIL_OPEN",
+            "applied": False,
+            "reason": "authority_lot_projection_read_failed",
+            "legacy_lot_mode": "unknown",
+            "authority_lot_mode": "unknown",
+            "authority_confidence": 0.0,
+            "detected_lot_numbers": [],
+            "source_pages": [],
+            "changed_fields": [],
+            "error": str(e)[:240],
+        }
+
+    internal_runtime = response_analysis.get("internal_runtime") if isinstance(response_analysis.get("internal_runtime"), dict) else {}
+    debug_obj = internal_runtime.get("debug") if isinstance(internal_runtime.get("debug"), dict) else {}
+    debug_obj["authority_shadow_resolvers"] = authority_shadow
+    debug_obj["authority_lot_projection"] = projection_meta
+    internal_runtime["debug"] = debug_obj
+
+    sanitize_customer_facing_result(result)
+    result_internal_runtime = separate_internal_runtime_from_customer_result(result)
+    if isinstance(result_internal_runtime.get("debug"), dict):
+        debug_obj.update(result_internal_runtime["debug"])
+        internal_runtime["debug"] = debug_obj
+    response_analysis["result"] = result
+    return _sanitize_perizia_detail_response(response_analysis)
+
 def _persist_offline_analysis(path: Path, analysis: Dict[str, Any]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     with open(path, "w", encoding="utf-8") as f:
@@ -19177,13 +19402,18 @@ async def _get_perizia_analysis_for_user(analysis_id: str, user: User) -> Dict[s
     result = analysis.get("result")
     if isinstance(result, dict):
         if _has_persisted_customer_contract(result):
+            response_analysis = _apply_authority_lot_projection_to_detail_response_if_enabled(
+                analysis,
+                analysis_id=analysis_id,
+            )
             elapsed_ms = int((time.perf_counter() - started) * 1000)
             logger.info(
-                "perizia_detail_read analysis_id=%s read_path_mode=persisted_customer_contract elapsed_ms=%s refresh=skipped",
+                "perizia_detail_read analysis_id=%s read_path_mode=persisted_customer_contract elapsed_ms=%s refresh=skipped authority_lot_projection_flag=%s",
                 analysis_id,
                 elapsed_ms,
+                os.environ.get(AUTHORITY_LOT_PROJECTION_FLAG) == "1",
             )
-            return analysis
+            return response_analysis
         pages_hint = int(analysis.get("pages_count", 0) or 0)
         pages_for_proof = _load_pages_for_analysis(analysis_id, pages_hint)
         _refresh_customer_facing_result_on_read(
