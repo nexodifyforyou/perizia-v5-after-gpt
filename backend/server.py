@@ -19398,6 +19398,7 @@ async def _save_field_overrides_for_analysis(
 async def _get_perizia_analysis_for_user(analysis_id: str, user: User) -> Dict[str, Any]:
     started = time.perf_counter()
     analysis, _storage_mode, _storage_path = await _get_perizia_analysis_for_user_with_storage(analysis_id, user)
+    analysis = copy.deepcopy(analysis)
 
     result = analysis.get("result")
     if isinstance(result, dict):
@@ -19436,7 +19437,7 @@ async def _get_perizia_analysis_for_user(analysis_id: str, user: User) -> Dict[s
             analysis_id,
             elapsed_ms,
         )
-    return analysis
+    return _sanitize_perizia_detail_response(analysis)
 
 def _refresh_list_analysis_semaforo(analysis: Dict[str, Any]) -> Optional[str]:
     if not isinstance(analysis, dict):

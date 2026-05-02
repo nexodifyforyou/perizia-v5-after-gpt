@@ -124,7 +124,7 @@ def _collect_forbidden_customer_keys(value, path="response"):
     if isinstance(value, dict):
         for key, child in value.items():
             child_path = f"{path}.{key}"
-            if str(key) in forbidden or str(key).startswith("authority_") or str(key).startswith("shadow_"):
+            if str(key) in forbidden or str(key).startswith("authority_") or "shadow_" in str(key):
                 hits.append(child_path)
             hits.extend(_collect_forbidden_customer_keys(child, child_path))
     elif isinstance(value, list):
@@ -317,6 +317,111 @@ async def test_persisted_detail_authority_lot_projection_flag_off_keeps_saved_pa
     assert response["result"]["customer_decision_contract"]["is_multi_lot"] is True
     assert fake_db.perizia_analyses.items[0] == before_stored
     assert _collect_forbidden_customer_keys(response) == []
+
+
+@pytest.mark.anyio
+async def test_persisted_detail_outbound_sanitizer_strips_full_response_internal_keys(fake_db, monkeypatch):
+    monkeypatch.delenv(server.AUTHORITY_LOT_PROJECTION_FLAG, raising=False)
+
+    def forbidden_refresh(*_args, **_kwargs):
+        raise AssertionError("persisted customer contract detail read must not refresh")
+
+    monkeypatch.setattr(server, "_refresh_customer_facing_result_on_read", forbidden_refresh)
+
+    persisted_result = _persisted_lot_result(mode="single_lot", lots_count=1)
+    persisted_result["debug"] = {"authority_shadow_resolvers": {"leak": True}}
+    persisted_result["customer_decision_contract"]["authority_shadow_resolvers"] = {"leak": True}
+    persisted_result["customer_decision_contract"]["field_states"] = {
+        "stato_occupativo": {
+            "value": "LIBERO",
+            "status": "OK",
+            "evidence": [{"page": 12, "quote": "Libero"}],
+            "chosen_candidate": {"value": "LIBERO", "authority_score": 0.91},
+        }
+    }
+    stored = {
+        "analysis_id": "analysis_persisted_leaky",
+        "user_id": "user_test",
+        "case_id": "case_persisted_leaky",
+        "case_title": "persisted-leaky.pdf",
+        "file_name": "persisted-leaky.pdf",
+        "created_at": datetime(2026, 4, 25, tzinfo=timezone.utc),
+        "status": "COMPLETED",
+        "pages_count": 50,
+        "internal_runtime": {"debug": {"authority_lot_projection": {"applied": True}}},
+        "result": persisted_result,
+    }
+    fake_db.perizia_analyses.items.append(stored)
+    before_stored = copy.deepcopy(stored)
+
+    response = await server._get_perizia_analysis_for_user("analysis_persisted_leaky", _test_user())
+
+    assert _collect_forbidden_customer_keys(response) == []
+    field_state = response["result"]["customer_decision_contract"]["field_states"]["stato_occupativo"]
+    assert field_state["value"] == "LIBERO"
+    assert field_state["status"] == "OK"
+    assert field_state["evidence"] == [{"page": 12, "quote": "Libero"}]
+    assert field_state["chosen_candidate"] == {"value": "LIBERO"}
+    assert fake_db.perizia_analyses.items[0] == before_stored
+
+
+@pytest.mark.anyio
+async def test_legacy_refresh_detail_outbound_sanitizer_strips_authority_candidate_keys(fake_db, monkeypatch):
+    monkeypatch.delenv(server.AUTHORITY_LOT_PROJECTION_FLAG, raising=False)
+    monkeypatch.setattr(server, "_load_pages_for_analysis", lambda *_args, **_kwargs: [])
+
+    def no_refresh(result, *_args, **_kwargs):
+        result.setdefault("report_header", {"lotto": {"value": "Lotto Unico"}})
+
+    monkeypatch.setattr(server, "_refresh_customer_facing_result_on_read", no_refresh)
+
+    leaky_field_state = {
+        "value": "OCCUPATO",
+        "status": "OK",
+        "evidence": [{"page": 9, "quote": "Occupato"}],
+        "chosen_candidate": {"value": "OCCUPATO", "authority_score": 0.94},
+        "all_candidates": [{"value": "OCCUPATO", "authority_score": 0.94}],
+        "top_candidates": [{"value": "OCCUPATO", "authority_score": 0.94}],
+    }
+    stored = {
+        "analysis_id": "analysis_legacy_refresh_leaky",
+        "user_id": "user_test",
+        "case_id": "case_legacy_refresh_leaky",
+        "case_title": "legacy-refresh-leaky.pdf",
+        "file_name": "legacy-refresh-leaky.pdf",
+        "created_at": datetime(2026, 4, 25, tzinfo=timezone.utc),
+        "status": "COMPLETED",
+        "pages_count": 50,
+        "internal_runtime": {"debug": {"authority_lot_projection": {"applied": True}}},
+        "result": {
+            "debug": {"authority_shadow_resolvers": {"leak": True}},
+            "field_states": {"stato_occupativo": leaky_field_state},
+            "case_header": {"lotto": "Lotto Unico"},
+            "report_header": {"lotto": {"value": "Lotto Unico"}},
+            "lots_count": 1,
+            "is_multi_lot": False,
+            "summary_for_client": {"summary_it": "unchanged"},
+            "decision_rapida_client": {"headline_it": "unchanged"},
+        },
+    }
+    fake_db.perizia_analyses.items.append(stored)
+    before_stored = copy.deepcopy(stored)
+
+    response = await server._get_perizia_analysis_for_user("analysis_legacy_refresh_leaky", _test_user())
+
+    assert _collect_forbidden_customer_keys(response) == []
+    field_state = response["result"]["field_states"]["stato_occupativo"]
+    assert field_state["value"] == "OCCUPATO"
+    assert field_state["status"] == "OK"
+    assert field_state["evidence"] == [{"page": 9, "quote": "Occupato"}]
+    assert field_state["chosen_candidate"] == {"value": "OCCUPATO"}
+    assert field_state["all_candidates"] == [{"value": "OCCUPATO"}]
+    assert field_state["top_candidates"] == [{"value": "OCCUPATO"}]
+    assert response["result"]["lots_count"] == 1
+    assert response["result"]["is_multi_lot"] is False
+    assert response["result"]["case_header"]["lotto"] == "Lotto Unico"
+    assert response["result"]["report_header"]["lotto"]["value"] == "Lotto Unico"
+    assert fake_db.perizia_analyses.items[0] == before_stored
 
 
 @pytest.mark.anyio
