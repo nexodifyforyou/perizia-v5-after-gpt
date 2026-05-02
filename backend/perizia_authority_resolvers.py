@@ -7,6 +7,7 @@ payloads only, so Phase 3A can be compared before any replacement is enabled.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import re
 import unicodedata
@@ -35,6 +36,7 @@ SCHEMA_VERSION = "perizia_authority_resolvers_v1"
 
 STATUS_OK = "OK"
 STATUS_WARN = "WARN"
+STATUS_PARTIAL = "PARTIAL"
 STATUS_FAIL_OPEN = "FAIL_OPEN"
 STATUS_INSUFFICIENT = "INSUFFICIENT_EVIDENCE"
 
@@ -87,6 +89,20 @@ MONEY_AMOUNT_RE = re.compile(
     r"(?:\u20ac|\beuro\b)\s*\d+(?:[\.,]\d{2})?",
     flags=re.IGNORECASE | re.UNICODE,
 )
+MONEY_ROLES = [
+    "buyer_cost_signal_to_verify",
+    "valuation_deduction",
+    "price",
+    "base_auction",
+    "final_value",
+    "market_value",
+    "cadastral_rendita",
+    "formalities_procedural_amount",
+    "component_of_total",
+    "total_candidate",
+    "condominium_arrears",
+    "unknown_money",
+]
 
 
 def _normalize_text(text: Any) -> str:
@@ -1045,21 +1061,19 @@ def resolve_legal_formalities_shadow(pages: Sequence[Dict[str, Any]], section_ma
 
 
 def _empty_money_value() -> Dict[str, Any]:
-    roles = {
-        "buyer_cost_signal_to_verify": [],
-        "valuation_deduction": [],
-        "price": [],
-        "base_auction": [],
-        "final_value": [],
-        "market_value": [],
-        "cadastral_rendita": [],
-        "formalities_procedural_amount": [],
-        "component_of_total": [],
-        "total_candidate": [],
-        "unknown_money": [],
-    }
+    roles = {role: [] for role in MONEY_ROLES}
+    roles["money_candidates"] = []
     roles["money_role_counts"] = {key: 0 for key in roles.keys()}
     roles["counting_policy"] = "components_are_not_summed_when_total_candidate_is_present"
+    roles["summary"] = {
+        "buyer_cost_signal_count": 0,
+        "valuation_amount_count": 0,
+        "formalities_amount_count": 0,
+        "rendita_count": 0,
+        "unknown_count": 0,
+        "authority_customer_safe_cost_count": 0,
+        "double_count_risk": False,
+    }
     return roles
 
 
@@ -1075,52 +1089,142 @@ def _parse_amount(raw: Any) -> Optional[float]:
         return None
 
 
-def _money_role_from_text(text: str) -> str:
+def _money_role_reason_from_text(text: str) -> Tuple[str, str]:
     normalized = _normalize_text(text)
+    if re.search(r"\b(verifich\w*|accert\w*|provved\w*|indichi|riferisca|determini)\b.{0,120}\b(spese|costi|oneri|importi|euro)\b", normalized):
+        return "unknown_money", "INSTRUCTION_OR_BOILERPLATE_AMOUNT"
     if re.search(r"\brendita\s+catastale\b|\brendita\b.{0,80}\b(catasto|catastale|categoria|classe|vani|foglio|particella|subalterno)\b", normalized):
-        return "cadastral_rendita"
+        return "cadastral_rendita", "RENDITA_CATASTALE_AMOUNT"
     if re.search(r"\b(prezzo\s+base|base\s+d[' ]asta|offerta\s+minima)\b", normalized):
-        return "base_auction"
+        return "base_auction", "PREZZO_BASE_ASTA_AMOUNT"
     if re.search(r"\bvalore\s+finale\s+(?:di\s+)?stima\b|\bvalore\s+finale\b", normalized):
-        return "final_value"
+        return "final_value", "VALORE_FINALE_STIMA_AMOUNT"
     if re.search(r"\bvalore\s+di\s+(?:stima|mercato)|valore\s+venale|valore\s+cauzionale|valore\s+commerciale\b", normalized):
-        return "market_value"
+        return "market_value", "VALORE_STIMA_MERCATO_AMOUNT"
     if re.search(r"\b(deprezzament\w*|decurtazion\w*|abbattimento|riduzione|adeguament\w*\s+e\s+correzion\w*)\b", normalized):
-        return "valuation_deduction"
+        return "valuation_deduction", "VALUATION_DEDUCTION_AMOUNT"
     if re.search(r"\b(ipotec\w*|pignorament\w*|formalita|trascrizion\w*|iscrizion\w*|registro\s+(?:generale|particolare)|procedura)\b", normalized):
-        return "formalities_procedural_amount"
+        return "formalities_procedural_amount", "FORMALITA_PROCEDURAL_AMOUNT"
+    if re.search(r"\b(spese\s+condominiali|condominio|condominial\w*)\b.{0,120}\b(arretrat\w*|insolut\w*|scadut\w*|morosit\w*|debito|debitoria)\b", normalized):
+        return "condominium_arrears", "CONDOMINIUM_ARREARS_AMOUNT"
     if re.search(
         r"\b(spese\s+tecniche|regolarizzazion\w*|sanatori\w*|oblazion\w*|sanzion\w*|docfa|tipo\s+mappale|"
-        r"oneri?\s+(?:a\s+carico|di\s+regolarizzazione)|costo\s+(?:di\s+)?(?:sanatoria|regolarizzazione|ripristino))\b",
+        r"ripristin\w*|demolizion\w*|fiscalizzazion\w*|oneri?\s+(?:a\s+carico|di\s+regolarizzazione)|"
+        r"costo\s+(?:di\s+)?(?:sanatoria|regolarizzazione|ripristino|demolizione|fiscalizzazione))\b",
         normalized,
     ):
-        return "buyer_cost_signal_to_verify"
+        return "buyer_cost_signal_to_verify", "EXPLICIT_BUYER_COST_SIGNAL"
     if re.search(r"\b(prezzo|valore|stima)\b", normalized):
-        return "price"
-    return "unknown_money"
+        return "price", "GENERIC_PRICE_OR_VALUE_AMOUNT"
+    if re.search(r"\b(legge|norma|articolo|procedura|tribunale|decreto|asta|bando)\b", normalized):
+        return "unknown_money", "GENERIC_MONEY_BOILERPLATE"
+    return "unknown_money", "UNKNOWN_MONEY_AMOUNT"
 
 
-def _is_total_context(text: str) -> bool:
+def _is_total_context(text: str, amount_raw: Any = None) -> bool:
     normalized = _normalize_text(text)
+    raw_amount = _normalize_text(amount_raw)
+    if raw_amount:
+        idx = normalized.find(raw_amount)
+        if idx >= 0:
+            window_before = normalized[max(0, idx - 90) : idx]
+            return bool(re.search(r"\b(totale|complessiv[oa]|sommano|somma|importo\s+totale)\b", window_before))
     return bool(re.search(r"\b(totale|complessiv[oa]|sommano|somma|importo\s+totale)\b", normalized))
+
+
+def _candidate_id(page: int, amount: Any, quote: str, index: int) -> str:
+    seed = f"{page}|{amount}|{quote}|{index}".encode("utf-8", errors="ignore")
+    return "money_" + hashlib.sha1(seed).hexdigest()[:12]
+
+
+def _money_authority_supported(authority: Dict[str, Any]) -> bool:
+    return (
+        str(authority.get("authority_level") or "") in {AUTH_HIGH, AUTH_MEDIUM}
+        and str(authority.get("section_zone") or "") not in LOW_AUTHORITY_ZONES
+        and not bool(authority.get("is_instruction_like"))
+    )
+
+
+def _money_confidence(authority: Dict[str, Any], role: str, supported: bool) -> float:
+    score = _safe_float(authority.get("authority_score"), 0.3)
+    if role == "unknown_money":
+        return min(score, 0.35)
+    if supported:
+        return max(score, 0.75)
+    return min(score, 0.55)
+
+
+def _money_candidate_record(
+    item: Dict[str, Any],
+    authority: Dict[str, Any],
+    *,
+    role: str,
+    reason_code: str,
+    index: int,
+    base_role: Optional[str] = None,
+    base_reason_code: Optional[str] = None,
+) -> Dict[str, Any]:
+    page = int(item["page"])
+    quote = re.sub(r"\s+", " ", str(item.get("quote") or "")).strip()[:800]
+    amount = item.get("amount_eur")
+    supported = _money_authority_supported(authority)
+    buyer_signal = role in {"buyer_cost_signal_to_verify", "condominium_arrears"} or (
+        role == "total_candidate" and (base_role or "") in {"buyer_cost_signal_to_verify", "condominium_arrears"}
+    )
+    explicit_buyer_obligation = bool(
+        re.search(
+            r"\b(a\s+carico\s+(?:dell[' ]?)?(?:aggiudicatario|acquirente|parte\s+acquirente)|"
+            r"aggiudicatario|acquirente|da\s+sostenere|restano?\s+a\s+carico)\b",
+            _normalize_text(quote),
+        )
+    )
+    safe_cost = bool(buyer_signal and supported and explicit_buyer_obligation)
+    warnings: List[str] = []
+    if str(authority.get("authority_level") or "") in {AUTH_LOW, AUTH_UNKNOWN} or bool(authority.get("is_instruction_like")):
+        warnings.append("WEAK_OR_INSTRUCTION_AUTHORITY")
+    if role == "unknown_money" and reason_code in {"GENERIC_MONEY_BOILERPLATE", "INSTRUCTION_OR_BOILERPLATE_AMOUNT"}:
+        warnings.append(reason_code)
+    return {
+        "candidate_id": _candidate_id(page, amount, quote, index),
+        "amount_eur": amount,
+        "raw_text": quote,
+        "page": page,
+        "role": role,
+        "confidence": round(_money_confidence(authority, role, supported), 4),
+        "authority_zone": authority.get("section_zone") or ZONE_UNKNOWN,
+        "authority_level": authority.get("authority_level") or AUTH_UNKNOWN,
+        "reason_code": reason_code,
+        "is_customer_safe_cost": safe_cost,
+        "should_surface_in_money_box": bool(buyer_signal and supported),
+        "should_sum": bool(role == "total_candidate" and safe_cost),
+        "parent_total_candidate_id": None,
+        "warnings": warnings,
+        "source": item.get("source") or "",
+        "semantic_base_role": base_role or role,
+        "semantic_base_reason_code": base_reason_code or reason_code,
+    }
 
 
 def _candidate_money_items(
     pages: Sequence[Dict[str, Any]],
     candidates: Optional[Dict[str, Any]],
-) -> List[Dict[str, Any]]:
+) -> Tuple[List[Dict[str, Any]], List[str]]:
     out: List[Dict[str, Any]] = []
+    warnings: List[str] = []
     money_candidates = candidates.get("money") if isinstance(candidates, dict) else None
     if isinstance(money_candidates, list):
         for row in money_candidates:
             if not isinstance(row, dict):
+                warnings.append("malformed_money_candidate_row")
                 continue
             try:
                 page = int(row.get("page"))
             except Exception:
+                warnings.append("malformed_money_candidate_page")
                 continue
             quote = str(row.get("context") or row.get("quote") or "").strip()
             if not quote:
+                warnings.append("malformed_money_candidate_quote")
                 continue
             amount = row.get("amount_eur")
             if amount is None:
@@ -1129,7 +1233,17 @@ def _candidate_money_items(
                 amount_f = float(amount)
             except Exception:
                 amount_f = None
-            out.append({"page": page, "quote": quote, "amount_eur": amount_f, "source": "candidate_miner"})
+            out.append(
+                {
+                    "page": page,
+                    "quote": quote,
+                    "amount_eur": amount_f,
+                    "amount_raw": row.get("amount_raw"),
+                    "source": "candidate_miner",
+                }
+            )
+    elif money_candidates is not None:
+        warnings.append("malformed_candidate_money_file")
 
     for page in pages:
         text = page["text"]
@@ -1138,7 +1252,15 @@ def _candidate_money_items(
             amount = _parse_amount(match.group(0))
             if amount is None:
                 continue
-            out.append({"page": page["page"], "quote": quote, "amount_eur": amount, "source": "page_scan"})
+            out.append(
+                {
+                    "page": page["page"],
+                    "quote": quote,
+                    "amount_eur": amount,
+                    "amount_raw": match.group(0),
+                    "source": "page_scan",
+                }
+            )
 
     deduped: List[Dict[str, Any]] = []
     seen = set()
@@ -1148,7 +1270,7 @@ def _candidate_money_items(
             continue
         seen.add(sig)
         deduped.append(item)
-    return deduped
+    return deduped, list(dict.fromkeys(warnings))
 
 
 def resolve_money_roles_shadow(
@@ -1168,64 +1290,138 @@ def resolve_money_roles_shadow(
     if _mostly_unknown_authority(section_map):
         notes.append("mostly_unknown_authority_map")
 
-    items = _candidate_money_items(normalized_pages, candidates)
+    items, candidate_warnings = _candidate_money_items(normalized_pages, candidates)
+    notes.extend(candidate_warnings)
     failures: List[str] = []
-    classified: List[Dict[str, Any]] = []
-    for item in items:
+    money_candidates: List[Dict[str, Any]] = []
+    for idx, item in enumerate(items, start=1):
         page = int(item["page"])
         quote = str(item["quote"])
         authority, failed, err = _quote_authority(page, quote, section_map, rows, domain="money")
         if failed and err:
             failures.append(f"page_{page}:{err}")
-        role = _money_role_from_text(quote)
-        if _is_total_context(quote):
-            total_ev = _make_evidence(page, quote, authority, signal="money", role="total_candidate", amount_eur=item.get("amount_eur"))
-            value["total_candidate"].append(total_ev)
-            classified.append(total_ev)
-            if role == "unknown_money":
-                continue
-        ev = _make_evidence(page, quote, authority, signal="money", role=role, amount_eur=item.get("amount_eur"))
-        value[role].append(ev)
-        classified.append(ev)
+        base_role, reason_code = _money_role_reason_from_text(quote)
+        if _is_total_context(quote, item.get("amount_raw")):
+            total_reason = "EXPLICIT_TOTAL_CANDIDATE"
+            if base_role in {"buyer_cost_signal_to_verify", "condominium_arrears"}:
+                total_reason = "EXPLICIT_TOTAL_BUYER_COST_SIGNAL"
+            candidate = _money_candidate_record(
+                item,
+                authority,
+                role="total_candidate",
+                reason_code=total_reason,
+                index=idx,
+                base_role=base_role,
+                base_reason_code=reason_code,
+            )
+        else:
+            candidate = _money_candidate_record(item, authority, role=base_role, reason_code=reason_code, index=idx)
+        money_candidates.append(candidate)
 
-    total_pages = {int(ev.get("page")) for ev in value["total_candidate"] if ev.get("page")}
-    if total_pages:
-        total_amount_by_page: Dict[int, float] = {}
-        for ev in value["total_candidate"]:
+    totals_by_page: Dict[int, List[Dict[str, Any]]] = {}
+    for candidate in money_candidates:
+        if candidate.get("role") != "total_candidate":
+            continue
+        try:
+            totals_by_page.setdefault(int(candidate["page"]), []).append(candidate)
+        except Exception:
+            continue
+
+    for candidate in money_candidates:
+        if candidate.get("role") == "total_candidate":
+            continue
+        child_base_role = str(candidate.get("semantic_base_role") or candidate.get("role") or "")
+        try:
+            page = int(candidate.get("page"))
+            amount = float(candidate.get("amount_eur") or 0.0)
+        except Exception:
+            continue
+        parent = None
+        for total in sorted(totals_by_page.get(page) or [], key=lambda row: float(row.get("amount_eur") or 0.0)):
+            parent_base_role = str(total.get("semantic_base_role") or "")
+            compatible_component = (
+                child_base_role == parent_base_role
+                or {child_base_role, parent_base_role}.issubset({"buyer_cost_signal_to_verify", "condominium_arrears"})
+                or {child_base_role, parent_base_role}.issubset({"formalities_procedural_amount"})
+                or {child_base_role, parent_base_role}.issubset({"valuation_deduction", "market_value", "final_value"})
+            )
+            if not compatible_component:
+                continue
             try:
-                total_amount_by_page[int(ev["page"])] = max(
-                    total_amount_by_page.get(int(ev["page"]), 0.0),
-                    float(ev.get("amount_eur") or 0.0),
-                )
+                total_amount = float(total.get("amount_eur") or 0.0)
             except Exception:
                 continue
-        component_roles = {
-            "buyer_cost_signal_to_verify",
-            "valuation_deduction",
-            "formalities_procedural_amount",
-            "unknown_money",
-        }
-        for role in component_roles:
-            for ev in value[role]:
-                try:
-                    page = int(ev.get("page"))
-                    amount = float(ev.get("amount_eur") or 0.0)
-                except Exception:
-                    continue
-                if page in total_pages and amount and amount < total_amount_by_page.get(page, amount + 1):
-                    component = dict(ev)
-                    component["role"] = "component_of_total"
-                    value["component_of_total"].append(component)
+            if amount and total_amount and amount < total_amount:
+                parent = total
+                break
+        if parent is None:
+            continue
+        candidate["semantic_base_role"] = candidate.get("role")
+        candidate["semantic_base_reason_code"] = candidate.get("reason_code")
+        candidate["role"] = "component_of_total"
+        candidate["reason_code"] = "COMPONENT_OF_EXPLICIT_TOTAL"
+        candidate["is_customer_safe_cost"] = False
+        candidate["should_surface_in_money_box"] = False
+        candidate["should_sum"] = False
+        candidate["parent_total_candidate_id"] = parent.get("candidate_id")
+        candidate.setdefault("warnings", []).append("COMPONENT_TOTAL_DOUBLE_COUNT_RISK")
 
-    for key, role_items in list(value.items()):
-        if isinstance(role_items, list):
-            value[key] = _dedupe_evidence(role_items, limit=20)
+    value["money_candidates"] = money_candidates[:120]
+    for candidate in money_candidates:
+        role = str(candidate.get("role") or "unknown_money")
+        if role not in MONEY_ROLES:
+            role = "unknown_money"
+        value[role].append(
+            {
+                "page": candidate.get("page"),
+                "quote": candidate.get("raw_text"),
+                "signal": "money",
+                "role": role,
+                "amount_eur": candidate.get("amount_eur"),
+                "section_zone": candidate.get("authority_zone"),
+                "authority_level": candidate.get("authority_level"),
+                "authority_score": candidate.get("confidence"),
+                "reason_code": candidate.get("reason_code"),
+            }
+        )
+
+    for key in MONEY_ROLES:
+        value[key] = _dedupe_evidence(value.get(key) or [], limit=20)
     value["money_role_counts"] = {
         key: len(items)
         for key, items in value.items()
         if isinstance(items, list)
+        and key != "money_candidates"
     }
+    valuation_roles = {"valuation_deduction", "price", "base_auction", "final_value", "market_value"}
+    value["summary"] = {
+        "buyer_cost_signal_count": int(value["money_role_counts"].get("buyer_cost_signal_to_verify") or 0)
+        + int(value["money_role_counts"].get("condominium_arrears") or 0),
+        "valuation_amount_count": sum(int(value["money_role_counts"].get(role) or 0) for role in valuation_roles),
+        "formalities_amount_count": int(value["money_role_counts"].get("formalities_procedural_amount") or 0),
+        "rendita_count": int(value["money_role_counts"].get("cadastral_rendita") or 0),
+        "unknown_count": int(value["money_role_counts"].get("unknown_money") or 0),
+        "authority_customer_safe_cost_count": sum(1 for candidate in money_candidates if candidate.get("is_customer_safe_cost")),
+        "double_count_risk": any(candidate.get("parent_total_candidate_id") for candidate in money_candidates),
+        "candidate_count": len(money_candidates),
+    }
+    classified = [
+        {
+            "page": candidate.get("page"),
+            "quote": candidate.get("raw_text"),
+            "signal": "money",
+            "role": candidate.get("role"),
+            "amount_eur": candidate.get("amount_eur"),
+            "section_zone": candidate.get("authority_zone"),
+            "authority_level": candidate.get("authority_level"),
+            "authority_score": candidate.get("confidence"),
+            "reason_code": candidate.get("reason_code"),
+        }
+        for candidate in money_candidates
+    ]
 
+    if any(note.startswith("malformed_") for note in candidate_warnings):
+        notes.append("partial_malformed_money_candidates")
     if failures:
         notes.append("partial_authority_classification_failure")
     notes.extend(
@@ -1235,11 +1431,23 @@ def resolve_money_roles_shadow(
         ]
     )
 
+    if "mostly_unknown_authority_map" in notes and classified:
+        return _result(
+            domain,
+            status=STATUS_FAIL_OPEN,
+            value=value,
+            confidence=0.0,
+            winning_evidence=classified[:16],
+            rules=["mostly_unknown_authority_map_cannot_support_money_certainty"],
+            fail_open=True,
+            notes=notes,
+        )
+
     if classified:
         confidence = max(_safe_float(ev.get("authority_score"), 0.3) for ev in classified)
         return _result(
             domain,
-            status=STATUS_WARN if failures else STATUS_OK,
+            status=STATUS_PARTIAL if failures or any(note.startswith("malformed_") for note in notes) else STATUS_OK,
             value=value,
             confidence=confidence,
             winning_evidence=classified[:16],
@@ -1310,6 +1518,7 @@ def build_authority_shadow_resolvers(
         STATUS_OK: 0,
         STATUS_INSUFFICIENT: 1,
         STATUS_WARN: 2,
+        STATUS_PARTIAL: 2,
         STATUS_FAIL_OPEN: 3,
     }
     overall_status = max((str(row.get("status") or STATUS_WARN) for row in domains.values()), key=lambda s: status_order.get(s, 2))

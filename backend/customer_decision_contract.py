@@ -1060,6 +1060,7 @@ _CUSTOMER_RESULT_INTERNAL_RUNTIME_KEYS = {
     "canonical_freeze_contract",
     "canonical_freeze_explanations",
     "debug",
+    "internal_runtime",
 }
 
 
@@ -1080,7 +1081,7 @@ def _strip_customer_internal_controls(value: Any) -> Any:
         cleaned: Dict[str, Any] = {}
         for key, child in value.items():
             key_text = str(key)
-            if key_text in _CUSTOMER_INTERNAL_CONTROL_KEYS or key_text.startswith("authority_"):
+            if key_text in _CUSTOMER_INTERNAL_CONTROL_KEYS or key_text.startswith("authority_") or "shadow_" in key_text:
                 continue
             if _is_customer_internal_provenance(key_text, child):
                 continue
@@ -1129,7 +1130,7 @@ def sanitize_customer_facing_result(result: Dict[str, Any]) -> Dict[str, Any]:
         return result
     for key in list(result.keys()):
         key_text = str(key)
-        if key_text in _CUSTOMER_INTERNAL_AUTHORITY_KEYS or key_text.startswith("authority_"):
+        if key_text in _CUSTOMER_INTERNAL_AUTHORITY_KEYS or key_text.startswith("authority_") or "shadow_" in key_text:
             result.pop(key, None)
     for key in _CUSTOMER_FACING_RESULT_KEYS:
         if key in result:

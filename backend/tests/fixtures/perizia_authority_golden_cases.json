@@ -68,6 +68,9 @@
     "id": "via_umbria",
     "label": "Via Umbria / VIA UMBRIA N. 26.pdf",
     "expected_class": "PASS_IF_AVAILABLE",
+    "analysis_ids": [
+      "analysis_85b6655bedd2"
+    ],
     "paths": [
       "/home/syedtajmeelshah/VIA UMBRIA N. 26.pdf",
       "/home/syedtajmeelshah/Via Umbria.pdf",

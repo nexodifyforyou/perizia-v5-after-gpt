@@ -333,7 +333,7 @@ def test_bad_authority_classification_on_one_page_is_partial_fail_open(monkeypat
 
     payload = shadow.build_authority_shadow_resolvers(pages, section_map)
     money = payload["money_roles"]
-    assert money["status"] == "WARN"
+    assert money["status"] == "PARTIAL"
     assert money["fail_open"] is True
     assert money["value"]["cadastral_rendita"]
     assert money["value"]["base_auction"]
