@@ -34,6 +34,8 @@ FORBIDDEN_KEYS = {
     "is_answer_like",
     "source_stage",
     "extractor_version",
+    "removed_paths",
+    "shadow_money",
 }
 
 
@@ -160,6 +162,134 @@ def test_money_projection_scrubs_via_umbria_stale_31_6_and_surfaces_verify_signa
     assert all(item["customer_visible_amount_status"] == "to_verify" for item in cdc_box["cost_signals_to_verify"])
 
 
+def test_money_projection_removes_stale_qa_gate_money_claim_from_customer_response(monkeypatch):
+    monkeypatch.setenv(FEATURE_FLAG, "1")
+    result = _result_with_money_box(
+        [
+            {"label_it": "Regolarizzazione: € 31", "stima_euro": 31},
+            {"label_it": "Regolarizzazione: € 6", "stima_euro": 6},
+        ]
+    )
+    stale_claim = "Totale stimato in perizia: € 30535; Regolarizzazione: € 31; Regolarizzazione: € 6."
+    result["qa_gate"] = {
+        "contradictions_detected": [
+            {"id": "money_stale", "current_wrong_claim": stale_claim},
+            {"id": "occupancy", "current_wrong_claim": "Occupazione: LIBERO, ma lo schema dice occupato."},
+        ]
+    }
+    result["customer_decision_contract"]["qa_gate"] = {
+        "contradictions_detected": [{"id": "cdc_money_stale", "current_wrong_claim": stale_claim}]
+    }
+    shadow = _shadow(
+        "STIMA / FORMAZIONE LOTTI\n"
+        "Spese tecniche di regolarizzazione Euro 5.032,00.\n"
+        "Sanzione per sanatoria Euro 3.000,00."
+    )
+
+    meta = apply_authority_money_projection_if_enabled(result, authority_shadow=shadow)
+
+    assert meta["status"] == "APPLIED"
+    assert meta["removed_money_qa_claims_count"] == 2
+    assert "stale_money_qa_claims_removed" in meta["notes"]
+    response_blob = _text_blob(result)
+    assert "Regolarizzazione: € 31" not in response_blob
+    assert "Regolarizzazione: € 6" not in response_blob
+    assert "Totale stimato in perizia" not in response_blob
+    assert "Occupazione: LIBERO" in response_blob
+    box = result["customer_decision_contract"]["money_box"]
+    assert {5032, 3000}.issubset({item.get("stima_euro") for item in box["cost_signals_to_verify"]})
+
+    clean = copy.deepcopy(result)
+    sanitize_customer_facing_result(clean)
+    separate_internal_runtime_from_customer_result(clean)
+    assert "removed_paths" not in _text_blob(clean)
+    assert _leak_paths(clean) == []
+
+
+def test_money_projection_preserves_non_money_qa_contradictions(monkeypatch):
+    monkeypatch.setenv(FEATURE_FLAG, "1")
+    result = _result_with_money_box([{"label_it": "Regolarizzazione: € 31", "stima_euro": 31}])
+    result["qa_gate"] = {
+        "contradictions_detected": [
+            {"id": "lot", "current_wrong_claim": "Lotto unico indicato, ma il documento ha LOTTO 1 e LOTTO 2."},
+            {"id": "occupancy", "message": "Occupazione da verificare con custode."},
+        ]
+    }
+
+    meta = apply_authority_money_projection_if_enabled(
+        result,
+        authority_shadow=_shadow("STIMA / FORMAZIONE LOTTI\nSpese tecniche di regolarizzazione Euro 5.032,00."),
+    )
+
+    assert meta["status"] == "APPLIED"
+    assert meta.get("removed_money_qa_claims_count", 0) == 0
+    text = _text_blob(result["qa_gate"])
+    assert "Lotto unico indicato" in text
+    assert "Occupazione da verificare" in text
+
+
+def test_money_projection_removes_generic_regolarizzazione_qa_claim(monkeypatch):
+    monkeypatch.setenv(FEATURE_FLAG, "1")
+    result = _result_with_money_box([{"label_it": "Regolarizzazione: € 1234", "stima_euro": 1234}])
+    result["qa_gate"] = {
+        "warnings": [
+            {"id": "generic_reg", "claim": "Regolarizzazione: € 1234 come costo certo per l'acquirente."}
+        ]
+    }
+
+    meta = apply_authority_money_projection_if_enabled(
+        result,
+        authority_shadow=_shadow("STIMA / FORMAZIONE LOTTI\nSpese tecniche di regolarizzazione Euro 5.032,00."),
+    )
+
+    assert meta["status"] == "APPLIED"
+    assert meta["removed_money_qa_claims_count"] == 1
+    assert "Regolarizzazione: € 1234" not in _text_blob(result)
+
+
+@pytest.mark.parametrize(
+    "claim",
+    [
+        "Formalita ipotecaria di € 200 come costo a carico dell'acquirente.",
+        "Rendita catastale € 123 trattata come costo extra.",
+        "Prezzo base d'asta € 80.000 e deprezzamento € 10.000 come costi buyer-side.",
+    ],
+)
+def test_money_projection_removes_non_buyer_amount_qa_claims(monkeypatch, claim):
+    monkeypatch.setenv(FEATURE_FLAG, "1")
+    result = _result_with_money_box([{"label_it": claim, "stima_euro": 200}])
+    result["qa_gate"] = {"contradictions_detected": [{"id": "non_buyer_cost", "current_wrong_claim": claim}]}
+    shadow = _shadow(
+        "STIMA / FORMAZIONE LOTTI\nRendita catastale Euro 123,00.",
+        "STIMA / FORMAZIONE LOTTI\nPrezzo base d'asta Euro 80.000,00.",
+        "STIMA / FORMAZIONE LOTTI\nDeprezzamento Euro 10.000,00.",
+        "FORMALITA PREGIUDIZIEVOLI\nCancellazione ipoteca Euro 200,00.",
+    )
+
+    meta = apply_authority_money_projection_if_enabled(result, authority_shadow=shadow)
+
+    assert meta["status"] == "APPLIED"
+    assert meta["removed_money_qa_claims_count"] == 1
+    assert claim not in _text_blob(result)
+
+
+def test_money_projection_qa_sanitizer_flag_off_invariance(monkeypatch):
+    monkeypatch.delenv(FEATURE_FLAG, raising=False)
+    stale_claim = "Regolarizzazione: € 1234 come costo certo per l'acquirente."
+    result = _result_with_money_box([{"label_it": "Regolarizzazione: € 1234", "stima_euro": 1234}])
+    result["qa_gate"] = {"contradictions_detected": [{"current_wrong_claim": stale_claim}]}
+    before = copy.deepcopy(result)
+
+    meta = apply_authority_money_projection_if_enabled(
+        result,
+        authority_shadow=_shadow("STIMA / FORMAZIONE LOTTI\nSpese tecniche di regolarizzazione Euro 5.032,00."),
+    )
+
+    assert meta["status"] == "DISABLED"
+    assert result == before
+    assert stale_claim in _text_blob(result)
+
+
 def test_non_buyer_amount_roles_do_not_become_extra_cost_items(monkeypatch):
     monkeypatch.setenv(FEATURE_FLAG, "1")
     result = _result_with_money_box(
@@ -262,6 +392,14 @@ async def test_read_time_money_projection_is_response_only_and_mongo_unchanged(f
             {"label_it": "Regolarizzazione: € 6", "stima_euro": 6},
         ]
     )
+    result["qa_gate"] = {
+        "contradictions_detected": [
+            {
+                "id": "stale_money_read_path",
+                "current_wrong_claim": "Totale stimato in perizia: € 30535; Regolarizzazione: € 31; Regolarizzazione: € 6.",
+            }
+        ]
+    }
     result.update(
         {
             "issues": [],

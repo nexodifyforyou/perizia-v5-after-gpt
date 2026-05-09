@@ -36,6 +36,40 @@ STALE_REGOLARIZZAZIONE_RE = re.compile(
     r"regolarizzazion\w*\s*:\s*(?:€|\beuro\b)?\s*(?:31|6)(?:[,\.]00)?\b",
     re.IGNORECASE,
 )
+GENERIC_REGOLARIZZAZIONE_CERTAINTY_RE = re.compile(
+    r"\bregolarizzazion\w*\s*:\s*(?:€|\beuro\b)?\s*\d+(?:[\.,]\d+)?\b",
+    re.IGNORECASE,
+)
+MONEY_AMOUNT_RE = re.compile(r"(?:€|\beuro\b)\s*\d|\d[\d\.\s]*,\d{2}\b", re.IGNORECASE)
+MONEY_QA_TOPIC_RE = re.compile(
+    r"\b(?:costi?|spese?|oneri?|import[oi]|regolarizzazion\w*|sanatori\w*|ripristin\w*|"
+    r"fiscalizzazion\w*|formal(?:it|i)à?|ipotec\w*|pignorament\w*|rendita\s+catastal\w*|"
+    r"prezzo\s+base|base\s+d['’]?\s*asta|valore\s+(?:di\s+)?stima|valore\s+finale|"
+    r"market\s+value|deprezzament\w*|totale\s+(?:stimato|costi?|extra|oneri?|spese?))\b",
+    re.IGNORECASE,
+)
+BUYER_COST_CERTAINTY_RE = re.compile(
+    r"\b(?:costo\s+certo|costi?\s+(?:extra|espliciti|a\s+carico)|a\s+carico\s+(?:dell['’]?)?"
+    r"(?:acquirente|aggiudicatario)|buyer[-\s]?side|extra\s+cost|totale\s+(?:stimato|costi?|extra|oneri?|spese?))\b",
+    re.IGNORECASE,
+)
+NON_BUYER_COST_AS_BUYER_RE = re.compile(
+    r"\b(?:formal(?:it|i)à?|ipotec\w*|pignorament\w*|rendita\s+catastal\w*|prezzo\s+base|"
+    r"base\s+d['’]?\s*asta|valore\s+(?:di\s+)?stima|valore\s+finale|market\s+value|"
+    r"deprezzament\w*)\b.*\b(?:costi?|spese?|oneri?|a\s+carico|acquirente|aggiudicatario|extra)\b",
+    re.IGNORECASE,
+)
+QA_MONEY_TEXT_FIELDS = {
+    "current_wrong_claim",
+    "claim",
+    "message",
+    "text",
+    "problem_it",
+    "description",
+    "detail",
+    "details",
+}
+QA_CLAIM_LIST_MARKERS = {"contradiction", "warning", "warn", "claim", "qa_gate"}
 
 
 def _base_meta(enabled: bool) -> Dict[str, Any]:
@@ -276,6 +310,101 @@ def _legacy_money_text(result: Dict[str, Any]) -> str:
             cur = cur.get(part) if isinstance(cur, dict) else None
         walk(cur)
     return " ".join(pieces)
+
+
+def _money_box_has_projected_downgrades(money_box: Dict[str, Any]) -> bool:
+    if not isinstance(money_box, dict):
+        return False
+    if money_box.get("policy") != "AUTHORITY_CONSERVATIVE":
+        return False
+    downgrade_keys = (
+        "cost_signals_to_verify",
+        "buyer_cost_signals_to_verify",
+        "qualitative_burdens",
+        "valuation_reference_amounts",
+        "excluded_non_buyer_cost_amounts",
+        "unsupported_or_unknown_amounts",
+    )
+    return any(isinstance(money_box.get(key), list) and bool(money_box.get(key)) for key in downgrade_keys)
+
+
+def _qa_list_path_is_customer_warning_or_contradiction(path: str) -> bool:
+    path_text = str(path or "").lower()
+    return any(marker in path_text for marker in QA_CLAIM_LIST_MARKERS)
+
+
+def _qa_money_claim_texts(item: Dict[str, Any]) -> List[str]:
+    texts: List[str] = []
+    if not isinstance(item, dict):
+        return texts
+    for key, value in item.items():
+        key_text = str(key or "")
+        if key_text in QA_MONEY_TEXT_FIELDS or key_text.endswith("_claim") or key_text.endswith("_message"):
+            if isinstance(value, (dict, list)):
+                continue
+            normalized = _normalize_text(value)
+            if normalized:
+                texts.append(normalized)
+    return texts
+
+
+def _is_stale_money_qa_claim(item: Dict[str, Any], projected_money_box: Dict[str, Any]) -> bool:
+    if not _money_box_has_projected_downgrades(projected_money_box):
+        return False
+    for text in _qa_money_claim_texts(item):
+        if GENERIC_REGOLARIZZAZIONE_CERTAINTY_RE.search(text):
+            return True
+        if re.search(r"\btotale\s+stimato\s+in\s+perizia\s*:\s*(?:€|\beuro\b)?\s*\d", text, re.IGNORECASE):
+            return True
+        if NON_BUYER_COST_AS_BUYER_RE.search(text):
+            return True
+        if MONEY_AMOUNT_RE.search(text) and MONEY_QA_TOPIC_RE.search(text) and BUYER_COST_CERTAINTY_RE.search(text):
+            return True
+    return False
+
+
+def _sanitize_stale_money_qa_claims_after_projection(result: Dict[str, Any], projected_money_box: Dict[str, Any]) -> Dict[str, Any]:
+    meta: Dict[str, Any] = {
+        "removed_money_qa_claims_count": 0,
+        "removed_paths": [],
+        "reason_codes": [],
+    }
+    if not isinstance(result, dict) or not _money_box_has_projected_downgrades(projected_money_box):
+        return meta
+
+    def walk(value: Any, path: str) -> Any:
+        if isinstance(value, dict):
+            for key in list(value.keys()):
+                value[key] = walk(value.get(key), f"{path}.{key}")
+            return value
+        if isinstance(value, list):
+            cleaned: List[Any] = []
+            claim_list = _qa_list_path_is_customer_warning_or_contradiction(path)
+            for idx, item in enumerate(value):
+                item_path = f"{path}[{idx}]"
+                if claim_list and isinstance(item, dict) and _is_stale_money_qa_claim(item, projected_money_box):
+                    meta["removed_money_qa_claims_count"] += 1
+                    meta["removed_paths"].append(item_path)
+                    meta["reason_codes"].append("STALE_MONEY_QA_CLAIM_REMOVED")
+                    continue
+                cleaned.append(walk(item, item_path))
+            return cleaned
+        return value
+
+    walk(result.get("qa_gate"), "result.qa_gate")
+    customer_contract = result.get("customer_decision_contract")
+    if isinstance(customer_contract, dict):
+        walk(customer_contract.get("qa_gate"), "result.customer_decision_contract.qa_gate")
+    for key in list(result.keys()):
+        key_text = str(key or "").lower()
+        if key_text == "qa_gate" or key_text == "customer_decision_contract":
+            continue
+        if any(marker in key_text for marker in ("contradiction", "warning", "warn", "claim")):
+            result[key] = walk(result.get(key), f"result.{key}")
+
+    meta["removed_paths"] = list(dict.fromkeys(str(path) for path in meta["removed_paths"]))
+    meta["reason_codes"] = list(dict.fromkeys(str(code) for code in meta["reason_codes"]))
+    return meta
 
 
 def _section3_from_money_box(money_box: Dict[str, Any]) -> Dict[str, Any]:
@@ -521,6 +650,14 @@ def apply_authority_money_projection_if_enabled(
             "changed_fields": changed_fields,
         }
     )
+    if changed_fields:
+        qa_sanitize_meta = _sanitize_stale_money_qa_claims_after_projection(result, projected)
+        removed_count = int(qa_sanitize_meta.get("removed_money_qa_claims_count") or 0)
+        meta["removed_money_qa_claims_count"] = removed_count
+        meta["removed_paths"] = qa_sanitize_meta.get("removed_paths") or []
+        meta["qa_money_claim_sanitizer_reason_codes"] = qa_sanitize_meta.get("reason_codes") or []
+        if removed_count:
+            meta["notes"].append("stale_money_qa_claims_removed")
     _attach_meta(result, meta)
     return meta
 
