@@ -45,6 +45,7 @@ from cost_market_ranges import market_range_for_item
 from customer_decision_contract import apply_customer_decision_contract, sanitize_customer_facing_result, separate_internal_runtime_from_customer_result
 from customer_contract_qa_gate import apply_customer_contract_qa_gate
 from perizia_authority_lot_projection import FEATURE_FLAG as AUTHORITY_LOT_PROJECTION_FLAG, apply_authority_lot_projection_if_enabled
+from perizia_authority_money_projection import FEATURE_FLAG as AUTHORITY_MONEY_PROJECTION_FLAG, apply_authority_money_projection_if_enabled
 from perizia_authority_resolvers import build_authority_shadow_resolvers
 from perizia_section_authority import build_section_authority_map, summarize_authority_map
 from perizia_runtime.runtime import apply_verifier_to_result, run_quality_verifier
@@ -16362,6 +16363,31 @@ async def analyze_perizia(request: Request, file: UploadFile = File(...)):
     result["debug"] = debug_obj
     _ensure_section_3_money_box_alias(result)
     scrub_customer_facing_stale_money_labels(result)
+    if os.environ.get(AUTHORITY_MONEY_PROJECTION_FLAG) == "1":
+        try:
+            debug_obj["authority_money_projection"] = apply_authority_money_projection_if_enabled(
+                result,
+                pages,
+                extraction_payload.get("section_authority"),
+                candidate_summary.get("candidates_folder"),
+                analysis_id=analysis_id,
+                authority_shadow=debug_obj.get("authority_shadow_resolvers"),
+                request_id=request_id,
+            )
+        except Exception as e:
+            logger.exception(f"[{request_id}] authority_money_projection_failed analysis_id={analysis_id} err={e}")
+            debug_obj["authority_money_projection"] = {
+                "enabled": True,
+                "status": "FAIL_OPEN",
+                "applied": False,
+                "reason": "authority_money_projection_failed",
+                "money_status": "unknown",
+                "authority_confidence": 0.0,
+                "candidate_count": 0,
+                "changed_fields": [],
+                "error": str(e)[:240],
+            }
+        result["debug"] = debug_obj
     scrubbed_placeholders = _scrub_visible_machine_placeholders(result)
     if scrubbed_placeholders:
         debug_obj["visible_machine_placeholders_scrubbed"] = scrubbed_placeholders
@@ -18964,7 +18990,9 @@ def _apply_authority_lot_projection_to_detail_response_if_enabled(
         return {}
     response_analysis = copy.deepcopy(analysis)
     result = response_analysis.get("result")
-    if os.environ.get(AUTHORITY_LOT_PROJECTION_FLAG) != "1":
+    lot_projection_enabled = os.environ.get(AUTHORITY_LOT_PROJECTION_FLAG) == "1"
+    money_projection_enabled = os.environ.get(AUTHORITY_MONEY_PROJECTION_FLAG) == "1"
+    if not lot_projection_enabled and not money_projection_enabled:
         return _sanitize_perizia_detail_response(response_analysis)
     if not isinstance(analysis, dict) or not isinstance(result, dict):
         return _sanitize_perizia_detail_response(response_analysis)
@@ -18972,36 +19000,115 @@ def _apply_authority_lot_projection_to_detail_response_if_enabled(
         return _sanitize_perizia_detail_response(response_analysis)
 
     authority_shadow = _load_authority_shadow_for_detail_read(analysis_id, analysis)
-    customer_contract = result.get("customer_decision_contract")
-    projection_target = customer_contract if isinstance(customer_contract, dict) else result
+    projection_meta: Optional[Dict[str, Any]] = None
+    if lot_projection_enabled:
+        customer_contract = result.get("customer_decision_contract")
+        projection_target = customer_contract if isinstance(customer_contract, dict) else result
+        try:
+            projection_meta = apply_authority_lot_projection_if_enabled(
+                projection_target,
+                authority_shadow,
+                request_id=f"detail_read:{analysis_id}",
+            )
+            projection_meta["target"] = "customer_decision_contract" if projection_target is customer_contract else "result"
+            if isinstance(customer_contract, dict) and (
+                projection_meta.get("applied") is True or projection_meta.get("status") == "ALREADY_MATCHES"
+            ):
+                mirror_changed = _sync_authority_lot_projection_mirror_fields(result, customer_contract)
+                if mirror_changed:
+                    projection_meta["changed_fields"] = list(
+                        dict.fromkeys((projection_meta.get("changed_fields") or []) + [f"result.{field}" for field in mirror_changed])
+                    )
+                    projection_meta["mirror_changed_fields"] = mirror_changed
+        except Exception as e:
+            logger.exception("authority_lot_projection_read_failed analysis_id=%s err=%s", analysis_id, e)
+            projection_meta = {
+                "enabled": True,
+                "status": "FAIL_OPEN",
+                "applied": False,
+                "reason": "authority_lot_projection_read_failed",
+                "legacy_lot_mode": "unknown",
+                "authority_lot_mode": "unknown",
+                "authority_confidence": 0.0,
+                "detected_lot_numbers": [],
+                "source_pages": [],
+                "changed_fields": [],
+                "error": str(e)[:240],
+            }
+
+    money_projection_meta: Optional[Dict[str, Any]] = None
+    if money_projection_enabled:
+        try:
+            money_projection_meta = apply_authority_money_projection_if_enabled(
+                result,
+                authority_shadow=authority_shadow,
+                analysis_id=analysis_id,
+                request_id=f"detail_read:{analysis_id}",
+            )
+        except Exception as e:
+            logger.exception("authority_money_projection_read_failed analysis_id=%s err=%s", analysis_id, e)
+            money_projection_meta = {
+                "enabled": True,
+                "status": "FAIL_OPEN",
+                "applied": False,
+                "reason": "authority_money_projection_read_failed",
+                "money_status": "unknown",
+                "authority_confidence": 0.0,
+                "candidate_count": 0,
+                "changed_fields": [],
+                "error": str(e)[:240],
+            }
+
+    internal_runtime = response_analysis.get("internal_runtime") if isinstance(response_analysis.get("internal_runtime"), dict) else {}
+    debug_obj = internal_runtime.get("debug") if isinstance(internal_runtime.get("debug"), dict) else {}
+    if lot_projection_enabled or money_projection_enabled:
+        debug_obj["authority_shadow_resolvers"] = authority_shadow
+    if projection_meta is not None:
+        debug_obj["authority_lot_projection"] = projection_meta
+    if money_projection_meta is not None:
+        debug_obj["authority_money_projection"] = money_projection_meta
+    internal_runtime["debug"] = debug_obj
+
+    sanitize_customer_facing_result(result)
+    result_internal_runtime = separate_internal_runtime_from_customer_result(result)
+    if isinstance(result_internal_runtime.get("debug"), dict):
+        debug_obj.update(result_internal_runtime["debug"])
+        internal_runtime["debug"] = debug_obj
+    response_analysis["result"] = result
+    return _sanitize_perizia_detail_response(response_analysis)
+
+def _apply_authority_money_projection_to_detail_response_if_enabled(
+    analysis: Dict[str, Any],
+    *,
+    analysis_id: str,
+) -> Dict[str, Any]:
+    if not isinstance(analysis, dict):
+        return {}
+    response_analysis = copy.deepcopy(analysis)
+    result = response_analysis.get("result")
+    if os.environ.get(AUTHORITY_MONEY_PROJECTION_FLAG) != "1":
+        return _sanitize_perizia_detail_response(response_analysis)
+    if not isinstance(result, dict):
+        return _sanitize_perizia_detail_response(response_analysis)
+
+    authority_shadow = _load_authority_shadow_for_detail_read(analysis_id, analysis)
     try:
-        projection_meta = apply_authority_lot_projection_if_enabled(
-            projection_target,
-            authority_shadow,
+        projection_meta = apply_authority_money_projection_if_enabled(
+            result,
+            authority_shadow=authority_shadow,
+            analysis_id=analysis_id,
             request_id=f"detail_read:{analysis_id}",
         )
-        projection_meta["target"] = "customer_decision_contract" if projection_target is customer_contract else "result"
-        if isinstance(customer_contract, dict) and (
-            projection_meta.get("applied") is True or projection_meta.get("status") == "ALREADY_MATCHES"
-        ):
-            mirror_changed = _sync_authority_lot_projection_mirror_fields(result, customer_contract)
-            if mirror_changed:
-                projection_meta["changed_fields"] = list(
-                    dict.fromkeys((projection_meta.get("changed_fields") or []) + [f"result.{field}" for field in mirror_changed])
-                )
-                projection_meta["mirror_changed_fields"] = mirror_changed
     except Exception as e:
-        logger.exception("authority_lot_projection_read_failed analysis_id=%s err=%s", analysis_id, e)
+        logger.exception("authority_money_projection_read_failed analysis_id=%s err=%s", analysis_id, e)
         projection_meta = {
             "enabled": True,
             "status": "FAIL_OPEN",
             "applied": False,
-            "reason": "authority_lot_projection_read_failed",
-            "legacy_lot_mode": "unknown",
-            "authority_lot_mode": "unknown",
+            "reason": "authority_money_projection_read_failed",
+            "money_status": "unknown",
             "authority_confidence": 0.0,
-            "detected_lot_numbers": [],
-            "source_pages": [],
+            "candidate_count": 0,
             "changed_fields": [],
             "error": str(e)[:240],
         }
@@ -19009,7 +19116,7 @@ def _apply_authority_lot_projection_to_detail_response_if_enabled(
     internal_runtime = response_analysis.get("internal_runtime") if isinstance(response_analysis.get("internal_runtime"), dict) else {}
     debug_obj = internal_runtime.get("debug") if isinstance(internal_runtime.get("debug"), dict) else {}
     debug_obj["authority_shadow_resolvers"] = authority_shadow
-    debug_obj["authority_lot_projection"] = projection_meta
+    debug_obj["authority_money_projection"] = projection_meta
     internal_runtime["debug"] = debug_obj
 
     sanitize_customer_facing_result(result)
@@ -19437,6 +19544,11 @@ async def _get_perizia_analysis_for_user(analysis_id: str, user: User) -> Dict[s
             analysis_id,
             elapsed_ms,
         )
+        if os.environ.get(AUTHORITY_MONEY_PROJECTION_FLAG) == "1":
+            return _apply_authority_money_projection_to_detail_response_if_enabled(
+                analysis,
+                analysis_id=analysis_id,
+            )
     return _sanitize_perizia_detail_response(analysis)
 
 def _refresh_list_analysis_semaforo(analysis: Dict[str, Any]) -> Optional[str]:
