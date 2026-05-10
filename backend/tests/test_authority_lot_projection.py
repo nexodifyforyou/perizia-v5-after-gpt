@@ -280,6 +280,96 @@ def test_feature_flag_disabled_does_not_change_customer_lots(monkeypatch):
     assert result == before
 
 
+def test_lot_consistency_sanitizer_flag_off_valid_lotto_unico_unchanged(monkeypatch):
+    monkeypatch.delenv(FEATURE_FLAG, raising=False)
+    result = _false_single_lot_result()
+    result["customer_decision_contract"] = copy.deepcopy(result)
+    before = copy.deepcopy(result)
+
+    meta = sanitize_lot_field_consistency_for_customer(
+        result,
+        {"enabled": False, "status": "DISABLED", "authority_lot_mode": "unknown"},
+    )
+
+    assert meta["enabled"] is False
+    assert meta["status"] == "SKIPPED"
+    assert meta["changed"] is False
+    assert meta["changed_fields"] == []
+    assert result == before
+    assert result["case_header"]["lotto"] == "Lotto Unico"
+    assert "DA VERIFICARE" not in _flatten_text(result)
+
+
+def test_lot_consistency_sanitizer_flag_off_upload_path_disabled_meta_noop(monkeypatch):
+    monkeypatch.delenv(FEATURE_FLAG, raising=False)
+    result = _false_single_lot_result()
+    result["customer_decision_contract"] = copy.deepcopy(result)
+    before = copy.deepcopy(result)
+
+    projection_meta = apply_authority_lot_projection_if_enabled(result, {"lot_structure": {}})
+    consistency_meta = sanitize_lot_field_consistency_for_customer(result, projection_meta)
+
+    assert projection_meta["enabled"] is False
+    assert projection_meta["status"] == "DISABLED"
+    assert consistency_meta["enabled"] is False
+    assert consistency_meta["status"] == "SKIPPED"
+    assert consistency_meta["changed"] is False
+    assert consistency_meta["changed_fields"] == []
+    assert result == before
+    assert result["case_header"]["lotto"] == "Lotto Unico"
+    assert "DA VERIFICARE" not in _flatten_text(result)
+
+
+def test_lot_consistency_sanitizer_flag_off_weak_fake_lotto_unico_unchanged(monkeypatch):
+    monkeypatch.delenv(FEATURE_FLAG, raising=False)
+    result = _weak_unknown_single_lot_result()
+    before = copy.deepcopy(result)
+
+    meta = sanitize_lot_field_consistency_for_customer(
+        result,
+        {"enabled": False, "status": "DISABLED", "authority_lot_mode": "unknown"},
+    )
+
+    assert meta["enabled"] is False
+    assert meta["status"] == "SKIPPED"
+    assert meta["changed"] is False
+    assert meta["changed_fields"] == []
+    assert result == before
+    assert result["case_header"]["lotto"] == "Lotto Unico"
+    assert "DA VERIFICARE" not in _flatten_text(result)
+
+
+def test_lot_consistency_sanitizer_meta_disabled_noop_even_when_flag_on(monkeypatch):
+    monkeypatch.setenv(FEATURE_FLAG, "1")
+    result = _weak_unknown_single_lot_result()
+    before = copy.deepcopy(result)
+
+    meta = sanitize_lot_field_consistency_for_customer(
+        result,
+        {"enabled": False, "status": "DISABLED", "authority_lot_mode": "unknown"},
+    )
+
+    assert meta["enabled"] is False
+    assert meta["status"] == "SKIPPED"
+    assert meta["changed"] is False
+    assert meta["changed_fields"] == []
+    assert result == before
+
+
+def test_lot_consistency_sanitizer_missing_meta_noop_even_when_flag_on(monkeypatch):
+    monkeypatch.setenv(FEATURE_FLAG, "1")
+    result = _weak_unknown_single_lot_result()
+    before = copy.deepcopy(result)
+
+    meta = sanitize_lot_field_consistency_for_customer(result)
+
+    assert meta["enabled"] is False
+    assert meta["status"] == "SKIPPED"
+    assert meta["changed"] is False
+    assert meta["changed_fields"] == []
+    assert result == before
+
+
 def test_casa_ai_venti_saved_extraction_projects_single_lot(monkeypatch):
     monkeypatch.setenv(FEATURE_FLAG, "1")
     shadow = _shadow_for_analysis(CASA_ANALYSIS_ID)

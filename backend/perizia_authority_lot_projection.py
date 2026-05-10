@@ -86,6 +86,18 @@ _STALE_ITEM_LIST_KEYS = {
 }
 
 
+def _lot_consistency_sanitizer_enabled(projection_meta: Optional[Dict[str, Any]]) -> bool:
+    if os.environ.get(FEATURE_FLAG) != "1":
+        return False
+    if not isinstance(projection_meta, dict):
+        return False
+    if projection_meta.get("enabled") is False:
+        return False
+    if str(projection_meta.get("status") or "") == "DISABLED":
+        return False
+    return True
+
+
 def _meta(enabled: bool, status: str, reason: str = "") -> Dict[str, Any]:
     return {
         "enabled": bool(enabled),
@@ -749,13 +761,14 @@ def sanitize_lot_field_consistency_for_customer(
     caller. Internal metadata returned from this function must stay in debug or
     internal_runtime, never in the customer-facing result.
     """
-    enabled = os.environ.get(FEATURE_FLAG) == "1" or bool(projection_meta)
+    enabled = _lot_consistency_sanitizer_enabled(projection_meta)
     meta = {
         "enabled": enabled,
         "status": "SKIPPED",
         "projection_status": str((projection_meta or {}).get("status") or ""),
         "projection_mode": str((projection_meta or {}).get("authority_lot_mode") or ""),
         "changed_fields": [],
+        "changed": False,
     }
     if not enabled:
         return meta
@@ -772,6 +785,7 @@ def sanitize_lot_field_consistency_for_customer(
         meta["status"] = _sanitize_conservative_lot_consistency(result, changed)
 
     meta["changed_fields"] = list(dict.fromkeys(changed))
+    meta["changed"] = bool(meta["changed_fields"])
     return meta
 
 
