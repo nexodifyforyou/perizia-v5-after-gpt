@@ -47,6 +47,7 @@ from customer_contract_qa_gate import apply_customer_contract_qa_gate
 from perizia_authority_lot_projection import (
     FEATURE_FLAG as AUTHORITY_LOT_PROJECTION_FLAG,
     apply_authority_lot_projection_if_enabled,
+    sanitize_lot_field_consistency_for_customer,
     sanitize_stale_lot_narratives_after_projection,
 )
 from perizia_authority_money_projection import FEATURE_FLAG as AUTHORITY_MONEY_PROJECTION_FLAG, apply_authority_money_projection_if_enabled
@@ -16398,6 +16399,10 @@ async def analyze_perizia(request: Request, file: UploadFile = File(...)):
         if lot_narrative_sync_meta.get("removed_stale_lot_narrative_count"):
             debug_obj["authority_lot_narrative_sync"] = lot_narrative_sync_meta
             result["debug"] = debug_obj
+        lot_consistency_meta = sanitize_lot_field_consistency_for_customer(result, lot_projection_meta)
+        if lot_consistency_meta.get("changed_fields"):
+            debug_obj["authority_lot_field_consistency"] = lot_consistency_meta
+            result["debug"] = debug_obj
     scrubbed_placeholders = _scrub_visible_machine_placeholders(result)
     if scrubbed_placeholders:
         debug_obj["visible_machine_placeholders_scrubbed"] = scrubbed_placeholders
@@ -19034,6 +19039,9 @@ def _apply_authority_lot_projection_to_detail_response_if_enabled(
                 lot_narrative_sync_meta = sanitize_stale_lot_narratives_after_projection(result, projection_meta)
                 if lot_narrative_sync_meta.get("removed_stale_lot_narrative_count"):
                     projection_meta["authority_lot_narrative_sync"] = lot_narrative_sync_meta
+            lot_consistency_meta = sanitize_lot_field_consistency_for_customer(result, projection_meta)
+            if lot_consistency_meta.get("changed_fields"):
+                projection_meta["authority_lot_field_consistency"] = lot_consistency_meta
         except Exception as e:
             logger.exception("authority_lot_projection_read_failed analysis_id=%s err=%s", analysis_id, e)
             projection_meta = {
