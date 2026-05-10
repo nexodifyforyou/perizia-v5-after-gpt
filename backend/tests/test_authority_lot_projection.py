@@ -1,4 +1,5 @@
 import copy
+import json
 import os
 import sys
 from functools import lru_cache
@@ -18,6 +19,7 @@ from customer_decision_contract import (  # noqa: E402
 from perizia_authority_lot_projection import (  # noqa: E402
     FEATURE_FLAG,
     apply_authority_lot_projection_if_enabled,
+    sanitize_stale_lot_narratives_after_projection,
 )
 from perizia_authority_resolvers import build_authority_shadow_resolvers  # noqa: E402
 from perizia_section_authority import build_section_authority_map  # noqa: E402
@@ -131,6 +133,74 @@ def _false_single_lot_result() -> Dict[str, Any]:
         "section_3_money_box": {"items": []},
         "field_states": {"stato_occupativo": {"status": "UNKNOWN"}},
     }
+
+
+def _applied_lot_meta(mode: str, numbers: List[int]) -> Dict[str, Any]:
+    return {
+        "enabled": True,
+        "status": "APPLIED_AUTHORITY_SINGLE_LOT" if mode == "single_lot" else "APPLIED_AUTHORITY_MULTI_LOT",
+        "applied": True,
+        "authority_lot_mode": mode,
+        "detected_lot_numbers": numbers,
+        "changed_fields": ["lots_count", "is_multi_lot", "case_header.lotto"],
+    }
+
+
+def _customer_lot_narrative_result() -> Dict[str, Any]:
+    legal_item = {
+        "killer": "Lotto 2: Non regolare / difformità",
+        "detail": "Lotto 2 da verificare",
+        "evidence": [{"quote": "Non-lot evidence remains irrelevant to active label"}],
+    }
+    return {
+        "lots": [{"lot_number": 1, "lot_id": "1", "beni": [{"bene_id": "a"}]}],
+        "lots_count": 1,
+        "lot_count": 1,
+        "is_multi_lot": False,
+        "case_header": {"lotto": "Lotto Unico"},
+        "report_header": {"lotto": {"value": "Lotto Unico"}, "is_multi_lot": False},
+        "summary_for_client": {
+            "summary_it": "La perizia riguarda 2 lotti. Rischi documentati: verificare difformità e costi."
+        },
+        "summary_for_client_bundle": {
+            "factual_summary_it": "La perizia riguarda 2 lotti. Rischi documentati: verificare difformità e costi.",
+            "checks_it": ["Verificare difformità e costi"],
+        },
+        "decision_rapida_narrated": {
+            "summary_it": "La perizia riguarda 2 lotti. Stato e costi da verificare.",
+            "decisione_rapida_it": "Verificare stato e costi prima dell'offerta.",
+        },
+        "section_9_legal_killers": {
+            "items": [copy.deepcopy(legal_item), {"killer": "Occupazione da verificare", "detail": "Titolo non chiaro"}],
+        },
+        "red_flags_operativi": [
+            {"flag_it": "Lotto 2: difformità da verificare", "action_it": "Verificare la regolarità"},
+            {"flag_it": "Stato occupativo da verificare", "action_it": "Controllare titolo"},
+        ],
+        "customer_decision_contract": {
+            "summary_for_client": {
+                "summary_it": "La perizia riguarda 2 lotti. Rischi documentati: verificare difformità e costi."
+            },
+            "summary_for_client_bundle": {
+                "factual_summary_it": "La perizia riguarda 2 lotti. Rischi documentati: verificare difformità e costi."
+            },
+            "decision_rapida_narrated": {
+                "summary_it": "La perizia riguarda 2 lotti. Stato e costi da verificare."
+            },
+            "section_9_legal_killers": {
+                "items": [copy.deepcopy(legal_item), {"killer": "Occupazione da verificare", "detail": "Titolo non chiaro"}],
+            },
+        },
+        "other_customer_text": "Campo non-lot preservato",
+    }
+
+
+def _flatten_text(value: Any) -> str:
+    if isinstance(value, dict):
+        return " ".join(_flatten_text(child) for child in value.values())
+    if isinstance(value, list):
+        return " ".join(_flatten_text(item) for item in value)
+    return str(value or "")
 
 
 def _collect_forbidden_keys(value: Any, path: str = "result") -> List[str]:
@@ -277,6 +347,163 @@ def test_projection_debug_stays_internal_after_customer_sanitization(monkeypatch
     assert "debug" in internal_runtime
     assert "authority_lot_projection" in internal_runtime["debug"]
     assert "authority_shadow_resolvers" in internal_runtime["debug"]
+
+
+def test_stale_single_lot_narrative_is_removed_after_authority_projection(monkeypatch):
+    monkeypatch.setenv(FEATURE_FLAG, "1")
+    result = _customer_lot_narrative_result()
+    meta = sanitize_stale_lot_narratives_after_projection(result, _applied_lot_meta("single_lot", [1]))
+    serialized = _flatten_text(result)
+
+    assert result["lots_count"] == 1
+    assert result["is_multi_lot"] is False
+    assert result["case_header"]["lotto"] == "Lotto Unico"
+    assert "2 lotti" not in serialized
+    assert "Lotto 2" not in serialized
+    assert result["other_customer_text"] == "Campo non-lot preservato"
+    assert result["section_9_legal_killers"]["items"] == [
+        {"killer": "Occupazione da verificare", "detail": "Titolo non chiaro"}
+    ]
+    assert meta["removed_stale_lot_narrative_count"] > 0
+
+
+def test_stale_single_lot_narrative_syncs_top_level_and_cdc(monkeypatch):
+    monkeypatch.setenv(FEATURE_FLAG, "1")
+    result = _customer_lot_narrative_result()
+
+    sanitize_stale_lot_narratives_after_projection(result, _applied_lot_meta("single_lot", [1]))
+
+    assert "2 lotti" not in _flatten_text(result["summary_for_client"])
+    assert "2 lotti" not in _flatten_text(result["summary_for_client_bundle"])
+    assert "2 lotti" not in _flatten_text(result["decision_rapida_narrated"])
+    cdc = result["customer_decision_contract"]
+    assert "2 lotti" not in _flatten_text(cdc["summary_for_client"])
+    assert "2 lotti" not in _flatten_text(cdc["summary_for_client_bundle"])
+    assert "2 lotti" not in _flatten_text(cdc["decision_rapida_narrated"])
+    assert "Lotto 2" not in _flatten_text(cdc["section_9_legal_killers"])
+
+
+def test_non_lot_summary_is_preserved_after_lot_narrative_sync(monkeypatch):
+    monkeypatch.setenv(FEATURE_FLAG, "1")
+    result = {
+        "lots": [{"lot_number": 1}],
+        "lots_count": 1,
+        "is_multi_lot": False,
+        "summary_for_client": {"summary_it": "Rischi documentati: verificare occupazione e costi."},
+        "customer_decision_contract": {
+            "summary_for_client": {"summary_it": "Rischi documentati: verificare occupazione e costi."}
+        },
+    }
+    before = copy.deepcopy(result)
+
+    meta = sanitize_stale_lot_narratives_after_projection(result, _applied_lot_meta("single_lot", [1]))
+
+    assert result == before
+    assert meta["status"] == "NO_STALE_LOT_NARRATIVE"
+
+
+def test_valid_multilot_references_are_preserved_after_lot_narrative_sync(monkeypatch):
+    monkeypatch.setenv(FEATURE_FLAG, "1")
+    result = {
+        "lots": [{"lot_number": 1}, {"lot_number": 2}, {"lot_number": 3}],
+        "lots_count": 3,
+        "is_multi_lot": True,
+        "summary_for_client": {"summary_it": "La perizia riguarda 3 lotti. Lotto 1, Lotto 2 e Lotto 3 restano distinti."},
+        "section_9_legal_killers": {
+            "items": [
+                {"killer": "Lotto 1: occupazione da verificare"},
+                {"killer": "Lotto 2: difformità da verificare"},
+                {"killer": "Lotto 3: formalità da verificare"},
+            ]
+        },
+    }
+    before = copy.deepcopy(result)
+
+    meta = sanitize_stale_lot_narratives_after_projection(result, _applied_lot_meta("multi_lot", [1, 2, 3]))
+
+    assert result == before
+    assert "Lotto 1" in _flatten_text(result)
+    assert "Lotto 2" in _flatten_text(result)
+    assert "Lotto 3" in _flatten_text(result)
+    assert meta["status"] == "NO_STALE_LOT_NARRATIVE"
+
+
+def test_out_of_range_multilot_reference_is_removed_after_lot_narrative_sync(monkeypatch):
+    monkeypatch.setenv(FEATURE_FLAG, "1")
+    result = {
+        "lots": [{"lot_number": 1}, {"lot_number": 2}, {"lot_number": 3}],
+        "lots_count": 3,
+        "is_multi_lot": True,
+        "summary_for_client": {"summary_it": "La perizia riguarda 3 lotti. Lotto 4 contiene difformità."},
+        "section_9_legal_killers": {
+            "items": [
+                {"killer": "Lotto 1: occupazione da verificare"},
+                {"killer": "Lotto 4: difformità da verificare"},
+            ]
+        },
+    }
+
+    meta = sanitize_stale_lot_narratives_after_projection(result, _applied_lot_meta("multi_lot", [1, 2, 3]))
+
+    serialized = _flatten_text(result)
+    assert "Lotto 1" in serialized
+    assert "Lotto 4" not in serialized
+    assert result["section_9_legal_killers"]["items"] == [{"killer": "Lotto 1: occupazione da verificare"}]
+    assert meta["removed_stale_lot_narrative_count"] > 0
+
+
+def test_lot_narrative_sync_is_flag_off_invariant(monkeypatch):
+    monkeypatch.delenv(FEATURE_FLAG, raising=False)
+    result = _customer_lot_narrative_result()
+    before = copy.deepcopy(result)
+
+    meta = sanitize_stale_lot_narratives_after_projection(result, _applied_lot_meta("single_lot", [1]))
+
+    assert result == before
+    assert meta["status"] == "SKIPPED"
+
+
+def test_lot_narrative_sync_mutates_response_copy_only(monkeypatch):
+    monkeypatch.setenv(FEATURE_FLAG, "1")
+    source = _customer_lot_narrative_result()
+    response_copy = copy.deepcopy(source)
+
+    sanitize_stale_lot_narratives_after_projection(response_copy, _applied_lot_meta("single_lot", [1]))
+
+    assert "2 lotti" in _flatten_text(source)
+    assert "Lotto 2" in _flatten_text(source)
+    assert "2 lotti" not in _flatten_text(response_copy)
+    assert "Lotto 2" not in _flatten_text(response_copy)
+
+
+def test_lot_narrative_sync_metadata_does_not_leak_to_customer_response(monkeypatch):
+    monkeypatch.setenv(FEATURE_FLAG, "1")
+    result = _customer_lot_narrative_result()
+    meta = sanitize_stale_lot_narratives_after_projection(result, _applied_lot_meta("single_lot", [1]))
+    result["debug"] = {
+        "authority_lot_projection": _applied_lot_meta("single_lot", [1]),
+        "authority_lot_narrative_sync": meta,
+        "section_zone": "FINAL_LOT_FORMATION",
+        "authority_score": 0.99,
+        "shadow_authority": {"lot": "single"},
+    }
+
+    sanitize_customer_facing_result(result)
+    internal_runtime = separate_internal_runtime_from_customer_result(result)
+    serialized = json.dumps(result, ensure_ascii=False)
+
+    assert _collect_forbidden_keys(result) == []
+    for forbidden in (
+        "debug",
+        "internal_runtime",
+        "authority_lot_projection",
+        "removed_paths",
+        "section_zone",
+        "authority_score",
+        "shadow_authority",
+    ):
+        assert forbidden not in serialized
+    assert "debug" in internal_runtime
 
 
 def test_feature_flag_on_changes_only_lot_structure_fields(monkeypatch):

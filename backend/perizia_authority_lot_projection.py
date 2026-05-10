@@ -9,6 +9,7 @@ from __future__ import annotations
 import copy
 import json
 import os
+import re
 from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
 
 
@@ -18,6 +19,66 @@ LOT_RULES = {
     "high_authority_lotto_unico_beats_toc_context_and_generic_lot_mentions",
     "high_authority_multilot_beats_toc_context_and_generic_lot_mentions",
     "chapter_based_multi_lot_topology",
+}
+APPLIED_STATUSES = {"APPLIED_AUTHORITY_SINGLE_LOT", "APPLIED_AUTHORITY_MULTI_LOT"}
+
+_LOT_NUMBER_RE = re.compile(r"\blott[oi]\s*(?:n(?:\.|umero)?\s*)?([0-9]{1,3})\b", re.I)
+_LOTTI_LIST_RE = re.compile(r"\blotti\s+([0-9]{1,3}(?:\s*(?:,|e|/|-|–)\s*[0-9]{1,3})+)", re.I)
+_DIGIT_LOT_COUNT_RE = re.compile(r"\b([0-9]{1,3})\s+lotti\b", re.I)
+_WORD_LOT_COUNT_RE = re.compile(r"\b(due|tre|quattro|cinque|sei|sette|otto|nove|dieci)\s+lotti\b", re.I)
+_GENERIC_MULTI_LOT_CLAIM_RE = re.compile(
+    r"\b(?:pi[ùu]\s+lotti|lotti\s+multipli|multipli\s+lotti|multi[-\s]?lotto|multi[-\s]?lot)\b",
+    re.I,
+)
+_COUNT_WORDS = {
+    "due": 2,
+    "tre": 3,
+    "quattro": 4,
+    "cinque": 5,
+    "sei": 6,
+    "sette": 7,
+    "otto": 8,
+    "nove": 9,
+    "dieci": 10,
+}
+_ACTIVE_LOT_TEXT_KEYS = {
+    "summary_it",
+    "summary_en",
+    "factual_summary_it",
+    "factual_summary_en",
+    "decision_summary_it",
+    "decision_summary_en",
+    "main_risk_it",
+    "main_risk_en",
+    "why_it_matters_it",
+    "why_it_matters_en",
+    "not_to_confuse_it",
+    "not_to_confuse_en",
+    "killer",
+    "detail",
+    "description",
+    "text",
+    "title_it",
+    "title_en",
+    "flag_it",
+    "flag_en",
+    "action_it",
+    "action_en",
+    "label_it",
+    "label_en",
+    "problem_it",
+    "problem_en",
+    "current_wrong_claim",
+}
+_STALE_ITEM_LIST_KEYS = {
+    "items",
+    "top_items",
+    "legal_killers",
+    "red_flags",
+    "red_flags_operativi",
+    "section_11_red_flags",
+    "warnings",
+    "driver_rosso",
 }
 
 
@@ -349,3 +410,191 @@ def apply_authority_lot_projection_if_enabled(
     meta["applied"] = bool(changed)
     return meta
 
+
+def _numbers_from_lot_text(text: str) -> List[int]:
+    numbers = [_safe_int(match.group(1)) for match in _LOT_NUMBER_RE.finditer(text or "")]
+    for match in _LOTTI_LIST_RE.finditer(text or ""):
+        numbers.extend(_safe_int(item) for item in re.findall(r"[0-9]{1,3}", match.group(1) or ""))
+    return _dedupe_numbers(item for item in numbers if item is not None)
+
+
+def _count_claims_from_lot_text(text: str) -> List[int]:
+    counts = [_safe_int(match.group(1)) for match in _DIGIT_LOT_COUNT_RE.finditer(text or "")]
+    for match in _WORD_LOT_COUNT_RE.finditer(text or ""):
+        counts.append(_COUNT_WORDS.get(str(match.group(1) or "").lower()))
+    return [count for count in counts if count is not None]
+
+
+def _projected_lot_numbers(result: Dict[str, Any], projection_meta: Dict[str, Any]) -> List[int]:
+    lots = result.get("lots") if isinstance(result.get("lots"), list) else []
+    numbers = [_lot_number(lot) for lot in lots if isinstance(lot, dict)]
+    if not numbers:
+        numbers = [_safe_int(item) for item in projection_meta.get("detected_lot_numbers") or []]
+    numbers = _dedupe_numbers(item for item in numbers if item is not None)
+    if numbers:
+        return numbers
+    count = _safe_int(result.get("lots_count") or result.get("lot_count"))
+    if count and count > 1:
+        return list(range(1, count + 1))
+    return [1]
+
+
+def _has_stale_lot_text(text: Any, mode: str, valid_numbers: Sequence[int]) -> bool:
+    if not isinstance(text, str) or not text.strip():
+        return False
+    valid = set(valid_numbers or [1])
+    numbers = _numbers_from_lot_text(text)
+    counts = _count_claims_from_lot_text(text)
+    if mode == "single_lot":
+        if _GENERIC_MULTI_LOT_CLAIM_RE.search(text):
+            return True
+        if any(count != 1 for count in counts):
+            return True
+        return any(number not in valid for number in numbers)
+    if mode == "multi_lot":
+        projected_count = len(valid)
+        if any(count != projected_count for count in counts):
+            return True
+        return any(number not in valid for number in numbers)
+    return False
+
+
+def _clean_sentence_spacing(text: str) -> str:
+    cleaned = re.sub(r"\s+", " ", text or "").strip()
+    cleaned = re.sub(r"\s+([,.;:!?])", r"\1", cleaned)
+    return cleaned
+
+
+def _remove_stale_lot_sentences(text: str, mode: str, valid_numbers: Sequence[int]) -> Optional[str]:
+    if not _has_stale_lot_text(text, mode, valid_numbers):
+        return text
+    parts = re.split(r"(?<=[.!?;])\s+", text)
+    kept = [part.strip() for part in parts if part.strip() and not _has_stale_lot_text(part, mode, valid_numbers)]
+    cleaned = _clean_sentence_spacing(" ".join(kept))
+    if cleaned and not _has_stale_lot_text(cleaned, mode, valid_numbers):
+        return cleaned
+
+    downgraded = re.sub(r"^\s*Lotto\s+[0-9]{1,3}\s*[:\-–]\s*", "", text, flags=re.I)
+    downgraded = _clean_sentence_spacing(downgraded)
+    if downgraded and downgraded != _clean_sentence_spacing(text) and not _has_stale_lot_text(downgraded, mode, valid_numbers):
+        return downgraded[:1].upper() + downgraded[1:]
+    return None
+
+
+def _item_has_stale_active_lot_text(item: Any, mode: str, valid_numbers: Sequence[int]) -> bool:
+    if isinstance(item, dict):
+        for key, child in item.items():
+            if isinstance(child, str) and str(key) in _ACTIVE_LOT_TEXT_KEYS and _has_stale_lot_text(child, mode, valid_numbers):
+                return True
+            if isinstance(child, dict) and _item_has_stale_active_lot_text(child, mode, valid_numbers):
+                return True
+            if isinstance(child, list):
+                for nested in child:
+                    if isinstance(nested, dict) and _item_has_stale_active_lot_text(nested, mode, valid_numbers):
+                        return True
+                    if isinstance(nested, str) and str(key) in _ACTIVE_LOT_TEXT_KEYS and _has_stale_lot_text(nested, mode, valid_numbers):
+                        return True
+    return False
+
+
+def _sanitize_stale_lot_texts(
+    value: Any,
+    *,
+    path: str,
+    key: str = "",
+    list_key: str = "",
+    mode: str,
+    valid_numbers: Sequence[int],
+    removed_paths: List[str],
+) -> Any:
+    if isinstance(value, dict):
+        for child_key in list(value.keys()):
+            child_path = f"{path}.{child_key}"
+            child_list_key = str(child_key) if isinstance(value[child_key], list) else list_key
+            sanitized = _sanitize_stale_lot_texts(
+                value[child_key],
+                path=child_path,
+                key=str(child_key),
+                list_key=child_list_key,
+                mode=mode,
+                valid_numbers=valid_numbers,
+                removed_paths=removed_paths,
+            )
+            if sanitized is None and str(child_key) in _ACTIVE_LOT_TEXT_KEYS:
+                removed_paths.append(child_path)
+                value.pop(child_key, None)
+            else:
+                value[child_key] = sanitized
+        return value
+
+    if isinstance(value, list):
+        sanitized_items: List[Any] = []
+        for idx, item in enumerate(value):
+            item_path = f"{path}[{idx}]"
+            if list_key in _STALE_ITEM_LIST_KEYS and _item_has_stale_active_lot_text(item, mode, valid_numbers):
+                removed_paths.append(item_path)
+                continue
+            sanitized = _sanitize_stale_lot_texts(
+                item,
+                path=item_path,
+                key="",
+                list_key=list_key,
+                mode=mode,
+                valid_numbers=valid_numbers,
+                removed_paths=removed_paths,
+            )
+            if sanitized is None:
+                removed_paths.append(item_path)
+                continue
+            sanitized_items.append(sanitized)
+        return sanitized_items
+
+    if isinstance(value, str) and key in _ACTIVE_LOT_TEXT_KEYS and _has_stale_lot_text(value, mode, valid_numbers):
+        return _remove_stale_lot_sentences(value, mode, valid_numbers)
+
+    if isinstance(value, str) and list_key in _STALE_ITEM_LIST_KEYS and _has_stale_lot_text(value, mode, valid_numbers):
+        return _remove_stale_lot_sentences(value, mode, valid_numbers)
+
+    return value
+
+
+def sanitize_stale_lot_narratives_after_projection(
+    result: Dict[str, Any],
+    projection_meta: Dict[str, Any],
+) -> Dict[str, Any]:
+    """Scrub customer-visible lot text that contradicts an applied authority projection.
+
+    The function mutates only the supplied response object. It returns metadata for
+    internal debug/runtime storage; callers must not place that metadata in the
+    customer-visible result.
+    """
+    enabled = os.environ.get(FEATURE_FLAG) == "1"
+    status = str((projection_meta or {}).get("status") or "")
+    mode = str((projection_meta or {}).get("authority_lot_mode") or "")
+    meta = {
+        "enabled": enabled,
+        "status": "SKIPPED",
+        "projection_status": status,
+        "projection_mode": mode,
+        "removed_stale_lot_narrative_count": 0,
+        "removed_paths": [],
+    }
+    if not enabled or status not in APPLIED_STATUSES or mode not in {"single_lot", "multi_lot"}:
+        return meta
+    if not isinstance(result, dict):
+        meta["status"] = "FAIL_OPEN"
+        return meta
+
+    valid_numbers = _projected_lot_numbers(result, projection_meta)
+    removed_paths: List[str] = []
+    _sanitize_stale_lot_texts(
+        result,
+        path="result",
+        mode=mode,
+        valid_numbers=valid_numbers,
+        removed_paths=removed_paths,
+    )
+    meta["status"] = "APPLIED" if removed_paths else "NO_STALE_LOT_NARRATIVE"
+    meta["removed_stale_lot_narrative_count"] = len(removed_paths)
+    meta["removed_paths"] = list(dict.fromkeys(removed_paths))
+    return meta

@@ -44,7 +44,11 @@ from narrator import (
 from cost_market_ranges import market_range_for_item
 from customer_decision_contract import apply_customer_decision_contract, sanitize_customer_facing_result, separate_internal_runtime_from_customer_result
 from customer_contract_qa_gate import apply_customer_contract_qa_gate
-from perizia_authority_lot_projection import FEATURE_FLAG as AUTHORITY_LOT_PROJECTION_FLAG, apply_authority_lot_projection_if_enabled
+from perizia_authority_lot_projection import (
+    FEATURE_FLAG as AUTHORITY_LOT_PROJECTION_FLAG,
+    apply_authority_lot_projection_if_enabled,
+    sanitize_stale_lot_narratives_after_projection,
+)
 from perizia_authority_money_projection import FEATURE_FLAG as AUTHORITY_MONEY_PROJECTION_FLAG, apply_authority_money_projection_if_enabled
 from perizia_authority_resolvers import build_authority_shadow_resolvers
 from perizia_section_authority import build_section_authority_map, summarize_authority_map
@@ -16388,6 +16392,12 @@ async def analyze_perizia(request: Request, file: UploadFile = File(...)):
                 "error": str(e)[:240],
             }
         result["debug"] = debug_obj
+    lot_projection_meta = debug_obj.get("authority_lot_projection") if isinstance(debug_obj, dict) else None
+    if isinstance(lot_projection_meta, dict):
+        lot_narrative_sync_meta = sanitize_stale_lot_narratives_after_projection(result, lot_projection_meta)
+        if lot_narrative_sync_meta.get("removed_stale_lot_narrative_count"):
+            debug_obj["authority_lot_narrative_sync"] = lot_narrative_sync_meta
+            result["debug"] = debug_obj
     scrubbed_placeholders = _scrub_visible_machine_placeholders(result)
     if scrubbed_placeholders:
         debug_obj["visible_machine_placeholders_scrubbed"] = scrubbed_placeholders
@@ -19020,6 +19030,10 @@ def _apply_authority_lot_projection_to_detail_response_if_enabled(
                         dict.fromkeys((projection_meta.get("changed_fields") or []) + [f"result.{field}" for field in mirror_changed])
                     )
                     projection_meta["mirror_changed_fields"] = mirror_changed
+            if projection_meta.get("status") in {"APPLIED_AUTHORITY_SINGLE_LOT", "APPLIED_AUTHORITY_MULTI_LOT"}:
+                lot_narrative_sync_meta = sanitize_stale_lot_narratives_after_projection(result, projection_meta)
+                if lot_narrative_sync_meta.get("removed_stale_lot_narrative_count"):
+                    projection_meta["authority_lot_narrative_sync"] = lot_narrative_sync_meta
         except Exception as e:
             logger.exception("authority_lot_projection_read_failed analysis_id=%s err=%s", analysis_id, e)
             projection_meta = {
