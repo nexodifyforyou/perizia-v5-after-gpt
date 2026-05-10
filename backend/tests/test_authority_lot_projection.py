@@ -216,6 +216,23 @@ def _lot_contradiction_result() -> Dict[str, Any]:
     }
 
 
+def _weak_unknown_single_lot_result() -> Dict[str, Any]:
+    return {
+        "lots": [{"lot_number": 1, "lot_id": "1", "titolo": "Lotto 1"}],
+        "lots_count": 1,
+        "is_multi_lot": False,
+        "lot_index": [{"lot": 1, "ubicazione": "Via non certa"}],
+        "case_header": {"lotto": "Lotto Unico"},
+        "report_header": {"lotto": {"value": "Lotto Unico"}, "is_multi_lot": False},
+        "field_states": {"lotto": {"value": "Lotto Unico"}},
+        "customer_decision_contract": {
+            "case_header": {"lotto": "Lotto Unico"},
+            "report_header": {"lotto": {"value": "Lotto Unico"}, "is_multi_lot": False},
+            "field_states": {"lotto": {"value": "Lotto Unico"}},
+        },
+    }
+
+
 def _assert_lot_headers(result: Dict[str, Any], label: str, is_multi_lot: bool) -> None:
     assert result["case_header"]["lotto"] == label
     assert result["report_header"]["lotto"]["value"] == label
@@ -226,7 +243,7 @@ def _assert_lot_headers(result: Dict[str, Any], label: str, is_multi_lot: bool) 
 
 def _assert_top_level_and_cdc_lot_fields_match(result: Dict[str, Any]) -> None:
     cdc = result["customer_decision_contract"]
-    for key in ("lots_count", "lot_count", "is_multi_lot", "case_header", "report_header"):
+    for key in ("lots", "lots_count", "lot_count", "is_multi_lot", "lot_index", "case_header", "report_header"):
         assert cdc.get(key) == result.get(key)
 
 
@@ -426,6 +443,50 @@ def test_lot_consistency_sanitizer_downgrades_fail_open_contradiction(monkeypatc
     assert "Lotto Unico" not in _flatten_text(result["report_header"])
 
 
+def test_lot_consistency_sanitizer_not_applied_removes_fake_lotto_unico(monkeypatch):
+    monkeypatch.setenv(FEATURE_FLAG, "1")
+    result = _weak_unknown_single_lot_result()
+
+    meta = sanitize_lot_field_consistency_for_customer(
+        result,
+        {
+            "enabled": True,
+            "status": "NOT_APPLIED",
+            "applied": False,
+            "authority_lot_mode": "unknown",
+            "reason": "low_confidence",
+        },
+    )
+
+    assert meta["status"] == "APPLIED_CONSERVATIVE_UNCERTAIN_CONSISTENCY"
+    assert "Lotto Unico" not in _flatten_text(result)
+    _assert_lot_headers(result, "DA VERIFICARE", False)
+    assert result["is_multi_lot"] is False
+    assert result["lots_count"] == 1
+    assert "Lotti 1, 2" not in _flatten_text(result)
+
+
+def test_lot_consistency_sanitizer_not_applied_syncs_top_level_and_cdc(monkeypatch):
+    monkeypatch.setenv(FEATURE_FLAG, "1")
+    result = _weak_unknown_single_lot_result()
+    result["customer_decision_contract"].pop("lots_count", None)
+    result["customer_decision_contract"].pop("is_multi_lot", None)
+    result["customer_decision_contract"].pop("lots", None)
+    result["customer_decision_contract"].pop("lot_index", None)
+
+    sanitize_lot_field_consistency_for_customer(
+        result,
+        {"enabled": True, "status": "NOT_APPLIED", "applied": False, "authority_lot_mode": "unknown"},
+    )
+
+    _assert_lot_headers(result, "DA VERIFICARE", False)
+    _assert_top_level_and_cdc_lot_fields_match(result)
+    assert result["customer_decision_contract"]["lots_count"] == 1
+    assert result["customer_decision_contract"]["is_multi_lot"] is False
+    assert result["customer_decision_contract"]["lots"] == result["lots"]
+    assert result["customer_decision_contract"]["lot_index"] == result["lot_index"]
+
+
 def test_lot_consistency_sanitizer_applies_authority_single_lot(monkeypatch):
     monkeypatch.setenv(FEATURE_FLAG, "1")
     result = _false_multilot_result()
@@ -455,6 +516,26 @@ def test_lot_consistency_sanitizer_applies_authority_multi_lot(monkeypatch):
     _assert_top_level_and_cdc_lot_fields_match(result)
     assert "Lotto Unico" not in _flatten_text(result["case_header"])
     assert "Lotto Unico" not in _flatten_text(result["report_header"])
+
+
+def test_lot_consistency_sanitizer_preserves_known_authority_multilot(monkeypatch):
+    monkeypatch.setenv(FEATURE_FLAG, "1")
+    result = {
+        "lots": [{"lot_number": 1}, {"lot_number": 2}, {"lot_number": 3}],
+        "lots_count": 3,
+        "is_multi_lot": True,
+        "lot_index": [{"lot": 1}, {"lot": 2}, {"lot": 3}],
+        "case_header": {"lotto": "Lotti 1, 2, 3"},
+        "report_header": {"lotto": {"value": "Lotti 1, 2, 3"}, "is_multi_lot": True},
+        "customer_decision_contract": {},
+    }
+
+    sanitize_lot_field_consistency_for_customer(result, _applied_lot_meta("multi_lot", [1, 2, 3]))
+
+    assert result["lots_count"] == 3
+    assert result["is_multi_lot"] is True
+    _assert_lot_headers(result, "Lotti 1, 2, 3", True)
+    _assert_top_level_and_cdc_lot_fields_match(result)
 
 
 def test_lot_consistency_sanitizer_aligns_cdc_and_top_level(monkeypatch):
@@ -531,6 +612,22 @@ def test_lot_consistency_sanitizer_mutates_response_copy_only(monkeypatch):
     assert "Lotto Unico" in _flatten_text(source)
     assert "Lotto Unico" not in _flatten_text(response_copy["case_header"])
     assert "DA VERIFICARE" in _flatten_text(response_copy)
+
+
+def test_lot_consistency_sanitizer_weak_case_source_copy_only(monkeypatch):
+    monkeypatch.setenv(FEATURE_FLAG, "1")
+    source = _weak_unknown_single_lot_result()
+    response_copy = copy.deepcopy(source)
+
+    sanitize_lot_field_consistency_for_customer(
+        response_copy,
+        {"enabled": True, "status": "NOT_APPLIED", "authority_lot_mode": "unknown"},
+    )
+
+    assert source["case_header"]["lotto"] == "Lotto Unico"
+    assert source["customer_decision_contract"].get("lots") is None
+    assert response_copy["case_header"]["lotto"] == "DA VERIFICARE"
+    assert response_copy["customer_decision_contract"]["lots"] == response_copy["lots"]
 
 
 def test_stale_single_lot_narrative_syncs_top_level_and_cdc(monkeypatch):

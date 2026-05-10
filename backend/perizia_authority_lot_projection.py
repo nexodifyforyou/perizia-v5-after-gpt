@@ -599,6 +599,13 @@ def _best_conservative_count(containers: Sequence[Dict[str, Any]]) -> Optional[i
     return 1 if any(count == 1 for count in counts) else None
 
 
+def _has_single_lot_certainty_label(containers: Sequence[Dict[str, Any]]) -> bool:
+    labels: List[str] = []
+    for container in containers:
+        labels.extend(_lot_labels_from_container(container))
+    return _labels_have_single_lot(labels)
+
+
 def _authority_numbers_for_consistency(result: Dict[str, Any], projection_meta: Dict[str, Any]) -> List[int]:
     numbers = _dedupe_numbers((projection_meta or {}).get("detected_lot_numbers") or [])
     if numbers:
@@ -696,9 +703,12 @@ def _sanitize_conservative_lot_consistency(result: Dict[str, Any], changed: List
     containers = [result]
     if isinstance(customer_contract, dict):
         containers.append(customer_contract)
-    if not _has_lot_field_contradiction(containers):
+
+    has_contradiction = _has_lot_field_contradiction(containers)
+    has_unsupported_single_certainty = _has_single_lot_certainty_label(containers)
+    if not has_contradiction and not has_unsupported_single_certainty:
         if isinstance(customer_contract, dict):
-            _copy_lot_structure(result, customer_contract, changed=changed, path_prefix="result.customer_decision_contract", authoritative=False)
+            _copy_lot_structure(result, customer_contract, changed=changed, path_prefix="result.customer_decision_contract", authoritative=True)
         return "NO_CONTRADICTION"
 
     count = _best_conservative_count(containers)
@@ -723,8 +733,10 @@ def _sanitize_conservative_lot_consistency(result: Dict[str, Any], changed: List
             path_prefix=prefix,
         )
     if isinstance(customer_contract, dict):
-        _copy_lot_structure(result, customer_contract, changed=changed, path_prefix="result.customer_decision_contract", authoritative=False)
-    return "APPLIED_CONSERVATIVE_CONSISTENCY"
+        _copy_lot_structure(result, customer_contract, changed=changed, path_prefix="result.customer_decision_contract", authoritative=True)
+    if has_contradiction:
+        return "APPLIED_CONSERVATIVE_CONSISTENCY"
+    return "APPLIED_CONSERVATIVE_UNCERTAIN_CONSISTENCY"
 
 
 def sanitize_lot_field_consistency_for_customer(
