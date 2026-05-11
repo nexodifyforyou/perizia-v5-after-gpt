@@ -19566,8 +19566,8 @@ async def _get_perizia_analysis_for_user(analysis_id: str, user: User) -> Dict[s
             analysis_id,
             elapsed_ms,
         )
-        if os.environ.get(AUTHORITY_MONEY_PROJECTION_FLAG) == "1":
-            return _apply_authority_money_projection_to_detail_response_if_enabled(
+        if os.environ.get(AUTHORITY_LOT_PROJECTION_FLAG) == "1" or os.environ.get(AUTHORITY_MONEY_PROJECTION_FLAG) == "1":
+            return _apply_authority_lot_projection_to_detail_response_if_enabled(
                 analysis,
                 analysis_id=analysis_id,
             )

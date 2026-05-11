@@ -499,3 +499,54 @@ async def test_persisted_detail_authority_lot_projection_missing_pack_fails_open
     assert response["result"]["customer_decision_contract"]["lots_count"] == 2
     assert response["result"]["customer_decision_contract"]["is_multi_lot"] is True
     assert _collect_forbidden_customer_keys(response) == []
+
+
+@pytest.mark.anyio
+async def test_legacy_refresh_combined_flags_sync_authority_multilot_headers_without_mutating_source(fake_db, monkeypatch):
+    monkeypatch.setenv(server.AUTHORITY_LOT_PROJECTION_FLAG, "1")
+    monkeypatch.setenv(server.AUTHORITY_MONEY_PROJECTION_FLAG, "1")
+    monkeypatch.setattr(
+        server,
+        "_load_authority_shadow_for_detail_read",
+        lambda _analysis_id, _analysis: _authority_lot_shadow("multi_lot", numbers=[1, 2, 3]),
+    )
+    saved_result = {
+        "lots": [{"lot_number": 1}, {"lot_number": 2}, {"lot_number": 3}],
+        "lots_count": 3,
+        "lot_count": 3,
+        "is_multi_lot": True,
+        "case_header": {"lotto": "DA VERIFICARE"},
+        "report_header": {"lotto": {"value": "Lotto 1"}, "is_multi_lot": False},
+        "field_states": {"lotto": {"value": "DA VERIFICARE"}},
+        "money_box": {"items": []},
+        "section_3_money_box": {"items": []},
+    }
+    stored = {
+        "analysis_id": "analysis_combined_legacy_multilot_headers",
+        "user_id": "user_test",
+        "case_id": "case_combined_legacy_multilot_headers",
+        "case_title": "combined-legacy-multilot.pdf",
+        "file_name": "combined-legacy-multilot.pdf",
+        "created_at": datetime(2026, 4, 25, tzinfo=timezone.utc),
+        "status": "COMPLETED",
+        "pages_count": 80,
+        "result": saved_result,
+    }
+    fake_db.perizia_analyses.items.append(stored)
+    before_stored = copy.deepcopy(stored)
+
+    response = await server._get_perizia_analysis_for_user("analysis_combined_legacy_multilot_headers", _test_user())
+
+    result = response["result"]
+    assert result["lots_count"] == 3
+    assert result["is_multi_lot"] is True
+    assert result["case_header"]["lotto"] == "Lotti 1, 2, 3"
+    assert result["report_header"]["lotto"]["value"] == "Lotti 1, 2, 3"
+    assert result["report_header"]["is_multi_lot"] is True
+    cdc = result["customer_decision_contract"]
+    assert cdc["case_header"]["lotto"] == "Lotti 1, 2, 3"
+    assert cdc["report_header"]["lotto"]["value"] == "Lotti 1, 2, 3"
+    assert cdc["report_header"]["is_multi_lot"] is True
+    assert "lot_verification_hint" not in result
+    assert fake_db.perizia_analyses.items[0] == before_stored
+    assert _collect_forbidden_customer_keys(response) == []

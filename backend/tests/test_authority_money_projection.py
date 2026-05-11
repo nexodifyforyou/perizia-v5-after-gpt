@@ -247,6 +247,39 @@ def test_money_projection_removes_generic_regolarizzazione_qa_claim(monkeypatch)
     assert "Regolarizzazione: € 1234" not in _text_blob(result)
 
 
+def test_money_projection_preserves_regolarizzazione_duration_as_non_money_claim(monkeypatch):
+    monkeypatch.setenv(FEATURE_FLAG, "1")
+    result = _result_with_money_box([{"label_it": "Regolarizzazione: 6 mesi", "note_it": "durata pratica"}])
+    result["qa_gate"] = {
+        "warnings": [{"id": "reg_duration", "claim": "Regolarizzazione: 6 mesi per completare la pratica."}]
+    }
+
+    meta = apply_authority_money_projection_if_enabled(
+        result,
+        authority_shadow=_shadow("STIMA / FORMAZIONE LOTTI\nSpese tecniche di regolarizzazione Euro 5.032,00."),
+    )
+
+    assert meta["status"] == "APPLIED"
+    assert meta.get("removed_money_qa_claims_count", 0) == 0
+    assert "Regolarizzazione: 6 mesi" in _text_blob(result)
+
+
+def test_money_projection_preserves_truncated_regolarizzazione_duration_context(monkeypatch):
+    monkeypatch.setenv(FEATURE_FLAG, "1")
+    duration_text = "Tempi necessari per la regolarizzazione: 6"
+    result = _result_with_money_box([{"label_it": duration_text, "note_it": "durata pratica"}])
+    result["qa_gate"] = {"warnings": [{"id": "reg_duration", "claim": duration_text}]}
+
+    meta = apply_authority_money_projection_if_enabled(
+        result,
+        authority_shadow=_shadow("STIMA / FORMAZIONE LOTTI\nSpese tecniche di regolarizzazione Euro 5.032,00."),
+    )
+
+    assert meta["status"] == "APPLIED"
+    assert meta.get("removed_money_qa_claims_count", 0) == 0
+    assert duration_text in _text_blob(result)
+
+
 @pytest.mark.parametrize(
     "claim",
     [

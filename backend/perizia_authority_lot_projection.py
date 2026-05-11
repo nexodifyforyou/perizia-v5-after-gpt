@@ -23,6 +23,27 @@ LOT_RULES = {
 APPLIED_STATUSES = {"APPLIED_AUTHORITY_SINGLE_LOT", "APPLIED_AUTHORITY_MULTI_LOT"}
 AUTHORITATIVE_STATUSES = APPLIED_STATUSES | {"ALREADY_MATCHES"}
 CONSERVATIVE_LOT_LABEL = "DA VERIFICARE"
+LOT_VERIFICATION_SECTIONS = [
+    "Identificazione del lotto",
+    "Descrizione dei beni",
+    "Formazione dei lotti",
+    "Quesito / risposta dell'esperto",
+    "Valutazione / riepilogo finale",
+]
+LOT_VERIFICATION_FALLBACK_HINT = (
+    "pagine non determinate automaticamente; verificare nelle sezioni iniziali "
+    "e nella formazione lotti della perizia"
+)
+_LOT_VERIFICATION_ROOT_KEYS = (
+    "lot_verification_hint",
+    "lot_verification_pages",
+    "lot_verification_sections",
+)
+_LOT_VERIFICATION_LOTTO_KEYS = (
+    "verification_hint",
+    "verification_pages",
+    "verification_sections",
+)
 
 _LOT_NUMBER_RE = re.compile(r"\blott[oi]\s*(?:n(?:\.|umero)?\s*)?([0-9]{1,3})\b", re.I)
 _LOTTI_LIST_RE = re.compile(r"\blotti\s+([0-9]{1,3}(?:\s*(?:,|e|/|-|–)\s*[0-9]{1,3})+)", re.I)
@@ -109,6 +130,7 @@ def _meta(enabled: bool, status: str, reason: str = "") -> Dict[str, Any]:
         "authority_confidence": 0.0,
         "detected_lot_numbers": [],
         "source_pages": [],
+        "searched_page_ranges": [],
         "changed_fields": [],
     }
 
@@ -182,6 +204,61 @@ def _source_pages(lot_shadow: Dict[str, Any]) -> List[int]:
         if parsed is not None and parsed not in pages:
             pages.append(parsed)
     return sorted(pages)
+
+
+def _page_refs_from_value(value: Any) -> List[Any]:
+    refs: List[Any] = []
+
+    def add_ref(ref: Any) -> None:
+        if ref in (None, ""):
+            return
+        parsed = _safe_int(ref)
+        normalized: Any
+        if parsed is not None:
+            normalized = parsed
+        else:
+            text = str(ref or "").strip()
+            if not re.fullmatch(r"[0-9]{1,3}(?:\s*[-–]\s*[0-9]{1,3})?", text):
+                return
+            normalized = re.sub(r"\s*[–-]\s*", "-", text)
+        if normalized not in refs:
+            refs.append(normalized)
+
+    if isinstance(value, dict):
+        start = _safe_int(value.get("start") or value.get("from") or value.get("page_start"))
+        end = _safe_int(value.get("end") or value.get("to") or value.get("page_end"))
+        page = _safe_int(value.get("page") or value.get("page_number"))
+        if start is not None and end is not None:
+            add_ref(f"{min(start, end)}-{max(start, end)}" if start != end else start)
+        elif page is not None:
+            add_ref(page)
+        return refs
+    if isinstance(value, list):
+        for item in value:
+            refs.extend(ref for ref in _page_refs_from_value(item) if ref not in refs)
+        return refs
+    add_ref(value)
+    return refs
+
+
+def _lot_search_page_refs(lot_shadow: Dict[str, Any]) -> List[Any]:
+    refs: List[Any] = []
+    value = lot_shadow.get("value") if isinstance(lot_shadow.get("value"), dict) else {}
+    for key in (
+        "final_lot_formation_pages",
+        "schema_riassuntivo_pages",
+        "riepilogo_bando_pages",
+        "chapter_lot_start_pages",
+    ):
+        refs.extend(ref for ref in _page_refs_from_value(value.get(key)) if ref not in refs)
+    for ev_key in ("winning_evidence", "rejected_conflicts"):
+        for ev in _as_list(lot_shadow.get(ev_key)):
+            if not isinstance(ev, dict):
+                continue
+            for ref in _page_refs_from_value(ev.get("page")):
+                if ref not in refs:
+                    refs.append(ref)
+    return refs
 
 
 def _rules(lot_shadow: Dict[str, Any]) -> List[str]:
@@ -496,6 +573,92 @@ def _force_lot_headers(
     _set_field_state_lotto(container, label, changed, path_prefix)
 
 
+def _refs_from_projection_meta(projection_meta: Dict[str, Any], keys: Sequence[str]) -> List[Any]:
+    refs: List[Any] = []
+    for key in keys:
+        for ref in _page_refs_from_value((projection_meta or {}).get(key)):
+            if ref not in refs:
+                refs.append(ref)
+    return refs
+
+
+def _lot_verification_guidance(projection_meta: Dict[str, Any]) -> Dict[str, Any]:
+    exact_pages = _refs_from_projection_meta(
+        projection_meta,
+        ("source_pages", "lot_verification_pages", "exact_pages", "page_anchors"),
+    )
+    searched_refs = _refs_from_projection_meta(
+        projection_meta,
+        ("searched_page_ranges", "searched_pages", "candidate_page_ranges", "candidate_pages"),
+    )
+    page_guidance: Dict[str, Any] = {
+        "exact_pages": exact_pages,
+        "searched_page_ranges": searched_refs,
+    }
+    if exact_pages:
+        page_text = "Ancore pagina: " + ", ".join(str(page) for page in exact_pages)
+    elif searched_refs:
+        page_text = "Pagine/range cercati: " + ", ".join(str(page) for page in searched_refs)
+    else:
+        page_text = LOT_VERIFICATION_FALLBACK_HINT
+        page_guidance["warning"] = "lot_pages_not_determined"
+
+    sections_text = "; ".join(LOT_VERIFICATION_SECTIONS)
+    return {
+        "hint": (
+            "Verificare lot structure / lotto / numero lotti. "
+            f"{page_text}. Sezioni da controllare: {sections_text}."
+        ),
+        "pages": page_guidance,
+        "sections": list(LOT_VERIFICATION_SECTIONS),
+    }
+
+
+def _set_lot_verification_guidance(
+    container: Dict[str, Any],
+    projection_meta: Dict[str, Any],
+    changed: List[str],
+    path_prefix: str,
+) -> None:
+    guidance = _lot_verification_guidance(projection_meta)
+    root_values = {
+        "lot_verification_hint": guidance["hint"],
+        "lot_verification_pages": guidance["pages"],
+        "lot_verification_sections": guidance["sections"],
+    }
+    for key, value in root_values.items():
+        if container.get(key) != value:
+            changed.append(f"{path_prefix}.{key}")
+        container[key] = copy.deepcopy(value)
+
+    report_header = container.get("report_header")
+    lotto = report_header.get("lotto") if isinstance(report_header, dict) else None
+    if isinstance(lotto, dict):
+        lotto_values = {
+            "verification_hint": guidance["hint"],
+            "verification_pages": guidance["pages"],
+            "verification_sections": guidance["sections"],
+        }
+        for key, value in lotto_values.items():
+            if lotto.get(key) != value:
+                changed.append(f"{path_prefix}.report_header.lotto.{key}")
+            lotto[key] = copy.deepcopy(value)
+
+
+def _clear_lot_verification_guidance(container: Dict[str, Any], changed: List[str], path_prefix: str) -> None:
+    for key in _LOT_VERIFICATION_ROOT_KEYS:
+        if key in container:
+            changed.append(f"{path_prefix}.{key}")
+            container.pop(key, None)
+    report_header = container.get("report_header")
+    lotto = report_header.get("lotto") if isinstance(report_header, dict) else None
+    if isinstance(lotto, dict):
+        for key in _LOT_VERIFICATION_LOTTO_KEYS:
+            if key in lotto:
+                changed.append(f"{path_prefix}.report_header.lotto.{key}")
+                lotto.pop(key, None)
+
+
 def _set_lot_count_and_mode(
     container: Dict[str, Any],
     *,
@@ -528,7 +691,18 @@ def _copy_lot_structure(
     path_prefix: str,
     authoritative: bool,
 ) -> None:
-    keys = ("lots", "lots_count", "lot_count", "is_multi_lot", "lot_index", "case_header", "report_header")
+    keys = (
+        "lots",
+        "lots_count",
+        "lot_count",
+        "is_multi_lot",
+        "lot_index",
+        "case_header",
+        "report_header",
+        "lot_verification_hint",
+        "lot_verification_pages",
+        "lot_verification_sections",
+    )
     for key in keys:
         if key not in source:
             continue
@@ -545,6 +719,16 @@ def _copy_lot_structure(
             if target_lotto.get("value") != source_lotto.get("value"):
                 changed.append(f"{path_prefix}.field_states.lotto.value")
             target_lotto["value"] = copy.deepcopy(source_lotto.get("value"))
+
+
+def _ensure_customer_contract(result: Dict[str, Any], changed: List[str]) -> Dict[str, Any]:
+    customer_contract = result.get("customer_decision_contract")
+    if isinstance(customer_contract, dict):
+        return customer_contract
+    customer_contract = {}
+    result["customer_decision_contract"] = customer_contract
+    changed.append("result.customer_decision_contract")
+    return customer_contract
 
 
 def _labels_have_single_lot(labels: Sequence[str]) -> bool:
@@ -642,10 +826,8 @@ def _sanitize_authoritative_lot_consistency(
     changed: List[str],
 ) -> str:
     mode = str((projection_meta or {}).get("authority_lot_mode") or "")
-    customer_contract = result.get("customer_decision_contract")
-    containers = [("result", result)]
-    if isinstance(customer_contract, dict):
-        containers.append(("result.customer_decision_contract", customer_contract))
+    customer_contract = _ensure_customer_contract(result, changed)
+    containers = [("result", result), ("result.customer_decision_contract", customer_contract)]
 
     source = customer_contract if (
         isinstance(customer_contract, dict)
@@ -672,6 +854,7 @@ def _sanitize_authoritative_lot_consistency(
                 changed=changed,
                 path_prefix=prefix,
             )
+            _clear_lot_verification_guidance(container, changed, prefix)
         if isinstance(customer_contract, dict):
             _copy_lot_structure(source, result if source is customer_contract else customer_contract, changed=changed, path_prefix="result" if source is customer_contract else "result.customer_decision_contract", authoritative=True)
         return "APPLIED_SINGLE_LOT_CONSISTENCY"
@@ -703,6 +886,7 @@ def _sanitize_authoritative_lot_consistency(
                 changed=changed,
                 path_prefix=prefix,
             )
+            _clear_lot_verification_guidance(container, changed, prefix)
         if isinstance(customer_contract, dict):
             _copy_lot_structure(source, result if source is customer_contract else customer_contract, changed=changed, path_prefix="result" if source is customer_contract else "result.customer_decision_contract", authoritative=True)
         return "APPLIED_MULTI_LOT_CONSISTENCY"
@@ -710,7 +894,11 @@ def _sanitize_authoritative_lot_consistency(
     return "SKIPPED_UNKNOWN_AUTHORITY_MODE"
 
 
-def _sanitize_conservative_lot_consistency(result: Dict[str, Any], changed: List[str]) -> str:
+def _sanitize_conservative_lot_consistency(
+    result: Dict[str, Any],
+    projection_meta: Dict[str, Any],
+    changed: List[str],
+) -> str:
     customer_contract = result.get("customer_decision_contract")
     containers = [result]
     if isinstance(customer_contract, dict):
@@ -719,12 +907,27 @@ def _sanitize_conservative_lot_consistency(result: Dict[str, Any], changed: List
     has_contradiction = _has_lot_field_contradiction(containers)
     has_unsupported_single_certainty = _has_single_lot_certainty_label(containers)
     if not has_contradiction and not has_unsupported_single_certainty:
+        needs_guidance = any(
+            CONSERVATIVE_LOT_LABEL in _lot_labels_from_container(container)
+            for container in containers
+        )
+        if needs_guidance and not isinstance(customer_contract, dict):
+            customer_contract = _ensure_customer_contract(result, changed)
+            containers.append(customer_contract)
+        for prefix, container in (
+            [("result", result)]
+            + ([("result.customer_decision_contract", customer_contract)] if isinstance(customer_contract, dict) else [])
+        ):
+            if CONSERVATIVE_LOT_LABEL in _lot_labels_from_container(container):
+                _set_lot_verification_guidance(container, projection_meta, changed, prefix)
         if isinstance(customer_contract, dict):
             _copy_lot_structure(result, customer_contract, changed=changed, path_prefix="result.customer_decision_contract", authoritative=True)
         return "NO_CONTRADICTION"
 
     count = _best_conservative_count(containers)
     is_multi_lot = bool(count and count > 1)
+    if not isinstance(customer_contract, dict):
+        customer_contract = _ensure_customer_contract(result, changed)
     for prefix, container in (
         [("result", result)]
         + ([("result.customer_decision_contract", customer_contract)] if isinstance(customer_contract, dict) else [])
@@ -744,6 +947,7 @@ def _sanitize_conservative_lot_consistency(result: Dict[str, Any], changed: List
             changed=changed,
             path_prefix=prefix,
         )
+        _set_lot_verification_guidance(container, projection_meta, changed, prefix)
     if isinstance(customer_contract, dict):
         _copy_lot_structure(result, customer_contract, changed=changed, path_prefix="result.customer_decision_contract", authoritative=True)
     if has_contradiction:
@@ -782,7 +986,7 @@ def sanitize_lot_field_consistency_for_customer(
     if status in AUTHORITATIVE_STATUSES and mode in {"single_lot", "multi_lot"}:
         meta["status"] = _sanitize_authoritative_lot_consistency(result, projection_meta or {}, changed)
     else:
-        meta["status"] = _sanitize_conservative_lot_consistency(result, changed)
+        meta["status"] = _sanitize_conservative_lot_consistency(result, projection_meta or {}, changed)
 
     meta["changed_fields"] = list(dict.fromkeys(changed))
     meta["changed"] = bool(meta["changed_fields"])
@@ -858,6 +1062,7 @@ def apply_authority_lot_projection_if_enabled(
     meta["authority_lot_mode"] = mode
     meta["detected_lot_numbers"] = _dedupe_numbers(value.get("detected_lot_numbers") or value.get("chapter_lot_numbers") or [])
     meta["source_pages"] = _source_pages(lot_shadow) if isinstance(lot_shadow, dict) else []
+    meta["searched_page_ranges"] = _lot_search_page_refs(lot_shadow) if isinstance(lot_shadow, dict) else []
     meta["reason"] = reason
     if mode not in {"single_lot", "multi_lot"}:
         meta["status"] = "FAIL_OPEN" if "fail_open" in reason or "missing" in reason or "corrupt" in reason else "NOT_APPLIED"

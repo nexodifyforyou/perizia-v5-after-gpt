@@ -33,11 +33,11 @@ NON_BUYER_COST_ROLES = {
 }
 BUYER_SIGNAL_ROLES = {"buyer_cost_signal_to_verify", "condominium_arrears"}
 STALE_REGOLARIZZAZIONE_RE = re.compile(
-    r"regolarizzazion\w*\s*:\s*(?:€|\beuro\b)?\s*(?:31|6)(?:[,\.]00)?\b",
+    r"(?<!tempi necessari per la )(?<!tempo necessario per la )regolarizzazion\w*\s*:\s*(?:€|\beuro\b)?\s*(?:31|6)(?:[,\.]00)?\b(?!\s*(?:mesi?|giorni?|anni?)\b)",
     re.IGNORECASE,
 )
 GENERIC_REGOLARIZZAZIONE_CERTAINTY_RE = re.compile(
-    r"\bregolarizzazion\w*\s*:\s*(?:€|\beuro\b)?\s*\d+(?:[\.,]\d+)?\b",
+    r"\b(?<!tempi necessari per la )(?<!tempo necessario per la )regolarizzazion\w*\s*:\s*(?:€|\beuro\b)?\s*\d+(?:[\.,]\d+)?\b(?!\s*(?:mesi?|giorni?|anni?)\b)",
     re.IGNORECASE,
 )
 MONEY_AMOUNT_RE = re.compile(r"(?:€|\beuro\b)\s*\d|\d[\d\.\s]*,\d{2}\b", re.IGNORECASE)
