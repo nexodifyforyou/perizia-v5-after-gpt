@@ -142,6 +142,31 @@ const normalizeAnalysisResponse = (payload) => {
   return payload;
 };
 
+// Hero summary sanitizer — turns naked "Non specificato in perizia" / "Unknown" /
+// "N/A" into a friendlier directive that points to pages or removes the value
+// entirely. Keep the value as-is when it contains real content.
+const HERO_PLACEHOLDER_PATTERNS = [
+  /\bnon\s+specificat[oa]\s+in\s+perizia\b/i,
+  /\bnon\s+specificat[oa]\b/i,
+  /\bnot\s+specified\b/i,
+  /\bunknown\b/i,
+  /^\s*n\s*\/\s*a\s*$/i,
+  /^\s*n\.d\.?\s*$/i,
+];
+const sanitizeHeroSummaryText = (text) => {
+  const raw = typeof text === 'string' ? text.trim() : '';
+  if (!raw) return '';
+  const isNakedPlaceholder = HERO_PLACEHOLDER_PATTERNS.some((pattern) => {
+    if (pattern.test(raw)) {
+      const cleaned = raw.replace(pattern, '').trim();
+      return cleaned.length < 12;
+    }
+    return false;
+  });
+  if (isNakedPlaceholder) return '';
+  return raw;
+};
+
 // Helper function to safely render any value - replaces placeholders
 const safeRender = (value, fallback = 'Non specificato in perizia') => {
   const normalized = normalizePlaceholder(value);
@@ -682,8 +707,12 @@ const MoneyBoxItem = ({ item }) => {
   const [expandedEvidence, setExpandedEvidence] = useState(false);
   const evidence = getItemEvidence(item);
   const hasEvidence = evidence.length > 0;
-  const label = item.label_it || item.voce || item.label || 'Voce';
-  const code = safeRender(item.code || item.voce, '');
+  const rawLabel = item.label_it || item.voce || item.label || 'Voce';
+  // Customer-safe: strip any AUTH_* prefix and "(non a carico dell'acquirente)" parenthetical
+  const label = (typeof stripInternalCodePrefix === 'function' ? stripInternalCodePrefix(rawLabel) : rawLabel) || rawLabel || 'Voce';
+  const rawCode = safeRender(item.code || item.voce, '');
+  // Never render AUTH_* internal codes to the customer
+  const code = /^AUTH_/i.test(rawCode) ? '' : rawCode;
   const euroValue = parseNumericEuro(item.stima_euro);
   const marketRange = item?.market_range_eur && typeof item.market_range_eur === 'object'
     ? item.market_range_eur
@@ -776,6 +805,372 @@ const MoneyBoxItem = ({ item }) => {
         hasMarketRange && (
           <p className="text-xs text-zinc-500 italic mt-2">(non presente in perizia)</p>
         )
+      )}
+    </div>
+  );
+};
+
+// ---------------------------------------------------------------------------
+// Money Map customer-safe helpers + components (added 2026-05-12 for demo).
+// All AUTH_*-prefixed codes/labels stay strictly internal; the helpers below
+// produce role-based titles, badges, and context strings the UI can render
+// without leaking machine identifiers.
+// ---------------------------------------------------------------------------
+
+const asArray = (value) => (Array.isArray(value) ? value : []);
+
+const safeText = (value, fallback = '') => {
+  if (value === null || value === undefined) return fallback;
+  if (typeof value === 'string') return value.trim() || fallback;
+  if (typeof value === 'number' && Number.isFinite(value)) return String(value);
+  return fallback;
+};
+
+const getMoneyBox = (result) => {
+  if (!result || typeof result !== 'object') return {};
+  const cdcBox = result?.customer_decision_contract?.money_box;
+  if (cdcBox && typeof cdcBox === 'object') return cdcBox;
+  if (result?.section_3_money_box && typeof result.section_3_money_box === 'object') {
+    return result.section_3_money_box;
+  }
+  if (result?.money_box && typeof result.money_box === 'object') return result.money_box;
+  return {};
+};
+
+const getEvidenceList = (item) => {
+  if (!item || typeof item !== 'object') return [];
+  if (Array.isArray(item.evidence)) return item.evidence.filter((ev) => ev && typeof ev === 'object');
+  if (Array.isArray(item?.fonte_perizia?.evidence)) {
+    return item.fonte_perizia.evidence.filter((ev) => ev && typeof ev === 'object');
+  }
+  return [];
+};
+
+const getPageLabel = (evidence) => {
+  const list = asArray(evidence);
+  const pages = [...new Set(
+    list
+      .map((ev) => Number(ev?.page))
+      .filter((page) => Number.isFinite(page) && page > 0)
+  )].sort((a, b) => a - b);
+  if (!pages.length) return '';
+  if (pages.length === 1) return `p. ${pages[0]}`;
+  if (pages.length <= 3) return `p. ${pages.join(', ')}`;
+  return `p. ${pages[0]}-${pages[pages.length - 1]}`;
+};
+
+const MONEY_GROUP_TITLES = {
+  buyer_costs_confirmed: "Costo a carico dell'acquirente",
+  buyer_cost_signals_to_verify: 'Costo da verificare',
+  valuation_references: 'Riferimento valutativo',
+  valuation_reference_amounts: 'Riferimento valutativo',
+  price_references: 'Riferimento di prezzo',
+  valuation_deductions: 'Decurtazione nella stima',
+  cadastral_values: 'Valore catastale',
+  formalities_and_procedural_amounts: 'Importo procedurale / formalità',
+  other_monetary_mentions: 'Importo monetario citato in perizia',
+  unsupported_or_unknown_amounts: 'Importo senza pagina certa',
+  cost_signals_to_verify: 'Costo da verificare',
+};
+
+const MONEY_GROUP_BADGES = {
+  buyer_costs_confirmed: { label: 'Costo acquirente', tone: 'buyer_confirmed' },
+  buyer_cost_signals_to_verify: { label: 'Da verificare', tone: 'buyer_verify' },
+  valuation_references: { label: 'Stima', tone: 'info_neutral' },
+  valuation_reference_amounts: { label: 'Stima', tone: 'info_neutral' },
+  price_references: { label: 'Prezzo', tone: 'info_neutral' },
+  valuation_deductions: { label: 'Decurtazione', tone: 'info_neutral' },
+  cadastral_values: { label: 'Catastale', tone: 'info_neutral' },
+  formalities_and_procedural_amounts: { label: 'Procedurale', tone: 'info_neutral' },
+  other_monetary_mentions: { label: 'Altro importo', tone: 'info_neutral' },
+  unsupported_or_unknown_amounts: { label: 'Da verificare', tone: 'low_confidence' },
+  cost_signals_to_verify: { label: 'Da verificare', tone: 'buyer_verify' },
+};
+
+const stripInternalCodePrefix = (text) => {
+  if (typeof text !== 'string') return '';
+  // Strip any leading AUTH_*_NN code that backend may have left in label_it / titles
+  return text
+    .replace(/^AUTH_[A-Z0-9_]+\s*[·\-:|]\s*/i, '')
+    .replace(/^AUTH_[A-Z0-9_]+\s+/i, '')
+    .replace(/\(non a carico dell['’]?acquirente\)\s*/gi, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+};
+
+const formatAmountEuro = (value) => {
+  const numeric = parseNumericEuro(value);
+  if (numeric === null) return '';
+  if (Math.abs(numeric - Math.round(numeric)) < 0.005) {
+    return `€ ${Math.round(numeric).toLocaleString('it-IT')}`;
+  }
+  return `€ ${numeric.toLocaleString('it-IT', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+};
+
+const getDisplayTitle = (item, groupHint = '') => {
+  if (!item || typeof item !== 'object') return '';
+  const customerTitle = stripInternalCodePrefix(safeText(item.customer_title_it, ''));
+  if (customerTitle) return customerTitle;
+  const group = String(item.group || groupHint || '').toLowerCase();
+  const baseTitle = MONEY_GROUP_TITLES[group] || stripInternalCodePrefix(safeText(item.label_it, ''));
+  const amountLabel = item.customer_amount_label
+    ? safeText(item.customer_amount_label, '')
+    : formatAmountEuro(item.amount_eur ?? item.stima_euro);
+  if (baseTitle && amountLabel) return `${baseTitle}: ${amountLabel}`;
+  return baseTitle || amountLabel || 'Importo monetario';
+};
+
+const getDisplayBadge = (item, groupHint = '') => {
+  if (!item || typeof item !== 'object') {
+    return { label: 'Da verificare', tone: 'low_confidence' };
+  }
+  if (item.customer_badge_it) {
+    return {
+      label: safeText(item.customer_badge_it, 'Da verificare'),
+      tone: safeText(item.customer_badge_tone, 'info_neutral'),
+    };
+  }
+  const group = String(item.group || groupHint || '').toLowerCase();
+  return MONEY_GROUP_BADGES[group] || { label: 'Da verificare', tone: 'low_confidence' };
+};
+
+const getDisplayContext = (item) => {
+  if (!item || typeof item !== 'object') return '';
+  const fromCustomer = safeText(item.customer_context_it, '');
+  if (fromCustomer) return fromCustomer;
+  const evidence = getEvidenceList(item);
+  if (!evidence.length) return '';
+  const quote = safeText(evidence[0]?.quote, '');
+  return cleanEvidenceWhitespace(quote);
+};
+
+const BADGE_TONE_CLASSES = {
+  buyer_confirmed: 'border-red-500/40 bg-red-500/10 text-red-300',
+  buyer_verify: 'border-amber-500/40 bg-amber-500/10 text-amber-300',
+  info_neutral: 'border-zinc-700 bg-zinc-800/60 text-zinc-300',
+  low_confidence: 'border-zinc-700 bg-zinc-900/60 text-zinc-400',
+};
+
+const CARD_TONE_CLASSES = {
+  buyer_confirmed: 'border-red-500/30 bg-red-500/5',
+  buyer_verify: 'border-amber-500/30 bg-amber-500/5',
+  info_neutral: 'border-zinc-800 bg-zinc-950/50',
+  low_confidence: 'border-zinc-800 bg-zinc-950/30',
+};
+
+const dedupeMoneyMapItems = (items) => {
+  const list = asArray(items);
+  if (list.length <= 1) return list.map((item, idx) => ({ item, extraCount: 0, extraPages: [], _key: `dm_${idx}` }));
+  const seen = new Map();
+  list.forEach((item, idx) => {
+    if (!item || typeof item !== 'object') return;
+    const amount = parseNumericEuro(item.amount_eur ?? item.stima_euro);
+    const group = String(item.group || '').toLowerCase();
+    const evidence = getEvidenceList(item);
+    const firstPage = Number(item.page ?? evidence[0]?.page) || 0;
+    const sigKey = `${group}|${amount === null ? 'na' : Math.round(amount)}|${firstPage || idx}`;
+    const existing = seen.get(sigKey);
+    if (existing) {
+      existing.extraCount += 1;
+      const otherPages = asArray(evidence).map((ev) => Number(ev?.page)).filter((p) => Number.isFinite(p) && p > 0);
+      otherPages.forEach((p) => {
+        if (!existing.extraPages.includes(p) && p !== firstPage) existing.extraPages.push(p);
+      });
+    } else {
+      seen.set(sigKey, { item, extraCount: 0, extraPages: [], _key: `dm_${sigKey}_${idx}` });
+    }
+  });
+  return Array.from(seen.values());
+};
+
+const MoneyMapItem = ({ item, groupHint = '', extraCount = 0, extraPages = [] }) => {
+  const [expanded, setExpanded] = useState(false);
+  const badge = getDisplayBadge(item, groupHint);
+  const cardClass = CARD_TONE_CLASSES[badge.tone] || CARD_TONE_CLASSES.info_neutral;
+  const badgeClass = BADGE_TONE_CLASSES[badge.tone] || BADGE_TONE_CLASSES.info_neutral;
+  const title = getDisplayTitle(item, groupHint);
+  const context = getDisplayContext(item);
+  const truncatedContext = context.length > 240 ? `${context.slice(0, 240)}…` : context;
+  const evidence = getEvidenceList(item);
+  const pageLabel = getPageLabel(evidence) || (item?.page ? `p. ${item.page}` : '');
+  const extraPagesLabel = asArray(extraPages).slice(0, 4).map((p) => `p.${p}`).join(', ');
+  const explanation = stripInternalCodePrefix(safeText(item?.explanation_it, ''));
+  const verificationNote = stripInternalCodePrefix(safeText(item?.verification_note_it, ''));
+  const showExpand = context.length > 240 || (expanded && (explanation || verificationNote));
+
+  return (
+    <div className={`p-4 rounded-lg border ${cardClass}`}>
+      <div className="flex items-start justify-between gap-3 mb-2">
+        <div className="flex-1 min-w-0">
+          <p className="text-sm font-medium text-zinc-100 break-words">{title}</p>
+          <div className="mt-2 flex flex-wrap items-center gap-2">
+            <span className={`inline-block text-[10px] uppercase tracking-wide px-2 py-0.5 rounded border ${badgeClass}`}>
+              {badge.label}
+            </span>
+            {pageLabel && (
+              <span className="inline-flex items-center gap-1 text-[11px] font-mono text-gold border border-gold/40 rounded px-1.5 py-0.5">
+                <FileText className="w-3 h-3" />
+                {pageLabel}
+              </span>
+            )}
+            {extraCount > 0 && (
+              <span className="inline-block text-[10px] px-2 py-0.5 rounded border border-zinc-700 text-zinc-400">
+                +{extraCount} riferiment{extraCount === 1 ? 'o' : 'i'}{extraPagesLabel ? ` (${extraPagesLabel})` : ''}
+              </span>
+            )}
+          </div>
+        </div>
+      </div>
+      {context ? (
+        <div className="mt-2 p-2 bg-zinc-900 rounded border-l-2 border-gold/30">
+          <p className="text-xs text-zinc-300 italic whitespace-pre-wrap">
+            "{expanded ? context : truncatedContext}"
+          </p>
+        </div>
+      ) : (
+        <p className="mt-2 text-xs text-zinc-500 italic">Contesto non disponibile in perizia.</p>
+      )}
+      {(explanation || verificationNote) && expanded && (
+        <div className="mt-2 space-y-1">
+          {explanation && <p className="text-xs text-zinc-400">{explanation}</p>}
+          {verificationNote && <p className="text-xs text-amber-300">Verifica: {verificationNote}</p>}
+        </div>
+      )}
+      {(showExpand || explanation || verificationNote) && (
+        <button
+          type="button"
+          onClick={() => setExpanded((prev) => !prev)}
+          className="mt-2 text-[11px] text-gold hover:underline"
+        >
+          {expanded ? 'Mostra meno' : 'Mostra evidenza completa'}
+        </button>
+      )}
+    </div>
+  );
+};
+
+const MoneyMapGroupSection = ({
+  title,
+  helperText,
+  items,
+  groupHint,
+  initialLimit = 6,
+  emptyText = 'Nessun importo classificato in questa categoria.',
+}) => {
+  const [showAll, setShowAll] = useState(false);
+  const list = asArray(items);
+  const deduped = dedupeMoneyMapItems(list);
+  const visible = showAll ? deduped : deduped.slice(0, initialLimit);
+  const hidden = deduped.length - visible.length;
+  return (
+    <div className="p-4 rounded-lg border border-zinc-800 bg-zinc-950/40 mb-5">
+      <h3 className="text-sm font-semibold text-zinc-100 mb-2">{title}</h3>
+      {helperText && <p className="text-xs text-zinc-500 mb-3">{helperText}</p>}
+      {deduped.length === 0 ? (
+        <p className="text-xs text-zinc-500">{emptyText}</p>
+      ) : (
+        <div className="space-y-3">
+          {visible.map((entry) => (
+            <MoneyMapItem
+              key={entry._key}
+              item={entry.item}
+              groupHint={groupHint}
+              extraCount={entry.extraCount}
+              extraPages={entry.extraPages}
+            />
+          ))}
+          {hidden > 0 && (
+            <button
+              type="button"
+              onClick={() => setShowAll(true)}
+              className="text-xs text-gold hover:underline"
+            >
+              Mostra altri {hidden} riferiment{hidden === 1 ? 'o' : 'i'}
+            </button>
+          )}
+          {showAll && deduped.length > initialLimit && (
+            <button
+              type="button"
+              onClick={() => setShowAll(false)}
+              className="text-xs text-zinc-500 hover:underline"
+            >
+              Mostra meno
+            </button>
+          )}
+        </div>
+      )}
+    </div>
+  );
+};
+
+const MoneyMapSummary = ({ summary, totalLabel }) => {
+  if (!summary || typeof summary !== 'object') {
+    return (
+      <div className="p-4 rounded-lg border border-zinc-800 bg-zinc-950/60 mb-5">
+        <h3 className="text-sm font-semibold text-zinc-100 mb-2">Mappa Economica — Sintesi</h3>
+        <p className="text-xs text-zinc-400">
+          Nessun importo monetario classificato per questa perizia. Verificare manualmente eventuali importi nel testo.
+        </p>
+      </div>
+    );
+  }
+  const counts = summary.counts || {};
+  const totalStatus = summary.total_status || {};
+  const isExplicit = totalStatus.status_code === 'explicit_total';
+  const summaryLine = safeText(summary.line_it, '');
+  const focusLine = safeText(summary.focus_it, '');
+  const whyLine = safeText(summary.why_not_buyer_it, '');
+  const primaryPages = asArray(summary.primary_pages);
+  const chip = (label, count, tone = 'neutral') => {
+    if (!count) return null;
+    const toneClass = tone === 'red'
+      ? 'border-red-500/40 text-red-300 bg-red-500/10'
+      : tone === 'amber'
+        ? 'border-amber-500/40 text-amber-300 bg-amber-500/10'
+        : 'border-zinc-700 text-zinc-300 bg-zinc-800/60';
+    return (
+      <span className={`inline-flex items-center gap-1 text-[11px] px-2 py-0.5 rounded border ${toneClass}`}>
+        <span>{label}</span>
+        <span className="font-mono">{count}</span>
+      </span>
+    );
+  };
+  return (
+    <div className="p-5 rounded-lg border border-gold/30 bg-gradient-to-br from-zinc-950 to-zinc-900 mb-5">
+      <div className="flex items-start justify-between gap-3 mb-3">
+        <div>
+          <h3 className="text-base font-semibold text-zinc-100">Mappa Economica — Sintesi</h3>
+          <p className="text-[11px] text-zinc-500 mt-0.5">Quadro deterministico delle voci monetarie classificate.</p>
+        </div>
+        <div className="text-right">
+          <p className="text-[10px] uppercase tracking-wide text-zinc-500">Totale buyer-side</p>
+          <p className={`font-mono text-base font-semibold ${isExplicit ? 'text-gold' : 'text-amber-300'}`}>
+            {totalLabel || safeText(totalStatus.label_it, 'Non quantificato in modo difendibile')}
+          </p>
+        </div>
+      </div>
+      <div className="flex flex-wrap gap-2 mb-3">
+        {chip('Costi acquirente', counts.buyer_costs_confirmed, 'red')}
+        {chip('Da verificare', counts.buyer_cost_signals_to_verify, 'amber')}
+        {chip('Stime/prezzo', (counts.valuation_references || 0) + (counts.price_references || 0))}
+        {chip('Decurtazioni', counts.valuation_deductions)}
+        {chip('Catastali', counts.cadastral_values)}
+        {chip('Procedurali', counts.formalities_and_procedural_amounts)}
+        {chip('Altri importi', counts.other_monetary_mentions)}
+        {chip('Senza pagina', counts.unsupported_or_unknown_amounts)}
+      </div>
+      {summaryLine && <p className="text-sm text-zinc-200 leading-relaxed">{summaryLine}</p>}
+      {focusLine && <p className="text-xs text-zinc-400 mt-2">{focusLine}</p>}
+      {whyLine && <p className="text-xs text-zinc-500 mt-2 italic">{whyLine}</p>}
+      {primaryPages.length > 0 && (
+        <div className="mt-3 flex flex-wrap items-center gap-2">
+          <span className="text-[11px] text-zinc-500">Pagine consigliate:</span>
+          {primaryPages.map((p) => (
+            <span key={`mm_pp_${p}`} className="text-[11px] font-mono text-gold border border-gold/40 rounded px-1.5 py-0.5">
+              p.{p}
+            </span>
+          ))}
+        </div>
       )}
     </div>
   );
@@ -2259,9 +2654,15 @@ const AnalysisResult = () => {
     : [];
   const moneyMapOtherMentions = Array.isArray(moneyBox.other_monetary_mentions) ? moneyBox.other_monetary_mentions : [];
   const moneyMapBuyerConfirmed = Array.isArray(moneyBox.buyer_costs_confirmed) ? moneyBox.buyer_costs_confirmed : [];
+  const moneyMapBuyerSignals = Array.isArray(moneyBox.buyer_cost_signals_to_verify)
+    ? moneyBox.buyer_cost_signals_to_verify
+    : (Array.isArray(moneyBox.cost_signals_to_verify) ? moneyBox.cost_signals_to_verify : []);
   const moneyMapUnsupported = Array.isArray(moneyBox.unsupported_or_unknown_amounts)
     ? moneyBox.unsupported_or_unknown_amounts
     : [];
+  const moneyMapCustomerSummary = moneyBox.customer_summary && typeof moneyBox.customer_summary === 'object'
+    ? moneyBox.customer_summary
+    : null;
   const moneyBoxBreakdown = canonicalMoneyBoxItems.reduce((acc, item) => {
     const euroValue = parseNumericEuro(item?.stima_euro);
     const marketRange = item?.market_range_eur && typeof item.market_range_eur === 'object'
@@ -2941,21 +3342,24 @@ const AnalysisResult = () => {
   const shouldUseCanonicalSummaryFallback = Boolean(topAttentionLegalItem) && (!summaryMentionsCanonicalIssue || summaryHasGenericDocumentFraming);
   const summaryFallbackIt = [displayDecisionIt, decisionBulletsIt[0]].filter(Boolean).join('. ').trim();
   const summaryFallbackEn = [displayHeaderSummaryEn, decisionBulletsEn[0]].filter(Boolean).join('. ').trim();
-  const bundleSummaryIt = safeRender(summaryBundle.decision_summary_it, '');
-  const bundleSummaryEn = safeRender(summaryBundle.decision_summary_en, '');
-  const displayDecisionItSafe = displayDecisionIt || bundleSummaryIt;
-  const displayDecisionEnSafe = displayDecisionEn || bundleSummaryEn;
-  const displayHeaderDriverItSafe = bundleSummaryIt || displayHeaderDriverIt;
-  const displayHeaderSummaryItSafe = bundleSummaryIt || displayHeaderSummaryIt;
-  const displayHeaderSummaryEnSafe = bundleSummaryEn || displayHeaderSummaryEn;
-  const displaySummaryForClientIt = safeRender(
+  const bundleSummaryIt = sanitizeHeroSummaryText(safeRender(summaryBundle.decision_summary_it, ''));
+  const bundleSummaryEn = sanitizeHeroSummaryText(safeRender(summaryBundle.decision_summary_en, ''));
+  const displayDecisionItSafe = sanitizeHeroSummaryText(displayDecisionIt) || bundleSummaryIt || 'Analisi documento completata. Verificare nelle sezioni dedicate i dettagli.';
+  const displayDecisionEnSafe = sanitizeHeroSummaryText(displayDecisionEn) || bundleSummaryEn || '';
+  const displayHeaderDriverItSafe = bundleSummaryIt || sanitizeHeroSummaryText(displayHeaderDriverIt);
+  const displayHeaderSummaryItSafe = bundleSummaryIt || sanitizeHeroSummaryText(displayHeaderSummaryIt);
+  const displayHeaderSummaryEnSafe = bundleSummaryEn || sanitizeHeroSummaryText(displayHeaderSummaryEn);
+  const rawSummaryForClientIt = safeRender(
     summary.summary_it,
     shouldUseCanonicalSummaryFallback ? summaryFallbackIt : 'Analisi documento completata.'
   );
-  const displaySummaryForClientEn = safeRender(
+  const displaySummaryForClientIt = sanitizeHeroSummaryText(rawSummaryForClientIt)
+    || 'Analisi documento completata. Punti da verificare: consultare le sezioni Costi, Legal Killers e Red Flags.';
+  const rawSummaryForClientEn = safeRender(
     summary.summary_en,
     shouldUseCanonicalSummaryFallback ? summaryFallbackEn : ''
   );
+  const displaySummaryForClientEn = sanitizeHeroSummaryText(rawSummaryForClientEn);
 
   // Debug logging for troubleshooting
   if (process.env.NODE_ENV === 'development') {
@@ -3383,19 +3787,28 @@ const AnalysisResult = () => {
                 {displayedDrivers.length > 0 && (
                   <div className="mt-4 space-y-2">
                     <p className="text-xs font-mono text-red-400 uppercase">Criticità Rilevate:</p>
-                    {displayedDrivers.map((driver, idx) => (
-                      <div key={idx} className="p-2 bg-red-500/10 rounded border border-red-500/20">
-                        <div className="flex flex-wrap items-center gap-2">
-                          <AlertTriangle className="w-4 h-4 text-red-400" />
-                          <span className="text-sm text-red-400">{safeRender(driver.headline_it)}</span>
-                          {getEvidence(driver).length > 0 && (
-                            <span className="text-xs font-mono text-gold">
-                              p. {[...new Set(getEvidence(driver).map(e => e.page))].join(', ')}
-                            </span>
-                          )}
+                    {displayedDrivers.map((driver, idx) => {
+                      const driverEvidence = getEvidence(driver);
+                      const driverPages = [...new Set(driverEvidence.map((e) => e.page).filter(Boolean))];
+                      const rawHeadline = safeRender(driver.headline_it, '');
+                      const cleanHeadline = sanitizeHeroSummaryText(rawHeadline)
+                        || (driverPages.length > 0
+                          ? `Da verificare — non rilevato automaticamente nelle sezioni consultate. Controllare p. ${driverPages.join(', ')}.`
+                          : 'Da verificare nella perizia originale.');
+                      return (
+                        <div key={idx} className="p-2 bg-red-500/10 rounded border border-red-500/20">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <AlertTriangle className="w-4 h-4 text-red-400" />
+                            <span className="text-sm text-red-400">{cleanHeadline}</span>
+                            {driverPages.length > 0 && rawHeadline && rawHeadline !== cleanHeadline && (
+                              <span className="text-xs font-mono text-gold">
+                                p. {driverPages.join(', ')}
+                              </span>
+                            )}
+                          </div>
                         </div>
-                      </div>
-                    ))}
+                      );
+                    })}
                   </div>
                 )}
               </div>
@@ -3786,196 +4199,168 @@ const AnalysisResult = () => {
             <div className="money-box-card p-6">
               <div className="flex items-center gap-3 mb-2">
                 <DollarSign className="w-6 h-6 text-gold" />
-                <h2 className="text-xl font-serif font-bold text-zinc-100">Costi / Costs</h2>
+                <h2 className="text-xl font-serif font-bold text-zinc-100">Mappa Economica / Money Map</h2>
               </div>
               <p className="text-xs text-zinc-500 mb-6">
-                Sezioni separate per evitare mix fuorviante tra deprezzamenti, costi espliciti e stime.
+                Importi monetari della perizia classificati per ruolo (costo acquirente, segnale da verificare, stima/decurtazione, catastale, procedurale).
+                I valori valutativi NON sono costi a carico dell'acquirente.
               </p>
 
-              <div className="p-4 rounded-lg border border-zinc-800 bg-zinc-950/60 mb-5">
-                <h3 className="text-sm font-semibold text-zinc-100 mb-2">Deprezzamenti da perizia / Perizia valuation adjustments</h3>
-                {valuationDeprezzamentiValue !== null ? (
-                  <>
-                    <p className="text-lg font-mono font-semibold text-amber-300">- €{valuationDeprezzamentiValue.toLocaleString()}</p>
-                    {valuationDeprezzamentiIsComputed ? (
-                      <div className="mt-3 rounded-md border border-amber-500/20 bg-zinc-950/70 p-3">
-                        <p className="text-xs font-medium uppercase tracking-wide text-amber-300">
-                          {safeRender(valuationDeprezzamentiMeta?.label_it, 'Deprezzamento totale calcolato da valori in perizia')}
-                        </p>
-                        <div className="mt-2 space-y-2 text-sm text-zinc-300">
-                          {valuationDeprezzamentiGrossValue !== null && (
-                            <div>
-                              <p className="flex items-center gap-1">
-                                <span>{safeRender(valuationDeprezzamentiMeta?.gross_label_it, 'Valore di stima lordo')}: €{valuationDeprezzamentiGrossValue.toLocaleString()}</span>
-                                {valuationDeprezzamentiGrossEvidence.length > 0 && <EvidenceBadge evidence={valuationDeprezzamentiGrossEvidence} />}
-                              </p>
-                            </div>
-                          )}
-                          {valuationDeprezzamentiFinalValue !== null && (
-                            <div>
-                              <p className="flex items-center gap-1">
-                                <span>{safeRender(valuationDeprezzamentiMeta?.final_label_it, 'Valore finale / prezzo base')}: €{valuationDeprezzamentiFinalValue.toLocaleString()}</span>
-                                {valuationDeprezzamentiFinalEvidence.length > 0 && <EvidenceBadge evidence={valuationDeprezzamentiFinalEvidence} />}
-                              </p>
-                            </div>
-                          )}
-                          {valuationDeprezzamentiGrossValue !== null && valuationDeprezzamentiFinalValue !== null && valuationDeprezzamentiComputedValue !== null && (
-                            <p className="font-mono text-xs text-zinc-400">
-                              Calcolo: €{valuationDeprezzamentiGrossValue.toLocaleString()} - €{valuationDeprezzamentiFinalValue.toLocaleString()} = €{valuationDeprezzamentiComputedValue.toLocaleString()}
-                            </p>
-                          )}
-                        </div>
-                        {valuationDeprezzamentiEvidence.length > 0 && (
-                          <div className="mt-3">
-                            <EvidenceDetail evidence={valuationDeprezzamentiEvidence} />
-                          </div>
-                        )}
-                      </div>
-                    ) : valuationDeprezzamentiEvidence.length > 0 && (
-                      <div className="mt-2">
-                        <EvidenceDetail evidence={valuationDeprezzamentiEvidence} />
-                      </div>
-                    )}
-                    <p className="text-xs text-zinc-500 mt-2">
-                      Voce di deprezzamento della valutazione in perizia: non equivale automaticamente a cassa extra lato acquirente.
-                    </p>
-                  </>
-                ) : valuationDeductionSignals.length > 0 ? (
-                  <div className="space-y-3">
-                    {valuationDeductionSignals.map((item, index) => (
-                      <MoneyBoxItem key={`valuation_signal_${index}`} item={item} />
-                    ))}
-                  </div>
-                ) : (
-                  <p className="text-sm text-zinc-500">Non specificato in perizia</p>
-                )}
-                {valuationDeprezzamentiValue !== null && valuationDeductionSignals.length > 0 && (
-                  <div className="mt-4 space-y-3">
-                    {valuationDeductionSignals.map((item, index) => (
-                      <MoneyBoxItem key={`valuation_signal_extra_${index}`} item={item} />
-                    ))}
-                  </div>
-                )}
-              </div>
-
-              <div className="p-4 rounded-lg border border-zinc-800 bg-zinc-950/40 mb-5">
-                <h3 className="text-sm font-semibold text-zinc-100 mb-3">Costi espliciti citati nel testo / Explicit cost mentions from text</h3>
-                {explicitCostMentions.length > 0 ? (
-                  <div className="space-y-3">
-                    {explicitCostMentions.map((item, index) => (
-                      <MoneyBoxItem key={`explicit_${index}`} item={item} />
-                    ))}
-                  </div>
-                ) : (
-                  <p className="text-zinc-500 text-sm">Nessun costo esplicito affidabile disponibile.</p>
-                )}
-              </div>
-
-              <div className="p-4 rounded-lg border border-zinc-800 bg-zinc-950/40">
-                <h3 className="text-sm font-semibold text-zinc-100 mb-3">Segnali di costo da verificare / Grounded cost signals to verify</h3>
-                <p className="text-xs text-zinc-500 mb-3">
-                  Mostrati quando la perizia contiene voci ancorate, senza sommarle come extra buyer-side se manca prova testuale di separata debenza.
-                </p>
-                {costSignalsToVerify.length > 0 ? (
-                  <div className="space-y-3">
-                    {costSignalsToVerify.map((item, index) => (
-                      <MoneyBoxItem key={`cost_signal_${index}`} item={item} />
-                    ))}
-                  </div>
-                ) : groundedUnquantifiedBurdens.length > 0 ? (
-                  <div className="space-y-2">
-                    {groundedUnquantifiedBurdens.map((item) => (
-                      <div key={item.key} className="rounded-lg border border-zinc-800 bg-zinc-950/60 px-4 py-3">
-                        <div className="flex items-center justify-between gap-2">
-                          <p className="text-sm font-medium text-zinc-100">{item.label}</p>
-                          {item.evidence?.length > 0 && <EvidenceBadge evidence={item.evidence} />}
-                        </div>
-                        <p className="text-xs text-zinc-500 mt-1">{item.note}</p>
-                      </div>
-                    ))}
-                  </div>
-                ) : (
-                  <p className="text-zinc-500 text-sm">Nessun segnale di costo ancorato disponibile.</p>
-                )}
-              </div>
+              <MoneyMapSummary
+                summary={moneyMapCustomerSummary}
+                totalLabel={costTotalSummary?.text}
+              />
 
               {moneyMapBuyerConfirmed.length > 0 && (
-                <div className="p-4 rounded-lg border border-emerald-700/40 bg-zinc-950/40 mb-5">
-                  <h3 className="text-sm font-semibold text-zinc-100 mb-3">Costi potenzialmente a carico dell'acquirente / Buyer-side costs (confirmed)</h3>
-                  <div className="space-y-3">
-                    {moneyMapBuyerConfirmed.map((item, index) => (
-                      <MoneyBoxItem key={`buyer_confirmed_${index}`} item={item} />
-                    ))}
-                  </div>
+                <MoneyMapGroupSection
+                  title="Costi a carico dell'acquirente"
+                  helperText="Importi esplicitamente dichiarati come a carico dell'acquirente nella perizia. Verificare comunque con tecnico/delegato prima dell'offerta."
+                  items={moneyMapBuyerConfirmed}
+                  groupHint="buyer_costs_confirmed"
+                />
+              )}
+
+              {(moneyMapBuyerSignals.length > 0 || groundedUnquantifiedBurdens.length > 0) && (
+                <div className="p-4 rounded-lg border border-zinc-800 bg-zinc-950/40 mb-5">
+                  <h3 className="text-sm font-semibold text-zinc-100 mb-2">Segnali da verificare prima dell'offerta</h3>
+                  <p className="text-xs text-zinc-500 mb-3">
+                    Importi ancorati alla perizia che potrebbero rappresentare costi acquirente: la perizia non lo afferma con certezza, perciò vanno confermati con tecnico/delegato.
+                  </p>
+                  {moneyMapBuyerSignals.length > 0 ? (
+                    <div className="space-y-3">
+                      {dedupeMoneyMapItems(moneyMapBuyerSignals).slice(0, 8).map((entry) => (
+                        <MoneyMapItem
+                          key={entry._key}
+                          item={entry.item}
+                          groupHint="buyer_cost_signals_to_verify"
+                          extraCount={entry.extraCount}
+                          extraPages={entry.extraPages}
+                        />
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="space-y-2">
+                      {groundedUnquantifiedBurdens.map((item) => (
+                        <div key={item.key} className="rounded-lg border border-zinc-800 bg-zinc-950/60 px-4 py-3">
+                          <div className="flex items-center justify-between gap-2">
+                            <p className="text-sm font-medium text-zinc-100">{item.label}</p>
+                            {item.evidence?.length > 0 && <EvidenceBadge evidence={item.evidence} />}
+                          </div>
+                          <p className="text-xs text-zinc-500 mt-1">{item.note}</p>
+                        </div>
+                      ))}
+                    </div>
+                  )}
                 </div>
               )}
 
               {(moneyMapValuationReferences.length > 0 || moneyMapPriceReferences.length > 0) && (
-                <div className="p-4 rounded-lg border border-zinc-800 bg-zinc-950/40 mb-5">
-                  <h3 className="text-sm font-semibold text-zinc-100 mb-3">Valori di stima e riferimenti di prezzo / Valuation & price references</h3>
-                  <p className="text-xs text-zinc-500 mb-3">
-                    Importi che derivano da calcoli o riferimenti valutativi (es. mq × €/mq, valore di stima, prezzo base). Non sono costi a carico dell'acquirente.
-                  </p>
-                  <div className="space-y-3">
-                    {moneyMapValuationReferences.map((item, index) => (
-                      <MoneyBoxItem key={`val_ref_${index}`} item={item} />
-                    ))}
-                    {moneyMapPriceReferences.map((item, index) => (
-                      <MoneyBoxItem key={`price_ref_${index}`} item={item} />
-                    ))}
-                  </div>
-                </div>
+                <MoneyMapGroupSection
+                  title="Valori di stima e riferimenti di prezzo"
+                  helperText="Importi che derivano da calcoli o riferimenti valutativi (es. mq × €/mq, valore di stima, prezzo base). Non sono costi a carico dell'acquirente."
+                  items={[...moneyMapValuationReferences, ...moneyMapPriceReferences]}
+                  groupHint="valuation_references"
+                />
+              )}
+
+              {valuationDeductionSignals.length > 0 && (
+                <MoneyMapGroupSection
+                  title="Decurtazioni / deprezzamenti / regolarizzazioni nella stima"
+                  helperText="Riduzioni applicate dal perito al valore del bene (es. spese di regolarizzazione catastale/urbanistica). Non sono costi extra che l'acquirente paga in più."
+                  items={valuationDeductionSignals}
+                  groupHint="valuation_deductions"
+                />
               )}
 
               {moneyMapCadastralValues.length > 0 && (
-                <div className="p-4 rounded-lg border border-zinc-800 bg-zinc-950/40 mb-5">
-                  <h3 className="text-sm font-semibold text-zinc-100 mb-3">Rendite catastali / valori catastali</h3>
-                  <p className="text-xs text-zinc-500 mb-3">Dato fiscale: non un costo a carico dell'acquirente.</p>
-                  <div className="space-y-3">
-                    {moneyMapCadastralValues.map((item, index) => (
-                      <MoneyBoxItem key={`cadastral_${index}`} item={item} />
-                    ))}
-                  </div>
-                </div>
+                <MoneyMapGroupSection
+                  title="Rendite catastali / valori catastali"
+                  helperText="Dato fiscale: non un costo a carico dell'acquirente."
+                  items={moneyMapCadastralValues}
+                  groupHint="cadastral_values"
+                />
               )}
 
               {moneyMapFormalities.length > 0 && (
-                <div className="p-4 rounded-lg border border-zinc-800 bg-zinc-950/40 mb-5">
-                  <h3 className="text-sm font-semibold text-zinc-100 mb-3">Formalità e importi procedurali</h3>
-                  <p className="text-xs text-zinc-500 mb-3">
-                    Importi legati a formalità (ipoteca, cancellazione, trascrizione). Non automaticamente a carico dell'acquirente; verificare nel dispositivo di vendita.
-                  </p>
-                  <div className="space-y-3">
-                    {moneyMapFormalities.map((item, index) => (
-                      <MoneyBoxItem key={`formality_${index}`} item={item} />
-                    ))}
-                  </div>
-                </div>
+                <MoneyMapGroupSection
+                  title="Formalità e importi procedurali"
+                  helperText="Importi legati a formalità (ipoteca, cancellazione, trascrizione). Non automaticamente a carico dell'acquirente; verificare nel dispositivo di vendita."
+                  items={moneyMapFormalities}
+                  groupHint="formalities_and_procedural_amounts"
+                />
               )}
 
               {moneyMapOtherMentions.length > 0 && (
-                <div className="p-4 rounded-lg border border-zinc-800 bg-zinc-950/40 mb-5">
-                  <h3 className="text-sm font-semibold text-zinc-100 mb-3">Altri importi monetari rilevati</h3>
-                  <p className="text-xs text-zinc-500 mb-3">
-                    Importi citati in perizia senza esplicita responsabilità dell'acquirente. Da verificare con tecnico/delegato.
-                  </p>
-                  <div className="space-y-3">
-                    {moneyMapOtherMentions.map((item, index) => (
-                      <MoneyBoxItem key={`other_money_${index}`} item={item} />
-                    ))}
-                  </div>
-                </div>
+                <MoneyMapGroupSection
+                  title="Altri importi monetari rilevati"
+                  helperText="Importi citati in perizia senza esplicita responsabilità dell'acquirente. Da verificare con tecnico/delegato."
+                  items={moneyMapOtherMentions}
+                  groupHint="other_monetary_mentions"
+                />
               )}
 
               {moneyMapUnsupported.length > 0 && (
-                <div className="p-4 rounded-lg border border-zinc-800 bg-zinc-950/30 mb-5">
-                  <h3 className="text-sm font-semibold text-zinc-100 mb-3">Importi senza evidenza paginata</h3>
-                  <p className="text-xs text-zinc-500 mb-3">
-                    Importi rilevati senza pagina/contesto certo: verificare manualmente nella perizia originale.
+                <details className="mb-5 rounded-lg border border-zinc-800 bg-zinc-950/30">
+                  <summary className="cursor-pointer px-4 py-3 text-sm font-semibold text-zinc-100">
+                    Importi non classificati / bassa confidenza ({moneyMapUnsupported.length})
+                  </summary>
+                  <div className="p-4 pt-0">
+                    <p className="text-xs text-zinc-500 mb-3">
+                      Importi rilevati senza pagina/contesto certo: verificare manualmente nella perizia originale.
+                    </p>
+                    <MoneyMapGroupSection
+                      title=""
+                      helperText=""
+                      items={moneyMapUnsupported}
+                      groupHint="unsupported_or_unknown_amounts"
+                      initialLimit={3}
+                    />
+                  </div>
+                </details>
+              )}
+
+              {valuationDeprezzamentiValue !== null && (
+                <div className="p-4 rounded-lg border border-zinc-800 bg-zinc-950/60 mb-5">
+                  <h3 className="text-sm font-semibold text-zinc-100 mb-2">Waterfall di deprezzamento (riferimento)</h3>
+                  <p className="text-lg font-mono font-semibold text-amber-300">- €{valuationDeprezzamentiValue.toLocaleString()}</p>
+                  {valuationDeprezzamentiIsComputed && (
+                    <div className="mt-3 rounded-md border border-amber-500/20 bg-zinc-950/70 p-3">
+                      <p className="text-xs font-medium uppercase tracking-wide text-amber-300">
+                        {safeRender(valuationDeprezzamentiMeta?.label_it, 'Deprezzamento totale calcolato da valori in perizia')}
+                      </p>
+                      <div className="mt-2 space-y-2 text-sm text-zinc-300">
+                        {valuationDeprezzamentiGrossValue !== null && (
+                          <p className="flex items-center gap-1">
+                            <span>{safeRender(valuationDeprezzamentiMeta?.gross_label_it, 'Valore di stima lordo')}: €{valuationDeprezzamentiGrossValue.toLocaleString()}</span>
+                            {valuationDeprezzamentiGrossEvidence.length > 0 && <EvidenceBadge evidence={valuationDeprezzamentiGrossEvidence} />}
+                          </p>
+                        )}
+                        {valuationDeprezzamentiFinalValue !== null && (
+                          <p className="flex items-center gap-1">
+                            <span>{safeRender(valuationDeprezzamentiMeta?.final_label_it, 'Valore finale / prezzo base')}: €{valuationDeprezzamentiFinalValue.toLocaleString()}</span>
+                            {valuationDeprezzamentiFinalEvidence.length > 0 && <EvidenceBadge evidence={valuationDeprezzamentiFinalEvidence} />}
+                          </p>
+                        )}
+                        {valuationDeprezzamentiGrossValue !== null && valuationDeprezzamentiFinalValue !== null && valuationDeprezzamentiComputedValue !== null && (
+                          <p className="font-mono text-xs text-zinc-400">
+                            Calcolo: €{valuationDeprezzamentiGrossValue.toLocaleString()} - €{valuationDeprezzamentiFinalValue.toLocaleString()} = €{valuationDeprezzamentiComputedValue.toLocaleString()}
+                          </p>
+                        )}
+                      </div>
+                    </div>
+                  )}
+                  <p className="text-xs text-zinc-500 mt-2">
+                    Il deprezzamento riduce il valore di stima del bene: non è una cassa extra a carico dell'acquirente.
                   </p>
+                </div>
+              )}
+
+              {explicitCostMentions.length > 0 && moneyMapBuyerConfirmed.length === 0 && (
+                <div className="p-4 rounded-lg border border-zinc-800 bg-zinc-950/40 mb-5">
+                  <h3 className="text-sm font-semibold text-zinc-100 mb-3">Costi espliciti citati nel testo (legacy)</h3>
                   <div className="space-y-3">
-                    {moneyMapUnsupported.map((item, index) => (
-                      <MoneyBoxItem key={`unsupported_${index}`} item={item} />
+                    {explicitCostMentions.slice(0, 6).map((item, index) => (
+                      <MoneyBoxItem key={`explicit_${index}`} item={item} />
                     ))}
                   </div>
                 </div>

@@ -734,6 +734,42 @@ _CODE_PREFIX = {
     "unsupported_or_unknown_amounts": "AUTH_UNSUPPORTED",
 }
 
+_CUSTOMER_TITLE_PREFIX = {
+    "buyer_costs_confirmed": "Costo a carico dell'acquirente",
+    "buyer_cost_signals_to_verify": "Costo da verificare",
+    "valuation_references": "Riferimento valutativo",
+    "price_references": "Riferimento di prezzo",
+    "valuation_deductions": "Decurtazione nella stima",
+    "cadastral_values": "Valore catastale",
+    "formalities_and_procedural_amounts": "Importo procedurale / formalità",
+    "other_monetary_mentions": "Importo monetario citato in perizia",
+    "unsupported_or_unknown_amounts": "Importo senza pagina certa",
+}
+
+_CUSTOMER_BADGE_LABEL = {
+    "buyer_costs_confirmed": "Costo acquirente",
+    "buyer_cost_signals_to_verify": "Da verificare",
+    "valuation_references": "Stima",
+    "price_references": "Prezzo",
+    "valuation_deductions": "Decurtazione",
+    "cadastral_values": "Catastale",
+    "formalities_and_procedural_amounts": "Procedurale",
+    "other_monetary_mentions": "Altro importo",
+    "unsupported_or_unknown_amounts": "Da verificare",
+}
+
+_CUSTOMER_BADGE_TONE = {
+    "buyer_costs_confirmed": "buyer_confirmed",
+    "buyer_cost_signals_to_verify": "buyer_verify",
+    "valuation_references": "info_neutral",
+    "price_references": "info_neutral",
+    "valuation_deductions": "info_neutral",
+    "cadastral_values": "info_neutral",
+    "formalities_and_procedural_amounts": "info_neutral",
+    "other_monetary_mentions": "info_neutral",
+    "unsupported_or_unknown_amounts": "low_confidence",
+}
+
 
 def make_customer_money_item(
     candidate: Dict[str, Any],
@@ -775,10 +811,24 @@ def make_customer_money_item(
         page_candidate = evidence[0].get("page")
         if isinstance(page_candidate, int):
             page_value = page_candidate
+    customer_title_base = _CUSTOMER_TITLE_PREFIX.get(group, "Importo monetario")
+    customer_title = f"{customer_title_base}: {amount_text}" if amount_text else customer_title_base
+    customer_badge = _CUSTOMER_BADGE_LABEL.get(group, "Da verificare")
+    badge_tone = _CUSTOMER_BADGE_TONE.get(group, "info_neutral")
+    customer_context = ""
+    if evidence and isinstance(evidence[0], dict):
+        quote_text = _normalize_text(evidence[0].get("quote"))
+        if quote_text:
+            customer_context = quote_text
     payload: Dict[str, Any] = {
         "code": f"{code_prefix}_{index:02d}",
         "label_it": label,
         "label_en": label,
+        "customer_title_it": customer_title,
+        "customer_badge_it": customer_badge,
+        "customer_badge_tone": badge_tone,
+        "customer_amount_label": amount_text,
+        "customer_context_it": customer_context,
         "type": "ESTIMATE" if group == "buyer_costs_confirmed" else "SIGNAL_TO_VERIFY" if group == "buyer_cost_signals_to_verify" else "INFO",
         "group": group,
         "role": str(candidate.get("semantic_base_role") or candidate.get("role") or "unknown_money"),
@@ -798,6 +848,235 @@ def make_customer_money_item(
         "fonte_perizia": {"value": "Perizia", "evidence": evidence},
     }
     return payload
+
+
+def _customer_total_status(money_box: Dict[str, Any]) -> Dict[str, Any]:
+    total_extra_cost = money_box.get("total_extra_cost_eur")
+    total_block = money_box.get("total_extra_costs") if isinstance(money_box.get("total_extra_costs"), dict) else {}
+    if isinstance(total_extra_cost, (int, float)) and total_extra_cost > 0:
+        amount_text = _amount_label(float(total_extra_cost))
+        return {
+            "status_code": "explicit_total",
+            "label_it": amount_text or "Totale buyer-side esplicito",
+            "explanation_it": str(total_block.get("note") or "Totale buyer-side esplicitamente supportato in perizia."),
+        }
+    return {
+        "status_code": "no_defensible_total",
+        "label_it": "Non quantificato in modo difendibile",
+        "explanation_it": str(
+            total_block.get("note")
+            or "Nessun totale buyer-side certo: usare le voci sotto come checklist di verifica."
+        ),
+    }
+
+
+def _customer_summary_pages(money_box: Dict[str, Any], group_keys: Sequence[str], limit: int = 4) -> List[int]:
+    pages: List[int] = []
+    seen = set()
+    for key in group_keys:
+        for item in money_box.get(key, []) or []:
+            if not isinstance(item, dict):
+                continue
+            page = item.get("page")
+            if not isinstance(page, int) or page <= 0:
+                continue
+            if page in seen:
+                continue
+            seen.add(page)
+            pages.append(page)
+            if len(pages) >= limit:
+                return pages
+    return pages
+
+
+def _top_amount_phrase(money_box: Dict[str, Any], key: str, limit: int = 2) -> str:
+    items = money_box.get(key) or []
+    if not isinstance(items, list):
+        return ""
+    candidates: List[Tuple[int, Optional[int]]] = []
+    seen_amounts = set()
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        amount = item.get("amount_eur") or item.get("stima_euro")
+        try:
+            amount_int = int(round(float(amount)))
+        except Exception:
+            continue
+        if amount_int <= 0 or amount_int in seen_amounts:
+            continue
+        seen_amounts.add(amount_int)
+        page = item.get("page") if isinstance(item.get("page"), int) else None
+        candidates.append((amount_int, page))
+    if not candidates:
+        return ""
+    candidates.sort(key=lambda pair: pair[0], reverse=True)
+    formatted = []
+    for amount_int, page in candidates[:limit]:
+        amount_text = f"€{amount_int:,.0f}".replace(",", ".")
+        if page:
+            formatted.append(f"{amount_text} (p.{page})")
+        else:
+            formatted.append(amount_text)
+    return ", ".join(formatted)
+
+
+def _build_customer_summary(money_box: Dict[str, Any]) -> Dict[str, Any]:
+    """Deterministic, case-specific Money Map summary for the customer UI.
+
+    The frontend renders this verbatim; if Gemini is wired upstream the
+    `line_it` field can be replaced while the counts/pages/total remain.
+    """
+    counts = {
+        "buyer_costs_confirmed": len(money_box.get("buyer_costs_confirmed") or []),
+        "buyer_cost_signals_to_verify": len(money_box.get("buyer_cost_signals_to_verify") or []),
+        "valuation_references": len(money_box.get("valuation_references") or []),
+        "price_references": len(money_box.get("price_references") or []),
+        "valuation_deductions": len(money_box.get("valuation_deductions") or []),
+        "cadastral_values": len(money_box.get("cadastral_values") or []),
+        "formalities_and_procedural_amounts": len(money_box.get("formalities_and_procedural_amounts") or []),
+        "other_monetary_mentions": len(money_box.get("other_monetary_mentions") or []),
+        "unsupported_or_unknown_amounts": len(money_box.get("unsupported_or_unknown_amounts") or []),
+    }
+    total_status = _customer_total_status(money_box)
+    pages = _customer_summary_pages(
+        money_box,
+        (
+            "buyer_costs_confirmed",
+            "buyer_cost_signals_to_verify",
+            "valuation_references",
+            "valuation_deductions",
+            "price_references",
+            "formalities_and_procedural_amounts",
+            "cadastral_values",
+            "other_monetary_mentions",
+        ),
+        limit=4,
+    )
+
+    parts: List[str] = []
+    if total_status["status_code"] == "explicit_total":
+        parts.append(
+            f"Totale buyer-side dichiarato in perizia: {total_status['label_it']}."
+        )
+    else:
+        parts.append("Nessun totale buyer-side difendibile è stato ricavato dalla perizia.")
+
+    if counts["buyer_costs_confirmed"] > 0:
+        top_buyer = _top_amount_phrase(money_box, "buyer_costs_confirmed", limit=2)
+        if top_buyer:
+            parts.append(
+                f"{counts['buyer_costs_confirmed']} costi a carico dell'acquirente confermati (es. {top_buyer})."
+            )
+        else:
+            parts.append(f"{counts['buyer_costs_confirmed']} costi a carico dell'acquirente confermati.")
+    if counts["buyer_cost_signals_to_verify"] > 0:
+        top_signal = _top_amount_phrase(money_box, "buyer_cost_signals_to_verify", limit=2)
+        if top_signal:
+            parts.append(
+                f"{counts['buyer_cost_signals_to_verify']} segnali da verificare prima dell'offerta (es. {top_signal})."
+            )
+        else:
+            parts.append(
+                f"{counts['buyer_cost_signals_to_verify']} segnali da verificare prima dell'offerta."
+            )
+
+    classified_total = (
+        counts["valuation_references"]
+        + counts["price_references"]
+        + counts["valuation_deductions"]
+        + counts["cadastral_values"]
+        + counts["formalities_and_procedural_amounts"]
+    )
+    if classified_total > 0:
+        breakdown = []
+        if counts["valuation_references"]:
+            top = _top_amount_phrase(money_box, "valuation_references", limit=1)
+            breakdown.append(
+                f"{counts['valuation_references']} riferimenti di stima"
+                + (f" (es. {top})" if top else "")
+            )
+        if counts["price_references"]:
+            top = _top_amount_phrase(money_box, "price_references", limit=1)
+            breakdown.append(
+                f"{counts['price_references']} riferimenti di prezzo"
+                + (f" (es. {top})" if top else "")
+            )
+        if counts["valuation_deductions"]:
+            top = _top_amount_phrase(money_box, "valuation_deductions", limit=1)
+            breakdown.append(
+                f"{counts['valuation_deductions']} decurtazioni nella stima"
+                + (f" (es. {top})" if top else "")
+            )
+        if counts["cadastral_values"]:
+            top = _top_amount_phrase(money_box, "cadastral_values", limit=1)
+            breakdown.append(
+                f"{counts['cadastral_values']} valori catastali"
+                + (f" (es. {top})" if top else "")
+            )
+        if counts["formalities_and_procedural_amounts"]:
+            top = _top_amount_phrase(money_box, "formalities_and_procedural_amounts", limit=1)
+            breakdown.append(
+                f"{counts['formalities_and_procedural_amounts']} importi procedurali"
+                + (f" (es. {top})" if top else "")
+            )
+        parts.append(
+            "Importi classificati come non a carico dell'acquirente: "
+            + ", ".join(breakdown)
+            + "."
+        )
+    if counts["other_monetary_mentions"]:
+        parts.append(
+            f"{counts['other_monetary_mentions']} altri importi monetari rilevati senza obbligo esplicito."
+        )
+    if counts["unsupported_or_unknown_amounts"]:
+        parts.append(
+            f"{counts['unsupported_or_unknown_amounts']} importi senza pagina certa: verificare manualmente nella perizia."
+        )
+    if pages:
+        parts.append("Pagine principali da controllare: " + ", ".join(f"p.{p}" for p in pages) + ".")
+
+    line_it = " ".join(parts).strip()
+    if not line_it:
+        line_it = "Nessun importo monetario classificato in questa perizia."
+
+    focus_pieces: List[str] = []
+    if counts["buyer_cost_signals_to_verify"]:
+        focus_pieces.append("Concentrarsi sui segnali da verificare prima dell'offerta.")
+    if counts["valuation_references"] or counts["valuation_deductions"]:
+        focus_pieces.append("Stime e decurtazioni sono riferimenti del perito, non costi extra.")
+    if counts["formalities_and_procedural_amounts"]:
+        focus_pieces.append("Le formalità procedurali non sono automaticamente a carico dell'acquirente.")
+    focus_it = " ".join(focus_pieces).strip()
+
+    why_pieces: List[str] = []
+    if counts["valuation_references"] or counts["price_references"]:
+        why_pieces.append(
+            "I valori di stima/prezzo sono calcoli del perito (es. mq × €/mq) e non rappresentano cassa extra a carico dell'acquirente."
+        )
+    if counts["valuation_deductions"]:
+        why_pieces.append(
+            "Le decurtazioni applicate alla stima riducono il valore del bene ma non sono costi che l'acquirente paga in più."
+        )
+    if counts["cadastral_values"]:
+        why_pieces.append(
+            "I valori catastali sono dati fiscali, non costi a carico dell'acquirente."
+        )
+    if counts["formalities_and_procedural_amounts"]:
+        why_pieces.append(
+            "Le formalità (ipoteche, cancellazioni, trascrizioni) sono importi procedurali; verificare nel dispositivo di vendita chi è tenuto a sostenerli."
+        )
+    why_not_buyer_it = " ".join(why_pieces).strip()
+
+    return {
+        "version": "money_map_summary_v1",
+        "line_it": line_it,
+        "focus_it": focus_it,
+        "why_not_buyer_it": why_not_buyer_it,
+        "counts": counts,
+        "total_status": total_status,
+        "primary_pages": pages,
+    }
 
 
 def _section3_from_money_box(money_box: Dict[str, Any]) -> Dict[str, Any]:
@@ -981,6 +1260,7 @@ def _build_projected_money_box(money_value: Dict[str, Any], legacy_result: Dict[
         "total_extra_costs": total,
         "total_extra_cost_eur": total_extra_cost_eur,
     }
+    money_box["customer_summary"] = _build_customer_summary(money_box)
     if double_count_risk:
         money_box["component_total_policy"] = "componenti_non_sommate_con_totale"
     return money_box, {
