@@ -322,6 +322,12 @@ def _money_box_has_projected_downgrades(money_box: Dict[str, Any]) -> bool:
         "buyer_cost_signals_to_verify",
         "qualitative_burdens",
         "valuation_reference_amounts",
+        "valuation_references",
+        "valuation_deductions",
+        "price_references",
+        "cadastral_values",
+        "formalities_and_procedural_amounts",
+        "other_monetary_mentions",
         "excluded_non_buyer_cost_amounts",
         "unsupported_or_unknown_amounts",
     )
@@ -407,6 +413,393 @@ def _sanitize_stale_money_qa_claims_after_projection(result: Dict[str, Any], pro
     return meta
 
 
+_TEXT_NORMALIZE_TR = str.maketrans({"’": "'", "‘": "'", "`": "'", "´": "'"})
+
+
+def _money_norm(text: Any) -> str:
+    raw = str(text or "").translate(_TEXT_NORMALIZE_TR)
+    return re.sub(r"\s+", " ", raw).strip().lower()
+
+
+_BUYER_OBLIGATION_PATTERNS = (
+    re.compile(r"\ba\s+carico\s+(?:dell['\s]?\s*)?(?:aggiudicatario|acquirente|parte\s+acquirente|nuovo\s+proprietario)\b", re.IGNORECASE),
+    re.compile(r"\b(?:onere|oneri|spese|costi|importi)\s+a\s+carico\s+(?:dell['\s]?)?(?:aggiudicatario|acquirente)", re.IGNORECASE),
+    re.compile(r"\b(?:dovr[aà]|dovranno|tenuto\s+a|tenuti\s+a)\s+sostenere\b", re.IGNORECASE),
+    re.compile(r"\b(?:da|deve|devono)\s+sostenere\b", re.IGNORECASE),
+    re.compile(r"\brestano?\s+a\s+carico\s+(?:dell['\s]?)?(?:aggiudicatario|acquirente)", re.IGNORECASE),
+    re.compile(r"\bsono\s+a\s+carico\s+(?:dell['\s]?)?(?:aggiudicatario|acquirente)", re.IGNORECASE),
+    re.compile(r"\bspese\s+condominiali\s+(?:insolute|arretrate|scadute|morose|non\s+pagate)\b", re.IGNORECASE),
+)
+_BUYER_OBLIGATION_PROXIMITY = re.compile(
+    r"\b(?:sanatoria|oblazione|sanzione|diritti)\b[^.\n]{0,80}\b"
+    r"(?:a\s+carico\s+(?:dell['\s]?)?(?:aggiudicatario|acquirente)|aggiudicatario|acquirente|sostenere)\b",
+    re.IGNORECASE,
+)
+_VALUATION_ARITHMETIC_PATTERNS = (
+    re.compile(r"\d[\d\.\s]*(?:,\d{1,3})?\s*(?:mq|m²|metri\s+quadr\w*|ha|ettar\w*)\b", re.IGNORECASE),
+    re.compile(r"€\s*/\s*(?:mq|m²|ha|ettaro)\b", re.IGNORECASE),
+    re.compile(r"\b(?:€/mq|€/ha|euro/mq|euro/ha)\b", re.IGNORECASE),
+    re.compile(r"€?\s*\d[\d\.\s]*(?:,\d{1,3})?\s*[xX×\*]\s*€?\s*[\d/]", re.IGNORECASE),
+    re.compile(r"€?\s*\d[\d\.\s]*(?:,\d{1,3})?\s*[-−]\s*€?\s*\d[\d\.\s]*(?:,\d{1,3})?\s*=\s*€?\s*\d", re.IGNORECASE),
+    re.compile(r"€?\s*\d[\d\.\s]*(?:,\d{1,3})?\s*\+\s*€?\s*\d[\d\.\s]*(?:,\d{1,3})?\s*=\s*€?\s*\d", re.IGNORECASE),
+)
+_VALUATION_DEDUCTION_RE = re.compile(
+    r"\b(?:valore\s+(?:viene|e['\s]?\s+stato|sara['\s]?|risulta)\s+(?:decurtat|abbattut|ridott|deprezzat|adeguat|corret)\w*|"
+    r"decurtazion\w*|decurtat[oaie]|abbattiment\w*|deprezzament\w*|deprezzat[oaie]|"
+    r"detrazion\w*|detratt[oaie]|riduzion\w*\s+(?:di|del)\s+valore|"
+    r"adeguament\w*\s+e\s+correzion\w*|arrotondat[oaie]\s+a)\b",
+    re.IGNORECASE,
+)
+_PRICE_REFERENCE_RE = re.compile(
+    r"\b(?:prezzo\s+base|base\s+d['\s]?\s*asta|offerta\s+minima|prezzo\s+(?:di\s+)?vendita|"
+    r"valore\s+(?:di\s+)?(?:stima|mercato|venale|cauzionale|commerciale|finale|complessivo)|"
+    r"valore\s+arrotondat\w*|market\s+value|valore\s+(?:dell['\s]?immobile|dei?\s+beni?))\b",
+    re.IGNORECASE,
+)
+_CADASTRAL_RE = re.compile(
+    r"\b(?:rendita\s+catastal\w*|rendita\b[^.\n]{0,80}\b(?:catasto|catastale|foglio|particella|subalterno|"
+    r"mappale|categoria|classe|vani)|valore\s+catastal\w*|valore\s+ai\s+fini\s+catastal\w*)\b",
+    re.IGNORECASE,
+)
+_FORMALITY_RE = re.compile(
+    r"\b(?:formal(?:it|i)\w*|ipotec\w*|pignorament\w*|cancellazion\w*\s+(?:di\s+)?(?:ipotec|trascriz|formal)|"
+    r"trascrizion\w*\s+pregiudizievol|iscrizion\w*\s+ipotecari|registro\s+(?:generale|particolare)|"
+    r"procedura\s+(?:esecutiva|concorsual)|spese\s+procedural\w*)\b",
+    re.IGNORECASE,
+)
+_REGOLARIZZAZIONE_MENTION_RE = re.compile(
+    r"\b(?:regolarizzazion\w*|sanatori\w*|oblazion\w*|sanzion\w*|fiscalizzazion\w*|"
+    r"docfa|tipo\s+mappale|ripristin\w*|demolizion\w*|spese\s+tecnich\w*)\b",
+    re.IGNORECASE,
+)
+
+
+def is_explicit_buyer_obligation(quote: Any) -> bool:
+    """True iff the quote contains explicit buyer-side obligation/exposure language.
+
+    Strict rule: a mention of "regolarizzazione/sanzione/sanatoria" alone is NOT enough.
+    The phrase must tie the cost to the buyer (aggiudicatario / acquirente) or to
+    explicit "sostenere/a carico" language. Condominium arrears require the
+    "insolute/arretrate/scadute" qualifier.
+    """
+    norm = _money_norm(quote)
+    if not norm:
+        return False
+    for pattern in _BUYER_OBLIGATION_PATTERNS:
+        if pattern.search(norm):
+            return True
+    return bool(_BUYER_OBLIGATION_PROXIMITY.search(norm))
+
+
+def is_valuation_arithmetic_context(quote: Any, amount_raw: Any = None) -> bool:
+    """True iff the quote shows valuation arithmetic (mq×€/mq, +/- = formulas)."""
+    norm = _money_norm(quote)
+    if not norm:
+        return False
+    return any(pattern.search(norm) for pattern in _VALUATION_ARITHMETIC_PATTERNS)
+
+
+def is_price_reference_context(quote: Any) -> bool:
+    return bool(_PRICE_REFERENCE_RE.search(_money_norm(quote)))
+
+
+def is_valuation_deduction_context(quote: Any) -> bool:
+    return bool(_VALUATION_DEDUCTION_RE.search(_money_norm(quote)))
+
+
+def is_cadastral_context(quote: Any) -> bool:
+    return bool(_CADASTRAL_RE.search(_money_norm(quote)))
+
+
+def is_formality_procedural_context(quote: Any) -> bool:
+    return bool(_FORMALITY_RE.search(_money_norm(quote)))
+
+
+def _has_page_evidence(candidate: Dict[str, Any]) -> bool:
+    try:
+        page = int(candidate.get("page") or 0)
+    except Exception:
+        page = 0
+    quote = _normalize_text(candidate.get("raw_text"))
+    return page > 0 and bool(quote)
+
+
+_RESOLVER_NON_BUYER_ROLE_TO_GROUP = {
+    "cadastral_rendita": "cadastral_values",
+    "formalities_procedural_amount": "formalities_and_procedural_amounts",
+    "valuation_deduction": "valuation_deductions",
+    "base_auction": "price_references",
+    "final_value": "price_references",
+    "market_value": "price_references",
+    "price": "price_references",
+}
+
+
+def _classification_template(group: str, buyer_relevance: str, explanation: str, *, additive: bool = False, label_role: str = "", verification_note: Optional[str] = None) -> Dict[str, Any]:
+    return {
+        "group": group,
+        "buyer_relevance": buyer_relevance,
+        "additive_to_extra_total": additive,
+        "explanation_it": explanation,
+        "verification_note_it": verification_note,
+        "label_role": label_role or group,
+    }
+
+
+def classify_money_context(candidate: Dict[str, Any]) -> Dict[str, Any]:
+    """Map a money candidate into one customer-facing group + relevance metadata.
+
+    Decision order (highest priority first):
+      1. Arithmetic context (mq×€/mq, +/- = formulas) ALWAYS routes to valuation_references.
+      2. Resolver-assigned non-buyer role (rendita / formalities / valuation_deduction /
+         base_auction / final_value / market_value / price) routes to the corresponding
+         non-buyer group, regardless of obligation language elsewhere in the quote window.
+      3. Quote pattern fallback (cadastral / formality / deduction / price_ref) for amounts
+         the resolver left as buyer_cost_signal_to_verify / unknown_money / total_candidate.
+      4. Explicit buyer obligation language → buyer_cost_signals_to_verify (or
+         buyer_costs_confirmed for safe explicit totals).
+      5. Condominium arrears → buyer_cost_signals_to_verify.
+      6. Plain regolarizzazione/sanatoria mention without obligation → other_monetary_mentions.
+
+    Regolarizzazione/sanatoria mentions alone never promote to buyer cost.
+    """
+    quote = candidate.get("raw_text") or candidate.get("quote") or ""
+    amount_raw = candidate.get("amount_raw") or quote
+    explicit_buyer = is_explicit_buyer_obligation(quote)
+    role = str(candidate.get("role") or "")
+    base_role = str(candidate.get("semantic_base_role") or "")
+    confidence = float(candidate.get("confidence") or 0.0)
+
+    effective_role = base_role if role in {"component_of_total", "total_candidate"} else role
+    if not effective_role:
+        effective_role = role
+
+    arithmetic = is_valuation_arithmetic_context(quote, amount_raw)
+    deduction = is_valuation_deduction_context(quote)
+    price_ref = is_price_reference_context(quote)
+    cadastral = is_cadastral_context(quote)
+    formality = is_formality_procedural_context(quote)
+    regolarizzazione = bool(_REGOLARIZZAZIONE_MENTION_RE.search(_money_norm(quote)))
+
+    if arithmetic and not (
+        explicit_buyer and effective_role in {"buyer_cost_signal_to_verify", "condominium_arrears"}
+    ):
+        classification = _classification_template(
+            "valuation_references",
+            "none",
+            "Calcolo valutativo (es. mq × €/mq oppure somma/differenza nella stima): valore di riferimento, non un costo extra per l'acquirente.",
+            label_role="valuation_reference",
+        )
+        return _finalize_classification(classification, candidate, regolarizzazione, explicit_buyer)
+
+    resolver_group = _RESOLVER_NON_BUYER_ROLE_TO_GROUP.get(effective_role)
+    if resolver_group:
+        explanations = {
+            "cadastral_values": "Valore catastale (rendita / valore fiscale): dato di riferimento, non un costo a carico dell'acquirente.",
+            "formalities_and_procedural_amounts": "Importo procedurale (formalità/ipoteca/cancellazione/trascrizione): non automaticamente a carico dell'acquirente.",
+            "valuation_deductions": "Decurtazione/deprezzamento applicato dal perito alla stima del valore: non è un costo a carico dell'acquirente.",
+            "price_references": "Valore di stima / prezzo base / valore di mercato: riferimento di prezzo, non un costo extra per l'acquirente.",
+        }
+        classification = _classification_template(
+            resolver_group,
+            "none",
+            explanations[resolver_group],
+            label_role=resolver_group,
+        )
+        return _finalize_classification(classification, candidate, regolarizzazione, explicit_buyer)
+
+    if cadastral:
+        classification = _classification_template(
+            "cadastral_values",
+            "none",
+            "Valore catastale (rendita / valore fiscale): dato di riferimento, non un costo a carico dell'acquirente.",
+            label_role="cadastral",
+        )
+        return _finalize_classification(classification, candidate, regolarizzazione, explicit_buyer)
+
+    if formality and not explicit_buyer:
+        classification = _classification_template(
+            "formalities_and_procedural_amounts",
+            "none",
+            "Importo procedurale (formalità/ipoteca/cancellazione/trascrizione): non automaticamente a carico dell'acquirente.",
+            label_role="formality",
+        )
+        return _finalize_classification(classification, candidate, regolarizzazione, explicit_buyer)
+
+    if deduction:
+        classification = _classification_template(
+            "valuation_deductions",
+            "none",
+            "Decurtazione/deprezzamento applicato dal perito alla stima del valore: non è un costo a carico dell'acquirente.",
+            label_role="valuation_deduction",
+        )
+        return _finalize_classification(classification, candidate, regolarizzazione, explicit_buyer)
+
+    if price_ref and not explicit_buyer:
+        classification = _classification_template(
+            "price_references",
+            "none",
+            "Valore di stima / prezzo base / valore di mercato: riferimento di prezzo, non un costo extra per l'acquirente.",
+            label_role="price_reference",
+        )
+        return _finalize_classification(classification, candidate, regolarizzazione, explicit_buyer)
+
+    if explicit_buyer:
+        if confidence >= 0.75 and role == "total_candidate" and candidate.get("should_sum"):
+            classification = _classification_template(
+                "buyer_costs_confirmed",
+                "explicit",
+                "Costo a carico dell'acquirente esplicitamente dichiarato in perizia.",
+                additive=True,
+                label_role="buyer_cost_confirmed",
+                verification_note="Verificare comunque importo e modalità con tecnico/delegato prima dell'offerta.",
+            )
+        else:
+            classification = _classification_template(
+                "buyer_cost_signals_to_verify",
+                "to_verify",
+                "Indicato come obbligo dell'acquirente in perizia: confermare importo e applicabilità prima dell'offerta.",
+                label_role="buyer_cost_signal_to_verify",
+                verification_note="Verificare importo esatto, applicabilità e tempistiche con tecnico/delegato prima dell'offerta.",
+            )
+        return _finalize_classification(classification, candidate, regolarizzazione, explicit_buyer)
+
+    if base_role == "condominium_arrears" or role == "condominium_arrears":
+        classification = _classification_template(
+            "buyer_cost_signals_to_verify",
+            "to_verify",
+            "Spese condominiali potenzialmente esigibili dal nuovo proprietario: verificare esposizione esatta.",
+            label_role="buyer_cost_signal_to_verify",
+            verification_note="Richiedere lettera dell'amministratore condominiale e verificare esposizione residua biennale.",
+        )
+        return _finalize_classification(classification, candidate, regolarizzazione, explicit_buyer)
+
+    if regolarizzazione:
+        classification = _classification_template(
+            "other_monetary_mentions",
+            "none",
+            "Menzione di regolarizzazione/sanatoria senza esplicita responsabilità dell'acquirente: importo riportato ma non promosso a costo certo.",
+            label_role="monetary_mention",
+            verification_note="Verificare con tecnico/delegato se l'importo è effettivamente a carico dell'acquirente.",
+        )
+        return _finalize_classification(classification, candidate, regolarizzazione, explicit_buyer)
+
+    classification = _classification_template(
+        "other_monetary_mentions",
+        "none",
+        "Importo monetario rilevato in perizia: classificazione conservativa.",
+        label_role="monetary_mention",
+    )
+    return _finalize_classification(classification, candidate, regolarizzazione, explicit_buyer)
+
+
+def _finalize_classification(
+    classification: Dict[str, Any],
+    candidate: Dict[str, Any],
+    regolarizzazione: bool,
+    explicit_buyer: bool,
+) -> Dict[str, Any]:
+    if not _has_page_evidence(candidate):
+        classification = dict(classification)
+        classification["group"] = "unsupported_or_unknown_amounts"
+        classification["buyer_relevance"] = "none"
+        classification["additive_to_extra_total"] = False
+        classification["explanation_it"] = "Importo rilevato ma pagine non determinate automaticamente: non promosso a costo certo."
+        classification["verification_note_it"] = "Verificare la pagina e il contesto direttamente nella perizia originale."
+        classification["label_role"] = "unsupported_amount"
+    return classification
+
+
+_GROUP_LABEL_PREFIX = {
+    "buyer_costs_confirmed": "Costo a carico dell'acquirente",
+    "buyer_cost_signals_to_verify": "Costo da verificare",
+    "valuation_references": "Riferimento valutativo (non a carico dell'acquirente)",
+    "price_references": "Riferimento di prezzo (non a carico dell'acquirente)",
+    "valuation_deductions": "Decurtazione nella stima (non a carico dell'acquirente)",
+    "cadastral_values": "Valore catastale (non a carico dell'acquirente)",
+    "formalities_and_procedural_amounts": "Importo procedurale (non a carico dell'acquirente)",
+    "other_monetary_mentions": "Importo monetario citato in perizia",
+    "unsupported_or_unknown_amounts": "Importo senza evidenza paginata",
+}
+
+_CODE_PREFIX = {
+    "buyer_costs_confirmed": "AUTH_BUYER_COST",
+    "buyer_cost_signals_to_verify": "AUTH_BUYER_VERIFY",
+    "valuation_references": "AUTH_VAL_REF",
+    "price_references": "AUTH_PRICE_REF",
+    "valuation_deductions": "AUTH_VAL_DED",
+    "cadastral_values": "AUTH_CADASTRAL",
+    "formalities_and_procedural_amounts": "AUTH_FORMALITY",
+    "other_monetary_mentions": "AUTH_MONEY_MENTION",
+    "unsupported_or_unknown_amounts": "AUTH_UNSUPPORTED",
+}
+
+
+def make_customer_money_item(
+    candidate: Dict[str, Any],
+    classification: Dict[str, Any],
+    index: int,
+) -> Dict[str, Any]:
+    """Build a customer-safe money item carrying actionable DA VERIFICARE metadata."""
+    group = str(classification.get("group") or "other_monetary_mentions")
+    amount = _candidate_amount(candidate)
+    amount_text = _amount_label(amount)
+    base_label = _GROUP_LABEL_PREFIX.get(group, "Importo monetario")
+    label = f"{base_label}: {amount_text}" if amount_text else base_label
+    evidence = _evidence_from_candidate(candidate)
+    contract_state = (
+        "quantified_estimate"
+        if group == "buyer_costs_confirmed"
+        else "cost_signal_to_verify"
+        if group == "buyer_cost_signals_to_verify"
+        else "info_only"
+    )
+    visible_status = (
+        "explicit_buyer_obligation"
+        if group == "buyer_costs_confirmed"
+        else "to_verify"
+        if group == "buyer_cost_signals_to_verify"
+        else "info_only"
+    )
+    code_prefix = _CODE_PREFIX.get(group, "AUTH_MONEY")
+    explanation = str(classification.get("explanation_it") or "")
+    verification_note = classification.get("verification_note_it")
+    note_pieces: List[str] = []
+    if explanation:
+        note_pieces.append(explanation)
+    if verification_note:
+        note_pieces.append(str(verification_note))
+    note_text = " ".join(note_pieces).strip() or "Importo monetario classificato in modo conservativo."
+    page_value: Optional[int] = None
+    if evidence and isinstance(evidence[0], dict):
+        page_candidate = evidence[0].get("page")
+        if isinstance(page_candidate, int):
+            page_value = page_candidate
+    payload: Dict[str, Any] = {
+        "code": f"{code_prefix}_{index:02d}",
+        "label_it": label,
+        "label_en": label,
+        "type": "ESTIMATE" if group == "buyer_costs_confirmed" else "SIGNAL_TO_VERIFY" if group == "buyer_cost_signals_to_verify" else "INFO",
+        "group": group,
+        "role": str(candidate.get("semantic_base_role") or candidate.get("role") or "unknown_money"),
+        "buyer_relevance": classification.get("buyer_relevance") or "none",
+        "additive_to_extra_total": bool(classification.get("additive_to_extra_total")),
+        "amount_eur": int(round(amount)) if amount is not None else None,
+        "stima_euro": int(round(amount)) if amount is not None else None,
+        "raw_value": candidate.get("amount_raw") or _normalize_text(candidate.get("raw_text"))[:120],
+        "page": page_value,
+        "stima_nota": note_text,
+        "note_it": note_text,
+        "explanation_it": explanation,
+        "verification_note_it": str(verification_note) if verification_note else None,
+        "contract_state": contract_state,
+        "customer_visible_amount_status": visible_status,
+        "evidence": evidence,
+        "fonte_perizia": {"value": "Perizia", "evidence": evidence},
+    }
+    return payload
+
+
 def _section3_from_money_box(money_box: Dict[str, Any]) -> Dict[str, Any]:
     section3 = copy.deepcopy(money_box)
     total = money_box.get("total_extra_costs") if isinstance(money_box.get("total_extra_costs"), dict) else {}
@@ -426,61 +819,78 @@ def _section3_from_money_box(money_box: Dict[str, Any]) -> Dict[str, Any]:
     return section3
 
 
+_GROUP_LIMITS = {
+    "buyer_costs_confirmed": 12,
+    "buyer_cost_signals_to_verify": 16,
+    "valuation_references": 24,
+    "price_references": 16,
+    "valuation_deductions": 16,
+    "cadastral_values": 12,
+    "formalities_and_procedural_amounts": 16,
+    "other_monetary_mentions": 24,
+    "unsupported_or_unknown_amounts": 16,
+}
+
+_NON_BUYER_GROUPS = (
+    "valuation_references",
+    "price_references",
+    "valuation_deductions",
+    "cadastral_values",
+    "formalities_and_procedural_amounts",
+)
+
+
 def _build_projected_money_box(money_value: Dict[str, Any], legacy_result: Dict[str, Any]) -> Tuple[Optional[Dict[str, Any]], Dict[str, Any]]:
     raw_candidates = money_value.get("money_candidates") if isinstance(money_value.get("money_candidates"), list) else []
     candidates = [candidate for candidate in raw_candidates if isinstance(candidate, dict)]
-    safe_costs = _dedupe_candidates(
-        (
-            candidate
-            for candidate in candidates
-            if candidate.get("is_customer_safe_cost")
-            and candidate.get("role") != "component_of_total"
-            and _candidate_amount(candidate) is not None
-        ),
-        12,
-    )
-    signals = _dedupe_candidates(
-        (
-            candidate
-            for candidate in candidates
-            if not candidate.get("is_customer_safe_cost")
-            and (
-                candidate.get("role") in BUYER_SIGNAL_ROLES
-                or (
-                    candidate.get("role") == "total_candidate"
-                    and candidate.get("semantic_base_role") in BUYER_SIGNAL_ROLES
-                )
-            )
-            and candidate.get("role") != "component_of_total"
-            and _candidate_amount(candidate) is not None
-        ),
-        16,
-    )
-    excluded = _dedupe_candidates(
-        (
-            candidate
-            for candidate in candidates
-            if candidate.get("role") in NON_BUYER_COST_ROLES
-            and _candidate_amount(candidate) is not None
-        ),
-        24,
-    )
-    valuation = [candidate for candidate in excluded if candidate.get("role") in {"valuation_deduction", "price", "base_auction", "final_value", "market_value"}]
-    safe_total_candidates = _dedupe_candidates(
-        (
-            candidate
-            for candidate in candidates
-            if candidate.get("role") == "total_candidate"
-            and candidate.get("is_customer_safe_cost")
+
+    eligible = [
+        candidate
+        for candidate in candidates
+        if _candidate_amount(candidate) is not None
+    ]
+    eligible = _dedupe_candidates(eligible, limit=200)
+
+    grouped: Dict[str, List[Dict[str, Any]]] = {key: [] for key in _GROUP_LIMITS}
+    counters: Dict[str, int] = {key: 0 for key in _GROUP_LIMITS}
+    classified_total_candidate: Optional[Dict[str, Any]] = None
+
+    for candidate in eligible:
+        is_component = candidate.get("role") == "component_of_total"
+        classification = classify_money_context(candidate)
+        group = str(classification.get("group") or "other_monetary_mentions")
+        if is_component and group in {"buyer_costs_confirmed", "buyer_cost_signals_to_verify"}:
+            group = "other_monetary_mentions"
+            classification = dict(classification)
+            classification["group"] = group
+            classification["buyer_relevance"] = "none"
+            classification["additive_to_extra_total"] = False
+        if group not in grouped:
+            group = "other_monetary_mentions"
+            classification["group"] = group
+        if counters[group] >= _GROUP_LIMITS[group]:
+            continue
+        counters[group] += 1
+        item = make_customer_money_item(candidate, classification, counters[group])
+        if is_component:
+            item["is_component_of_total"] = True
+            item["additive_to_extra_total"] = False
+            item["parent_total_candidate_id"] = candidate.get("parent_total_candidate_id")
+        grouped[group].append(item)
+        if (
+            group == "buyer_costs_confirmed"
+            and classified_total_candidate is None
+            and candidate.get("role") == "total_candidate"
             and candidate.get("should_sum")
-            and _candidate_amount(candidate) is not None
-        ),
-        3,
-    )
+        ):
+            classified_total_candidate = {"candidate": candidate, "item": item}
+
     summary = money_value.get("summary") if isinstance(money_value.get("summary"), dict) else {}
     double_count_risk = bool(summary.get("double_count_risk")) or any(candidate.get("parent_total_candidate_id") for candidate in candidates)
     stale_removed = bool(STALE_REGOLARIZZAZIONE_RE.search(_legacy_money_text(legacy_result)))
-    if not (safe_costs or signals or excluded or stale_removed or double_count_risk):
+
+    any_items = any(grouped[key] for key in grouped)
+    if not (any_items or stale_removed or double_count_risk):
         return None, {
             "safe_cost_count": 0,
             "signal_count": 0,
@@ -490,15 +900,33 @@ def _build_projected_money_box(money_value: Dict[str, Any], legacy_result: Dict[
             "stale_removed": stale_removed,
         }
 
-    items = [_cost_signal_payload(candidate, idx, safe_cost=True) for idx, candidate in enumerate(safe_costs, start=1)]
-    signal_items = [_cost_signal_payload(candidate, idx, safe_cost=False) for idx, candidate in enumerate(signals, start=1)]
-    excluded_items = [_excluded_payload(candidate, idx) for idx, candidate in enumerate(excluded, start=1)]
-    valuation_items = [_excluded_payload(candidate, idx) for idx, candidate in enumerate(valuation[:16], start=1)]
+    buyer_confirmed = grouped["buyer_costs_confirmed"]
+    buyer_signals = grouped["buyer_cost_signals_to_verify"]
+    valuation_refs = grouped["valuation_references"]
+    price_refs = grouped["price_references"]
+    valuation_deds = grouped["valuation_deductions"]
+    cadastral_vals = grouped["cadastral_values"]
+    formalities = grouped["formalities_and_procedural_amounts"]
+    other_mentions = grouped["other_monetary_mentions"]
+    unsupported = grouped["unsupported_or_unknown_amounts"]
+
+    excluded_non_buyer_cost_amounts: List[Dict[str, Any]] = []
+    for key in _NON_BUYER_GROUPS:
+        for item in grouped[key]:
+            excluded_non_buyer_cost_amounts.append(copy.deepcopy(item))
+
+    qualitative_burdens = [
+        copy.deepcopy(item)
+        for item in buyer_signals
+        if item.get("amount_eur") is None or not item.get("additive_to_extra_total")
+    ] or copy.deepcopy(buyer_signals)
 
     total: Dict[str, Any]
-    if safe_total_candidates:
-        candidate = safe_total_candidates[0]
+    total_extra_cost_eur: Optional[int]
+    if classified_total_candidate:
+        candidate = classified_total_candidate["candidate"]
         amount = int(round(float(candidate.get("amount_eur"))))
+        total_extra_cost_eur = amount
         total = {
             "range": {"min": amount, "max": amount},
             "max_is_open": False,
@@ -507,36 +935,64 @@ def _build_projected_money_box(money_value: Dict[str, Any], legacy_result: Dict[
             "evidence": _evidence_from_candidate(candidate),
         }
     else:
-        note = "Oneri non quantificati in modo difendibile: usare le voci come checklist da verificare; nessun totale economico certo e' indicato."
-        if not (items or signal_items):
-            note = "Nessun costo extra buyer-side certo ricavabile dalla perizia; importi valutativi/procedurali esclusi dal totale."
+        total_extra_cost_eur = None
+        if buyer_confirmed or buyer_signals:
+            note = (
+                "Oneri non quantificati in modo difendibile come totale unico: usare le voci sotto come checklist "
+                "di verifica; nessun totale economico certo è indicato."
+            )
+            contract_state = "unresolved_explained"
+        else:
+            note = (
+                "Nessun costo extra buyer-side certo ricavabile dalla perizia; gli importi valutativi/procedurali "
+                "sono mostrati come riferimenti e non concorrono al totale dei costi extra."
+            )
+            contract_state = "info_only"
+        first_evidence_source: Optional[Dict[str, Any]] = None
+        for bucket in (buyer_confirmed, buyer_signals, valuation_refs, valuation_deds, cadastral_vals, formalities, price_refs, other_mentions):
+            if bucket:
+                first_evidence_source = bucket[0]
+                break
         total = {
             "min": None,
             "max": None,
             "max_is_open": False,
             "note": note,
-            "contract_state": "unresolved_explained" if (items or signal_items) else "info_only",
-            "evidence": copy.deepcopy((items or signal_items or excluded_items or [{}])[0].get("evidence", [])),
+            "contract_state": contract_state,
+            "evidence": copy.deepcopy((first_evidence_source or {}).get("evidence", [])),
         }
 
     money_box = {
         "policy": "AUTHORITY_CONSERVATIVE",
-        "items": items,
-        "cost_signals_to_verify": signal_items,
-        "qualitative_burdens": copy.deepcopy(signal_items),
-        "valuation_deductions": [item for item in valuation_items if "valutativo" in str(item.get("label_it") or "").lower()],
-        "valuation_reference_amounts": valuation_items,
-        "excluded_non_buyer_cost_amounts": excluded_items,
-        "unsupported_or_unknown_amounts": [],
+        "items": copy.deepcopy(buyer_confirmed),
+        "buyer_costs_confirmed": buyer_confirmed,
+        "buyer_cost_signals_to_verify": buyer_signals,
+        "cost_signals_to_verify": copy.deepcopy(buyer_signals),
+        "valuation_references": valuation_refs,
+        "valuation_reference_amounts": copy.deepcopy(valuation_refs),
+        "price_references": price_refs,
+        "valuation_deductions": valuation_deds,
+        "cadastral_values": cadastral_vals,
+        "formalities_and_procedural_amounts": formalities,
+        "other_monetary_mentions": other_mentions,
+        "qualitative_burdens": qualitative_burdens,
+        "excluded_non_buyer_cost_amounts": excluded_non_buyer_cost_amounts,
+        "unsupported_or_unknown_amounts": unsupported,
         "total_extra_costs": total,
+        "total_extra_cost_eur": total_extra_cost_eur,
     }
     if double_count_risk:
         money_box["component_total_policy"] = "componenti_non_sommate_con_totale"
     return money_box, {
-        "safe_cost_count": len(items),
-        "signal_count": len(signal_items),
-        "excluded_count": len(excluded_items),
-        "valuation_count": len(valuation_items),
+        "safe_cost_count": len(buyer_confirmed),
+        "signal_count": len(buyer_signals),
+        "excluded_count": len(excluded_non_buyer_cost_amounts),
+        "valuation_count": len(valuation_refs) + len(valuation_deds),
+        "price_reference_count": len(price_refs),
+        "cadastral_count": len(cadastral_vals),
+        "formality_count": len(formalities),
+        "other_mention_count": len(other_mentions),
+        "unsupported_count": len(unsupported),
         "double_count_risk": double_count_risk,
         "stale_removed": stale_removed,
     }

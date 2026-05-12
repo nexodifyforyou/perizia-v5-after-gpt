@@ -2249,6 +2249,19 @@ const AnalysisResult = () => {
   const costSignalsToVerify = Array.isArray(moneyBox.cost_signals_to_verify)
     ? moneyBox.cost_signals_to_verify
     : [];
+  const moneyMapValuationReferences = Array.isArray(moneyBox.valuation_references)
+    ? moneyBox.valuation_references
+    : (Array.isArray(moneyBox.valuation_reference_amounts) ? moneyBox.valuation_reference_amounts : []);
+  const moneyMapPriceReferences = Array.isArray(moneyBox.price_references) ? moneyBox.price_references : [];
+  const moneyMapCadastralValues = Array.isArray(moneyBox.cadastral_values) ? moneyBox.cadastral_values : [];
+  const moneyMapFormalities = Array.isArray(moneyBox.formalities_and_procedural_amounts)
+    ? moneyBox.formalities_and_procedural_amounts
+    : [];
+  const moneyMapOtherMentions = Array.isArray(moneyBox.other_monetary_mentions) ? moneyBox.other_monetary_mentions : [];
+  const moneyMapBuyerConfirmed = Array.isArray(moneyBox.buyer_costs_confirmed) ? moneyBox.buyer_costs_confirmed : [];
+  const moneyMapUnsupported = Array.isArray(moneyBox.unsupported_or_unknown_amounts)
+    ? moneyBox.unsupported_or_unknown_amounts
+    : [];
   const moneyBoxBreakdown = canonicalMoneyBoxItems.reduce((acc, item) => {
     const euroValue = parseNumericEuro(item?.stima_euro);
     const marketRange = item?.market_range_eur && typeof item.market_range_eur === 'object'
@@ -3885,6 +3898,88 @@ const AnalysisResult = () => {
                   <p className="text-zinc-500 text-sm">Nessun segnale di costo ancorato disponibile.</p>
                 )}
               </div>
+
+              {moneyMapBuyerConfirmed.length > 0 && (
+                <div className="p-4 rounded-lg border border-emerald-700/40 bg-zinc-950/40 mb-5">
+                  <h3 className="text-sm font-semibold text-zinc-100 mb-3">Costi potenzialmente a carico dell'acquirente / Buyer-side costs (confirmed)</h3>
+                  <div className="space-y-3">
+                    {moneyMapBuyerConfirmed.map((item, index) => (
+                      <MoneyBoxItem key={`buyer_confirmed_${index}`} item={item} />
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {(moneyMapValuationReferences.length > 0 || moneyMapPriceReferences.length > 0) && (
+                <div className="p-4 rounded-lg border border-zinc-800 bg-zinc-950/40 mb-5">
+                  <h3 className="text-sm font-semibold text-zinc-100 mb-3">Valori di stima e riferimenti di prezzo / Valuation & price references</h3>
+                  <p className="text-xs text-zinc-500 mb-3">
+                    Importi che derivano da calcoli o riferimenti valutativi (es. mq × €/mq, valore di stima, prezzo base). Non sono costi a carico dell'acquirente.
+                  </p>
+                  <div className="space-y-3">
+                    {moneyMapValuationReferences.map((item, index) => (
+                      <MoneyBoxItem key={`val_ref_${index}`} item={item} />
+                    ))}
+                    {moneyMapPriceReferences.map((item, index) => (
+                      <MoneyBoxItem key={`price_ref_${index}`} item={item} />
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {moneyMapCadastralValues.length > 0 && (
+                <div className="p-4 rounded-lg border border-zinc-800 bg-zinc-950/40 mb-5">
+                  <h3 className="text-sm font-semibold text-zinc-100 mb-3">Rendite catastali / valori catastali</h3>
+                  <p className="text-xs text-zinc-500 mb-3">Dato fiscale: non un costo a carico dell'acquirente.</p>
+                  <div className="space-y-3">
+                    {moneyMapCadastralValues.map((item, index) => (
+                      <MoneyBoxItem key={`cadastral_${index}`} item={item} />
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {moneyMapFormalities.length > 0 && (
+                <div className="p-4 rounded-lg border border-zinc-800 bg-zinc-950/40 mb-5">
+                  <h3 className="text-sm font-semibold text-zinc-100 mb-3">Formalità e importi procedurali</h3>
+                  <p className="text-xs text-zinc-500 mb-3">
+                    Importi legati a formalità (ipoteca, cancellazione, trascrizione). Non automaticamente a carico dell'acquirente; verificare nel dispositivo di vendita.
+                  </p>
+                  <div className="space-y-3">
+                    {moneyMapFormalities.map((item, index) => (
+                      <MoneyBoxItem key={`formality_${index}`} item={item} />
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {moneyMapOtherMentions.length > 0 && (
+                <div className="p-4 rounded-lg border border-zinc-800 bg-zinc-950/40 mb-5">
+                  <h3 className="text-sm font-semibold text-zinc-100 mb-3">Altri importi monetari rilevati</h3>
+                  <p className="text-xs text-zinc-500 mb-3">
+                    Importi citati in perizia senza esplicita responsabilità dell'acquirente. Da verificare con tecnico/delegato.
+                  </p>
+                  <div className="space-y-3">
+                    {moneyMapOtherMentions.map((item, index) => (
+                      <MoneyBoxItem key={`other_money_${index}`} item={item} />
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {moneyMapUnsupported.length > 0 && (
+                <div className="p-4 rounded-lg border border-zinc-800 bg-zinc-950/30 mb-5">
+                  <h3 className="text-sm font-semibold text-zinc-100 mb-3">Importi senza evidenza paginata</h3>
+                  <p className="text-xs text-zinc-500 mb-3">
+                    Importi rilevati senza pagina/contesto certo: verificare manualmente nella perizia originale.
+                  </p>
+                  <div className="space-y-3">
+                    {moneyMapUnsupported.map((item, index) => (
+                      <MoneyBoxItem key={`unsupported_${index}`} item={item} />
+                    ))}
+                  </div>
+                </div>
+              )}
 
               <div className="mt-6 p-4 bg-gold/10 border border-gold/30 rounded-lg">
                 <div className="flex items-center justify-between gap-3">

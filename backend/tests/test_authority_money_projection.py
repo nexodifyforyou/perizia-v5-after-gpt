@@ -143,8 +143,8 @@ def test_money_projection_scrubs_via_umbria_stale_31_6_and_surfaces_verify_signa
     )
     shadow = _shadow(
         "STIMA / FORMAZIONE LOTTI\n"
-        "Spese tecniche di regolarizzazione Euro 5.032,00.\n"
-        "Sanzione per sanatoria Euro 3.000,00."
+        "Spese tecniche di regolarizzazione Euro 5.032,00 a carico dell'aggiudicatario.\n"
+        "Sanzione per sanatoria Euro 3.000,00 a carico dell'acquirente."
     )
 
     meta = apply_authority_money_projection_if_enabled(result, authority_shadow=shadow, analysis_id="analysis_85b6655bedd2")
@@ -182,8 +182,8 @@ def test_money_projection_removes_stale_qa_gate_money_claim_from_customer_respon
     }
     shadow = _shadow(
         "STIMA / FORMAZIONE LOTTI\n"
-        "Spese tecniche di regolarizzazione Euro 5.032,00.\n"
-        "Sanzione per sanatoria Euro 3.000,00."
+        "Spese tecniche di regolarizzazione Euro 5.032,00 a carico dell'aggiudicatario.\n"
+        "Sanzione per sanatoria Euro 3.000,00 a carico dell'acquirente."
     )
 
     meta = apply_authority_money_projection_if_enabled(result, authority_shadow=shadow)
@@ -348,10 +348,17 @@ def test_non_buyer_amount_roles_do_not_become_extra_cost_items(monkeypatch):
     assert box["cost_signals_to_verify"] == []
     assert box["total_extra_costs"]["min"] is None
     assert box["total_extra_costs"]["max"] is None
-    labels = _text_blob(box["excluded_non_buyer_cost_amounts"])
-    assert "Rendita catastale: dato fiscale" in labels
-    assert "Formalita/cancellazione" in labels
-    assert "Importo valutativo" in labels
+    cadastral_amounts = {item.get("amount_eur") for item in box["cadastral_values"]}
+    price_amounts = {item.get("amount_eur") for item in box["price_references"]}
+    valuation_dedution_amounts = {item.get("amount_eur") for item in box["valuation_deductions"]}
+    formality_amounts = {item.get("amount_eur") for item in box["formalities_and_procedural_amounts"]}
+    assert 123 in cadastral_amounts
+    assert 80000 in price_amounts
+    assert 100000 in price_amounts
+    assert 10000 in valuation_dedution_amounts
+    assert 200 in formality_amounts
+    excluded_amounts = {item.get("amount_eur") for item in box["excluded_non_buyer_cost_amounts"]}
+    assert {123, 80000, 100000, 10000, 200}.issubset(excluded_amounts)
 
 
 def test_component_total_double_count_is_blocked(monkeypatch):
@@ -415,8 +422,8 @@ async def test_read_time_money_projection_is_response_only_and_mongo_unchanged(f
     monkeypatch.delenv(server.AUTHORITY_LOT_PROJECTION_FLAG, raising=False)
     shadow = _shadow(
         "STIMA / FORMAZIONE LOTTI\n"
-        "Spese tecniche di regolarizzazione Euro 5.032,00.\n"
-        "Sanzione per sanatoria Euro 3.000,00."
+        "Spese tecniche di regolarizzazione Euro 5.032,00 a carico dell'aggiudicatario.\n"
+        "Sanzione per sanatoria Euro 3.000,00 a carico dell'acquirente."
     )
     monkeypatch.setattr(server, "_load_authority_shadow_for_detail_read", lambda _analysis_id, _analysis: shadow)
     result = _result_with_money_box(
@@ -468,3 +475,327 @@ async def test_read_time_money_projection_is_response_only_and_mongo_unchanged(f
     box = response["result"]["customer_decision_contract"]["money_box"]
     assert {5032, 3000}.issubset({item.get("stima_euro") for item in box["cost_signals_to_verify"]})
     assert _leak_paths(response) == []
+
+
+# ---------------------------------------------------------------------------
+# Money Map redesign — tests 1-13 from brief
+# ---------------------------------------------------------------------------
+
+
+def _amounts_for(box: Dict[str, Any], key: str) -> set:
+    return {item.get("amount_eur") for item in box.get(key, []) if isinstance(item, dict)}
+
+
+def _money_map_apply(monkeypatch, *texts: str) -> Dict[str, Any]:
+    monkeypatch.setenv(FEATURE_FLAG, "1")
+    result = _result_with_money_box([])
+    shadow = _shadow(*texts)
+    apply_authority_money_projection_if_enabled(result, authority_shadow=shadow)
+    return result["customer_decision_contract"]["money_box"]
+
+
+_CASA_LIKE_RICH_CONTEXT = (
+    "STIMA / FORMAZIONE LOTTI\n"
+    "Valore di stima Euro 500.000,00. Prezzo base d'asta Euro 482.799,00. "
+    "Spese tecniche di regolarizzazione a carico dell'aggiudicatario Euro 1.500,00."
+)
+
+
+def test_money_map_valuation_arithmetic_is_not_buyer_cost(monkeypatch):
+    box = _money_map_apply(
+        monkeypatch,
+        "STIMA / FORMAZIONE LOTTI\nmq 374,23 x €/mq 1.300,00 = € 486.499,00",
+        _CASA_LIKE_RICH_CONTEXT,
+    )
+    assert 486499 not in _amounts_for(box, "cost_signals_to_verify")
+    assert 486499 not in _amounts_for(box, "buyer_cost_signals_to_verify")
+    val_refs = _amounts_for(box, "valuation_references")
+    val_ref_amounts = _amounts_for(box, "valuation_reference_amounts")
+    assert 486499 in (val_refs | val_ref_amounts)
+    for item in box.get("valuation_references", []):
+        if item.get("amount_eur") == 486499:
+            assert item.get("page")
+            assert item.get("evidence")
+            assert item.get("explanation_it")
+
+
+def test_money_map_decurtation_formula_is_not_buyer_cost(monkeypatch):
+    box = _money_map_apply(
+        monkeypatch,
+        "STIMA / FORMAZIONE LOTTI\nIl valore viene decurtato delle spese di regolarizzazione catastali "
+        "Euro 1.700,00 e regolarizzazione urbanistica Euro 2.000,00, totale Euro 3.700,00. "
+        "486.499,00 - 3.700,00 = 482.799,00.",
+        _CASA_LIKE_RICH_CONTEXT,
+    )
+    buyer_amounts = _amounts_for(box, "cost_signals_to_verify") | _amounts_for(box, "buyer_cost_signals_to_verify")
+    confirmed_amounts = _amounts_for(box, "buyer_costs_confirmed")
+    for amount in (2000, 1700, 3700, 486499, 482799):
+        assert amount not in buyer_amounts, f"€{amount} should not be a buyer cost signal"
+        assert amount not in confirmed_amounts, f"€{amount} should not be a confirmed buyer cost"
+    surfaced = (
+        _amounts_for(box, "excluded_non_buyer_cost_amounts")
+        | _amounts_for(box, "valuation_deductions")
+        | _amounts_for(box, "valuation_references")
+        | _amounts_for(box, "other_monetary_mentions")
+    )
+    for amount in (2000, 1700, 3700):
+        assert amount in surfaced, f"€{amount} must be visible in a non-buyer money group"
+
+
+def test_money_map_regolarizzazione_alone_is_not_buyer_cost(monkeypatch):
+    box = _money_map_apply(
+        monkeypatch,
+        "STIMA / FORMAZIONE LOTTI\nRegolarizzazione urbanistica Euro 2.000,00.",
+    )
+    buyer = _amounts_for(box, "cost_signals_to_verify") | _amounts_for(box, "buyer_cost_signals_to_verify")
+    assert 2000 not in buyer
+    surfaced = (
+        _amounts_for(box, "other_monetary_mentions")
+        | _amounts_for(box, "valuation_references")
+        | _amounts_for(box, "unsupported_or_unknown_amounts")
+    )
+    assert 2000 in surfaced
+
+
+def test_money_map_regolarizzazione_with_buyer_obligation_is_signal(monkeypatch):
+    box = _money_map_apply(
+        monkeypatch,
+        "STIMA / FORMAZIONE LOTTI\nCosti di regolarizzazione a carico dell'aggiudicatario Euro 2.000,00.",
+    )
+    signals = box.get("buyer_cost_signals_to_verify", []) + box.get("cost_signals_to_verify", [])
+    target = next((item for item in signals if item.get("amount_eur") == 2000), None)
+    assert target is not None, "€2.000 should appear as buyer_cost_signal_to_verify"
+    assert target.get("page")
+    assert target.get("evidence")
+    assert target.get("verification_note_it")
+
+
+def test_money_map_rendita_prezzo_stima_never_buyer_cost(monkeypatch):
+    box = _money_map_apply(
+        monkeypatch,
+        "STIMA / FORMAZIONE LOTTI\nRendita catastale Euro 123,00.",
+        "STIMA / FORMAZIONE LOTTI\nPrezzo base d'asta Euro 80.000,00.",
+        "STIMA / FORMAZIONE LOTTI\nValore di stima Euro 100.000,00.",
+        "STIMA / FORMAZIONE LOTTI\nDeprezzamento Euro 10.000,00.",
+    )
+    buyer = _amounts_for(box, "cost_signals_to_verify") | _amounts_for(box, "buyer_cost_signals_to_verify") | _amounts_for(box, "buyer_costs_confirmed")
+    for amount in (123, 80000, 100000, 10000):
+        assert amount not in buyer
+
+
+def test_money_map_formality_amounts_are_not_buyer_cost(monkeypatch):
+    box = _money_map_apply(
+        monkeypatch,
+        "FORMALITA PREGIUDIZIEVOLI\nCancellazione ipoteca Euro 200,00.\nIscrizione ipotecaria Euro 500,00.",
+    )
+    buyer = _amounts_for(box, "cost_signals_to_verify") | _amounts_for(box, "buyer_cost_signals_to_verify") | _amounts_for(box, "buyer_costs_confirmed")
+    assert 200 not in buyer
+    assert 500 not in buyer
+    formality_amounts = _amounts_for(box, "formalities_and_procedural_amounts")
+    assert {200, 500}.issubset(formality_amounts)
+
+
+def test_money_map_casa_ai_venti_regression(monkeypatch):
+    box = _money_map_apply(
+        monkeypatch,
+        "STIMA / FORMAZIONE LOTTI\n"
+        "mq 374,23 x €/mq 1.300,00 = € 486.499,00. "
+        "Il valore viene decurtato: regolarizzazioni catastali Euro 1.700,00, "
+        "regolarizzazioni urbanistiche Euro 2.000,00, totale Euro 3.700,00. "
+        "486.499,00 - 3.700,00 = 482.799,00.",
+        _CASA_LIKE_RICH_CONTEXT,
+    )
+    buyer = _amounts_for(box, "cost_signals_to_verify") | _amounts_for(box, "buyer_cost_signals_to_verify") | _amounts_for(box, "buyer_costs_confirmed")
+    assert 486499 not in buyer
+    assert 2000 not in buyer
+    val_visible = _amounts_for(box, "valuation_references") | _amounts_for(box, "valuation_reference_amounts") | _amounts_for(box, "excluded_non_buyer_cost_amounts")
+    assert 486499 in val_visible
+    deductions_or_excluded = (
+        _amounts_for(box, "valuation_deductions")
+        | _amounts_for(box, "excluded_non_buyer_cost_amounts")
+        | _amounts_for(box, "other_monetary_mentions")
+        | _amounts_for(box, "valuation_references")
+    )
+    assert 2000 in deductions_or_excluded
+    assert box.get("total_extra_cost_eur") is None
+
+
+def test_money_map_via_umbria_no_stale_amounts(monkeypatch):
+    monkeypatch.setenv(FEATURE_FLAG, "1")
+    result = _result_with_money_box(
+        [
+            {"label_it": "Regolarizzazione: € 31", "stima_euro": 31},
+            {"label_it": "Regolarizzazione: € 6", "stima_euro": 6},
+        ]
+    )
+    shadow = _shadow(
+        "STIMA / FORMAZIONE LOTTI\n"
+        "Valore di stima Euro 50.000,00. Deprezzamento Euro 5.000,00. "
+        "Rendita catastale Euro 250,00."
+    )
+    apply_authority_money_projection_if_enabled(result, authority_shadow=shadow)
+    box = result["customer_decision_contract"]["money_box"]
+    text = _text_blob(box)
+    assert "Regolarizzazione: € 31" not in text
+    assert "Regolarizzazione: € 6" not in text
+    assert box["total_extra_costs"]["min"] is None
+    assert box["total_extra_costs"]["max"] is None
+    buyer = _amounts_for(box, "cost_signals_to_verify") | _amounts_for(box, "buyer_costs_confirmed")
+    assert 50000 not in buyer
+    assert 5000 not in buyer
+    assert 250 not in buyer
+
+
+def test_money_map_ostuni_regolarizzazione_duration_is_not_money(monkeypatch):
+    monkeypatch.setenv(FEATURE_FLAG, "1")
+    result = _result_with_money_box([{"label_it": "Regolarizzazione: 6 mesi", "note_it": "durata pratica"}])
+    shadow = _shadow(
+        "STIMA / FORMAZIONE LOTTI\n"
+        "Tempi necessari per la regolarizzazione: 6 mesi."
+    )
+    apply_authority_money_projection_if_enabled(result, authority_shadow=shadow)
+    box = result["customer_decision_contract"]["money_box"]
+    buyer = _amounts_for(box, "cost_signals_to_verify") | _amounts_for(box, "buyer_costs_confirmed")
+    assert 6 not in buyer
+
+
+def test_money_map_flag_off_preserves_legacy_money_box(monkeypatch):
+    monkeypatch.delenv(FEATURE_FLAG, raising=False)
+    result = _result_with_money_box([{"label_it": "Regolarizzazione: € 31", "stima_euro": 31}])
+    before = copy.deepcopy(result)
+    apply_authority_money_projection_if_enabled(
+        result,
+        authority_shadow=_shadow(
+            "STIMA / FORMAZIONE LOTTI\nmq 374,23 x €/mq 1.300,00 = € 486.499,00",
+        ),
+    )
+    assert result == before
+
+
+def test_money_map_da_verificare_always_has_evidence(monkeypatch):
+    box = _money_map_apply(
+        monkeypatch,
+        "STIMA / FORMAZIONE LOTTI\nCosti di regolarizzazione a carico dell'aggiudicatario Euro 2.000,00 da verificare.",
+    )
+    signals = (
+        box.get("buyer_cost_signals_to_verify", [])
+        + box.get("cost_signals_to_verify", [])
+        + box.get("other_monetary_mentions", [])
+        + box.get("unsupported_or_unknown_amounts", [])
+    )
+    for item in signals:
+        page = item.get("page")
+        if page is None or page == 0:
+            assert item.get("group") == "unsupported_or_unknown_amounts"
+            assert "pagine non determinate" in str(item.get("verification_note_it") or "").lower() or item.get("verification_note_it")
+        else:
+            assert item.get("evidence"), f"DA VERIFICARE item must have evidence: {item}"
+            assert item.get("verification_note_it") or item.get("explanation_it"), (
+                "Each customer-visible money item needs explanation_it or verification_note_it"
+            )
+
+
+def test_money_map_no_invented_total_when_only_references(monkeypatch):
+    box = _money_map_apply(
+        monkeypatch,
+        "STIMA / FORMAZIONE LOTTI\nValore di stima Euro 100.000,00. Rendita catastale Euro 250,00.",
+    )
+    assert box["total_extra_costs"]["min"] is None
+    assert box["total_extra_costs"]["max"] is None
+    assert box.get("total_extra_cost_eur") is None
+
+
+@pytest.mark.parametrize(
+    "formula_text, expected_amount",
+    [
+        ("mq 250,00 x €/mq 1.500,00 = € 375.000,00", 375000),
+        ("mq 80,50 x €/mq 2.100,00 = € 169.050,00", 169050),
+        ("ha 1,25 x €/ha 12.000,00 = € 15.000,00", 15000),
+    ],
+)
+def test_money_map_generic_unit_price_formulas_are_valuation_references(monkeypatch, formula_text, expected_amount):
+    box = _money_map_apply(
+        monkeypatch,
+        f"STIMA / FORMAZIONE LOTTI\n{formula_text}",
+        _CASA_LIKE_RICH_CONTEXT,
+    )
+    buyer = _amounts_for(box, "cost_signals_to_verify") | _amounts_for(box, "buyer_costs_confirmed")
+    assert expected_amount not in buyer, f"{expected_amount} from {formula_text} leaked into buyer costs"
+    val_visible = _amounts_for(box, "valuation_references") | _amounts_for(box, "valuation_reference_amounts")
+    assert expected_amount in val_visible, f"{expected_amount} from {formula_text} missing from valuation_references"
+
+
+@pytest.mark.parametrize(
+    "decurtation_text, decurted_amounts",
+    [
+        (
+            "Il valore di stima viene decurtato per le spese tecniche di Euro 4.500,00 e per i diritti Euro 1.200,00. "
+            "Totale decurtazioni Euro 5.700,00.",
+            (4500, 1200, 5700),
+        ),
+        (
+            "L'importo è stato decurtato della somma di Euro 8.250,00 quale deprezzamento, "
+            "e di Euro 2.750,00 per arrotondamento.",
+            (8250, 2750),
+        ),
+    ],
+)
+def test_money_map_generic_decurtation_formulas_are_not_buyer_cost(monkeypatch, decurtation_text, decurted_amounts):
+    box = _money_map_apply(
+        monkeypatch,
+        f"STIMA / FORMAZIONE LOTTI\n{decurtation_text}",
+        _CASA_LIKE_RICH_CONTEXT,
+    )
+    buyer = _amounts_for(box, "cost_signals_to_verify") | _amounts_for(box, "buyer_costs_confirmed")
+    surfaced_non_buyer = (
+        _amounts_for(box, "valuation_deductions")
+        | _amounts_for(box, "valuation_references")
+        | _amounts_for(box, "excluded_non_buyer_cost_amounts")
+        | _amounts_for(box, "other_monetary_mentions")
+    )
+    for amount in decurted_amounts:
+        assert amount not in buyer, f"€{amount} leaked into buyer costs"
+        assert amount in surfaced_non_buyer, f"€{amount} missing from non-buyer Money Map sections"
+
+
+def test_money_map_classifier_helpers_unit_smoke():
+    from perizia_authority_money_projection import (
+        classify_money_context,
+        is_cadastral_context,
+        is_explicit_buyer_obligation,
+        is_formality_procedural_context,
+        is_price_reference_context,
+        is_valuation_arithmetic_context,
+        is_valuation_deduction_context,
+    )
+
+    assert is_valuation_arithmetic_context("mq 374,23 x €/mq 1.300,00 = € 486.499,00")
+    assert is_valuation_arithmetic_context("486.499,00 - 3.700,00 = 482.799,00")
+    assert is_valuation_deduction_context("Il valore viene decurtato delle spese tecniche")
+    assert is_valuation_deduction_context("Deprezzamento per anomalie urbanistiche")
+    assert is_price_reference_context("Prezzo base d'asta Euro 80.000,00")
+    assert is_price_reference_context("Valore di stima Euro 100.000,00")
+    assert is_cadastral_context("Rendita catastale Euro 123,00")
+    assert is_formality_procedural_context("Cancellazione ipoteca Euro 200,00")
+    assert is_explicit_buyer_obligation("Costi a carico dell'aggiudicatario Euro 2.000,00")
+    assert is_explicit_buyer_obligation("Sanatoria a carico dell'acquirente Euro 1.000,00")
+    assert not is_explicit_buyer_obligation("Regolarizzazione urbanistica Euro 2.000,00")
+    assert not is_explicit_buyer_obligation("Spese tecniche di regolarizzazione Euro 5.032,00")
+    classification = classify_money_context(
+        {
+            "raw_text": "mq 374,23 x €/mq 1.300,00 = € 486.499,00",
+            "amount_eur": 486499,
+            "page": 22,
+            "role": "unknown_money",
+        }
+    )
+    assert classification["group"] == "valuation_references"
+    classification = classify_money_context(
+        {
+            "raw_text": "Costi di regolarizzazione a carico dell'aggiudicatario Euro 2.000,00",
+            "amount_eur": 2000,
+            "page": 12,
+            "role": "buyer_cost_signal_to_verify",
+        }
+    )
+    assert classification["group"] == "buyer_cost_signals_to_verify"
