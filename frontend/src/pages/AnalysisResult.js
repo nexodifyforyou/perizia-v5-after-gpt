@@ -1904,6 +1904,44 @@ const AnalysisResult = () => {
     return rootValue;
   };
 
+  const parseCatastoFromEvidence = (evidence) => {
+    try {
+      const items = Array.isArray(evidence) ? evidence : evidence ? [evidence] : [];
+      if (items.length === 0) return null;
+      const pieces = [];
+      items.forEach((entry) => {
+        if (!entry) return;
+        if (typeof entry === 'string') {
+          pieces.push(entry);
+          return;
+        }
+        if (typeof entry !== 'object') return;
+        [entry.quote, entry.text, entry.context, entry.value, entry.search_hint].forEach((candidate) => {
+          if (typeof candidate === 'string' && candidate.trim()) pieces.push(candidate.trim());
+        });
+      });
+      if (pieces.length === 0) return null;
+      const seen = new Set();
+      const unique = [];
+      pieces.forEach((piece) => {
+        const normalized = piece.replace(/\s+/g, ' ').trim();
+        if (!normalized) return;
+        const key = normalized.toLowerCase();
+        if (seen.has(key)) return;
+        seen.add(key);
+        unique.push(normalized);
+      });
+      if (unique.length === 0) return null;
+      const catastoPattern = /(foglio|fg\.?|particell|part\.?|sub(?:alterno)?\.?|cat\.?\s*[a-z]\/?\d*)/i;
+      const preferred = unique.find((text) => catastoPattern.test(text));
+      const chosen = preferred || unique[0];
+      const truncated = chosen.length > 160 ? `${chosen.slice(0, 157)}…` : chosen;
+      return truncated || null;
+    } catch (err) {
+      return null;
+    }
+  };
+
   const normalizeDettagliValue = (value) => {
     const text = safeRender(value, '').trim();
     if (!text) return '';
@@ -2034,7 +2072,10 @@ const AnalysisResult = () => {
     const superficieDisplay = formatSurfaceDisplay(superficieRaw);
     const valoreNum = parseNumericEuro(pickFirstNonEmpty(contractBene?.valore_stima_eur, sourceBene?.valore_stima_eur, sourceBene?.valore_stima_bene, sourceBene?.valore_di_stima_bene, sourceBene?.valore_stima));
 
-    const catastoValue = formatCatastoCompact(pickFirstNonEmpty(sourceBene?.catasto, contractBene?.catasto)) || parseCatastoFromEvidence(sourceEvidenceObj?.catasto);
+    const catastoCompact = formatCatastoCompact(pickFirstNonEmpty(sourceBene?.catasto, contractBene?.catasto));
+    const catastoFromEvidence = parseCatastoFromEvidence(sourceEvidenceObj?.catasto);
+    const catastoCandidate = catastoCompact || catastoFromEvidence;
+    const catastoValue = typeof catastoCandidate === 'string' ? catastoCandidate : '';
     const quotaValue = getRichFieldDisplayValue(
       'quota',
       null,
