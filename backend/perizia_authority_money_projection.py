@@ -473,6 +473,49 @@ _REGOLARIZZAZIONE_MENTION_RE = re.compile(
     re.IGNORECASE,
 )
 
+# Strong economic/legal keywords that justify keeping a small amount as a real money
+# mention rather than demoting it as OCR/regex noise.
+_STRONG_MONEY_KEYWORD_RE = re.compile(
+    r"\b(?:imposta|bollo|tassa\w*|diritt\w*|spes\w*|oner\w*|cancellazion\w*|"
+    r"ipotec\w*|formal(?:it|i)\w*|tribut\w*|sanzion\w*|sanatori\w*|oblazion\w*|"
+    r"cost\w*|pagament\w*|debit\w*|prezzo|valor\w*|stima|deprezzament\w*|"
+    r"decurtazion\w*|rendita|extra|condominial\w*|insolut\w*|arretrat\w*|"
+    r"morosit\w*|esecutiv\w*|procedural\w*)\b",
+    re.IGNORECASE,
+)
+
+# Cadastral/table identification terms — a candidate dominated by these terms with
+# no economic/legal keyword is most likely OCR noise from the cadastral table rows.
+_CADASTRAL_TABLE_TERMS_RE = re.compile(
+    r"\b(?:foglio|particell\w*|part\.|sub\.?|subaltern\w*|categori\w*|classe|"
+    r"consistenz\w*|superficie\s+catastal\w*|zona\s+censuari\w*|graffat\w*|"
+    r"vani|mappal\w*|dati\s+identificativ\w*|sezione)\b",
+    re.IGNORECASE,
+)
+
+# Cadastral row HEADER patterns (table row signatures) — when present without
+# strong money keywords the amount is almost certainly OCR/regex noise.
+_CADASTRAL_TABLE_HEADER_RE = re.compile(
+    r"(?:dati\s+identificativ\w*[^.\n]{0,160}part(?:\.|icella)|"
+    r"foglio[^.\n]{0,40}part(?:\.|icella)|"
+    r"part(?:\.|icella)[^.\n]{0,30}sub(?:\.|alterno)|"
+    r"sub(?:\.|alterno)[^.\n]{0,30}zona\s+cens|"
+    r"categori\w*[^.\n]{0,40}classe[^.\n]{0,40}consistenz|"
+    r"superficie\s+catastal\w*[^.\n]{0,40}rendita)",
+    re.IGNORECASE,
+)
+
+# Broken token patterns (e.g., "€ T-1", "T-1", "F1", "A/3", "mappale", isolated "€1")
+# — common OCR/regex fragments that should not be promoted as money.
+_BROKEN_FRAGMENT_RE = re.compile(
+    r"^\s*€?\s*(?:[TtFfABCDE]\s*-\s*\d{1,3}|A\s*/\s*\d{1,3}|F\d{1,3}|"
+    r"mappal\w*|sub(?:\.|alterno)?|particell\w*)\s*[,;.\s]*$",
+    re.IGNORECASE,
+)
+
+# Standalone tiny euro shards: "€1", "€ 2" with no other money context.
+_ISOLATED_EURO_SHARD_RE = re.compile(r"^\s*€\s*\d{1,2}\s*$")
+
 
 def is_explicit_buyer_obligation(quote: Any) -> bool:
     """True iff the quote contains explicit buyer-side obligation/exposure language.
@@ -522,6 +565,85 @@ def _has_page_evidence(candidate: Dict[str, Any]) -> bool:
         page = 0
     quote = _normalize_text(candidate.get("raw_text"))
     return page > 0 and bool(quote)
+
+
+def is_likely_ocr_noise(candidate: Dict[str, Any]) -> bool:
+    """Return True iff the candidate is likely OCR/regex noise rather than a real money mention.
+
+    Hard guard: candidates already classified by the resolver into a known money role
+    (price/base_auction/final_value/market_value/valuation_deduction/cadastral_rendita/
+    condominium_arrears) are never treated as noise.
+
+    A candidate is flagged as noise when at least one of the following holds:
+      - The quote is empty.
+      - The full quote is a broken table/cadastral fragment (e.g. "T-1", "F1", "A/3", "mappale", isolated "€1").
+      - The context is dominated by cadastral identification tokens (Foglio, Part., Sub., Zona Cens., Categoria,
+        Classe, Consistenza, Superficie catastale, ...) AND has no strong economic/legal keyword.
+      - The amount is < €50 AND the context has no strong economic/legal keyword.
+      - The normalized quote is very short (< 12 chars) AND has no strong economic/legal keyword.
+    """
+    amount = _candidate_amount(candidate)
+    quote_raw = _normalize_text(candidate.get("raw_text") or candidate.get("quote") or "")
+    norm = _money_norm(quote_raw)
+    role = str(candidate.get("role") or "")
+    base_role = str(candidate.get("semantic_base_role") or "")
+    effective_role = base_role if role in {"component_of_total", "total_candidate", "unknown_money"} else role
+    if not effective_role:
+        effective_role = role
+
+    # Hard guard — known authoritative money roles always survive.
+    if effective_role in {
+        "price",
+        "base_auction",
+        "final_value",
+        "market_value",
+        "valuation_deduction",
+        "cadastral_rendita",
+        "condominium_arrears",
+    }:
+        return False
+
+    if not norm:
+        return True
+
+    if _BROKEN_FRAGMENT_RE.match(quote_raw):
+        return True
+    if _ISOLATED_EURO_SHARD_RE.match(quote_raw):
+        return True
+
+    amount_raw_text = _normalize_text(candidate.get("amount_raw") or "")
+    if amount_raw_text:
+        if _BROKEN_FRAGMENT_RE.match(amount_raw_text):
+            return True
+        if _ISOLATED_EURO_SHARD_RE.match(amount_raw_text):
+            return True
+
+    has_strong_kw = bool(_STRONG_MONEY_KEYWORD_RE.search(norm))
+    cadastral_hits = len(_CADASTRAL_TABLE_TERMS_RE.findall(norm))
+    in_cadastral_header = bool(_CADASTRAL_TABLE_HEADER_RE.search(norm))
+
+    # Tiny amounts (≤€5) inside cadastral table HEADER rows or heavily
+    # cadastral context are practically always OCR artifacts (e.g. "€ T-1"
+    # mis-read as "€1"). Demote regardless of column-header keywords like
+    # "Rendita" because they describe the table column, not a money amount.
+    if amount is not None and amount <= 5 and (in_cadastral_header or cadastral_hits >= 3):
+        return True
+
+    if in_cadastral_header and not has_strong_kw:
+        return True
+
+    if cadastral_hits >= 3 and not has_strong_kw:
+        return True
+
+    # Very small amount (<€50) with no economic/legal keyword in context.
+    if amount is not None and amount < 50 and not has_strong_kw:
+        return True
+
+    # Very short context with no money keyword.
+    if len(norm) < 12 and not has_strong_kw:
+        return True
+
+    return False
 
 
 _RESOLVER_NON_BUYER_ROLE_TO_GROUP = {
@@ -707,6 +829,26 @@ def _finalize_classification(
         classification["explanation_it"] = "Importo rilevato ma pagine non determinate automaticamente: non promosso a costo certo."
         classification["verification_note_it"] = "Verificare la pagina e il contesto direttamente nella perizia originale."
         classification["label_role"] = "unsupported_amount"
+    # OCR/regex noise demotion — never override an explicit buyer obligation, but
+    # demote any cadastral/table/broken-token/very-small fragment to the low-confidence
+    # bucket so it stops appearing as a primary valuation reference.
+    current_group = str(classification.get("group") or "")
+    if current_group not in {"buyer_costs_confirmed", "buyer_cost_signals_to_verify"} and is_likely_ocr_noise(candidate):
+        classification = dict(classification)
+        classification["group"] = "unsupported_or_unknown_amounts"
+        classification["buyer_relevance"] = "none"
+        classification["additive_to_extra_total"] = False
+        classification["explanation_it"] = (
+            "Frammento monetario probabilmente derivato da OCR/tabella catastale: "
+            "non promosso come riferimento monetario."
+        )
+        classification["verification_note_it"] = (
+            "Verificare manualmente nella perizia originale se l'importo è effettivamente rilevante."
+        )
+        classification["label_role"] = "ocr_noise"
+        classification["is_likely_ocr_noise"] = True
+    else:
+        classification["is_likely_ocr_noise"] = bool(classification.get("is_likely_ocr_noise"))
     return classification
 
 
@@ -770,6 +912,20 @@ _CUSTOMER_BADGE_TONE = {
     "unsupported_or_unknown_amounts": "low_confidence",
 }
 
+# Display importance / default-expand mapping used by the customer Money Map UI
+# to render collapsible/dropdown groups instead of a giant wall of cards.
+_GROUP_DISPLAY_IMPORTANCE = {
+    "buyer_costs_confirmed": ("primary", True),
+    "buyer_cost_signals_to_verify": ("primary", True),
+    "valuation_references": ("primary", True),
+    "price_references": ("primary", True),
+    "valuation_deductions": ("primary", True),
+    "cadastral_values": ("secondary", False),
+    "formalities_and_procedural_amounts": ("secondary", False),
+    "other_monetary_mentions": ("secondary", False),
+    "unsupported_or_unknown_amounts": ("raw", False),
+}
+
 
 def make_customer_money_item(
     candidate: Dict[str, Any],
@@ -820,6 +976,10 @@ def make_customer_money_item(
         quote_text = _normalize_text(evidence[0].get("quote"))
         if quote_text:
             customer_context = quote_text
+    is_noise = bool(classification.get("is_likely_ocr_noise"))
+    importance, default_expand = _GROUP_DISPLAY_IMPORTANCE.get(group, ("raw", False))
+    if is_noise:
+        importance, default_expand = "raw", False
     payload: Dict[str, Any] = {
         "code": f"{code_prefix}_{index:02d}",
         "label_it": label,
@@ -831,6 +991,10 @@ def make_customer_money_item(
         "customer_context_it": customer_context,
         "type": "ESTIMATE" if group == "buyer_costs_confirmed" else "SIGNAL_TO_VERIFY" if group == "buyer_cost_signals_to_verify" else "INFO",
         "group": group,
+        "display_group": group,
+        "importance": importance,
+        "should_expand_by_default": bool(default_expand),
+        "is_likely_ocr_noise": bool(is_noise),
         "role": str(candidate.get("semantic_base_role") or candidate.get("role") or "unknown_money"),
         "buyer_relevance": classification.get("buyer_relevance") or "none",
         "additive_to_extra_total": bool(classification.get("additive_to_extra_total")),

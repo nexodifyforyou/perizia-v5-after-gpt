@@ -143,28 +143,167 @@ const normalizeAnalysisResponse = (payload) => {
 };
 
 // Hero summary sanitizer — turns naked "Non specificato in perizia" / "Unknown" /
-// "N/A" into a friendlier directive that points to pages or removes the value
-// entirely. Keep the value as-is when it contains real content.
+// "N/A" / "null" / "undefined" / "Da verificare" into '' so the caller can pick a
+// case-specific replacement. Keeps the value as-is when it contains real content.
 const HERO_PLACEHOLDER_PATTERNS = [
-  /\bnon\s+specificat[oa]\s+in\s+perizia\b/i,
-  /\bnon\s+specificat[oa]\b/i,
-  /\bnot\s+specified\b/i,
-  /\bunknown\b/i,
-  /^\s*n\s*\/\s*a\s*$/i,
-  /^\s*n\.d\.?\s*$/i,
+  /\bnon\s+specificat[oa]\s+in\s+perizia\b/gi,
+  /\bnon\s+specificat[oa]\b/gi,
+  /\bnot\s+specified\b/gi,
+  /\bunknown\b/gi,
+  /\bn\.?d\.?\b/gi,
+  /\bnull\b/gi,
+  /\bundefined\b/gi,
+  /^\s*n\s*\/\s*a\s*$/gi,
 ];
+const NAKED_DA_VERIFICARE_RE = /^\s*da\s+verificare\b[\s\.\-—:]*$/i;
 const sanitizeHeroSummaryText = (text) => {
   const raw = typeof text === 'string' ? text.trim() : '';
   if (!raw) return '';
-  const isNakedPlaceholder = HERO_PLACEHOLDER_PATTERNS.some((pattern) => {
-    if (pattern.test(raw)) {
-      const cleaned = raw.replace(pattern, '').trim();
-      return cleaned.length < 12;
-    }
-    return false;
-  });
-  if (isNakedPlaceholder) return '';
+  // Strip every placeholder occurrence, then check if anything meaningful remains.
+  let stripped = raw;
+  for (const pattern of HERO_PLACEHOLDER_PATTERNS) {
+    stripped = stripped.replace(pattern, '');
+  }
+  stripped = stripped.replace(/\s{2,}/g, ' ').replace(/[\s\.,;:\-—]+$/g, '').trim();
+  if (!stripped || stripped.length < 12) return '';
+  if (NAKED_DA_VERIFICARE_RE.test(stripped)) return '';
   return raw;
+};
+
+// Map a structured driver/blocker key (or its text) to a customer-readable topic label.
+const HERO_TOPIC_BY_KEY = {
+  occupancy: 'Stato occupativo / opponibilità',
+  stato_occupativo: 'Stato occupativo / opponibilità',
+  occupazione: 'Stato occupativo / opponibilità',
+  opponibilita: 'Opponibilità occupazione',
+  urbanistica: 'Regolarità urbanistica',
+  regolarita_urbanistica: 'Regolarità urbanistica',
+  abusi: 'Regolarità urbanistica',
+  conformita_urbanistica: 'Regolarità urbanistica',
+  agibilita: 'Agibilità',
+  abitabilita: 'Abitabilità',
+  ape: 'APE / prestazione energetica',
+  catastale: 'Conformità catastale',
+  conformita_catastale: 'Conformità catastale',
+  formalita: 'Formalità / ipoteche',
+  formalities: 'Formalità / ipoteche',
+  ipoteca: 'Formalità / ipoteche',
+  ipoteche: 'Formalità / ipoteche',
+  costs: 'Costi / oneri',
+  oneri: 'Costi / oneri',
+  servitu: 'Servitù / vincoli',
+  vincoli: 'Servitù / vincoli',
+  pignoramento: 'Pignoramento / procedura',
+  quota: 'Quota di proprietà',
+};
+const inferHeroTopicFromText = (text) => {
+  const norm = String(text || '').toLowerCase();
+  if (/\bagibil/.test(norm)) return 'Agibilità';
+  if (/\babitabil/.test(norm)) return 'Abitabilità';
+  if (/urbanistic|\babus|conformit\w*\s+urbanistic/.test(norm)) return 'Regolarità urbanistica';
+  if (/occupat|possesso|opponibil/.test(norm)) return 'Stato occupativo / opponibilità';
+  if (/\b(?:costi|costo|oneri|onere|spese|sanzion\w*|sanatori\w*|importi|debenz)\b/.test(norm)) return 'Costi / oneri';
+  if (/\bape\b|prestazione\s+energetic/.test(norm)) return 'APE / prestazione energetica';
+  if (/\bcatastal/.test(norm)) return 'Conformità catastale';
+  if (/ipotec|\bformal(?:it|i)|cancellazion|trascrizion/.test(norm)) return 'Formalità / ipoteche';
+  if (/\bservit\w*|\bvincol/.test(norm)) return 'Servitù / vincoli';
+  if (/pignorament/.test(norm)) return 'Pignoramento / procedura';
+  if (/\bquota\b|comproprietà/.test(norm)) return 'Quota di proprietà';
+  if (/document(?:o|i)?[\s_]+(?:unreadable|illeggibil)|leggibil/.test(norm)) return 'Leggibilità documento';
+  return '';
+};
+const heroTopicForDriver = (driver) => {
+  const keyCandidates = [driver?.key, driver?.field_key, driver?.killer, driver?.field_name_it, driver?.name];
+  for (const k of keyCandidates) {
+    if (!k) continue;
+    const norm = String(k).toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, '');
+    if (HERO_TOPIC_BY_KEY[norm]) return HERO_TOPIC_BY_KEY[norm];
+  }
+  const textCandidates = [driver?.headline_it, driver?.label_it, driver?.title_it, driver?.reason_it, driver?.message];
+  for (const t of textCandidates) {
+    const inferred = inferHeroTopicFromText(t);
+    if (inferred) return inferred;
+  }
+  return '';
+};
+
+// Build a customer-readable Criticità row: { topic, text, pages }.
+// - If the headline is missing or naked ("Da verificare", "Non specificato"), synthesize
+//   "<Topic> da verificare — non rilevata automaticamente nelle sezioni consultate. Controllare p.X."
+// - If the headline is informative, keep it and append "Controllare p.X." when no page ref present.
+const buildCriticitaRow = (driver, getEvidenceFn) => {
+  // Drivers can come as plain strings (legacy fixtures) or structured objects.
+  const driverObj = (driver && typeof driver === 'object') ? driver : { headline_it: String(driver || '') };
+  const evidence = typeof getEvidenceFn === 'function' ? getEvidenceFn(driverObj) : [];
+  const pages = [...new Set((evidence || []).map((e) => Number(e?.page)).filter((p) => Number.isFinite(p) && p > 0))].sort((a, b) => a - b);
+  const rawHeadline = (
+    safeRender(driverObj.headline_it, '')
+    || safeRender(driverObj.label_it, '')
+    || safeRender(driverObj.reason_it, '')
+    || safeRender(driverObj.message, '')
+  );
+  const topic = heroTopicForDriver(driverObj) || 'Voce critica';
+  const cleanHeadline = sanitizeHeroSummaryText(rawHeadline);
+  const looksNaked = !cleanHeadline
+    || NAKED_DA_VERIFICARE_RE.test(cleanHeadline)
+    || /^\s*(non\s+specificat[oa]|unknown|n\.?d\.?)\s*$/i.test(cleanHeadline);
+  let text;
+  if (looksNaked) {
+    const pageText = pages.length > 0
+      ? ` Controllare p. ${pages.join(', ')}.`
+      : ' Verificare nella perizia originale.';
+    text = `${topic} da verificare — non rilevata automaticamente nelle sezioni consultate.${pageText}`;
+  } else {
+    text = cleanHeadline.trim();
+    if (!/\bp\.\s*\d/i.test(text) && pages.length > 0) {
+      text = text.replace(/[\.\s]+$/, '');
+      text = `${text}. Controllare p. ${pages.join(', ')}.`;
+    }
+  }
+  return { topic, text, pages };
+};
+
+// Dedupe criticità rows by topic; merge pages and keep the longest text.
+const dedupeCriticitaRows = (rows) => {
+  const byTopic = new Map();
+  for (const row of asArray(rows)) {
+    if (!row || !row.text) continue;
+    const key = String(row.topic || '').toLowerCase() || row.text.toLowerCase().slice(0, 40);
+    const existing = byTopic.get(key);
+    if (!existing) {
+      byTopic.set(key, { topic: row.topic, text: row.text, pages: [...(row.pages || [])] });
+      continue;
+    }
+    const mergedPages = new Set([...(existing.pages || []), ...(row.pages || [])]);
+    existing.pages = [...mergedPages].sort((a, b) => a - b);
+    if ((row.text || '').length > (existing.text || '').length) existing.text = row.text;
+  }
+  return Array.from(byTopic.values());
+};
+
+// Deterministic, case-specific Decisione Rapida fallback. Used only when the
+// upstream Italian decision text is missing or fully sanitized away.
+const buildDeterministicDecisioneIt = ({ criticitaRows, occupancyStatus, moneyTotalStatusCode }) => {
+  const parts = [];
+  const topics = [];
+  for (const row of asArray(criticitaRows)) {
+    if (row?.topic && !topics.includes(row.topic)) topics.push(row.topic);
+  }
+  if (topics.length > 0) {
+    parts.push(`Prima dell'offerta verificare: ${topics.join('; ')}.`);
+  }
+  const occClean = sanitizeHeroSummaryText(occupancyStatus || '');
+  if (occClean && occClean.length < 60) {
+    parts.push(`Stato occupativo rilevato: ${occClean}.`);
+  }
+  if (moneyTotalStatusCode === 'no_defensible_total') {
+    parts.push("Nessun totale extra a carico dell'acquirente quantificato in modo difendibile: vedere Costi.");
+  } else if (moneyTotalStatusCode === 'explicit_total') {
+    parts.push("Totale buyer-side esplicitamente supportato in perizia: dettaglio in Costi.");
+  } else {
+    parts.push('Punti monetari nella sezione Costi.');
+  }
+  return parts.join(' ').trim();
 };
 
 // Helper function to safely render any value - replaces placeholders
@@ -1049,6 +1188,8 @@ const MoneyMapItem = ({ item, groupHint = '', extraCount = 0, extraPages = [] })
   );
 };
 
+const filterOutOcrNoise = (items) => asArray(items).filter((item) => !item?.is_likely_ocr_noise);
+
 const MoneyMapGroupSection = ({
   title,
   helperText,
@@ -1056,15 +1197,20 @@ const MoneyMapGroupSection = ({
   groupHint,
   initialLimit = 6,
   emptyText = 'Nessun importo classificato in questa categoria.',
+  collapsible = false,
+  defaultOpen = true,
+  hideEmpty = false,
 }) => {
   const [showAll, setShowAll] = useState(false);
   const list = asArray(items);
-  const deduped = dedupeMoneyMapItems(list);
+  const visibleList = filterOutOcrNoise(list);
+  const deduped = dedupeMoneyMapItems(visibleList);
   const visible = showAll ? deduped : deduped.slice(0, initialLimit);
   const hidden = deduped.length - visible.length;
-  return (
-    <div className="p-4 rounded-lg border border-zinc-800 bg-zinc-950/40 mb-5">
-      <h3 className="text-sm font-semibold text-zinc-100 mb-2">{title}</h3>
+  if (hideEmpty && deduped.length === 0) return null;
+
+  const body = (
+    <>
       {helperText && <p className="text-xs text-zinc-500 mb-3">{helperText}</p>}
       {deduped.length === 0 ? (
         <p className="text-xs text-zinc-500">{emptyText}</p>
@@ -1099,6 +1245,28 @@ const MoneyMapGroupSection = ({
           )}
         </div>
       )}
+    </>
+  );
+
+  if (collapsible) {
+    return (
+      <details
+        className="mb-5 rounded-lg border border-zinc-800 bg-zinc-950/40"
+        open={defaultOpen}
+      >
+        <summary className="cursor-pointer px-4 py-3 text-sm font-semibold text-zinc-100 flex items-center justify-between gap-3 select-none">
+          <span className="flex-1">{title}</span>
+          <span className="text-[11px] font-mono text-zinc-500">{deduped.length}</span>
+        </summary>
+        <div className="px-4 pb-4 pt-1">{body}</div>
+      </details>
+    );
+  }
+
+  return (
+    <div className="p-4 rounded-lg border border-zinc-800 bg-zinc-950/40 mb-5">
+      <h3 className="text-sm font-semibold text-zinc-100 mb-2">{title}</h3>
+      {body}
     </div>
   );
 };
@@ -3385,17 +3553,43 @@ const AnalysisResult = () => {
   const summaryFallbackEn = [displayHeaderSummaryEn, decisionBulletsEn[0]].filter(Boolean).join('. ').trim();
   const bundleSummaryIt = sanitizeHeroSummaryText(safeRender(summaryBundle.decision_summary_it, ''));
   const bundleSummaryEn = sanitizeHeroSummaryText(safeRender(summaryBundle.decision_summary_en, ''));
-  const displayDecisionItSafe = sanitizeHeroSummaryText(displayDecisionIt) || bundleSummaryIt || 'Analisi documento completata. Verificare nelle sezioni dedicate i dettagli.';
+
+  // Customer-readable, deduped Criticità rows (topic + reason + page + action).
+  // Sourced first from explicit driver_rosso, then from semaforo.top_blockers
+  // structured list when drivers are empty/weak.
+  const rawCriticitaCandidates = (
+    Array.isArray(decision.driver_rosso) && decision.driver_rosso.length > 0
+      ? decision.driver_rosso
+      : asArray(semaforo.top_blockers)
+  );
+  const criticitaRows = dedupeCriticitaRows(
+    rawCriticitaCandidates.map((driver) => buildCriticitaRow(driver, getEvidence))
+  ).slice(0, 5);
+  const occupancyStatusForHero = (
+    safeRender(occupativo?.status_it, '')
+    || safeRender(occupativo?.status, '')
+  );
+  const moneyTotalStatusCode = moneyMapCustomerSummary?.total_status?.status_code || '';
+  const deterministicDecisioneIt = buildDeterministicDecisioneIt({
+    criticitaRows,
+    occupancyStatus: occupancyStatusForHero,
+    moneyTotalStatusCode,
+  });
+  const displayDecisionItSafe = sanitizeHeroSummaryText(displayDecisionIt)
+    || bundleSummaryIt
+    || deterministicDecisioneIt
+    || 'Analisi documento completata. Verificare le sezioni Costi, Legal Killers e Red Flags.';
   const displayDecisionEnSafe = sanitizeHeroSummaryText(displayDecisionEn) || bundleSummaryEn || '';
-  const displayHeaderDriverItSafe = bundleSummaryIt || sanitizeHeroSummaryText(displayHeaderDriverIt);
-  const displayHeaderSummaryItSafe = bundleSummaryIt || sanitizeHeroSummaryText(displayHeaderSummaryIt);
-  const displayHeaderSummaryEnSafe = bundleSummaryEn || sanitizeHeroSummaryText(displayHeaderSummaryEn);
+  const displayHeaderDriverItSafe = bundleSummaryIt || sanitizeHeroSummaryText(displayHeaderDriverIt) || criticitaRows[0]?.text || '';
+  const displayHeaderSummaryItSafe = bundleSummaryIt || sanitizeHeroSummaryText(displayHeaderSummaryIt) || deterministicDecisioneIt || '';
+  const displayHeaderSummaryEnSafe = bundleSummaryEn || sanitizeHeroSummaryText(displayHeaderSummaryEn) || '';
   const rawSummaryForClientIt = safeRender(
     summary.summary_it,
-    shouldUseCanonicalSummaryFallback ? summaryFallbackIt : 'Analisi documento completata.'
+    shouldUseCanonicalSummaryFallback ? summaryFallbackIt : ''
   );
   const displaySummaryForClientIt = sanitizeHeroSummaryText(rawSummaryForClientIt)
-    || 'Analisi documento completata. Punti da verificare: consultare le sezioni Costi, Legal Killers e Red Flags.';
+    || deterministicDecisioneIt
+    || 'Analisi documento completata. Punti da verificare: consultare Costi, Legal Killers e Red Flags.';
   const rawSummaryForClientEn = safeRender(
     summary.summary_en,
     shouldUseCanonicalSummaryFallback ? summaryFallbackEn : ''
@@ -3780,19 +3974,25 @@ const AnalysisResult = () => {
                 {/* Structured decision fields when backend provides them */}
                 {hasStructuredDecision && !hasNarratedDecision && (
                   <div className="mt-3 space-y-2">
-                    {decisionChecks.length > 0 && (
+                    {decisionChecks.map((check) => sanitizeHeroSummaryText(String(check || ''))).filter(Boolean).length > 0 && (
                       <div>
-                        <p className="text-xs font-mono uppercase text-zinc-500 mb-1">Da verificare:</p>
+                        <p className="text-xs font-mono uppercase text-zinc-500 mb-1">Punti da verificare:</p>
                         <ul className="space-y-0.5 text-sm text-zinc-300 list-disc pl-4">
-                          {decisionChecks.map((check, i) => <li key={i}>{check}</li>)}
+                          {decisionChecks.map((check, i) => {
+                            const clean = sanitizeHeroSummaryText(String(check || ''));
+                            return clean ? <li key={i}>{clean}</li> : null;
+                          })}
                         </ul>
                       </div>
                     )}
-                    {decisionBeforeOffer.length > 0 && (
+                    {decisionBeforeOffer.map((a) => sanitizeHeroSummaryText(String(a || ''))).filter(Boolean).length > 0 && (
                       <div>
                         <p className="text-xs font-mono uppercase text-zinc-500 mb-1">Prima dell&apos;offerta:</p>
                         <ul className="space-y-0.5 text-xs text-amber-300 list-disc pl-4">
-                          {decisionBeforeOffer.map((action, i) => <li key={i}>{action}</li>)}
+                          {decisionBeforeOffer.map((action, i) => {
+                            const clean = sanitizeHeroSummaryText(String(action || ''));
+                            return clean ? <li key={i}>{clean}</li> : null;
+                          })}
                         </ul>
                       </div>
                     )}
@@ -3800,16 +4000,22 @@ const AnalysisResult = () => {
                 )}
                 {!hasStructuredDecision && displayedDecisionBullets.length > 0 && (
                   <ul className="mt-3 space-y-1 text-sm text-zinc-300 list-disc pl-5">
-                    {displayedDecisionBullets.map((item) => (
-                      <li key={`it-bullet-${item.idx}`}>{safeRender(item.bullet, '')}</li>
-                    ))}
+                    {displayedDecisionBullets
+                      .map((item) => ({ ...item, cleaned: sanitizeHeroSummaryText(safeRender(item.bullet, '')) }))
+                      .filter((item) => item.cleaned)
+                      .map((item) => (
+                        <li key={`it-bullet-${item.idx}`}>{item.cleaned}</li>
+                      ))}
                   </ul>
                 )}
-                {displayedDecisionBullets.some((item) => item.bulletEn) && (
+                {displayedDecisionBullets.some((item) => sanitizeHeroSummaryText(safeRender(item.bulletEn, ''))) && (
                   <ul className="mt-2 space-y-1 text-xs text-zinc-500 list-disc pl-5">
-                    {displayedDecisionBullets.filter((item) => item.bulletEn).map((item) => (
-                      <li key={`en-bullet-${item.idx}`}>{safeRender(item.bulletEn, '')}</li>
-                    ))}
+                    {displayedDecisionBullets
+                      .map((item) => ({ ...item, cleanedEn: sanitizeHeroSummaryText(safeRender(item.bulletEn, '')) }))
+                      .filter((item) => item.cleanedEn)
+                      .map((item) => (
+                        <li key={`en-bullet-${item.idx}`}>{item.cleanedEn}</li>
+                      ))}
                   </ul>
                 )}
                 
@@ -3824,32 +4030,23 @@ const AnalysisResult = () => {
                   </div>
                 )}
                 
-                {/* Driver Rosso with Evidence - old format */}
-                {displayedDrivers.length > 0 && (
+                {/* Driver Rosso with Evidence — customer-readable: topic + reason + page */}
+                {criticitaRows.length > 0 && (
                   <div className="mt-4 space-y-2">
-                    <p className="text-xs font-mono text-red-400 uppercase">Criticità Rilevate:</p>
-                    {displayedDrivers.map((driver, idx) => {
-                      const driverEvidence = getEvidence(driver);
-                      const driverPages = [...new Set(driverEvidence.map((e) => e.page).filter(Boolean))];
-                      const rawHeadline = safeRender(driver.headline_it, '');
-                      const cleanHeadline = sanitizeHeroSummaryText(rawHeadline)
-                        || (driverPages.length > 0
-                          ? `Da verificare — non rilevato automaticamente nelle sezioni consultate. Controllare p. ${driverPages.join(', ')}.`
-                          : 'Da verificare nella perizia originale.');
-                      return (
-                        <div key={idx} className="p-2 bg-red-500/10 rounded border border-red-500/20">
-                          <div className="flex flex-wrap items-center gap-2">
-                            <AlertTriangle className="w-4 h-4 text-red-400" />
-                            <span className="text-sm text-red-400">{cleanHeadline}</span>
-                            {driverPages.length > 0 && rawHeadline && rawHeadline !== cleanHeadline && (
-                              <span className="text-xs font-mono text-gold">
-                                p. {driverPages.join(', ')}
-                              </span>
-                            )}
-                          </div>
+                    <p className="text-xs font-mono text-red-400 uppercase">Criticità rilevate:</p>
+                    {criticitaRows.map((row, idx) => (
+                      <div key={`crit-${idx}`} className="p-2 bg-red-500/10 rounded border border-red-500/20">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <AlertTriangle className="w-4 h-4 text-red-400" />
+                          <span className="text-sm text-red-400">{row.text}</span>
+                          {row.pages.length > 0 && !/\bp\.\s*\d/i.test(row.text) && (
+                            <span className="text-xs font-mono text-gold">
+                              p. {row.pages.join(', ')}
+                            </span>
+                          )}
                         </div>
-                      );
-                    })}
+                      </div>
+                    ))}
                   </div>
                 )}
               </div>
@@ -4258,41 +4455,50 @@ const AnalysisResult = () => {
                   helperText="Importi esplicitamente dichiarati come a carico dell'acquirente nella perizia. Verificare comunque con tecnico/delegato prima dell'offerta."
                   items={moneyMapBuyerConfirmed}
                   groupHint="buyer_costs_confirmed"
+                  collapsible
+                  defaultOpen
                 />
               )}
 
               {(moneyMapBuyerSignals.length > 0 || groundedUnquantifiedBurdens.length > 0) && (
-                <div className="p-4 rounded-lg border border-zinc-800 bg-zinc-950/40 mb-5">
-                  <h3 className="text-sm font-semibold text-zinc-100 mb-2">Segnali da verificare prima dell'offerta</h3>
-                  <p className="text-xs text-zinc-500 mb-3">
-                    Importi ancorati alla perizia che potrebbero rappresentare costi acquirente: la perizia non lo afferma con certezza, perciò vanno confermati con tecnico/delegato.
-                  </p>
-                  {moneyMapBuyerSignals.length > 0 ? (
-                    <div className="space-y-3">
-                      {dedupeMoneyMapItems(moneyMapBuyerSignals).slice(0, 8).map((entry) => (
-                        <MoneyMapItem
-                          key={entry._key}
-                          item={entry.item}
-                          groupHint="buyer_cost_signals_to_verify"
-                          extraCount={entry.extraCount}
-                          extraPages={entry.extraPages}
-                        />
-                      ))}
-                    </div>
-                  ) : (
-                    <div className="space-y-2">
-                      {groundedUnquantifiedBurdens.map((item) => (
-                        <div key={item.key} className="rounded-lg border border-zinc-800 bg-zinc-950/60 px-4 py-3">
-                          <div className="flex items-center justify-between gap-2">
-                            <p className="text-sm font-medium text-zinc-100">{item.label}</p>
-                            {item.evidence?.length > 0 && <EvidenceBadge evidence={item.evidence} />}
+                <details className="mb-5 rounded-lg border border-zinc-800 bg-zinc-950/40" open>
+                  <summary className="cursor-pointer px-4 py-3 text-sm font-semibold text-zinc-100 flex items-center justify-between gap-3 select-none">
+                    <span className="flex-1">Segnali da verificare prima dell'offerta</span>
+                    <span className="text-[11px] font-mono text-zinc-500">
+                      {filterOutOcrNoise(moneyMapBuyerSignals).length || groundedUnquantifiedBurdens.length}
+                    </span>
+                  </summary>
+                  <div className="px-4 pb-4 pt-1">
+                    <p className="text-xs text-zinc-500 mb-3">
+                      Importi ancorati alla perizia che potrebbero rappresentare costi acquirente: la perizia non lo afferma con certezza, perciò vanno confermati con tecnico/delegato.
+                    </p>
+                    {filterOutOcrNoise(moneyMapBuyerSignals).length > 0 ? (
+                      <div className="space-y-3">
+                        {dedupeMoneyMapItems(filterOutOcrNoise(moneyMapBuyerSignals)).slice(0, 8).map((entry) => (
+                          <MoneyMapItem
+                            key={entry._key}
+                            item={entry.item}
+                            groupHint="buyer_cost_signals_to_verify"
+                            extraCount={entry.extraCount}
+                            extraPages={entry.extraPages}
+                          />
+                        ))}
+                      </div>
+                    ) : (
+                      <div className="space-y-2">
+                        {groundedUnquantifiedBurdens.map((item) => (
+                          <div key={item.key} className="rounded-lg border border-zinc-800 bg-zinc-950/60 px-4 py-3">
+                            <div className="flex items-center justify-between gap-2">
+                              <p className="text-sm font-medium text-zinc-100">{item.label}</p>
+                              {item.evidence?.length > 0 && <EvidenceBadge evidence={item.evidence} />}
+                            </div>
+                            <p className="text-xs text-zinc-500 mt-1">{item.note}</p>
                           </div>
-                          <p className="text-xs text-zinc-500 mt-1">{item.note}</p>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </details>
               )}
 
               {(moneyMapValuationReferences.length > 0 || moneyMapPriceReferences.length > 0) && (
@@ -4301,6 +4507,9 @@ const AnalysisResult = () => {
                   helperText="Importi che derivano da calcoli o riferimenti valutativi (es. mq × €/mq, valore di stima, prezzo base). Non sono costi a carico dell'acquirente."
                   items={[...moneyMapValuationReferences, ...moneyMapPriceReferences]}
                   groupHint="valuation_references"
+                  collapsible
+                  defaultOpen
+                  hideEmpty
                 />
               )}
 
@@ -4310,6 +4519,9 @@ const AnalysisResult = () => {
                   helperText="Riduzioni applicate dal perito al valore del bene (es. spese di regolarizzazione catastale/urbanistica). Non sono costi extra che l'acquirente paga in più."
                   items={valuationDeductionSignals}
                   groupHint="valuation_deductions"
+                  collapsible
+                  defaultOpen
+                  hideEmpty
                 />
               )}
 
@@ -4319,6 +4531,9 @@ const AnalysisResult = () => {
                   helperText="Dato fiscale: non un costo a carico dell'acquirente."
                   items={moneyMapCadastralValues}
                   groupHint="cadastral_values"
+                  collapsible
+                  defaultOpen={false}
+                  hideEmpty
                 />
               )}
 
@@ -4328,6 +4543,9 @@ const AnalysisResult = () => {
                   helperText="Importi legati a formalità (ipoteca, cancellazione, trascrizione). Non automaticamente a carico dell'acquirente; verificare nel dispositivo di vendita."
                   items={moneyMapFormalities}
                   groupHint="formalities_and_procedural_amounts"
+                  collapsible
+                  defaultOpen={false}
+                  hideEmpty
                 />
               )}
 
@@ -4337,22 +4555,50 @@ const AnalysisResult = () => {
                   helperText="Importi citati in perizia senza esplicita responsabilità dell'acquirente. Da verificare con tecnico/delegato."
                   items={moneyMapOtherMentions}
                   groupHint="other_monetary_mentions"
+                  collapsible
+                  defaultOpen={false}
+                  hideEmpty
                 />
               )}
 
-              {moneyMapUnsupported.length > 0 && (
+              {(moneyMapUnsupported.length > 0
+                || asArray(moneyMapValuationReferences).some((i) => i?.is_likely_ocr_noise)
+                || asArray(moneyMapPriceReferences).some((i) => i?.is_likely_ocr_noise)
+                || asArray(moneyMapBuyerSignals).some((i) => i?.is_likely_ocr_noise)
+                || asArray(moneyMapCadastralValues).some((i) => i?.is_likely_ocr_noise)
+                || asArray(moneyMapFormalities).some((i) => i?.is_likely_ocr_noise)
+                || asArray(moneyMapOtherMentions).some((i) => i?.is_likely_ocr_noise)) && (
                 <details className="mb-5 rounded-lg border border-zinc-800 bg-zinc-950/30">
-                  <summary className="cursor-pointer px-4 py-3 text-sm font-semibold text-zinc-100">
-                    Importi non classificati / bassa confidenza ({moneyMapUnsupported.length})
+                  <summary className="cursor-pointer px-4 py-3 text-sm font-semibold text-zinc-100 select-none">
+                    Importi non classificati / bassa confidenza ({(() => {
+                      const noiseFromOtherGroups = [
+                        moneyMapValuationReferences,
+                        moneyMapPriceReferences,
+                        moneyMapBuyerSignals,
+                        moneyMapCadastralValues,
+                        moneyMapFormalities,
+                        moneyMapOtherMentions,
+                      ].reduce((n, list) => n + asArray(list).filter((i) => i?.is_likely_ocr_noise).length, 0);
+                      return moneyMapUnsupported.length + noiseFromOtherGroups;
+                    })()})
                   </summary>
                   <div className="p-4 pt-0">
                     <p className="text-xs text-zinc-500 mb-3">
-                      Importi rilevati senza pagina/contesto certo: verificare manualmente nella perizia originale.
+                      Frammenti monetari probabilmente derivati da OCR/tabelle catastali o senza pagina/contesto certo:
+                      verificare manualmente nella perizia originale.
                     </p>
                     <MoneyMapGroupSection
                       title=""
                       helperText=""
-                      items={moneyMapUnsupported}
+                      items={[
+                        ...moneyMapUnsupported,
+                        ...asArray(moneyMapValuationReferences).filter((i) => i?.is_likely_ocr_noise),
+                        ...asArray(moneyMapPriceReferences).filter((i) => i?.is_likely_ocr_noise),
+                        ...asArray(moneyMapBuyerSignals).filter((i) => i?.is_likely_ocr_noise),
+                        ...asArray(moneyMapCadastralValues).filter((i) => i?.is_likely_ocr_noise),
+                        ...asArray(moneyMapFormalities).filter((i) => i?.is_likely_ocr_noise),
+                        ...asArray(moneyMapOtherMentions).filter((i) => i?.is_likely_ocr_noise),
+                      ]}
                       groupHint="unsupported_or_unknown_amounts"
                       initialLimit={3}
                     />
