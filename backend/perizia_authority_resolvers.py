@@ -86,8 +86,33 @@ CHAPTER_SUPPORT_PATTERNS = {
 MONEY_AMOUNT_RE = re.compile(
     r"(?:\u20ac|\beuro\b)\s*\d{1,3}(?:\.\d{3})*(?:,\d{2})?|"
     r"\d{1,3}(?:\.\d{3})*(?:,\d{2})?\s*(?:\u20ac|\beuro\b)|"
-    r"(?:\u20ac|\beuro\b)\s*\d+(?:[\.,]\d{2})?",
+    r"(?:\u20ac|\beuro\b)\s*\d+(?:[\.,]\d{2})?|"
+    # Amounts written without thousand separators next to \u20ac symbol, e.g.
+    # "23000,00 \u20ac" or "\u20ac 5000". Require \u22653 digits to avoid matching "3 \u20ac".
+    r"\d{3,}(?:[\.,]\d{1,2})?\s*(?:\u20ac|\beuro\b)|"
+    r"(?:\u20ac|\beuro\b)\s*\d{3,}(?:[\.,]\d{1,2})?",
     flags=re.IGNORECASE | re.UNICODE,
+)
+# Standalone Italian-format amounts that appear in valuation tables / formula
+# results without a \u20ac symbol adjacent. Only used as a SECONDARY pass and only
+# accepted when the surrounding window contains a strong valuation/sale keyword
+# (vendita giudiziaria, valore arrotondato, valore di mercato, VdM, etc.) so
+# we do not promote arbitrary numbers (dates, IDs, percentages) as money.
+STANDALONE_MONEY_AMOUNT_RE = re.compile(
+    r"\b\d{1,3}(?:\.\d{3})+(?:,\d{1,2})?\b",
+    flags=re.UNICODE,
+)
+_STANDALONE_AMOUNT_CONTEXT_RE = re.compile(
+    r"\b(?:valore\s+arrotondat\w*|valore\s+(?:di\s+|esatto\s+)?(?:vendita\s+giudiziaria|stima|mercato|venale|complessivo|finale|netto)|"
+    r"vendita\s+giudiziaria|piu\s+probabile\s+valore|market\s+value|"
+    r"vdm\b|val\.\s*di\s+merc|valore\s+immobiliare|prezzo\s+base|base\s+d['\s]?\s*asta|"
+    r"totale\s+deprezzament\w*|totale\s+detrazion\w*|"
+    r"a\s+lavori\s+ultimat\w*|come\s+sopra\s+determinat\w*)\b",
+    flags=re.IGNORECASE | re.UNICODE,
+)
+_STANDALONE_FORMULA_RESULT_RE = re.compile(
+    r"=\s*\d{1,3}(?:\.\d{3})+(?:,\d{1,2})?",
+    flags=re.UNICODE,
 )
 MONEY_ROLES = [
     "buyer_cost_signal_to_verify",
@@ -101,6 +126,11 @@ MONEY_ROLES = [
     "component_of_total",
     "total_candidate",
     "condominium_arrears",
+    "judicial_sale_value",
+    "final_valuation_after_deductions",
+    "regularization_cost",
+    "unit_price_reference",
+    "rent_or_income",
     "unknown_money",
 ]
 
@@ -1079,7 +1109,12 @@ def _empty_money_value() -> Dict[str, Any]:
 
 def _parse_amount(raw: Any) -> Optional[float]:
     text = str(raw or "")
-    match = re.search(r"\d{1,3}(?:\.\d{3})*(?:,\d{2})?|\d+(?:,\d{2})?", text)
+    # Try Italian thousand-separated form first (e.g. "23.000,00" or "500"),
+    # then fall back to bare digits (e.g. "23000,00") so we do not collapse a
+    # 5-digit number into the leading 3 digits.
+    match = re.search(r"\d{1,3}(?:\.\d{3})+(?:,\d{1,2})?", text)
+    if not match:
+        match = re.search(r"\d+(?:,\d{1,2})?", text)
     if not match:
         return None
     normalized = match.group(0).replace(".", "").replace(",", ".")
@@ -1089,27 +1124,247 @@ def _parse_amount(raw: Any) -> Optional[float]:
         return None
 
 
-def _money_role_reason_from_text(text: str) -> Tuple[str, str]:
+_BUYER_OBLIGATION_NORM_RE = re.compile(
+    r"\b(?:a\s+carico\s+(?:dell[' ]?)?(?:aggiudicatario|acquirente|parte\s+acquirente|nuovo\s+proprietario)"
+    r"|onere\s+a\s+carico|oneri\s+a\s+carico|spese\s+a\s+carico|costi\s+a\s+carico|importi\s+a\s+carico"
+    r"|sostenere|restano?\s+a\s+carico|sono\s+a\s+carico"
+    r"|spese\s+condominiali\s+(?:insolute|arretrate|scadute|morose|non\s+pagate)"
+    r"|debito\s+pregresso\s+(?:condominio|condominial)"
+    r"|aggiudicatario\s+dovr|acquirente\s+dovr)\b",
+    re.IGNORECASE,
+)
+
+
+def _classify_amount_position(text: str, amount_raw: Any) -> Optional[Tuple[str, str]]:
+    """Position-aware classification based on the immediate context around the
+    specific amount. Returns (role, reason_code) when a position-specific pattern
+    fires; None otherwise so the whole-quote classifier can fall through.
+    """
+    if not amount_raw:
+        return None
+    amt_str = str(amount_raw)
+    if not amt_str:
+        return None
+    idx = text.find(amt_str)
+    if idx < 0:
+        # The candidate miner sometimes records amount_raw with extra whitespace
+        # ("€         486.499,00") that does not appear verbatim in the page
+        # text. Fall back to searching by the bare digit portion so we still
+        # know which character offset to use for the before/after context.
+        digits_match = re.search(r"\d[\d.,\s]*\d|\d", amt_str)
+        if digits_match:
+            digit_form = digits_match.group(0)
+            collapsed = re.sub(r"\s+", "", digit_form)
+            for needle in (digit_form, collapsed):
+                if not needle:
+                    continue
+                pos = text.find(needle)
+                if pos >= 0:
+                    idx = pos
+                    amt_str = needle
+                    break
+        if idx < 0:
+            return None
+    before_text = text[max(0, idx - 80): idx]
+    after_text = text[idx + len(amt_str): idx + len(amt_str) + 60]
+    before = _normalize_text(before_text)
+    after = _normalize_text(after_text)
+    full_norm = _normalize_text(text)
+
+    # FORMULA RESULT: amount preceded by "=" → final value after deductions
+    if re.search(r"=\s*(?:€|euro)?\s*$", before):
+        return "final_valuation_after_deductions", "FORMULA_RESULT_AFTER_EQUALS"
+
+    # Amount preceded by "-" or "−" → subtrahend in deduction formula
+    if re.search(r"[-−–]\s*(?:€|euro)?\s*$", before):
+        if re.search(r"\b(decurtat|deprezzat|abbattut|detratt|ridott|netto)\w*", full_norm):
+            return "valuation_deduction", "FORMULA_SUBTRACTOR"
+
+    # FORMULA MINUEND: amount immediately followed by " - " (subtraction operator)
+    # in a context with decurtazione/netto keywords → this is the reference value
+    # being decurted, not a deduction itself.
+    if re.search(r"^\s*[,\.0-9]*\s*[-−–]\s*(?:€|euro)?\s*\d", after):
+        if re.search(r"\b(decurtat|deprezzat|abbattut|detratt|ridott|netto)\w*", full_norm):
+            return "market_value", "FORMULA_MINUEND_REFERENCE"
+
+    # Unit price reference: amount followed by /mq, /ha, /mc
+    if re.search(r"^\s*/\s*(?:mq|m²|m2|ha|ettar|mc|m3)\b", after) or re.search(
+        r"\b(?:€|euro)\s*/\s*(?:mq|m²|m2|ha|mc|m3)\s*$", before
+    ):
+        return "unit_price_reference", "UNIT_PRICE_REFERENCE"
+
+    # Headline labels immediately before the amount
+    if re.search(
+        r"\bvalore\s+arrotondat\w*\s+final\w*\s+(?:per\s+)?vendita\s+giudiziaria\b[^.\n=]{0,60}$",
+        before,
+    ):
+        return "judicial_sale_value", "VALORE_ARROTONDATO_VENDITA_GIUDIZIARIA"
+    if re.search(r"\b(?:valore\s+di\s+vendita\s+giudiziaria|vendita\s+giudiziaria|valore\s+giudiziario)\b[^.\n=]{0,60}$", before):
+        return "judicial_sale_value", "VALORE_VENDITA_GIUDIZIARIA"
+
+    if re.search(
+        r"\b(?:valore\s+arrotondat\w*|valore\s+netto|netto\s+(?:delle\s+)?decurtazion\w*|"
+        r"valore\s+(?:di\s+)?stima\s+netto|valore\s+(?:di\s+)?perizia\s+netto)\b[^.\n=]{0,60}$",
+        before,
+    ):
+        return "final_valuation_after_deductions", "FINAL_VALUE_LABELED"
+    if re.search(r"\bvalore\s+finale\s+(?:di\s+)?stima\b[^.\n=]{0,40}$", before):
+        return "final_value", "VALORE_FINALE_STIMA_AMOUNT"
+    if re.search(r"\bvalore\s+finale\b[^.\n=]{0,40}$", before):
+        return "final_value", "VALORE_FINALE_STIMA_AMOUNT"
+
+    if re.search(r"\b(?:prezzo\s+base|base\s+d['\s]?\s*asta|offerta\s+minima)\b[^.\n=]{0,40}$", before):
+        return "base_auction", "PREZZO_BASE_ASTA_AMOUNT"
+
+    if re.search(
+        r"\b(?:pi[uù]\s+probabile\s+valore(?:\s+(?:immobiliare|di\s+mercato|venale))?|"
+        r"valore\s+di\s+(?:stima|mercato|venale|cauzionale|commerciale|complessivo)|"
+        r"market\s+value)\b[^.\n=]{0,40}$",
+        before,
+    ):
+        return "market_value", "VALORE_STIMA_MERCATO_AMOUNT"
+
+    # "valore viene decurtato di X" / "decurtazione di X" / "decurtato delle spese di X"
+    if re.search(
+        r"\b(?:decurtat|deprezzat|abbattut|detratt|ridott)\w*\s+(?:di|delle?|del|per|dal|delle\s+spese\s+di)\s+(?:€|euro)?\s*$",
+        before,
+    ):
+        return "valuation_deduction", "DECURTATO_DI_AMOUNT"
+
+    # "Oneri di regolarizzazione urbanistica €N" / "Rischio assunto per mancata
+    # garanzia €N" — these are valuation deductions applied by the appraiser, not
+    # buyer-extra costs. They are listed in the appraisal as items that reduce
+    # the base value.
+    if re.search(
+        r"\b(?:oneri\s+(?:di\s+)?regolarizzazione\s+urbanistic\w*|"
+        r"rischio\s+(?:assunto\s+)?per\s+(?:la\s+)?mancata\s+garanzi\w*|"
+        r"totale\s+(?:delle\s+)?(?:decurtazion\w*|detrazion\w*|deprezzament\w*))\b[^.\n=]{0,40}$",
+        before,
+    ):
+        return "valuation_deduction", "VALUATION_DEDUCTION_LABEL"
+
+    # "Valore a lavori ultimati / considerato a lavori ultimati / come sopra
+    # determinato" — hypothetical completed-state value: this is a valuation
+    # reference, not a deduction.
+    if re.search(
+        r"\b(?:valore\s+(?:considerato\s+)?a\s+lavori\s+ultimat\w*|"
+        r"a\s+lavori\s+ultimat\w*|"
+        r"valore\s+come\s+sopra\s+determinat\w*|"
+        r"valore\s+ipotetic\w*\s+a\s+lavori)\b[^.\n=]{0,60}$",
+        before,
+    ):
+        return "market_value", "HYPOTHETICAL_COMPLETED_VALUE"
+
+    # Buyer cost / regularization labels immediately before amount. We always
+    # return buyer_cost_signal_to_verify here (consistent with the legacy
+    # whole-quote resolver) so the projection can demote to other_monetary_mentions
+    # when there is no explicit buyer obligation in the wider context.
+    reg_labels = re.search(
+        r"\b(?:completamento\s+lavori|abitabilit[aà]|sanatori\w*|oblazion\w*|sanzion\w*|"
+        r"oneri\s+(?:di\s+)?regolarizzazione|costi\s+(?:di\s+)?regolarizzazione|"
+        r"spese\s+(?:di\s+|tecniche\s+(?:di\s+)?)?regolarizzazione|"
+        r"debito\s+pregresso\s+condomini\w*|"
+        r"spese\s+condominiali\s+(?:insolut\w*|arretrat\w*|scadut\w*|morosit\w*|pregress\w*)|"
+        r"condominiali\s+(?:insolut\w*|arretrat\w*|scadut\w*|morosit\w*|pregress\w*)|"
+        r"diritti\s+di\s+sanatoria|fiscalizzazion\w*|ripristin\w*|demolizion\w*)\b[^\n=]{0,80}$",
+        before,
+    )
+    if reg_labels:
+        if re.search(
+            r"\b(?:spese\s+condominiali\s+(?:insolut|arretrat|scadut|morosit|pregress)|"
+            r"condominiali\s+(?:insolut|arretrat|scadut|morosit|pregress)|"
+            r"debito\s+pregresso\s+condomini)\w*",
+            reg_labels.group(0),
+            re.IGNORECASE,
+        ):
+            return "condominium_arrears", "CONDOMINIUM_ARREARS_AMOUNT"
+        return "buyer_cost_signal_to_verify", "EXPLICIT_BUYER_COST_SIGNAL"
+
+    # Inline condominium-arrears phrases that mention "debito pregresso" with the
+    # condominium context within the same window — these are buyer-side liabilities
+    # the new owner inherits, regardless of "a carico" sugar.
+    if re.search(
+        r"\b(?:debito\s+pregresso|debito\s+condominial\w*|debito\s+condomini\w*)\b",
+        before,
+    ) and re.search(r"\bcondomini\w*\b", full_norm):
+        return "condominium_arrears", "CONDOMINIUM_ARREARS_AMOUNT"
+
+    # Rendita catastale immediately before this amount
+    if re.search(r"\brendita\s+catastal\w*\b[^.\n=]{0,40}$", before):
+        return "cadastral_rendita", "RENDITA_CATASTALE_AMOUNT"
+
+    # Cancellation / formality labels immediately before
+    if re.search(
+        r"\b(?:cancellazion\w*\s+(?:ipotec|trascriz|formal)|ipotec\w*|pignorament\w*|formalita|"
+        r"iscrizione\s+ipotecari|trascrizion\w*\s+pregiudizievol|capitale\s+(?:residuo|garantito))\b[^.\n=]{0,40}$",
+        before,
+    ):
+        return "formalities_procedural_amount", "FORMALITA_PROCEDURAL_AMOUNT"
+
+    # Rent / income context
+    if re.search(
+        r"\b(?:canone\s+(?:di\s+)?(?:locazione|affitto|annuo|mensile)|reddito\s+(?:locativo|annuo)|"
+        r"affitto\s+(?:annuo|mensile)|locazione\s+(?:annua|mensile))\b[^.\n=]{0,40}$",
+        before,
+    ):
+        return "rent_or_income", "RENT_OR_INCOME_AMOUNT"
+
+    return None
+
+
+def _money_role_reason_from_text(text: str, amount_raw: Any = None) -> Tuple[str, str]:
+    # Position-aware classification first (formula direction, labelled headlines).
+    pos = _classify_amount_position(text, amount_raw)
+    if pos is not None:
+        return pos
+
     normalized = _normalize_text(text)
     if re.search(r"\b(verifich\w*|accert\w*|provved\w*|indichi|riferisca|determini)\b.{0,120}\b(spese|costi|oneri|importi|euro)\b", normalized):
         return "unknown_money", "INSTRUCTION_OR_BOILERPLATE_AMOUNT"
+    if re.search(
+        r"\b(?:valore\s+(?:considerato\s+)?a\s+lavori\s+ultimat\w*|"
+        r"a\s+lavori\s+ultimat\w*|"
+        r"valore\s+come\s+sopra\s+determinat\w*)\b",
+        normalized,
+    ):
+        return "market_value", "HYPOTHETICAL_COMPLETED_VALUE"
     if re.search(r"\brendita\s+catastale\b|\brendita\b.{0,80}\b(catasto|catastale|categoria|classe|vani|foglio|particella|subalterno)\b", normalized):
         return "cadastral_rendita", "RENDITA_CATASTALE_AMOUNT"
+    if re.search(r"\bvalore\s+di\s+vendita\s+giudiziaria\b|\bvendita\s+giudiziaria\b", normalized):
+        return "judicial_sale_value", "VALORE_VENDITA_GIUDIZIARIA"
     if re.search(r"\b(prezzo\s+base|base\s+d[' ]asta|offerta\s+minima)\b", normalized):
         return "base_auction", "PREZZO_BASE_ASTA_AMOUNT"
+    if re.search(r"\b(?:valore\s+arrotondat\w*|netto\s+(?:delle\s+)?decurtazion\w*|valore\s+(?:di\s+)?stima\s+netto)\b", normalized):
+        return "final_valuation_after_deductions", "FINAL_VALUE_LABELED"
     if re.search(r"\bvalore\s+finale\s+(?:di\s+)?stima\b|\bvalore\s+finale\b", normalized):
         return "final_value", "VALORE_FINALE_STIMA_AMOUNT"
-    if re.search(r"\bvalore\s+di\s+(?:stima|mercato)|valore\s+venale|valore\s+cauzionale|valore\s+commerciale\b", normalized):
+    if re.search(
+        r"\b(?:pi[uù]\s+probabile\s+valore(?:\s+(?:immobiliare|di\s+mercato|venale))?|"
+        r"valore\s+di\s+(?:stima|mercato|venale|cauzionale|commerciale|complessivo)|"
+        r"market\s+value)\b",
+        normalized,
+    ):
         return "market_value", "VALORE_STIMA_MERCATO_AMOUNT"
     if re.search(r"\b(deprezzament\w*|decurtazion\w*|abbattimento|riduzione|adeguament\w*\s+e\s+correzion\w*)\b", normalized):
         return "valuation_deduction", "VALUATION_DEDUCTION_AMOUNT"
     if re.search(r"\b(ipotec\w*|pignorament\w*|formalita|trascrizion\w*|iscrizion\w*|registro\s+(?:generale|particolare)|procedura)\b", normalized):
         return "formalities_procedural_amount", "FORMALITA_PROCEDURAL_AMOUNT"
-    if re.search(r"\b(spese\s+condominiali|condominio|condominial\w*)\b.{0,120}\b(arretrat\w*|insolut\w*|scadut\w*|morosit\w*|debito|debitoria)\b", normalized):
+    if re.search(r"\b(spese\s+condominiali|condominio|condominial\w*)\b.{0,140}\b(arretrat\w*|insolut\w*|scadut\w*|morosit\w*|debito|debitoria|pregress\w*)\b", normalized):
+        return "condominium_arrears", "CONDOMINIUM_ARREARS_AMOUNT"
+    if re.search(r"\bdebito\s+pregress\w*\b.{0,120}\bcondomini\w*\b", normalized) or re.search(
+        r"\bcondomini\w*\b.{0,120}\bdebito\s+pregress\w*\b", normalized
+    ):
         return "condominium_arrears", "CONDOMINIUM_ARREARS_AMOUNT"
     if re.search(
+        r"\b(canone\s+(?:di\s+)?(?:locazione|affitto|annuo|mensile)|reddito\s+(?:locativo|annuo)|"
+        r"affitto\s+(?:annuo|mensile))\b",
+        normalized,
+    ):
+        return "rent_or_income", "RENT_OR_INCOME_AMOUNT"
+    if re.search(
         r"\b(spese\s+tecniche|regolarizzazion\w*|sanatori\w*|oblazion\w*|sanzion\w*|docfa|tipo\s+mappale|"
-        r"ripristin\w*|demolizion\w*|fiscalizzazion\w*|oneri?\s+(?:a\s+carico|di\s+regolarizzazione)|"
+        r"ripristin\w*|demolizion\w*|fiscalizzazion\w*|completamento\s+lavori|abitabilit[aà]|"
+        r"oneri?\s+(?:a\s+carico|di\s+regolarizzazione)|"
         r"costo\s+(?:di\s+)?(?:sanatoria|regolarizzazione|ripristino|demolizione|fiscalizzazione))\b",
         normalized,
     ):
@@ -1124,11 +1379,22 @@ def _money_role_reason_from_text(text: str) -> Tuple[str, str]:
 def _is_total_context(text: str, amount_raw: Any = None) -> bool:
     normalized = _normalize_text(text)
     raw_amount = _normalize_text(amount_raw)
+    # "Totale deprezzamenti / detrazioni / decurtazioni" introduces a valuation
+    # deduction subtotal, not a buyer-side extras total — never promote to a
+    # total_candidate (which would double-count or fake a buyer total).
+    deduction_total = re.compile(
+        r"\btotale\s+(?:delle\s+)?(?:deprezzament\w*|detrazion\w*|decurtazion\w*)\b",
+        re.IGNORECASE,
+    )
     if raw_amount:
         idx = normalized.find(raw_amount)
         if idx >= 0:
             window_before = normalized[max(0, idx - 90) : idx]
+            if deduction_total.search(window_before):
+                return False
             return bool(re.search(r"\b(totale|complessiv[oa]|sommano|somma|importo\s+totale)\b", window_before))
+    if deduction_total.search(normalized):
+        return False
     return bool(re.search(r"\b(totale|complessiv[oa]|sommano|somma|importo\s+totale)\b", normalized))
 
 
@@ -1152,6 +1418,22 @@ def _money_confidence(authority: Dict[str, Any], role: str, supported: bool) -> 
     if supported:
         return max(score, 0.75)
     return min(score, 0.55)
+
+
+def _lot_label_from_context(quote: str, page_lot_label: Optional[str] = None) -> Optional[str]:
+    """Detect a lot label inside the quote window. Falls back to page-level lot
+    context computed by the caller. Returns canonical labels like "Lotto 1" or
+    "LOTTO UNICO" or None when no lot context is detectable.
+    """
+    if not quote:
+        return page_lot_label
+    norm = _normalize_text(quote)
+    if LOT_UNICO_RE.search(norm):
+        return "LOTTO UNICO"
+    m = LOT_NUMBER_RE.search(norm)
+    if m:
+        return f"Lotto {int(m.group(1))}"
+    return page_lot_label
 
 
 def _money_candidate_record(
@@ -1184,10 +1466,12 @@ def _money_candidate_record(
         warnings.append("WEAK_OR_INSTRUCTION_AUTHORITY")
     if role == "unknown_money" and reason_code in {"GENERIC_MONEY_BOILERPLATE", "INSTRUCTION_OR_BOILERPLATE_AMOUNT"}:
         warnings.append(reason_code)
+    lot_label = _lot_label_from_context(quote, item.get("page_lot_label"))
     return {
         "candidate_id": _candidate_id(page, amount, quote, index),
         "amount_eur": amount,
         "raw_text": quote,
+        "amount_raw": item.get("amount_raw"),
         "page": page,
         "role": role,
         "confidence": round(_money_confidence(authority, role, supported), 4),
@@ -1202,7 +1486,74 @@ def _money_candidate_record(
         "source": item.get("source") or "",
         "semantic_base_role": base_role or role,
         "semantic_base_reason_code": base_reason_code or reason_code,
+        "lot_label": lot_label,
     }
+
+
+_PAGE_LOT_INTERNAL_OFFSETS: Dict[int, List[Tuple[int, str]]] = {}
+
+
+def _build_page_lot_context(pages: Sequence[Dict[str, Any]]) -> Dict[int, str]:
+    """Walk pages in order and propagate the most-recent lot heading forward.
+
+    A "Lotto N" or "LOTTO UNICO" heading on page P applies to page P and to all
+    subsequent pages until a different lot heading is seen. Returns a mapping
+    page_number -> canonical lot label.
+
+    Side effect: also populates the per-page internal offset list
+    (_PAGE_LOT_INTERNAL_OFFSETS) so callers can resolve "which lot is in effect
+    at character offset N within page P" for cases where the same page contains
+    headings for multiple lots.
+    """
+    ctx: Dict[int, str] = {}
+    current: Optional[str] = None
+    _PAGE_LOT_INTERNAL_OFFSETS.clear()
+    for page in pages:
+        try:
+            page_number = int(page.get("page"))
+        except Exception:
+            continue
+        text = str(page.get("text") or "")
+        norm = _normalize_text(text)
+        # Collect every lot heading inside the page in order of appearance so we
+        # can resolve attribution at character offset level (a page that lists
+        # "Lotto 1 ... Lotto 2" must NOT propagate Lotto 1 into Lotto 2 body).
+        internal: List[Tuple[int, str]] = []
+        for m_each in LOT_UNICO_RE.finditer(norm):
+            internal.append((m_each.start(), "LOTTO UNICO"))
+        for m_each in LOT_NUMBER_RE.finditer(norm):
+            try:
+                internal.append((m_each.start(), f"Lotto {int(m_each.group(1))}"))
+            except Exception:
+                continue
+        if internal:
+            internal.sort(key=lambda pair: pair[0])
+            _PAGE_LOT_INTERNAL_OFFSETS[page_number] = internal
+        # Detect headings in this page text - take the first one on the page
+        m_unico = LOT_UNICO_RE.search(norm)
+        m_num = LOT_NUMBER_RE.search(norm)
+        if m_unico and (not m_num or m_unico.start() < m_num.start()):
+            current = "LOTTO UNICO"
+        elif m_num:
+            current = f"Lotto {int(m_num.group(1))}"
+        if current is not None:
+            ctx[page_number] = current
+    return ctx
+
+
+def _lot_label_at_offset(page_number: int, offset: int, fallback: Optional[str]) -> Optional[str]:
+    """Return the lot label whose heading appears nearest BEFORE the given
+    character offset within the page, falling back to the forward-propagated
+    page_lot_ctx label when no heading appears earlier on the same page.
+    """
+    headings = _PAGE_LOT_INTERNAL_OFFSETS.get(int(page_number)) or []
+    chosen: Optional[str] = None
+    for start, label in headings:
+        if start <= offset:
+            chosen = label
+        else:
+            break
+    return chosen or fallback
 
 
 def _candidate_money_items(
@@ -1211,7 +1562,9 @@ def _candidate_money_items(
 ) -> Tuple[List[Dict[str, Any]], List[str]]:
     out: List[Dict[str, Any]] = []
     warnings: List[str] = []
+    page_lot_ctx = _build_page_lot_context(pages)
     money_candidates = candidates.get("money") if isinstance(candidates, dict) else None
+    page_text_by_number = {row["page"]: row["text"] for row in pages}
     if isinstance(money_candidates, list):
         for row in money_candidates:
             if not isinstance(row, dict):
@@ -1233,6 +1586,21 @@ def _candidate_money_items(
                 amount_f = float(amount)
             except Exception:
                 amount_f = None
+            # Locate the amount's position inside the page text so we can pick
+            # the nearest preceding lot heading (avoids propagating Lotto 1 into
+            # a Lotto 2 body when the same page contains both).
+            page_text = page_text_by_number.get(page) or ""
+            amount_raw = str(row.get("amount_raw") or "")
+            offset = -1
+            if amount_raw:
+                offset = page_text.find(amount_raw)
+            if offset < 0 and quote:
+                offset = page_text.find(quote[:40])
+            lot_label = (
+                _lot_label_at_offset(page, offset, page_lot_ctx.get(page))
+                if offset >= 0
+                else page_lot_ctx.get(page)
+            )
             out.append(
                 {
                     "page": page,
@@ -1240,6 +1608,7 @@ def _candidate_money_items(
                     "amount_eur": amount_f,
                     "amount_raw": row.get("amount_raw"),
                     "source": "candidate_miner",
+                    "page_lot_label": lot_label,
                 }
             )
     elif money_candidates is not None:
@@ -1247,6 +1616,8 @@ def _candidate_money_items(
 
     for page in pages:
         text = page["text"]
+        page_num = page["page"]
+        page_default_label = page_lot_ctx.get(page_num)
         for match in MONEY_AMOUNT_RE.finditer(text):
             quote = _line_snippet(text, match.start(), match.end(), radius=220)
             amount = _parse_amount(match.group(0))
@@ -1254,11 +1625,46 @@ def _candidate_money_items(
                 continue
             out.append(
                 {
-                    "page": page["page"],
+                    "page": page_num,
                     "quote": quote,
                     "amount_eur": amount,
                     "amount_raw": match.group(0),
                     "source": "page_scan",
+                    "page_lot_label": _lot_label_at_offset(page_num, match.start(), page_default_label),
+                }
+            )
+        # Secondary pass: standalone Italian-format amounts (e.g. "204.450,00")
+        # that lack a € symbol but appear in a valuation/sale context window or
+        # as a formula result after "= ". Only accepted when the wider quote
+        # contains a strong valuation keyword so we do not invent money. We
+        # examine the RAW window (across newline-broken table cells) for the
+        # context check so amounts in narrow table rows still pick up section
+        # headers like "VENDITA GIUDIZIARIA" on a previous row.
+        for match in STANDALONE_MONEY_AMOUNT_RE.finditer(text):
+            amount = _parse_amount(match.group(0))
+            if amount is None or amount < 100:
+                continue
+            wider_raw = text[max(0, match.start() - 500): match.end() + 200]
+            wider_norm = _normalize_text(wider_raw)
+            after_equals = _STANDALONE_FORMULA_RESULT_RE.search(text[max(0, match.start() - 4): match.end()])
+            has_context = bool(_STANDALONE_AMOUNT_CONTEXT_RE.search(wider_norm))
+            if not (after_equals or has_context):
+                continue
+            # For standalone table cell amounts we need a wider quote (including
+            # column headers like "Valore arrotondato finale per vendita
+            # giudiziaria" that sit on previous rows) so the role resolver can
+            # classify them correctly. Use the raw +/-500/+200 window.
+            quote_window = re.sub(r"\s+", " ", wider_raw).strip()
+            if len(quote_window) > 720:
+                quote_window = quote_window[:720]
+            out.append(
+                {
+                    "page": page_num,
+                    "quote": quote_window,
+                    "amount_eur": amount,
+                    "amount_raw": match.group(0),
+                    "source": "page_scan_standalone",
+                    "page_lot_label": _lot_label_at_offset(page_num, match.start(), page_default_label),
                 }
             )
 
@@ -1300,8 +1706,25 @@ def resolve_money_roles_shadow(
         authority, failed, err = _quote_authority(page, quote, section_map, rows, domain="money")
         if failed and err:
             failures.append(f"page_{page}:{err}")
-        base_role, reason_code = _money_role_reason_from_text(quote)
-        if _is_total_context(quote, item.get("amount_raw")):
+        base_role, reason_code = _money_role_reason_from_text(quote, item.get("amount_raw"))
+        # Valuation/sale roles must never be downgraded to "total_candidate" just
+        # because the surrounding sentence contains the word "totale" — that
+        # leads to legitimate headline values being treated as buyer-side totals
+        # and to neighbouring smaller amounts being marked as components.
+        non_total_eligible_roles = {
+            "valuation_deduction",
+            "price",
+            "base_auction",
+            "final_value",
+            "market_value",
+            "cadastral_rendita",
+            "formalities_procedural_amount",
+            "judicial_sale_value",
+            "final_valuation_after_deductions",
+            "unit_price_reference",
+            "rent_or_income",
+        }
+        if base_role not in non_total_eligible_roles and _is_total_context(quote, item.get("amount_raw")):
             total_reason = "EXPLICIT_TOTAL_CANDIDATE"
             if base_role in {"buyer_cost_signal_to_verify", "condominium_arrears"}:
                 total_reason = "EXPLICIT_TOTAL_BUYER_COST_SIGNAL"
@@ -1366,7 +1789,7 @@ def resolve_money_roles_shadow(
         candidate["parent_total_candidate_id"] = parent.get("candidate_id")
         candidate.setdefault("warnings", []).append("COMPONENT_TOTAL_DOUBLE_COUNT_RISK")
 
-    value["money_candidates"] = money_candidates[:120]
+    value["money_candidates"] = money_candidates[:300]
     for candidate in money_candidates:
         role = str(candidate.get("role") or "unknown_money")
         if role not in MONEY_ROLES:

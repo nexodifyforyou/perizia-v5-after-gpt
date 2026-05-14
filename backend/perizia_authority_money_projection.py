@@ -225,6 +225,56 @@ def _dedupe_candidates(candidates: Iterable[Dict[str, Any]], limit: int) -> List
     return out
 
 
+def _consolidate_repeated_items(items: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Group items with the same (amount, label_role, lot_label) across multiple
+    pages into a single visible item carrying the union of evidence pages.
+
+    This prevents the same mortgage / cadastral value / formality from rendering
+    six times when it is repeated on consecutive pages.
+    """
+    if not items:
+        return items
+    grouped: Dict[Tuple[Any, ...], Dict[str, Any]] = {}
+    order: List[Tuple[Any, ...]] = []
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        try:
+            amount_key = round(float(item.get("amount_eur") or 0.0), 2)
+        except Exception:
+            amount_key = 0.0
+        key = (
+            amount_key,
+            str(item.get("label_role") or ""),
+            str(item.get("lot_label") or ""),
+        )
+        existing = grouped.get(key)
+        if existing is None:
+            grouped[key] = copy.deepcopy(item)
+            order.append(key)
+            continue
+        # Merge evidence pages
+        ev_list = existing.get("evidence") or []
+        if not isinstance(ev_list, list):
+            ev_list = []
+        for ev in item.get("evidence") or []:
+            if isinstance(ev, dict) and ev not in ev_list:
+                ev_list.append(ev)
+        existing["evidence"] = ev_list
+        pages_seen: List[int] = []
+        for ev in ev_list:
+            page = ev.get("page") if isinstance(ev, dict) else None
+            if isinstance(page, int) and page > 0 and page not in pages_seen:
+                pages_seen.append(page)
+        if pages_seen:
+            existing["pages"] = pages_seen
+            if existing.get("page") is None:
+                existing["page"] = pages_seen[0]
+        existing.setdefault("merged_count", 1)
+        existing["merged_count"] = int(existing.get("merged_count") or 1) + 1
+    return [grouped[key] for key in order]
+
+
 def _role_label(candidate: Dict[str, Any]) -> str:
     role = str(candidate.get("role") or "")
     base_role = str(candidate.get("semantic_base_role") or "")
@@ -472,6 +522,11 @@ _REGOLARIZZAZIONE_MENTION_RE = re.compile(
     r"docfa|tipo\s+mappale|ripristin\w*|demolizion\w*|spese\s+tecnich\w*)\b",
     re.IGNORECASE,
 )
+_LAVORI_ULTIMATI_RE = re.compile(
+    r"\b(?:valore\s+(?:considerato\s+)?a\s+lavori\s+ultimat\w*|a\s+lavori\s+ultimat\w*|"
+    r"valore\s+come\s+sopra\s+determinat\w*|valore\s+ipotetic\w*\s+a\s+lavori)\b",
+    re.IGNORECASE,
+)
 
 # Strong economic/legal keywords that justify keeping a small amount as a real money
 # mention rather than demoting it as OCR/regex noise.
@@ -567,12 +622,26 @@ def _has_page_evidence(candidate: Dict[str, Any]) -> bool:
     return page > 0 and bool(quote)
 
 
+# Amounts that are commonly OCR fragments / table cell mis-reads when no clear
+# tax/fee/legal context surrounds them. The list is intentionally narrow: any
+# such amount is only demoted when the surrounding quote lacks economic/legal
+# keywords like tassa, bollo, diritti, imposta, costo, ipoteca, cancellazione.
+_SUSPICIOUS_TINY_AMOUNTS = {1, 2, 3, 5, 9, 10, 12, 24, 35, 59, 100}
+
+_UNIT_PRICE_CONTEXT_RE = re.compile(
+    r"€\s*/\s*(?:mq|m²|m2|ha|ettar|mc|m3)\b|\b(?:euro\s+per|al)\s+(?:mq|m²|m2|ha|mc)\b|"
+    r"\d+(?:[,\.]\d+)?\s*(?:mq|m²|m2|ha|ettar|mc|m3)\s*[xX×]\s*€?\s*\d",
+    re.IGNORECASE,
+)
+
+
 def is_likely_ocr_noise(candidate: Dict[str, Any]) -> bool:
     """Return True iff the candidate is likely OCR/regex noise rather than a real money mention.
 
     Hard guard: candidates already classified by the resolver into a known money role
     (price/base_auction/final_value/market_value/valuation_deduction/cadastral_rendita/
-    condominium_arrears) are never treated as noise.
+    condominium_arrears/judicial_sale_value/final_valuation_after_deductions/
+    unit_price_reference/rent_or_income/formalities_procedural_amount) are never treated as noise.
 
     A candidate is flagged as noise when at least one of the following holds:
       - The quote is empty.
@@ -580,6 +649,8 @@ def is_likely_ocr_noise(candidate: Dict[str, Any]) -> bool:
       - The context is dominated by cadastral identification tokens (Foglio, Part., Sub., Zona Cens., Categoria,
         Classe, Consistenza, Superficie catastale, ...) AND has no strong economic/legal keyword.
       - The amount is < €50 AND the context has no strong economic/legal keyword.
+      - The amount is in the suspicious-tiny list (1, 2, 3, 5, 9, 10, 12, 24, 35, 59, 100) AND has no
+        explicit tax/fee/cost/legal keyword.
       - The normalized quote is very short (< 12 chars) AND has no strong economic/legal keyword.
     """
     amount = _candidate_amount(candidate)
@@ -600,6 +671,11 @@ def is_likely_ocr_noise(candidate: Dict[str, Any]) -> bool:
         "valuation_deduction",
         "cadastral_rendita",
         "condominium_arrears",
+        "judicial_sale_value",
+        "final_valuation_after_deductions",
+        "unit_price_reference",
+        "rent_or_income",
+        "formalities_procedural_amount",
     }:
         return False
 
@@ -621,6 +697,7 @@ def is_likely_ocr_noise(candidate: Dict[str, Any]) -> bool:
     has_strong_kw = bool(_STRONG_MONEY_KEYWORD_RE.search(norm))
     cadastral_hits = len(_CADASTRAL_TABLE_TERMS_RE.findall(norm))
     in_cadastral_header = bool(_CADASTRAL_TABLE_HEADER_RE.search(norm))
+    in_unit_price_context = bool(_UNIT_PRICE_CONTEXT_RE.search(quote_raw))
 
     # Tiny amounts (≤€5) inside cadastral table HEADER rows or heavily
     # cadastral context are practically always OCR artifacts (e.g. "€ T-1"
@@ -639,6 +716,15 @@ def is_likely_ocr_noise(candidate: Dict[str, Any]) -> bool:
     if amount is not None and amount < 50 and not has_strong_kw:
         return True
 
+    # Suspicious round/tiny amounts that frequently come from broken OCR rows.
+    if (
+        amount is not None
+        and int(round(amount)) in _SUSPICIOUS_TINY_AMOUNTS
+        and not has_strong_kw
+        and not in_unit_price_context
+    ):
+        return True
+
     # Very short context with no money keyword.
     if len(norm) < 12 and not has_strong_kw:
         return True
@@ -654,6 +740,50 @@ _RESOLVER_NON_BUYER_ROLE_TO_GROUP = {
     "final_value": "price_references",
     "market_value": "price_references",
     "price": "price_references",
+    "judicial_sale_value": "price_references",
+    "final_valuation_after_deductions": "price_references",
+    "unit_price_reference": "valuation_references",
+    "regularization_cost": "other_monetary_mentions",
+    "rent_or_income": "other_monetary_mentions",
+}
+
+# Map resolver semantic role to a customer-facing label_role / sub-role so the
+# Money Box can show "Prezzo base d'asta", "Valore di stima", "Valore finale dopo
+# decurtazioni", etc. instead of one generic "Riferimento di prezzo".
+_RESOLVER_ROLE_TO_LABEL_ROLE = {
+    "base_auction": "auction_base_price",
+    "judicial_sale_value": "judicial_sale_value",
+    "market_value": "market_value",
+    "final_value": "valuation_value",
+    "final_valuation_after_deductions": "final_valuation_after_deductions",
+    "price": "valuation_value",
+    "valuation_deduction": "valuation_deduction",
+    "cadastral_rendita": "cadastral_rendita",
+    "formalities_procedural_amount": "mortgage_formality",
+    "buyer_cost_signal_to_verify": "buyer_cost_signal",
+    "condominium_arrears": "condominium_arrears",
+    "regularization_cost": "regularization_cost",
+    "rent_or_income": "rent_or_income",
+    "unit_price_reference": "unit_price_reference",
+    "unknown_money": "raw_or_low_confidence",
+}
+
+_RESOLVER_ROLE_TO_TITLE_IT = {
+    "base_auction": "Prezzo base d'asta",
+    "judicial_sale_value": "Valore di vendita giudiziaria",
+    "market_value": "Valore di stima / mercato",
+    "final_value": "Valore finale di stima",
+    "final_valuation_after_deductions": "Valore finale (netto delle decurtazioni)",
+    "price": "Valore di stima",
+    "valuation_deduction": "Decurtazione nella stima",
+    "cadastral_rendita": "Rendita catastale",
+    "formalities_procedural_amount": "Formalità / ipoteca / pignoramento",
+    "buyer_cost_signal_to_verify": "Costo a carico dell'acquirente (da verificare)",
+    "condominium_arrears": "Spese condominiali pregresse",
+    "regularization_cost": "Costo di regolarizzazione (da verificare)",
+    "rent_or_income": "Canone / reddito locativo",
+    "unit_price_reference": "Riferimento unitario (€/mq / €/ha)",
+    "unknown_money": "Importo monetario",
 }
 
 
@@ -702,6 +832,34 @@ def classify_money_context(candidate: Dict[str, Any]) -> Dict[str, Any]:
     cadastral = is_cadastral_context(quote)
     formality = is_formality_procedural_context(quote)
     regolarizzazione = bool(_REGOLARIZZAZIONE_MENTION_RE.search(_money_norm(quote)))
+    lavori_ultimati = bool(_LAVORI_ULTIMATI_RE.search(_money_norm(quote)))
+
+    # "Valore a lavori ultimati" / "valore considerato a lavori ultimati" /
+    # "valore come sopra determinato" — hypothetical completed-state value:
+    # always a valuation reference, never a buyer-side cost or a deduction.
+    if lavori_ultimati and effective_role not in {"buyer_cost_signal_to_verify", "condominium_arrears"}:
+        classification = _classification_template(
+            "valuation_references",
+            "none",
+            "Valore considerato a lavori ultimati: stima ipotetica del bene a regolarizzazione/lavori completati, non un costo per l'acquirente.",
+            label_role="valuation_reference",
+        )
+        return _finalize_classification(classification, candidate, regolarizzazione, explicit_buyer)
+
+    # Resolver-assigned condominium_arrears (the position-aware resolver
+    # already determined this amount sits under a "spese condominiali insolute /
+    # debito pregresso condominio" label) MUST surface as a buyer signal, even
+    # when the wider quote contains valuation/price keywords from neighbouring
+    # table cells.
+    if effective_role == "condominium_arrears":
+        classification = _classification_template(
+            "buyer_cost_signals_to_verify",
+            "to_verify",
+            "Spese condominiali potenzialmente esigibili dal nuovo proprietario: verificare esposizione esatta.",
+            label_role="condominium_arrears",
+            verification_note="Richiedere lettera dell'amministratore condominiale e verificare esposizione residua biennale.",
+        )
+        return _finalize_classification(classification, candidate, regolarizzazione, explicit_buyer)
 
     if arithmetic and not (
         explicit_buyer and effective_role in {"buyer_cost_signal_to_verify", "condominium_arrears"}
@@ -721,11 +879,16 @@ def classify_money_context(candidate: Dict[str, Any]) -> Dict[str, Any]:
             "formalities_and_procedural_amounts": "Importo procedurale (formalità/ipoteca/cancellazione/trascrizione): non automaticamente a carico dell'acquirente.",
             "valuation_deductions": "Decurtazione/deprezzamento applicato dal perito alla stima del valore: non è un costo a carico dell'acquirente.",
             "price_references": "Valore di stima / prezzo base / valore di mercato: riferimento di prezzo, non un costo extra per l'acquirente.",
+            "valuation_references": "Calcolo o riferimento valutativo: importo unitario o ipotetico usato dal perito, non un costo per l'acquirente.",
+            "other_monetary_mentions": "Importo monetario rilevato in perizia: classificazione conservativa.",
         }
+        explanation_text = explanations.get(
+            resolver_group, "Importo monetario classificato in modo conservativo."
+        )
         classification = _classification_template(
             resolver_group,
             "none",
-            explanations[resolver_group],
+            explanation_text,
             label_role=resolver_group,
         )
         return _finalize_classification(classification, candidate, regolarizzazione, explicit_buyer)
@@ -936,7 +1099,13 @@ def make_customer_money_item(
     group = str(classification.get("group") or "other_monetary_mentions")
     amount = _candidate_amount(candidate)
     amount_text = _amount_label(amount)
-    base_label = _GROUP_LABEL_PREFIX.get(group, "Importo monetario")
+    # Resolver-driven label_role overrides the group default when available,
+    # so the customer sees "Prezzo base d'asta" rather than a generic
+    # "Riferimento di prezzo".
+    resolver_role = str(candidate.get("semantic_base_role") or candidate.get("role") or "")
+    role_label_role = _RESOLVER_ROLE_TO_LABEL_ROLE.get(resolver_role)
+    role_title = _RESOLVER_ROLE_TO_TITLE_IT.get(resolver_role)
+    base_label = role_title or _GROUP_LABEL_PREFIX.get(group, "Importo monetario")
     label = f"{base_label}: {amount_text}" if amount_text else base_label
     evidence = _evidence_from_candidate(candidate)
     contract_state = (
@@ -967,7 +1136,7 @@ def make_customer_money_item(
         page_candidate = evidence[0].get("page")
         if isinstance(page_candidate, int):
             page_value = page_candidate
-    customer_title_base = _CUSTOMER_TITLE_PREFIX.get(group, "Importo monetario")
+    customer_title_base = role_title or _CUSTOMER_TITLE_PREFIX.get(group, "Importo monetario")
     customer_title = f"{customer_title_base}: {amount_text}" if amount_text else customer_title_base
     customer_badge = _CUSTOMER_BADGE_LABEL.get(group, "Da verificare")
     badge_tone = _CUSTOMER_BADGE_TONE.get(group, "info_neutral")
@@ -980,6 +1149,7 @@ def make_customer_money_item(
     importance, default_expand = _GROUP_DISPLAY_IMPORTANCE.get(group, ("raw", False))
     if is_noise:
         importance, default_expand = "raw", False
+    lot_label = candidate.get("lot_label") if isinstance(candidate.get("lot_label"), str) else None
     payload: Dict[str, Any] = {
         "code": f"{code_prefix}_{index:02d}",
         "label_it": label,
@@ -995,9 +1165,13 @@ def make_customer_money_item(
         "importance": importance,
         "should_expand_by_default": bool(default_expand),
         "is_likely_ocr_noise": bool(is_noise),
-        "role": str(candidate.get("semantic_base_role") or candidate.get("role") or "unknown_money"),
+        "role": resolver_role or "unknown_money",
+        "label_role": role_label_role or classification.get("label_role") or group,
+        "lot_label": lot_label,
+        "lot_id": lot_label,
         "buyer_relevance": classification.get("buyer_relevance") or "none",
         "additive_to_extra_total": bool(classification.get("additive_to_extra_total")),
+        "additive_to_buyer_total": bool(classification.get("additive_to_extra_total")),
         "amount_eur": int(round(amount)) if amount is not None else None,
         "stima_euro": int(round(amount)) if amount is not None else None,
         "raw_value": candidate.get("amount_raw") or _normalize_text(candidate.get("raw_text"))[:120],
@@ -1283,6 +1457,297 @@ _NON_BUYER_GROUPS = (
 )
 
 
+_ESTRATTO_AMOUNT_RE = re.compile(
+    r"(?:€|\beuro\b)\s*\d{1,3}(?:\.\d{3})*(?:,\d{1,2})?|"
+    r"\d{1,3}(?:\.\d{3})*(?:,\d{1,2})?\s*(?:€|\beuro\b)|"
+    r"\b\d{1,3}(?:\.\d{3})+(?:,\d{1,2})?\b",
+    flags=re.IGNORECASE | re.UNICODE,
+)
+
+
+def _parse_amount_eur(text: str) -> Optional[float]:
+    """Parse a single Italian-formatted money fragment into a float, or None."""
+    if not text:
+        return None
+    match = re.search(r"\d{1,3}(?:\.\d{3})*(?:,\d{1,2})?|\d+(?:,\d{1,2})?", text)
+    if not match:
+        return None
+    normalized = match.group(0).replace(".", "").replace(",", ".")
+    try:
+        value = float(normalized)
+    except Exception:
+        return None
+    return value if value > 0 else None
+
+
+def _iter_estratto_quality_items(result: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """Yield every item dict found under result["estratto_quality"], either
+    directly via "items" or nested under "sections[].items"."""
+    out: List[Dict[str, Any]] = []
+    estratto = result.get("estratto_quality") if isinstance(result.get("estratto_quality"), dict) else {}
+    sections = estratto.get("sections") if isinstance(estratto.get("sections"), list) else []
+    for section in sections:
+        if not isinstance(section, dict):
+            continue
+        for item in section.get("items") or []:
+            if isinstance(item, dict):
+                out.append(item)
+    for item in estratto.get("items") or []:
+        if isinstance(item, dict):
+            out.append(item)
+    return out
+
+
+def _estratto_evidence_page(item: Dict[str, Any]) -> Tuple[Optional[int], str]:
+    evidence = item.get("evidence") if isinstance(item.get("evidence"), list) else []
+    for ev in evidence:
+        if not isinstance(ev, dict):
+            continue
+        try:
+            page = int(ev.get("page"))
+            quote = _normalize_text(ev.get("quote"))
+            if page > 0:
+                return page, quote
+        except Exception:
+            continue
+    return None, ""
+
+
+def _candidate_from_estratto_amount(
+    item: Dict[str, Any],
+    amount_text: str,
+    amount_eur: float,
+    base_text: str,
+    page: int,
+    quote: str,
+) -> Dict[str, Any]:
+    role, reason = _resolve_estratto_role(item, base_text, amount_text)
+    seed = f"estratto|{page}|{round(amount_eur, 2)}|{amount_text}".encode("utf-8")
+    import hashlib
+
+    candidate_id = "money_eq_" + hashlib.sha1(seed).hexdigest()[:12]
+    candidate = {
+        "candidate_id": candidate_id,
+        "amount_eur": amount_eur,
+        "raw_text": quote or base_text,
+        "amount_raw": amount_text,
+        "page": int(page),
+        "role": role,
+        "confidence": 0.78,
+        "authority_zone": "FINAL_VALUATION",
+        "authority_level": "HIGH",
+        "reason_code": reason,
+        "is_customer_safe_cost": False,
+        "should_surface_in_money_box": role in {"buyer_cost_signal_to_verify", "condominium_arrears"},
+        "should_sum": False,
+        "parent_total_candidate_id": None,
+        "warnings": [],
+        "source": "estratto_quality",
+        "semantic_base_role": role,
+        "semantic_base_reason_code": reason,
+        "lot_label": item.get("lot_label") if isinstance(item.get("lot_label"), str) else None,
+    }
+    return candidate
+
+
+_ESTRATTO_LABEL_ROLE_RULES = (
+    (re.compile(r"\b(?:valore\s+arrotondat\w*\s+final\w*\s+(?:per\s+)?vendita\s+giudiziaria|"
+                r"valore\s+(?:di\s+|esatto\s+)?vendita\s+giudiziaria|vendita\s+giudiziaria)\b", re.IGNORECASE),
+     "judicial_sale_value", "ESTRATTO_VENDITA_GIUDIZIARIA"),
+    (re.compile(r"\b(?:lotto\s+unico|valore\s+(?:complessivo\s+)?(?:di\s+stima|finale|"
+                r"arrotondat\w*)\s*(?:dell['\s]?immobile|del\s+compendio|del\s+lotto)?)\b", re.IGNORECASE),
+     "market_value", "ESTRATTO_VALORE_STIMA"),
+    (re.compile(r"\b(?:prezzo\s+base|base\s+d['\s]?\s*asta|offerta\s+minima)\b", re.IGNORECASE),
+     "base_auction", "ESTRATTO_PREZZO_BASE"),
+    (re.compile(r"\b(?:valore\s+di\s+(?:mercato|venale|stima|complessivo)|piu\s+probabile\s+valore|market\s+value)\b", re.IGNORECASE),
+     "market_value", "ESTRATTO_VALORE_MERCATO"),
+    (re.compile(r"\b(?:rendita\s+catastal\w*|valore\s+catastal\w*)\b", re.IGNORECASE),
+     "cadastral_rendita", "ESTRATTO_RENDITA"),
+    (re.compile(r"\b(?:cancellazion\w*|formal(?:it|i)\w*|ipotec\w*|pignorament\w*|"
+                r"iscrizione\s+ipotecari|trascrizion\w*)\b", re.IGNORECASE),
+     "formalities_procedural_amount", "ESTRATTO_FORMALITA"),
+    (re.compile(r"\b(?:spese\s+condominiali\s+(?:insolut|arretrat|scadut|morosit|pregress)|"
+                r"debito\s+pregress\w*\s+condomini|condominial\w*\s+(?:insolut|arretrat|scadut|morosit|pregress))\w*",
+                re.IGNORECASE),
+     "condominium_arrears", "ESTRATTO_CONDOMINIUM_ARREARS"),
+    (re.compile(r"\b(?:decurtazion\w*|deprezzament\w*|abbattiment\w*|detrazion\w*|"
+                r"oneri\s+di\s+regolarizzazion\w*|rischio\s+(?:assunto\s+)?per\s+(?:la\s+)?mancata\s+garanzi\w*)\b",
+                re.IGNORECASE),
+     "valuation_deduction", "ESTRATTO_DECURTAZIONE"),
+    (re.compile(r"\b(?:sanatori\w*|oblazion\w*|sanzion\w*|completamento\s+lavori|"
+                r"abitabilit[aà]|spese\s+tecnich\w*|fiscalizzazion\w*|ripristin\w*|demolizion\w*|"
+                r"regolarizzazion\w*)\b", re.IGNORECASE),
+     "buyer_cost_signal_to_verify", "ESTRATTO_BUYER_SIGNAL"),
+)
+
+
+def _resolve_estratto_role(item: Dict[str, Any], context_text: str, amount_text: str) -> Tuple[str, str]:
+    label_parts = [
+        item.get("label_it"),
+        item.get("label_en"),
+        item.get("detail_it"),
+        item.get("note_it"),
+        item.get("title_it"),
+        context_text,
+    ]
+    joined = " ".join(str(part or "") for part in label_parts if part)
+    for pattern, role, reason in _ESTRATTO_LABEL_ROLE_RULES:
+        if pattern.search(joined):
+            return role, reason
+    return "unknown_money", "ESTRATTO_GENERIC"
+
+
+def _augment_with_estratto_quality_candidates(
+    money_value: Dict[str, Any],
+    result: Dict[str, Any],
+) -> int:
+    """Promote money amounts found inside result["estratto_quality"] items into
+    the resolver's money_candidates list. Returns the number of new entries
+    added. Duplicates (same page + same amount) are skipped.
+    """
+    items = _iter_estratto_quality_items(result)
+    if not items:
+        return 0
+    candidates = money_value.get("money_candidates")
+    if not isinstance(candidates, list):
+        candidates = []
+        money_value["money_candidates"] = candidates
+    seen = set()
+    for existing in candidates:
+        if not isinstance(existing, dict):
+            continue
+        try:
+            seen.add((int(existing.get("page") or 0), round(float(existing.get("amount_eur") or 0.0), 2)))
+        except Exception:
+            continue
+    added = 0
+    for item in items:
+        page, quote = _estratto_evidence_page(item)
+        if not page:
+            continue
+        text_parts = [
+            item.get("label_it"),
+            item.get("label_en"),
+            item.get("detail_it"),
+            item.get("note_it"),
+            item.get("title_it"),
+            item.get("value"),
+            quote,
+        ]
+        joined = " ".join(str(part or "") for part in text_parts if part)
+        # Look for an explicit amount_eur first; otherwise scan the joined text.
+        direct_amount = item.get("amount_eur") or item.get("stima_euro") or item.get("value_eur")
+        try:
+            direct_value = float(direct_amount) if direct_amount is not None else None
+        except Exception:
+            direct_value = None
+        if direct_value and direct_value > 0:
+            key = (int(page), round(direct_value, 2))
+            if key not in seen:
+                seen.add(key)
+                amount_label = _amount_label(direct_value)
+                candidates.append(
+                    _candidate_from_estratto_amount(item, amount_label, direct_value, joined, page, quote)
+                )
+                added += 1
+        for match in _ESTRATTO_AMOUNT_RE.finditer(joined):
+            amount_eur = _parse_amount_eur(match.group(0))
+            if amount_eur is None or amount_eur < 50:
+                continue
+            key = (int(page), round(amount_eur, 2))
+            if key in seen:
+                continue
+            seen.add(key)
+            candidates.append(
+                _candidate_from_estratto_amount(item, match.group(0), amount_eur, joined, page, quote)
+            )
+            added += 1
+    if added:
+        money_value.setdefault("summary", {})
+        money_value["summary"]["candidate_count"] = (
+            int(money_value["summary"].get("candidate_count") or 0) + added
+        )
+    return added
+
+
+def _augment_with_evidence_quote_amounts(money_value: Dict[str, Any]) -> int:
+    """For every existing money candidate, scan its evidence quote for OTHER
+    money amounts that did not surface as standalone candidates and add them
+    with a role inferred from the surrounding phrase. This is the
+    "evidence-quote amount extraction" rule from the brief: e.g. when a quote
+    contains 'netto delle decurtazioni € 191.273,57', surface 191274 even if
+    only 5932 was the original candidate.
+    """
+    candidates = money_value.get("money_candidates")
+    if not isinstance(candidates, list):
+        return 0
+    seen = set()
+    for existing in candidates:
+        if not isinstance(existing, dict):
+            continue
+        try:
+            seen.add((int(existing.get("page") or 0), round(float(existing.get("amount_eur") or 0.0), 2)))
+        except Exception:
+            continue
+    added = 0
+    promote_patterns = (
+        (re.compile(r"\bnetto\s+delle\s+decurtazion\w*\b[^.\n]{0,40}(?:€|\beuro\b)?\s*(\d{1,3}(?:\.\d{3})*(?:,\d{1,2})?)",
+                    re.IGNORECASE), "final_valuation_after_deductions", "EVIDENCE_NETTO_DECURTAZIONI"),
+        (re.compile(r"\bvalore\s+final\w*\b[^.\n]{0,40}(?:€|\beuro\b)?\s*(\d{1,3}(?:\.\d{3})*(?:,\d{1,2})?)",
+                    re.IGNORECASE), "final_value", "EVIDENCE_VALORE_FINALE"),
+        (re.compile(r"\bvendita\s+giudiziari\w*\b[^.\n]{0,60}(?:€|\beuro\b)?\s*(\d{1,3}(?:\.\d{3})*(?:,\d{1,2})?)",
+                    re.IGNORECASE), "judicial_sale_value", "EVIDENCE_VENDITA_GIUDIZIARIA"),
+        (re.compile(r"\bvalore\s+di\s+mercato\b[^.\n]{0,40}(?:€|\beuro\b)?\s*(\d{1,3}(?:\.\d{3})*(?:,\d{1,2})?)",
+                    re.IGNORECASE), "market_value", "EVIDENCE_VALORE_DI_MERCATO"),
+        (re.compile(r"\b(?:debito\s+pregress\w*\s+condomini|spese\s+condominial\w*\s+(?:insolut|arretrat|scadut|morosit|pregress))\w*"
+                    r"\b[^.\n]{0,60}?(\d{1,3}(?:\.\d{3})*(?:,\d{1,2})?)\s*€?",
+                    re.IGNORECASE), "condominium_arrears", "EVIDENCE_CONDOMINIUM_ARREARS"),
+    )
+    base = list(candidates)
+    for existing in base:
+        if not isinstance(existing, dict):
+            continue
+        page = existing.get("page")
+        quote = _normalize_text(existing.get("raw_text"))
+        if not page or not quote:
+            continue
+        for pattern, role, reason in promote_patterns:
+            for match in pattern.finditer(quote):
+                amount_eur = _parse_amount_eur(match.group(1))
+                if amount_eur is None or amount_eur < 100:
+                    continue
+                key = (int(page), round(amount_eur, 2))
+                if key in seen:
+                    continue
+                seen.add(key)
+                import hashlib
+                seed = f"evquote|{page}|{round(amount_eur, 2)}|{reason}".encode("utf-8")
+                cand = {
+                    "candidate_id": "money_evq_" + hashlib.sha1(seed).hexdigest()[:12],
+                    "amount_eur": amount_eur,
+                    "raw_text": quote,
+                    "amount_raw": match.group(1),
+                    "page": int(page),
+                    "role": role,
+                    "confidence": float(existing.get("confidence") or 0.7),
+                    "authority_zone": existing.get("authority_zone") or "FINAL_VALUATION",
+                    "authority_level": existing.get("authority_level") or "HIGH",
+                    "reason_code": reason,
+                    "is_customer_safe_cost": False,
+                    "should_surface_in_money_box": role in {"buyer_cost_signal_to_verify", "condominium_arrears"},
+                    "should_sum": False,
+                    "parent_total_candidate_id": None,
+                    "warnings": [],
+                    "source": "evidence_quote",
+                    "semantic_base_role": role,
+                    "semantic_base_reason_code": reason,
+                    "lot_label": existing.get("lot_label"),
+                }
+                candidates.append(cand)
+                added += 1
+    return added
+
+
 def _build_projected_money_box(money_value: Dict[str, Any], legacy_result: Dict[str, Any]) -> Tuple[Optional[Dict[str, Any]], Dict[str, Any]]:
     raw_candidates = money_value.get("money_candidates") if isinstance(money_value.get("money_candidates"), list) else []
     candidates = [candidate for candidate in raw_candidates if isinstance(candidate, dict)]
@@ -1292,7 +1757,41 @@ def _build_projected_money_box(money_value: Dict[str, Any], legacy_result: Dict[
         for candidate in candidates
         if _candidate_amount(candidate) is not None
     ]
-    eligible = _dedupe_candidates(eligible, limit=200)
+    eligible = _dedupe_candidates(eligible, limit=400)
+
+    # Process larger amounts and authoritative roles first so the per-group
+    # limits do not silently drop headline valuations (e.g. €503.930 LOTTO
+    # UNICO) in favor of OCR-fragment noise that happens to come earlier in
+    # the page ordering.
+    _ROLE_PRIORITY = {
+        "judicial_sale_value": 0,
+        "final_value": 1,
+        "market_value": 1,
+        "final_valuation_after_deductions": 1,
+        "base_auction": 2,
+        "price": 3,
+        "valuation_deduction": 4,
+        "cadastral_rendita": 5,
+        "formalities_procedural_amount": 6,
+        "condominium_arrears": 7,
+        "buyer_cost_signal_to_verify": 8,
+        "total_candidate": 9,
+        "component_of_total": 10,
+        "unknown_money": 11,
+    }
+
+    def _priority(candidate: Dict[str, Any]) -> Tuple[int, float]:
+        role_key = str(candidate.get("role") or "")
+        if role_key in {"component_of_total", "total_candidate", "unknown_money"}:
+            role_key = str(candidate.get("semantic_base_role") or candidate.get("role") or "")
+        rank = _ROLE_PRIORITY.get(role_key, 12)
+        try:
+            amount = float(candidate.get("amount_eur") or 0.0)
+        except Exception:
+            amount = 0.0
+        return (rank, -amount)
+
+    eligible = sorted(eligible, key=_priority)
 
     grouped: Dict[str, List[Dict[str, Any]]] = {key: [] for key in _GROUP_LIMITS}
     counters: Dict[str, int] = {key: 0 for key in _GROUP_LIMITS}
@@ -1343,15 +1842,15 @@ def _build_projected_money_box(money_value: Dict[str, Any], legacy_result: Dict[
             "stale_removed": stale_removed,
         }
 
-    buyer_confirmed = grouped["buyer_costs_confirmed"]
-    buyer_signals = grouped["buyer_cost_signals_to_verify"]
-    valuation_refs = grouped["valuation_references"]
-    price_refs = grouped["price_references"]
-    valuation_deds = grouped["valuation_deductions"]
-    cadastral_vals = grouped["cadastral_values"]
-    formalities = grouped["formalities_and_procedural_amounts"]
-    other_mentions = grouped["other_monetary_mentions"]
-    unsupported = grouped["unsupported_or_unknown_amounts"]
+    buyer_confirmed = _consolidate_repeated_items(grouped["buyer_costs_confirmed"])
+    buyer_signals = _consolidate_repeated_items(grouped["buyer_cost_signals_to_verify"])
+    valuation_refs = _consolidate_repeated_items(grouped["valuation_references"])
+    price_refs = _consolidate_repeated_items(grouped["price_references"])
+    valuation_deds = _consolidate_repeated_items(grouped["valuation_deductions"])
+    cadastral_vals = _consolidate_repeated_items(grouped["cadastral_values"])
+    formalities = _consolidate_repeated_items(grouped["formalities_and_procedural_amounts"])
+    other_mentions = _consolidate_repeated_items(grouped["other_monetary_mentions"])
+    unsupported = _consolidate_repeated_items(grouped["unsupported_or_unknown_amounts"])
 
     excluded_non_buyer_cost_amounts: List[Dict[str, Any]] = []
     for key in _NON_BUYER_GROUPS:
@@ -1423,6 +1922,25 @@ def _build_projected_money_box(money_value: Dict[str, Any], legacy_result: Dict[
         "unsupported_or_unknown_amounts": unsupported,
         "total_extra_costs": total,
         "total_extra_cost_eur": total_extra_cost_eur,
+        # Canonical display groups — UI should render these and treat any other
+        # legacy list (cost_signals_to_verify, valuation_reference_amounts,
+        # excluded_non_buyer_cost_amounts) as an alias for backwards compat only.
+        "canonical_display_groups": [
+            "buyer_costs_confirmed",
+            "buyer_cost_signals_to_verify",
+            "valuation_references",
+            "price_references",
+            "valuation_deductions",
+            "cadastral_values",
+            "formalities_and_procedural_amounts",
+            "other_monetary_mentions",
+            "unsupported_or_unknown_amounts",
+        ],
+        "deprecated_alias_groups": {
+            "cost_signals_to_verify": "buyer_cost_signals_to_verify",
+            "valuation_reference_amounts": "valuation_references",
+            "excluded_non_buyer_cost_amounts": "valuation_references+price_references+valuation_deductions+cadastral_values+formalities_and_procedural_amounts",
+        },
     }
     money_box["customer_summary"] = _build_customer_summary(money_box)
     if double_count_risk:
@@ -1528,6 +2046,21 @@ def apply_authority_money_projection_if_enabled(
         meta.update({"status": "NOT_APPLIED_LOW_CONFIDENCE", "reason": "authority_money_low_confidence"})
         _attach_meta(result, meta)
         return meta
+
+    # Augment candidate pool with reliable economic values found in
+    # result["estratto_quality"] sections and with amounts only present inside
+    # the evidence-quote field of an existing candidate (rule from the brief:
+    # estratto_quality bridge + evidence-quote amount extraction).
+    estratto_added = _augment_with_estratto_quality_candidates(money_value, result)
+    evidence_added = _augment_with_evidence_quote_amounts(money_value)
+    if estratto_added:
+        meta["estratto_quality_candidates_added"] = estratto_added
+        meta["notes"].append("estratto_quality_bridge_applied")
+    if evidence_added:
+        meta["evidence_quote_candidates_added"] = evidence_added
+        meta["notes"].append("evidence_quote_amount_extraction_applied")
+    if estratto_added or evidence_added:
+        meta["candidate_count"] = int(meta.get("candidate_count") or 0) + estratto_added + evidence_added
 
     projected, stats = _build_projected_money_box(money_value, result)
     meta["component_total_double_count_prevented"] = bool(stats.get("double_count_risk"))
