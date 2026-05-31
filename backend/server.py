@@ -6871,12 +6871,43 @@ def _extract_lot_identity_and_rights(lot_pages: List[Dict[str, Any]], lot_num: i
     return out
 
 
+def _lot_overview_value(value: Any) -> Any:
+    if value in (None, ""):
+        return None
+    if _is_visible_machine_placeholder(value):
+        return None
+    if isinstance(value, str):
+        normalized = _normalize_headline_text(value)
+        return normalized or None
+    return value
+
+
+def _lot_overview_surface(raw_lot: Dict[str, Any]) -> Any:
+    for key in ("superficie_mq", "superficie"):
+        value = raw_lot.get(key)
+        if value in (None, ""):
+            continue
+        if _is_visible_machine_placeholder(value):
+            continue
+        return value
+    return None
+
+
+def _overview_lot_number(raw_lot: Dict[str, Any], idx: int) -> Any:
+    value = raw_lot.get("lot_number") or raw_lot.get("lot") or raw_lot.get("lotto") or (idx + 1)
+    try:
+        return int(value)
+    except Exception:
+        return value
+
+
 def _build_lots_overview(lots: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     out: List[Dict[str, Any]] = []
     for idx, raw_lot in enumerate(lots):
         if not isinstance(raw_lot, dict):
             continue
-        lot_number = raw_lot.get("lot_number") or (idx + 1)
+        lot_number = _overview_lot_number(raw_lot, idx)
+        lot_label = f"Lotto {lot_number}" if lot_number not in (None, "") else None
         prezzo = _as_float_or_none(raw_lot.get("prezzo_base_value"))
         stima = _as_float_or_none(raw_lot.get("valore_stima_eur"))
         dep_pct = _parse_percent_value(raw_lot.get("deprezzamento_percentuale"))
@@ -6885,21 +6916,52 @@ def _build_lots_overview(lots: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         dep_value = None
         if isinstance(stima, (int, float)) and isinstance(prezzo, (int, float)):
             dep_value = max(0.0, stima - prezzo)
+        diritto = _lot_overview_value(raw_lot.get("diritto_reale") or raw_lot.get("diritto"))
+        occupazione = _lot_overview_value(raw_lot.get("stato_occupativo") or raw_lot.get("occupancy_status"))
+        superficie = _lot_overview_surface(raw_lot)
         out.append({
-            "lot_number": int(lot_number),
-            "lotto_label": f"Lotto {int(lot_number)}",
-            "comune": _normalize_headline_text(str(raw_lot.get("comune", "") or "")) or None,
-            "ubicazione": _normalize_headline_text(str(raw_lot.get("ubicazione", "") or "")) or None,
-            "tipologia": _normalize_headline_text(str(raw_lot.get("tipologia", "") or "")) or None,
-            "diritto": _normalize_headline_text(str(raw_lot.get("diritto_reale", "") or "")) or None,
-            "quota": _normalize_headline_text(str(raw_lot.get("quota", "") or "")) or None,
-            "occupazione": _normalize_headline_text(str(raw_lot.get("occupancy_status") or raw_lot.get("stato_occupativo") or "")) or None,
+            "lot_number": lot_number,
+            "lotto_label": lot_label,
+            "lot_label": lot_label,
+            "comune": _lot_overview_value(raw_lot.get("comune")),
+            "ubicazione": _lot_overview_value(raw_lot.get("ubicazione")),
+            "tipologia": _lot_overview_value(raw_lot.get("tipologia")),
+            "diritto": diritto,
+            "diritto_reale": diritto,
+            "quota": _lot_overview_value(raw_lot.get("quota")),
+            "occupazione": occupazione,
+            "stato_occupativo": occupazione,
+            "superficie_mq": superficie,
+            "superficie": superficie,
             "valore_stima_eur": int(round(stima)) if isinstance(stima, (int, float)) else None,
             "deprezzamento_percent": round(float(dep_pct), 2) if isinstance(dep_pct, (int, float)) else None,
             "deprezzamento_eur": int(round(dep_value)) if isinstance(dep_value, (int, float)) else None,
             "prezzo_base_eur": int(round(prezzo)) if isinstance(prezzo, (int, float)) else None,
         })
     return out
+
+
+def _sync_lots_overview_from_result_lots(result: Dict[str, Any]) -> List[Dict[str, Any]]:
+    if not isinstance(result, dict):
+        return []
+    lots = result.get("lots") if isinstance(result.get("lots"), list) else []
+    if not lots:
+        return []
+    lots_overview = _build_lots_overview(lots)
+    panoramica = result.get("panoramica_contract")
+    if not isinstance(panoramica, dict):
+        panoramica = {}
+    panoramica["lots_overview"] = copy.deepcopy(lots_overview)
+    result["panoramica_contract"] = panoramica
+
+    customer_contract = result.get("customer_decision_contract")
+    if isinstance(customer_contract, dict):
+        cdc_panoramica = customer_contract.get("panoramica_contract")
+        if not isinstance(cdc_panoramica, dict):
+            cdc_panoramica = {}
+        cdc_panoramica["lots_overview"] = copy.deepcopy(lots_overview)
+        customer_contract["panoramica_contract"] = cdc_panoramica
+    return lots_overview
 
 
 def _build_multi_lot_top_legal_items(lots: List[Dict[str, Any]], pages: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
@@ -8116,6 +8178,7 @@ def _refresh_customer_facing_result_on_read(
         _prune_verifier_pricing_amounts_from_money_box(result)
         scrub_customer_facing_stale_money_labels(result)
         apply_customer_decision_contract(result)
+        _sync_lots_overview_from_result_lots(result)
         _apply_headline_overrides(result, headline_overrides or {})
         if _is_gemini_narrator_success(result):
             apply_narrated_payload_to_result(
@@ -8177,6 +8240,7 @@ def _refresh_customer_facing_result_on_read(
     _sanitize_lot_conservative_outputs(result)
     _normalize_evidence_offsets(result, safe_pages)
     result["panoramica_contract"] = _build_panoramica_contract(result, safe_pages)
+    _sync_lots_overview_from_result_lots(result)
 
     document_quality = result.get("document_quality", {}) if isinstance(result.get("document_quality"), dict) else {}
     _apply_unreadable_hard_stop(result, document_quality)
@@ -16324,6 +16388,7 @@ async def analyze_perizia(request: Request, file: UploadFile = File(...)):
             "error": str(e)[:240],
         }
     apply_customer_decision_contract(result)
+    _sync_lots_overview_from_result_lots(result)
     result["user_messages"] = _build_user_messages(result, extraction_payload, analysis_id=analysis_id)
 
     # QA Gate: LLM-powered challenge + deterministic safety sweep.
@@ -16345,6 +16410,7 @@ async def analyze_perizia(request: Request, file: UploadFile = File(...)):
     # Rebuild the deterministic customer contract after QA/semantic repair, then
     # let Gemini write only narrative copy from that final cleaned contract.
     apply_customer_decision_contract(result)
+    _sync_lots_overview_from_result_lots(result)
     try:
         narrator_meta = await _apply_post_qa_decision_narrator(result, request_id=request_id)
     except Exception as _narrator_exc:
@@ -16403,6 +16469,7 @@ async def analyze_perizia(request: Request, file: UploadFile = File(...)):
         if lot_consistency_meta.get("changed_fields"):
             debug_obj["authority_lot_field_consistency"] = lot_consistency_meta
             result["debug"] = debug_obj
+    _sync_lots_overview_from_result_lots(result)
     scrubbed_placeholders = _scrub_visible_machine_placeholders(result)
     if scrubbed_placeholders:
         debug_obj["visible_machine_placeholders_scrubbed"] = scrubbed_placeholders
@@ -19042,6 +19109,7 @@ def _apply_authority_lot_projection_to_detail_response_if_enabled(
             lot_consistency_meta = sanitize_lot_field_consistency_for_customer(result, projection_meta)
             if lot_consistency_meta.get("changed_fields"):
                 projection_meta["authority_lot_field_consistency"] = lot_consistency_meta
+            _sync_lots_overview_from_result_lots(result)
         except Exception as e:
             logger.exception("authority_lot_projection_read_failed analysis_id=%s err=%s", analysis_id, e)
             projection_meta = {
@@ -19091,6 +19159,7 @@ def _apply_authority_lot_projection_to_detail_response_if_enabled(
         debug_obj["authority_money_projection"] = money_projection_meta
     internal_runtime["debug"] = debug_obj
 
+    _sync_lots_overview_from_result_lots(result)
     sanitize_customer_facing_result(result)
     result_internal_runtime = separate_internal_runtime_from_customer_result(result)
     if isinstance(result_internal_runtime.get("debug"), dict):

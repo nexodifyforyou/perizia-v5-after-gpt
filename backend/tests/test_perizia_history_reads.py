@@ -474,6 +474,201 @@ async def test_persisted_detail_authority_lot_projection_preserves_passing_lot_c
 
 
 @pytest.mark.anyio
+async def test_persisted_detail_preserves_ostuni_lot_occupancy_and_syncs_overview(fake_db, monkeypatch):
+    monkeypatch.setenv(server.AUTHORITY_LOT_PROJECTION_FLAG, "1")
+    monkeypatch.setattr(
+        server,
+        "_load_authority_shadow_for_detail_read",
+        lambda _analysis_id, _analysis: _authority_lot_shadow("multi_lot", numbers=[1, 2, 3, 4, 5, 6, 7]),
+    )
+    saved_result = _persisted_lot_result(mode="multi_lot", lots_count=7)
+    statuses = [
+        "OCCUPATO DAL DEBITORE",
+        "OCCUPATO DAL DEBITORE",
+        "OCCUPATO DAL DEBITORE",
+        "OCCUPATO DAL DEBITORE",
+        "LOCATO",
+        "OCCUPATO DAL DEBITORE",
+        "LIBERO",
+    ]
+    saved_result["field_states"] = {
+        "stato_occupativo": {"value": "OCCUPATO", "status": "FOUND"},
+        "superficie": {"value": 123.6, "unit": "mq", "status": "FOUND"},
+    }
+    for idx, status in enumerate(statuses):
+        saved_result["lots"][idx].update(
+            {
+                "stato_occupativo": status,
+                "occupancy_status": status,
+                "superficie_mq": None,
+            }
+        )
+    saved_result["customer_decision_contract"]["lots"] = copy.deepcopy(saved_result["lots"])
+    saved_result["customer_decision_contract"]["field_states"] = copy.deepcopy(saved_result["field_states"])
+    saved_result["panoramica_contract"] = {"lots_overview": []}
+    saved_result["customer_decision_contract"]["panoramica_contract"] = {"lots_overview": []}
+    stored = {
+        "analysis_id": "analysis_1127db41e705",
+        "user_id": "user_test",
+        "case_id": "case_b6f579e0",
+        "case_title": "Ostuni, Via Viterbo 2.pdf",
+        "file_name": "Ostuni, Via Viterbo 2.pdf",
+        "created_at": datetime(2026, 4, 25, tzinfo=timezone.utc),
+        "status": "COMPLETED",
+        "pages_count": 80,
+        "result": saved_result,
+    }
+    fake_db.perizia_analyses.items.append(stored)
+    before_stored = copy.deepcopy(stored)
+
+    response = await server._get_perizia_analysis_for_user("analysis_1127db41e705", _test_user())
+    lots = response["result"]["lots"]
+    overview = response["result"]["panoramica_contract"]["lots_overview"]
+    cdc_overview = response["result"]["customer_decision_contract"]["panoramica_contract"]["lots_overview"]
+
+    assert lots[4]["stato_occupativo"] == "LOCATO"
+    assert lots[6]["stato_occupativo"] == "LIBERO"
+    assert {lot["stato_occupativo"] for lot in lots} != {"OCCUPATO"}
+    assert [row["stato_occupativo"] for row in overview] == statuses
+    assert [row["stato_occupativo"] for row in cdc_overview] == statuses
+    assert all(row.get("superficie_mq") is None for row in overview)
+    assert fake_db.perizia_analyses.items[0] == before_stored
+    assert _collect_forbidden_customer_keys(response) == []
+
+
+@pytest.mark.anyio
+async def test_persisted_detail_multilot_lots_overview_preserves_lot_surfaces(fake_db, monkeypatch):
+    monkeypatch.setenv(server.AUTHORITY_LOT_PROJECTION_FLAG, "1")
+    monkeypatch.setattr(
+        server,
+        "_load_authority_shadow_for_detail_read",
+        lambda _analysis_id, _analysis: _authority_lot_shadow("multi_lot", numbers=[1, 2, 3]),
+    )
+    saved_result = _persisted_lot_result(mode="multi_lot", lots_count=3)
+    lots = [
+        {
+            "lot_number": 1,
+            "superficie_mq": 169.3,
+            "diritto_reale": "Proprietà 1/1",
+            "quota": "1/1",
+            "stato_occupativo": "LOCATO",
+            "ubicazione": "Montecatini-Terme (PT)-via Giuseppe Garibaldi n.c. 23",
+        },
+        {
+            "lot_number": 2,
+            "superficie_mq": 258.5,
+            "diritto_reale": "Proprietà 1/1 + Quota 1/4 della stradella privata di accesso",
+            "quota": "1/1",
+            "stato_occupativo": "LIBERO",
+            "ubicazione": "Pieve a Nievole (PT)-via Colonna senza numero civico",
+        },
+        {
+            "lot_number": 3,
+            "superficie_mq": 411.85,
+            "diritto_reale": "Proprietà 1/1 + Quota 1/4 della stradella privata di accesso",
+            "quota": "1/1",
+            "stato_occupativo": "LOCATO",
+            "ubicazione": "Pieve a Nievole (PT) - via Colonna senza numero civico",
+        },
+    ]
+    saved_result["lots"] = copy.deepcopy(lots)
+    saved_result["customer_decision_contract"]["lots"] = copy.deepcopy(lots)
+    saved_result["panoramica_contract"] = {}
+    saved_result["customer_decision_contract"]["panoramica_contract"] = {}
+    stored = {
+        "analysis_id": "analysis_996bb0474af9",
+        "user_id": "user_test",
+        "case_id": "case_4c5cad8c",
+        "case_title": "perizia_multilot_69_2024.pdf",
+        "file_name": "perizia_multilot_69_2024.pdf",
+        "created_at": datetime(2026, 4, 25, tzinfo=timezone.utc),
+        "status": "COMPLETED",
+        "pages_count": 80,
+        "result": saved_result,
+    }
+    fake_db.perizia_analyses.items.append(stored)
+    before_stored = copy.deepcopy(stored)
+
+    response = await server._get_perizia_analysis_for_user("analysis_996bb0474af9", _test_user())
+    overview = response["result"]["panoramica_contract"]["lots_overview"]
+
+    assert len(response["result"]["lots"]) == 3
+    assert len(overview) == 3
+    assert [row["superficie_mq"] for row in overview] == [169.3, 258.5, 411.85]
+    assert [row["diritto_reale"] for row in overview] == [lot["diritto_reale"] for lot in lots]
+    assert [row["quota"] for row in overview] == ["1/1", "1/1", "1/1"]
+    assert [row["stato_occupativo"] for row in overview] == ["LOCATO", "LIBERO", "LOCATO"]
+    assert fake_db.perizia_analyses.items[0] == before_stored
+    assert _collect_forbidden_customer_keys(response) == []
+
+
+@pytest.mark.anyio
+async def test_persisted_detail_single_lot_lots_overview_preserves_surface(fake_db, monkeypatch):
+    monkeypatch.setenv(server.AUTHORITY_LOT_PROJECTION_FLAG, "1")
+    monkeypatch.setattr(
+        server,
+        "_load_authority_shadow_for_detail_read",
+        lambda _analysis_id, _analysis: _authority_lot_shadow("single_lot", numbers=[1]),
+    )
+    saved_result = _persisted_lot_result(mode="single_lot", lots_count=1)
+    saved_result["lots"][0].update(
+        {
+            "superficie_mq": 116.39,
+            "diritto_reale": "Proprietà",
+            "quota": "1/1",
+            "stato_occupativo": "OCCUPATO",
+            "ubicazione": "San Giorgio Bigarello (MN) - Via Sordello n. 5, piano Seminterrato",
+        }
+    )
+    saved_result["customer_decision_contract"]["lots"] = copy.deepcopy(saved_result["lots"])
+    saved_result["panoramica_contract"] = {}
+    saved_result["customer_decision_contract"]["panoramica_contract"] = {}
+    stored = {
+        "analysis_id": "analysis_98d2cb078503",
+        "user_id": "user_test",
+        "case_id": "case_c8b8d881",
+        "case_title": "1859886_c_perizia.pdf",
+        "file_name": "1859886_c_perizia.pdf",
+        "created_at": datetime(2026, 4, 25, tzinfo=timezone.utc),
+        "status": "COMPLETED",
+        "pages_count": 50,
+        "result": saved_result,
+    }
+    fake_db.perizia_analyses.items.append(stored)
+    before_stored = copy.deepcopy(stored)
+
+    response = await server._get_perizia_analysis_for_user("analysis_98d2cb078503", _test_user())
+    overview = response["result"]["panoramica_contract"]["lots_overview"]
+
+    assert len(response["result"]["lots"]) == 1
+    assert len(overview) == 1
+    assert overview[0]["superficie_mq"] == 116.39
+    assert overview[0]["diritto_reale"] == "Proprietà"
+    assert overview[0]["quota"] == "1/1"
+    assert fake_db.perizia_analyses.items[0] == before_stored
+    assert _collect_forbidden_customer_keys(response) == []
+
+
+def test_lots_overview_does_not_promote_global_surface_to_multilot():
+    result = {
+        "field_states": {"superficie": {"value": 123.6, "unit": "mq", "status": "FOUND"}},
+        "lots": [
+            {"lot_number": 1, "stato_occupativo": "OCCUPATO"},
+            {"lot_number": 2, "stato_occupativo": "LOCATO"},
+            {"lot_number": 3, "stato_occupativo": "LIBERO"},
+        ],
+        "customer_decision_contract": {},
+    }
+    source = copy.deepcopy(result)
+
+    overview = server._sync_lots_overview_from_result_lots(result)
+
+    assert [row.get("superficie_mq") for row in overview] == [None, None, None]
+    assert result["customer_decision_contract"]["panoramica_contract"]["lots_overview"] == overview
+    assert source.get("panoramica_contract") is None
+
+
+@pytest.mark.anyio
 async def test_persisted_detail_authority_lot_projection_missing_pack_fails_open(fake_db, monkeypatch):
     monkeypatch.setenv(server.AUTHORITY_LOT_PROJECTION_FLAG, "1")
     persisted_result = _persisted_lot_result(mode="multi_lot", lots_count=2)
@@ -490,14 +685,17 @@ async def test_persisted_detail_authority_lot_projection_missing_pack_fails_open
             "result": persisted_result,
         }
     )
+    before_stored = copy.deepcopy(fake_db.perizia_analyses.items[0])
 
     response = await server._get_perizia_analysis_for_user("analysis_missing_read_path_projection_pack", _test_user())
 
-    assert response["result"] == persisted_result
     assert response["result"]["lots_count"] == 2
     assert response["result"]["is_multi_lot"] is True
     assert response["result"]["customer_decision_contract"]["lots_count"] == 2
     assert response["result"]["customer_decision_contract"]["is_multi_lot"] is True
+    assert len(response["result"]["panoramica_contract"]["lots_overview"]) == 2
+    assert len(response["result"]["customer_decision_contract"]["panoramica_contract"]["lots_overview"]) == 2
+    assert fake_db.perizia_analyses.items[0] == before_stored
     assert _collect_forbidden_customer_keys(response) == []
 
 

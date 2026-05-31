@@ -1651,18 +1651,19 @@ def _propagate_agibilita_downgrade(container: Dict[str, Any]) -> None:
 
 
 def _propagate_occupancy_to_lots(result: Dict[str, Any]) -> None:
-    """Rule 4: If field_states.stato_occupativo=OCCUPATO, propagate to lots.
-
-    Skips lots whose evidence contains false libero markers — those were already
-    handled by INV-3 and should stay at DA VERIFICARE until manual review.
-    """
+    """Rule 4: Project global OCCUPATO only when it is safe at lot level."""
     field_states = result.get("field_states") or {}
     occ_state = field_states.get("stato_occupativo")
     if not isinstance(occ_state, dict):
         return
     if str(occ_state.get("value") or "").upper() != "OCCUPATO":
         return
-    for lot in (result.get("lots") or []):
+    lots = [lot for lot in (result.get("lots") or []) if isinstance(lot, dict)]
+    if len(lots) > 1:
+        # Multi-lot occupancy can differ by lot. Do not turn a global/root
+        # status into false certainty for every lot.
+        return
+    for lot in lots:
         if not isinstance(lot, dict):
             continue
         if str(lot.get("stato_occupativo") or "").upper() == "OCCUPATO":
@@ -2347,6 +2348,7 @@ def _sync_cdc_full_sections(result: Dict[str, Any]) -> None:
         "red_flags_operativi", "section_11_red_flags",
         "section_9_legal_killers",
         "semaforo_generale", "section_1_semaforo_generale",
+        "panoramica_contract",
         "lots", "lot_index", "beni", "lots_count", "is_multi_lot", "detail_scope",
         "case_header", "report_header", "asset_inventory_repair", "money_semantic_repair",
         "summary_for_client", "summary_for_client_bundle",

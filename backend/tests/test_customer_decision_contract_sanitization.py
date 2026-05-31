@@ -2270,13 +2270,12 @@ def test_agibilita_downgrade_purges_explanation_and_action_text():
     assert "L'agibilità risulta assente" in json.dumps(result["qa_gate"], ensure_ascii=False)
 
 
-def test_occupancy_correction_propagates_to_lots():
-    """When field_states.stato_occupativo=OCCUPATO, lots must be updated to OCCUPATO."""
+def test_occupancy_correction_propagates_to_single_lot_only():
+    """A root OCCUPATO state may fill a single lot, but must not imply multi-lot certainty."""
     result = _make_base_result_for_qa()
     result["field_states"]["stato_occupativo"]["value"] = "OCCUPATO"
     result["lots"] = [
         {"lot_number": 1, "stato_occupativo": "DA VERIFICARE", "occupancy_status": "DA VERIFICARE"},
-        {"lot_number": 2, "stato_occupativo": "OCCUPATO", "occupancy_status": "OCCUPATO"},
     ]
     result["customer_decision_contract"]["lots"] = [
         {"lot_number": 1, "stato_occupativo": "DA VERIFICARE", "occupancy_status": "DA VERIFICARE"},
@@ -2286,7 +2285,6 @@ def test_occupancy_correction_propagates_to_lots():
 
     assert result["lots"][0]["stato_occupativo"] == "OCCUPATO", "DA VERIFICARE lot must become OCCUPATO"
     assert result["lots"][0]["occupancy_status"] == "OCCUPATO"
-    assert result["lots"][1]["stato_occupativo"] == "OCCUPATO", "Already OCCUPATO lot must stay OCCUPATO"
 
     # CDC lots must also be synced (Rule 5 sync)
     cdc_lots = result["customer_decision_contract"].get("lots") or []
@@ -2296,6 +2294,33 @@ def test_occupancy_correction_propagates_to_lots():
     hits = _collect_customer_facing_bad_text_hits(result)
     occ_hits = [h for h in hits if h["pattern"] == "stato_non_verificabile_after_occupied"]
     assert occ_hits == [], f"No NON_VERIFICABILE occupancy must survive: {occ_hits}"
+
+
+def test_occupancy_correction_preserves_multilot_lot_specific_values():
+    result = _make_base_result_for_qa()
+    result["field_states"]["stato_occupativo"]["value"] = "OCCUPATO"
+    result["lots"] = [
+        {"lot_number": 1, "stato_occupativo": "OCCUPATO", "occupancy_status": "OCCUPATO"},
+        {"lot_number": 2, "stato_occupativo": "LOCATO", "occupancy_status": "LOCATO"},
+        {"lot_number": 3, "stato_occupativo": "LIBERO", "occupancy_status": "LIBERO"},
+        {"lot_number": 4, "stato_occupativo": "DA VERIFICARE", "occupancy_status": "DA VERIFICARE"},
+    ]
+    result["customer_decision_contract"]["lots"] = [{"lot_number": 1, "stato_occupativo": "STALE"}]
+
+    apply_customer_facing_consistency_sweep(result)
+
+    assert [lot["stato_occupativo"] for lot in result["lots"]] == [
+        "OCCUPATO",
+        "LOCATO",
+        "LIBERO",
+        "DA VERIFICARE",
+    ]
+    assert [lot["stato_occupativo"] for lot in result["customer_decision_contract"]["lots"]] == [
+        "OCCUPATO",
+        "LOCATO",
+        "LIBERO",
+        "DA VERIFICARE",
+    ]
 
 
 def test_customer_decision_contract_mirrors_corrected_root_sections():
