@@ -957,9 +957,14 @@ def _normalize_issue_pages(issue: Dict[str, Any]) -> Dict[str, Any]:
 
 _CUSTOMER_INTERNAL_CONTROL_KEYS = {
     "answer_point",
+    "authority_lot_projection",
+    "authority_money_projection",
+    "authority_shadow_resolvers",
+    "context_debug",
     "domain_hint",
     "domain_hints",
     "extractor_version",
+    "internal_runtime",
     "is_answer_like",
     "is_instruction_like",
     "reason_for_authority",
@@ -976,6 +981,7 @@ _CUSTOMER_INTERNAL_CONTROL_KEYS = {
     "theme_resolution",
     "llm_outcome",
     "raw",
+    "removed_paths",
     "debug",
     "candidate",
     "candidates",
@@ -1020,8 +1026,24 @@ _CUSTOMER_INTERNAL_PROVENANCE_KEYS = {
     "resolver_version",
 }
 
+_CUSTOMER_INTERNAL_CODE_KEYS = {
+    "code",
+    "id",
+    "item_id",
+    "candidate_id",
+    "source_id",
+    "internal_code",
+    "machine_code",
+}
+
+_AUTH_MACHINE_CODE_RE = re.compile(r"\bAUTH_[A-Z0-9_]+\b")
+
 _CUSTOMER_INTERNAL_AUTHORITY_KEYS = {
     "answer_point",
+    "authority_lot_projection",
+    "authority_money_projection",
+    "authority_shadow_resolvers",
+    "context_debug",
     "domain_hint",
     "domain_hints",
     "extractor_version",
@@ -1051,6 +1073,7 @@ _CUSTOMER_FACING_RESULT_KEYS = {
     "summary_for_client_bundle",
     "decision_rapida_client",
     "decision_rapida_narrated",
+    "qa_gate",
     "user_messages",
     "customer_decision_contract",
 }
@@ -1075,17 +1098,90 @@ def _is_customer_internal_provenance(key: str, value: Any) -> bool:
         and value.strip() in _CUSTOMER_INTERNAL_PROVENANCE_VALUES
     )
 
+_DROP_CUSTOMER_RESPONSE_VALUE = object()
+
+
+def _is_customer_internal_key(key_text: str) -> bool:
+    return (
+        key_text in _CUSTOMER_INTERNAL_CONTROL_KEYS
+        or key_text.startswith("authority_")
+        or "shadow_" in key_text
+    )
+
+
+def _is_internal_code_key(key_text: str) -> bool:
+    lowered = key_text.lower()
+    return (
+        lowered in _CUSTOMER_INTERNAL_CODE_KEYS
+        or lowered.endswith("_code")
+        or lowered.endswith("_id")
+        or lowered.endswith("_ids")
+    )
+
+
+def _sanitize_customer_response_string(value: str) -> Any:
+    if not isinstance(value, str):
+        return value
+    stripped = value.strip()
+    if not stripped:
+        return value
+    if _AUTH_MACHINE_CODE_RE.fullmatch(stripped):
+        return _DROP_CUSTOMER_RESPONSE_VALUE
+    if stripped.startswith("AUTH_"):
+        cleaned = re.sub(r"^\s*AUTH_[A-Z0-9_]+\s*(?:[\u00b7\-:|]\s*)?", "", value).strip()
+        if not cleaned:
+            return _DROP_CUSTOMER_RESPONSE_VALUE
+        value = cleaned
+    if _AUTH_MACHINE_CODE_RE.search(value):
+        value = _AUTH_MACHINE_CODE_RE.sub("", value)
+        value = re.sub(r"\s{2,}", " ", value).strip()
+        if not value:
+            return _DROP_CUSTOMER_RESPONSE_VALUE
+    return value
+
+
+def strip_customer_response_internal_fields(value: Any) -> Any:
+    """Return a customer API-safe copy with internal/debug metadata removed."""
+    if isinstance(value, dict):
+        cleaned: Dict[str, Any] = {}
+        for key, child in value.items():
+            key_text = str(key)
+            if _is_customer_internal_key(key_text):
+                continue
+            if _is_internal_code_key(key_text) and isinstance(child, str) and child.strip().startswith("AUTH_"):
+                continue
+            stripped = strip_customer_response_internal_fields(child)
+            if stripped is _DROP_CUSTOMER_RESPONSE_VALUE:
+                continue
+            cleaned[key] = stripped
+        return cleaned
+    if isinstance(value, list):
+        cleaned_items: List[Any] = []
+        for item in value:
+            stripped = strip_customer_response_internal_fields(item)
+            if stripped is _DROP_CUSTOMER_RESPONSE_VALUE:
+                continue
+            cleaned_items.append(stripped)
+        return cleaned_items
+    if isinstance(value, str):
+        return _sanitize_customer_response_string(value)
+    return copy.deepcopy(value)
+
 
 def _strip_customer_internal_controls(value: Any) -> Any:
     if isinstance(value, dict):
         cleaned: Dict[str, Any] = {}
         for key, child in value.items():
             key_text = str(key)
-            if key_text in _CUSTOMER_INTERNAL_CONTROL_KEYS or key_text.startswith("authority_") or "shadow_" in key_text:
+            if _is_customer_internal_key(key_text):
+                continue
+            if _is_internal_code_key(key_text) and isinstance(child, str) and child.strip().startswith("AUTH_"):
                 continue
             if _is_customer_internal_provenance(key_text, child):
                 continue
             stripped = _strip_customer_internal_controls(child)
+            if stripped is _DROP_CUSTOMER_RESPONSE_VALUE:
+                continue
             if key_text == "resolver_meta" and isinstance(stripped, dict) and not stripped:
                 continue
             if _is_customer_internal_marker(stripped) and (
@@ -1101,10 +1197,14 @@ def _strip_customer_internal_controls(value: Any) -> Any:
         cleaned_items: List[Any] = []
         for item in value:
             stripped = _strip_customer_internal_controls(item)
+            if stripped is _DROP_CUSTOMER_RESPONSE_VALUE:
+                continue
             if _is_customer_internal_marker(stripped):
                 continue
             cleaned_items.append(stripped)
         return cleaned_items
+    if isinstance(value, str):
+        return _sanitize_customer_response_string(value)
     return value
 
 

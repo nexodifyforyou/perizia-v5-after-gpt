@@ -133,6 +133,25 @@ def _collect_forbidden_customer_keys(value, path="response"):
     return hits
 
 
+def _collect_forbidden_customer_strings(value, path="response"):
+    hits = []
+    if isinstance(value, dict):
+        for key, child in value.items():
+            child_path = f"{path}.{key}"
+            if isinstance(child, str) and "AUTH_" in child:
+                hits.append(child_path)
+            hits.extend(_collect_forbidden_customer_strings(child, child_path))
+    elif isinstance(value, list):
+        for idx, item in enumerate(value):
+            item_path = f"{path}[{idx}]"
+            if isinstance(item, str) and "AUTH_" in item:
+                hits.append(item_path)
+            hits.extend(_collect_forbidden_customer_strings(item, item_path))
+    elif isinstance(value, str) and "AUTH_" in value:
+        hits.append(path)
+    return hits
+
+
 @pytest.mark.anyio
 async def test_perizia_history_list_is_lightweight_and_never_refreshes(fake_db, monkeypatch):
     async def fake_require_auth(_request):
@@ -330,6 +349,18 @@ async def test_persisted_detail_outbound_sanitizer_strips_full_response_internal
 
     persisted_result = _persisted_lot_result(mode="single_lot", lots_count=1)
     persisted_result["debug"] = {"authority_shadow_resolvers": {"leak": True}}
+    persisted_result["qa_gate"] = {"status": "PASS", "context_debug": {"internal": True}}
+    persisted_result["money_box"] = {
+        "valuation_references": [
+            {
+                "code": "AUTH_VAL_REF_01",
+                "customer_title_it": "Valore di stima",
+                "label_it": "Valore stimato",
+                "amount_eur": 391849,
+                "evidence": [{"page": 40, "quote": "Valore finale di stima"}],
+            }
+        ]
+    }
     persisted_result["customer_decision_contract"]["authority_shadow_resolvers"] = {"leak": True}
     persisted_result["customer_decision_contract"]["field_states"] = {
         "stato_occupativo": {
@@ -357,6 +388,15 @@ async def test_persisted_detail_outbound_sanitizer_strips_full_response_internal
     response = await server._get_perizia_analysis_for_user("analysis_persisted_leaky", _test_user())
 
     assert _collect_forbidden_customer_keys(response) == []
+    assert _collect_forbidden_customer_strings(response) == []
+    money_item = response["result"]["money_box"]["valuation_references"][0]
+    assert money_item == {
+        "customer_title_it": "Valore di stima",
+        "label_it": "Valore stimato",
+        "amount_eur": 391849,
+        "evidence": [{"page": 40, "quote": "Valore finale di stima"}],
+    }
+    assert response["result"]["qa_gate"] == {"status": "PASS"}
     field_state = response["result"]["customer_decision_contract"]["field_states"]["stato_occupativo"]
     assert field_state["value"] == "LIBERO"
     assert field_state["status"] == "OK"

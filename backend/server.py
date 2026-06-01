@@ -42,7 +42,12 @@ from narrator import (
     scrub_customer_facing_stale_money_labels,
 )
 from cost_market_ranges import market_range_for_item
-from customer_decision_contract import apply_customer_decision_contract, sanitize_customer_facing_result, separate_internal_runtime_from_customer_result
+from customer_decision_contract import (
+    apply_customer_decision_contract,
+    sanitize_customer_facing_result,
+    separate_internal_runtime_from_customer_result,
+    strip_customer_response_internal_fields,
+)
 from customer_contract_qa_gate import apply_customer_contract_qa_gate
 from perizia_authority_lot_projection import (
     FEATURE_FLAG as AUTHORITY_LOT_PROJECTION_FLAG,
@@ -19012,21 +19017,7 @@ _CUSTOMER_RESPONSE_INTERNAL_KEYS = {
 }
 
 def _strip_internal_keys_from_customer_response(value: Any) -> Any:
-    if isinstance(value, dict):
-        cleaned: Dict[str, Any] = {}
-        for key, child in value.items():
-            key_text = str(key)
-            if (
-                key_text in _CUSTOMER_RESPONSE_INTERNAL_KEYS
-                or key_text.startswith("authority_")
-                or "shadow_" in key_text
-            ):
-                continue
-            cleaned[key] = _strip_internal_keys_from_customer_response(child)
-        return cleaned
-    if isinstance(value, list):
-        return [_strip_internal_keys_from_customer_response(item) for item in value]
-    return value
+    return strip_customer_response_internal_fields(value)
 
 def _sanitize_perizia_detail_response(analysis: Dict[str, Any]) -> Dict[str, Any]:
     response_analysis = copy.deepcopy(analysis) if isinstance(analysis, dict) else {}

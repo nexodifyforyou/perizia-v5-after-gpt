@@ -11,6 +11,7 @@ from customer_decision_contract import (
     apply_customer_decision_contract,
     sanitize_customer_facing_result,
     separate_internal_runtime_from_customer_result,
+    strip_customer_response_internal_fields,
     _explicit_total_is_condo_periodic_sum,
     _is_valuation_narrative,
     _sanitize_address_contamination,
@@ -34,6 +35,7 @@ BANNED_FIELDS = {
     "llm_outcome",
     "raw",
     "debug",
+    "context_debug",
     "candidate",
     "candidates",
     "step3_candidates",
@@ -50,6 +52,7 @@ CUSTOMER_KEYS = {
     "abusi_edilizi_conformita",
     "red_flags_operativi",
     "section_11_red_flags",
+    "qa_gate",
     "customer_decision_contract",
 }
 
@@ -68,6 +71,170 @@ def _collect_customer_hits(value: Any, path: str = "root") -> list[tuple[str, st
     elif isinstance(value, str) and value.strip() in BANNED_VALUES:
         hits.append((path, "value", value))
     return hits
+
+
+def _collect_auth_code_hits(value: Any, path: str = "root") -> list[tuple[str, Any]]:
+    hits: list[tuple[str, Any]] = []
+    if isinstance(value, dict):
+        for key, child in value.items():
+            child_path = f"{path}.{key}"
+            if isinstance(child, str) and "AUTH_" in child:
+                hits.append((child_path, child))
+            hits.extend(_collect_auth_code_hits(child, child_path))
+    elif isinstance(value, list):
+        for index, child in enumerate(value):
+            child_path = f"{path}[{index}]"
+            if isinstance(child, str) and "AUTH_" in child:
+                hits.append((child_path, child))
+            hits.extend(_collect_auth_code_hits(child, child_path))
+    elif isinstance(value, str) and "AUTH_" in value:
+        hits.append((path, value))
+    return hits
+
+
+def test_sanitize_customer_facing_result_strips_auth_money_codes_from_nested_groups():
+    result = {
+        "money_box": {
+            "valuation_references": [
+                {
+                    "code": "AUTH_VAL_REF_01",
+                    "id": "AUTH_VAL_REF_01",
+                    "customer_title_it": "Valore di stima",
+                    "label_it": "Valore stimato in perizia",
+                    "amount_eur": 391849,
+                    "page": 40,
+                    "evidence": [{"page": 40, "quote": "Valore finale di stima: € 391.849,00"}],
+                    "quote": "Valore finale di stima: € 391.849,00",
+                    "verification_note_it": "Voce da leggere come riferimento di stima.",
+                }
+            ]
+        },
+        "section_3_money_box": {
+            "price_references": [
+                {
+                    "code": "AUTH_PRICE_REF_01",
+                    "customer_title_it": "Prezzo base",
+                    "label_it": "Prezzo base d'asta",
+                    "stima_euro": 200000,
+                    "pages": [2],
+                    "evidence": [{"page": 2, "quote": "Prezzo base d'asta € 200.000,00"}],
+                }
+            ]
+        },
+        "customer_decision_contract": {
+            "money_box": {
+                "formalities_and_procedural_amounts": [
+                    {
+                        "code": "AUTH_FORMALITY_01",
+                        "item_id": "AUTH_FORMALITY_01",
+                        "customer_title_it": "Formalità",
+                        "label_it": "Formalità da verificare",
+                        "amount_eur": 3600,
+                        "page": 12,
+                        "evidence": [{"page": 12, "quote": "Spese € 3.600,00"}],
+                        "verification_note_it": "Verificare in delega e ordinanza.",
+                    }
+                ]
+            }
+        },
+    }
+
+    sanitize_customer_facing_result(result)
+
+    assert _collect_auth_code_hits(result) == []
+    valuation = result["money_box"]["valuation_references"][0]
+    assert "code" not in valuation
+    assert "id" not in valuation
+    assert valuation["customer_title_it"] == "Valore di stima"
+    assert valuation["label_it"] == "Valore stimato in perizia"
+    assert valuation["amount_eur"] == 391849
+    assert valuation["page"] == 40
+    assert valuation["evidence"] == [{"page": 40, "quote": "Valore finale di stima: € 391.849,00"}]
+    assert valuation["quote"] == "Valore finale di stima: € 391.849,00"
+    assert valuation["verification_note_it"] == "Voce da leggere come riferimento di stima."
+
+    price = result["section_3_money_box"]["price_references"][0]
+    assert "code" not in price
+    assert price["customer_title_it"] == "Prezzo base"
+    assert price["label_it"] == "Prezzo base d'asta"
+    assert price["stima_euro"] == 200000
+    assert price["pages"] == [2]
+    assert price["evidence"] == [{"page": 2, "quote": "Prezzo base d'asta € 200.000,00"}]
+
+    formality = result["customer_decision_contract"]["money_box"]["formalities_and_procedural_amounts"][0]
+    assert "code" not in formality
+    assert "item_id" not in formality
+    assert formality["customer_title_it"] == "Formalità"
+    assert formality["label_it"] == "Formalità da verificare"
+    assert formality["amount_eur"] == 3600
+    assert formality["page"] == 12
+    assert formality["evidence"] == [{"page": 12, "quote": "Spese € 3.600,00"}]
+    assert formality["verification_note_it"] == "Verificare in delega e ordinanza."
+
+
+def test_sanitize_customer_facing_result_strips_qa_gate_context_debug():
+    result = {
+        "qa_gate": {
+            "status": "PASS",
+            "context_debug": {"page_pack": ["internal"]},
+            "nested": {"context_debug": {"leak": True}, "status": "OK"},
+        }
+    }
+
+    sanitize_customer_facing_result(result)
+
+    assert result == {"qa_gate": {"status": "PASS", "nested": {"status": "OK"}}}
+
+
+def test_strip_customer_response_internal_fields_recursively_removes_auth_codes():
+    payload = {
+        "result": {
+            "money_box": {
+                "groups": [
+                    {"code": "AUTH_COST_VERIFY_01", "label_it": "Costo da verificare"},
+                    {"notes": ["AUTH_MONEY_MENTION_01", "Nota cliente"]},
+                    {"label_it": "AUTH_FORMALITY_01 - Formalità da verificare"},
+                ]
+            }
+        }
+    }
+
+    cleaned = strip_customer_response_internal_fields(payload)
+
+    assert _collect_auth_code_hits(cleaned) == []
+    assert cleaned["result"]["money_box"]["groups"][0] == {"label_it": "Costo da verificare"}
+    assert cleaned["result"]["money_box"]["groups"][1] == {"notes": ["Nota cliente"]}
+    assert cleaned["result"]["money_box"]["groups"][2] == {"label_it": "Formalità da verificare"}
+
+
+def test_strip_customer_response_internal_fields_does_not_mutate_source_object():
+    source = {
+        "result": {
+            "money_box": {
+                "valuation_references": [
+                    {
+                        "code": "AUTH_VAL_REF_01",
+                        "label_it": "Valore di stima",
+                        "amount_eur": 391849,
+                        "evidence": [{"page": 40, "quote": "Valore finale"}],
+                    }
+                ]
+            },
+            "qa_gate": {"context_debug": {"internal": True}, "status": "PASS"},
+        }
+    }
+    before = copy.deepcopy(source)
+
+    cleaned = strip_customer_response_internal_fields(source)
+
+    assert source == before
+    assert cleaned is not source
+    assert cleaned["result"]["money_box"]["valuation_references"][0] == {
+        "label_it": "Valore di stima",
+        "amount_eur": 391849,
+        "evidence": [{"page": 40, "quote": "Valore finale"}],
+    }
+    assert cleaned["result"]["qa_gate"] == {"status": "PASS"}
 
 
 def test_sanitize_customer_facing_result_strips_internal_controls_only_from_customer_structures():
