@@ -16605,20 +16605,11 @@ async def download_perizia_pdf(analysis_id: str, request: Request):
     """Generate and download PDF report for analysis (real PDF bytes)"""
     user = await require_auth(request)
 
-    analysis = await db.perizia_analyses.find_one(
-        {"analysis_id": analysis_id, "user_id": user.user_id},
-        {"_id": 0}
-    )
-    if not analysis:
-        raise HTTPException(status_code=404, detail="Analysis not found")
-
+    analysis = await _get_perizia_analysis_for_user(analysis_id, user)
     result = analysis.get("result", {}) or {}
-    if _is_runtime_authoritative_result(result):
-        apply_customer_decision_contract(result)
-    _apply_headline_overrides(result, analysis.get("headline_overrides") or {})
-    _apply_field_overrides(result, analysis.get("field_overrides") or {})
 
-    # Deterministic PDF from stored JSON. No LLM here.
+    # Deterministic PDF from the same customer-facing read model used by the app.
+    # No LLM here, and no Mongo mutation.
     from pdf_report import build_perizia_pdf_bytes
     pdf_bytes = build_perizia_pdf_bytes(analysis, result)
 
@@ -16681,18 +16672,8 @@ async def download_perizia_html(analysis_id: str, request: Request):
     """Generate and download HTML report for analysis"""
     user = await require_auth(request)
 
-    analysis = await db.perizia_analyses.find_one(
-        {"analysis_id": analysis_id, "user_id": user.user_id},
-        {"_id": 0}
-    )
-    if not analysis:
-        raise HTTPException(status_code=404, detail="Analysis not found")
-
+    analysis = await _get_perizia_analysis_for_user(analysis_id, user)
     result = analysis.get("result", {}) or {}
-    if _is_runtime_authoritative_result(result):
-        apply_customer_decision_contract(result)
-    _apply_headline_overrides(result, analysis.get("headline_overrides") or {})
-    _apply_field_overrides(result, analysis.get("field_overrides") or {})
     html = generate_report_html(analysis, result)
 
     return Response(
@@ -17010,44 +16991,37 @@ def generate_report_html(analysis: Dict, result: Dict) -> str:
             </tr>'''
         lots_html += '</tbody></table></div>'
     
-    # Build money box items HTML - handle TBD values
+    # Build Money Map HTML from the same customer-facing report payload used by the PDF.
     money_items_html = ""
-    money_total_min = 0
-    money_total_max = 0
-    all_tbd = True
-    
-    for item in money_box.get("items", []):
-        voce = item.get("voce") or item.get("label_it") or item.get("code", "")
-        stima = item.get("stima_euro", 0)
-        nota = item.get("stima_nota", "")
-        fonte = norm_text(item.get("fonte_perizia"))
-        
-        # Handle TBD values
-        if stima == "TBD" or (isinstance(stima, str) and "TBD" in stima):
-            value_display = "TBD"
-            value_color = "#f59e0b"  # Amber for TBD
-        elif isinstance(stima, (int, float)) and stima > 0:
-            value_display = f"€{stima:,.0f}"
-            value_color = "#10b981"  # Green for real values
-            all_tbd = False
-            money_total_min += stima
-            money_total_max += stima
-        else:
-            value_display = nota if nota else "TBD"
-            value_color = "#f59e0b"
-        
-        money_items_html += f'<div class="money-item"><span>{voce}</span><span class="page-ref">{fonte}</span><span style="color: {value_color}; font-weight: bold;">{value_display}</span></div>'
-    
-    # Build money total - handle TBD
-    money_total = money_box.get("totale_extra_budget", money_box.get("total_extra_costs", {}))
-    if all_tbd or money_total.get("min") == "TBD":
-        total_display = "TBD"
-        total_note = "Costi non quantificati in perizia — Verifica tecnico/legale obbligatoria"
-    else:
-        total_min = money_total.get("min", money_total_min) if isinstance(money_total.get("min"), (int, float)) else money_total_min
-        total_max = money_total.get("max", money_total_max) if isinstance(money_total.get("max"), (int, float)) else int(money_total_min * 1.2)
-        total_display = f"€{total_min:,.0f} - €{total_max:,.0f}"
-        total_note = money_total.get("nota", f"Costi extra stimati (min-max)")
+    try:
+        from pdf_report import money_report_payload_from_result
+        money_report = money_report_payload_from_result(result)
+    except Exception:
+        logger.exception("backend_html_money_payload_failed analysis_id=%s", analysis.get("analysis_id"))
+        money_report = {
+            "items": [],
+            "total": "Totale extra acquirente non quantificato in modo difendibile",
+            "summary": "Verifica tecnico/legale obbligatoria.",
+        }
+
+    for item in money_report.get("items") or []:
+        if not isinstance(item, dict):
+            continue
+        group = escape(str(item.get("group") or "Costi / oneri"))
+        label = escape(str(item.get("label") or "Voce da verificare"))
+        amount = escape(str(item.get("amount") or ""))
+        evidence = escape(str(item.get("evidence") or ""))
+        note = escape(str(item.get("note") or ""))
+        secondary = " | ".join([part for part in (evidence, note) if part])
+        secondary_html = f'<span class="page-ref">{secondary}</span>' if secondary else ""
+        money_items_html += (
+            f'<div class="money-item"><span><strong>{group}</strong><br>{label}</span>'
+            f'{secondary_html}<span style="color: #D4AF37; font-weight: bold;">{amount}</span></div>'
+        )
+
+    total_display = escape(str(money_report.get("total") or "Totale extra acquirente non quantificato in modo difendibile"))
+    total_note = escape(str(money_report.get("summary") or "Importi mostrati come riferimenti: non sommare se non qualificati come costi acquirente."))
+    total_class = "total-tbd" if "non quantificato" in total_display.lower() else "total-value"
     
     # Build legal killers HTML
     legal_items = legal_killers.get("items", []) if isinstance(legal_killers, dict) and "items" in legal_killers else []
@@ -17165,7 +17139,7 @@ def generate_report_html(analysis: Dict, result: Dict) -> str:
             <div class="total">
                 <div style="display: flex; justify-content: space-between; align-items: center;">
                     <span>TOTALE COSTI EXTRA STIMATI</span>
-                    <span class="{'total-tbd' if total_display == 'TBD' else 'total-value'}">{total_display}</span>
+                    <span class="{total_class}">{total_display}</span>
                 </div>
                 <p style="font-size: 12px; color: #71717a; margin-top: 8px;">{total_note}</p>
             </div>

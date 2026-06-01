@@ -175,11 +175,29 @@ def format_euro(value: Optional[float], *, allow_missing: bool = True) -> str:
     return f"EUR {formatted}"
 
 
+def _strip_internal_money_code(text: Any) -> str:
+    cleaned = str(text or "").strip()
+    cleaned = re.sub(r"^AUTH_[A-Z0-9_]+\s*[·\-:|]\s*", "", cleaned, flags=re.IGNORECASE)
+    cleaned = re.sub(r"^AUTH_[A-Z0-9_]+\s+", "", cleaned, flags=re.IGNORECASE)
+    cleaned = re.sub(r"\s+", " ", cleaned)
+    return cleaned.strip()
+
+
 def _safe_paragraph(text: Any, style: ParagraphStyle, context: str = "generic") -> Paragraph:
     normalized = sanitize_value(text, context=context)
     # Insert soft breaks for very long tokens to avoid overflow.
     normalized = re.sub(r"([A-Za-z0-9_/-]{40})(?=[A-Za-z0-9_/-])", r"\1&#8203;", normalized)
     return Paragraph(escape(normalized), style)
+
+
+def _optional_paragraph(text: Any, style: ParagraphStyle, context: str = "generic") -> Paragraph:
+    if text is None:
+        return Paragraph("", style)
+    if isinstance(text, str) and not text.strip():
+        return Paragraph("", style)
+    if _is_placeholder(text):
+        return Paragraph("", style)
+    return _safe_paragraph(text, style, context=context)
 
 
 def _status_color(status: str) -> colors.Color:
@@ -259,16 +277,279 @@ def _lots_payload(result: Dict[str, Any]) -> List[Dict[str, str]]:
     return rows
 
 
-def _money_items_payload(result: Dict[str, Any]) -> Tuple[List[Dict[str, str]], str]:
-    money_box = result.get("section_3_money_box") or result.get("money_box") or {}
+MONEY_MAP_GROUPS: Tuple[str, ...] = (
+    "buyer_costs_confirmed",
+    "buyer_cost_signals_to_verify",
+    "cost_signals_to_verify",
+    "valuation_references",
+    "valuation_reference_amounts",
+    "price_references",
+    "valuation_deductions",
+    "cadastral_values",
+    "formalities_and_procedural_amounts",
+    "other_monetary_mentions",
+    "unsupported_or_unknown_amounts",
+)
+
+MONEY_GROUP_LABELS = {
+    "buyer_costs_confirmed": "Costi acquirente confermati",
+    "buyer_cost_signals_to_verify": "Costi da verificare",
+    "cost_signals_to_verify": "Costi da verificare",
+    "valuation_references": "Riferimenti valutativi",
+    "valuation_reference_amounts": "Riferimenti valutativi",
+    "price_references": "Riferimenti di prezzo",
+    "valuation_deductions": "Decurtazioni nella stima",
+    "cadastral_values": "Valori catastali",
+    "formalities_and_procedural_amounts": "Formalita / importi procedurali",
+    "other_monetary_mentions": "Altri importi rilevati",
+    "unsupported_or_unknown_amounts": "Importi da verificare manualmente",
+}
+
+MONEY_GROUP_MAX_ROWS = {
+    "buyer_costs_confirmed": 8,
+    "buyer_cost_signals_to_verify": 8,
+    "cost_signals_to_verify": 8,
+    "valuation_references": 5,
+    "price_references": 5,
+    "valuation_deductions": 5,
+    "cadastral_values": 4,
+    "formalities_and_procedural_amounts": 5,
+}
+
+MONEY_GROUP_COLLAPSED = {"other_monetary_mentions", "unsupported_or_unknown_amounts"}
+NO_DEFENSIBLE_TOTAL_TEXT = "Totale extra acquirente non quantificato in modo difendibile"
+
+
+def _money_box_candidates(result: Dict[str, Any]) -> List[Tuple[str, Dict[str, Any]]]:
+    candidates: List[Tuple[str, Dict[str, Any]]] = []
+    for source_key in ("section_3_money_box", "money_box"):
+        box = result.get(source_key)
+        if isinstance(box, dict):
+            candidates.append((source_key, box))
+    cdc = result.get("customer_decision_contract")
+    if isinstance(cdc, dict) and isinstance(cdc.get("money_box"), dict):
+        candidates.append(("customer_decision_contract.money_box", cdc["money_box"]))
+    return candidates
+
+
+def _has_money_map_groups(money_box: Dict[str, Any]) -> bool:
+    return any(isinstance(money_box.get(group), list) and len(money_box.get(group) or []) > 0 for group in MONEY_MAP_GROUPS)
+
+
+def _select_money_box(result: Dict[str, Any]) -> Tuple[Dict[str, Any], str, bool]:
+    first_legacy: Optional[Tuple[str, Dict[str, Any]]] = None
+    for source, box in _money_box_candidates(result):
+        if _has_money_map_groups(box):
+            return box, source, True
+        if first_legacy is None and isinstance(box.get("items"), list) and box.get("items"):
+            first_legacy = (source, box)
+    if first_legacy:
+        return first_legacy[1], first_legacy[0], False
+    candidates = _money_box_candidates(result)
+    if candidates:
+        return candidates[0][1], candidates[0][0], False
+    return {}, "none", False
+
+
+def _money_item_title(item: Dict[str, Any]) -> str:
+    title = (
+        item.get("customer_title_it")
+        or item.get("label_it")
+        or item.get("label")
+        or item.get("voce")
+        or item.get("description_it")
+        or item.get("description")
+        or ""
+    )
+    return sanitize_value(_strip_internal_money_code(title), context="generic")
+
+
+def _money_item_amount(item: Dict[str, Any]) -> str:
+    for key in ("customer_amount_label", "amount_label", "amount_it", "formatted_amount", "formatted"):
+        value = item.get(key)
+        if value and not _is_placeholder(value):
+            return sanitize_value(value, context="money")
+    for key in ("amount_eur", "amount", "stima_euro", "value_eur", "value"):
+        parsed = parse_money_value(item.get(key))
+        if parsed is not None:
+            return format_euro(parsed, allow_missing=False)
+    return ""
+
+
+def _money_item_note(item: Dict[str, Any]) -> str:
+    note = (
+        item.get("customer_context_it")
+        or item.get("stima_nota")
+        or item.get("note_it")
+        or item.get("note")
+        or item.get("context_it")
+        or ""
+    )
+    note_text = sanitize_value(_strip_internal_money_code(note), context="estimate")
+    if _is_placeholder(note_text):
+        return ""
+    if len(note_text) > 180:
+        note_text = note_text[:177] + "..."
+    return note_text
+
+
+def _money_item_evidence(item: Dict[str, Any], max_items: int = 2) -> str:
+    evidence = item.get("evidence")
+    snippets = _extract_evidence_snippets(evidence, max_items=max_items)
+    if snippets:
+        return " | ".join(snippets)
+    page = item.get("page") or item.get("page_number")
+    if page:
+        return f"p.{page}"
+    fonte = item.get("fonte_perizia") or item.get("source")
+    if isinstance(fonte, list):
+        snippets = _extract_evidence_snippets(fonte, max_items=max_items)
+        if snippets:
+            return " | ".join(snippets)
+    if isinstance(fonte, str) and fonte.strip() and not _is_placeholder(fonte):
+        return sanitize_value(fonte, context="generic")
+    return ""
+
+
+def _money_group_entries(money_box: Dict[str, Any]) -> List[Tuple[str, List[Dict[str, Any]]]]:
+    groups: List[Tuple[str, List[Dict[str, Any]]]] = []
+    seen_keys = set()
+    for group in MONEY_MAP_GROUPS:
+        if group == "cost_signals_to_verify" and isinstance(money_box.get("buyer_cost_signals_to_verify"), list) and money_box.get("buyer_cost_signals_to_verify"):
+            continue
+        if group == "valuation_reference_amounts" and isinstance(money_box.get("valuation_references"), list) and money_box.get("valuation_references"):
+            continue
+        rows = money_box.get(group)
+        if not isinstance(rows, list) or not rows:
+            continue
+        deduped: List[Dict[str, Any]] = []
+        for item in rows:
+            if not isinstance(item, dict):
+                continue
+            key = (
+                _strip_internal_money_code(item.get("customer_title_it") or item.get("label_it") or item.get("label") or ""),
+                str(item.get("customer_amount_label") or item.get("amount_eur") or item.get("amount") or item.get("stima_euro") or ""),
+                str(item.get("page") or item.get("page_number") or ""),
+            )
+            if key in seen_keys:
+                continue
+            seen_keys.add(key)
+            deduped.append(item)
+        if deduped:
+            groups.append((group, deduped))
+    return groups
+
+
+def _money_total_text(money_box: Dict[str, Any], *, has_authority_groups: bool) -> str:
+    summary = money_box.get("customer_summary") if isinstance(money_box.get("customer_summary"), dict) else {}
+    total_status = summary.get("total_status") if isinstance(summary.get("total_status"), dict) else {}
+    if str(total_status.get("status_code") or "").strip().lower() == "no_defensible_total":
+        return NO_DEFENSIBLE_TOTAL_TEXT
+
+    explicit_total = parse_money_value(money_box.get("total_extra_cost_eur"))
+    if explicit_total is not None:
+        return format_euro(explicit_total, allow_missing=False)
+
+    for key in ("total_extra_costs_range", "totale_extra_budget", "total_extra_costs"):
+        total = money_box.get(key)
+        if not isinstance(total, dict):
+            continue
+        total_min = parse_money_value(total.get("min_eur") if "min_eur" in total else total.get("min"))
+        total_max = parse_money_value(total.get("max_eur") if "max_eur" in total else total.get("max"))
+        if total_min is not None and total_max is not None:
+            if abs(total_min - total_max) < 0.005:
+                return format_euro(total_min, allow_missing=False)
+            return f"{format_euro(total_min, allow_missing=False)} - {format_euro(total_max, allow_missing=False)}"
+        if total_min is not None and not has_authority_groups:
+            return format_euro(total_min, allow_missing=False)
+
+    return NO_DEFENSIBLE_TOTAL_TEXT if has_authority_groups else _missing_text("money")
+
+
+def money_report_payload_from_result(result: Dict[str, Any]) -> Dict[str, Any]:
+    money_box, source, has_authority_groups = _select_money_box(result)
+    output: List[Dict[str, str]] = []
+
+    if has_authority_groups:
+        for group, entries in _money_group_entries(money_box):
+            group_label = MONEY_GROUP_LABELS.get(group, group.replace("_", " ").title())
+            if group in MONEY_GROUP_COLLAPSED:
+                evidence_parts = []
+                for item in entries[:2]:
+                    evidence = _money_item_evidence(item, max_items=1)
+                    if evidence:
+                        evidence_parts.append(evidence)
+                output.append(
+                    {
+                        "group": group_label,
+                        "label": f"{len(entries)} importi rilevati; verificare nel documento",
+                        "amount": "",
+                        "note": "Gruppo sintetizzato per evitare rumore nel PDF.",
+                        "evidence": " | ".join(evidence_parts),
+                    }
+                )
+                continue
+
+            max_rows = MONEY_GROUP_MAX_ROWS.get(group, 5)
+            for item in entries[:max_rows]:
+                title = _money_item_title(item)
+                if _is_placeholder(title):
+                    continue
+                output.append(
+                    {
+                        "group": group_label,
+                        "label": title,
+                        "amount": _money_item_amount(item),
+                        "note": _money_item_note(item),
+                        "evidence": _money_item_evidence(item),
+                    }
+                )
+            remaining = len(entries) - max_rows
+            if remaining > 0:
+                output.append(
+                    {
+                        "group": group_label,
+                        "label": f"Altri {remaining} elementi nel gruppo",
+                        "amount": "",
+                        "note": "Dettaglio completo disponibile nella Money Map interattiva.",
+                        "evidence": "",
+                    }
+                )
+    else:
+        output = _legacy_money_items_payload(money_box)
+
+    if not output:
+        output.append(
+            {
+                "group": "Costi / oneri",
+                "label": "Costi non quantificabili dal documento",
+                "amount": "",
+                "note": "Verifica manuale consigliata",
+                "evidence": "",
+            }
+        )
+
+    summary = money_box.get("customer_summary") if isinstance(money_box.get("customer_summary"), dict) else {}
+    summary_line = sanitize_value(summary.get("line_it") or "", context="generic") if summary else ""
+    if _is_placeholder(summary_line):
+        summary_line = ""
+
+    return {
+        "source": source,
+        "uses_authority_groups": has_authority_groups,
+        "items": output,
+        "total": _money_total_text(money_box, has_authority_groups=has_authority_groups),
+        "summary": summary_line,
+    }
+
+
+def _legacy_money_items_payload(money_box: Dict[str, Any]) -> List[Dict[str, str]]:
     items = money_box.get("items") if isinstance(money_box, dict) else []
     if not isinstance(items, list):
         items = []
 
     canonical_codes = {"A", "B", "C", "D", "E", "F", "G", "H"}
     output: List[Dict[str, str]] = []
-    numeric_total = 0.0
-    has_unknown_cost = False
 
     for item in items:
         if not isinstance(item, dict):
@@ -277,55 +558,41 @@ def _money_items_payload(result: Dict[str, Any]) -> Tuple[List[Dict[str, str]], 
         if code.startswith("S3C"):
             continue
 
-        label = sanitize_value(item.get("label_it") or item.get("voce") or item.get("label") or code, context="generic")
+        label = sanitize_value(_strip_internal_money_code(item.get("label_it") or item.get("voce") or item.get("label") or code), context="generic")
         if _is_placeholder(label):
             continue
 
         stima = parse_money_value(item.get("stima_euro"))
-        if stima is None:
-            has_unknown_cost = True
-        else:
-            numeric_total += stima
 
         if code and code not in canonical_codes and stima is None:
             # Drop noisy non-canonical candidate rows without deterministic amount.
             continue
 
-        nota = sanitize_value(item.get("stima_nota") or item.get("note") or "", context="estimate")
-        fonte = sanitize_value(item.get("fonte_perizia") or item.get("source") or "", context="generic")
+        nota = sanitize_value(_strip_internal_money_code(item.get("stima_nota") or item.get("note") or ""), context="estimate")
+        fonte = sanitize_value(_strip_internal_money_code(item.get("fonte_perizia") or item.get("source") or ""), context="generic")
 
         output.append(
             {
-                "code": code or "-",
+                "group": "Costi / oneri",
                 "label": label,
-                "stima": format_euro(stima),
-                "nota": "" if _is_placeholder(nota) else nota,
-                "fonte": "" if _is_placeholder(fonte) else fonte,
+                "amount": format_euro(stima),
+                "note": "" if _is_placeholder(nota) else nota,
+                "evidence": "" if _is_placeholder(fonte) else fonte,
             }
         )
-
-    money_total = money_box.get("totale_extra_budget") or money_box.get("total_extra_costs") or {}
-    total_min = parse_money_value(money_total.get("min") if isinstance(money_total, dict) else None)
-    total_text = ""
-    if total_min is not None and not has_unknown_cost:
-        total_text = format_euro(total_min)
-    elif numeric_total > 0 and not has_unknown_cost:
-        total_text = format_euro(numeric_total)
-    else:
-        total_text = _missing_text("money")
 
     if not output:
         output.append(
             {
-                "code": "-",
+                "group": "Costi / oneri",
                 "label": "Costi non quantificabili dal documento",
-                "stima": _missing_text("money"),
-                "nota": "Verifica manuale consigliata",
-                "fonte": "",
+                "amount": "",
+                "note": "Verifica manuale consigliata",
+                "evidence": "",
             }
         )
 
-    return output, total_text
+    return output
 
 
 def _legal_killers_payload(result: Dict[str, Any]) -> List[Dict[str, str]]:
@@ -443,7 +710,7 @@ def _payload_from_result(analysis: Dict[str, Any], result: Dict[str, Any]) -> Di
     summary = result.get("summary_for_client") or {}
     bundle = result.get("summary_for_client_bundle") if isinstance(result.get("summary_for_client_bundle"), dict) else {}
     lots = _lots_payload(result)
-    costs, costs_total = _money_items_payload(result)
+    money_payload = money_report_payload_from_result(result)
 
     created_at = analysis.get("created_at") or datetime.now(timezone.utc).isoformat()
     generated_at = (result.get("run") or {}).get("generated_at_utc") or created_at
@@ -470,8 +737,11 @@ def _payload_from_result(analysis: Dict[str, Any], result: Dict[str, Any]) -> Di
         },
         "decisione": _decision_payload(result),
         "lots": lots,
-        "costi": costs,
-        "costi_totale": costs_total,
+        "costi": money_payload["items"],
+        "costi_totale": money_payload["total"],
+        "costi_summary": money_payload["summary"],
+        "costi_source": money_payload["source"],
+        "costi_uses_authority_groups": money_payload["uses_authority_groups"],
         "legal_killers": _legal_killers_payload(result),
         "dettagli_beni": _details_per_bene_payload(result),
         "red_flags": _red_flags_payload(result),
@@ -659,28 +929,31 @@ def _build_story(payload: Dict[str, Any], styles: Dict[str, ParagraphStyle], pag
 
     # 5) Money Box / Costi
     story.append(_safe_paragraph("5. Money Box / Costi", styles["h2"]))
+    if payload.get("costi_summary"):
+        story.append(_safe_paragraph(payload["costi_summary"], styles["muted"]))
+        story.append(Spacer(1, 4))
     cost_rows = [[
-        _safe_paragraph("Codice", styles["small"]),
+        _safe_paragraph("Gruppo", styles["small"]),
         _safe_paragraph("Voce", styles["small"]),
-        _safe_paragraph("Stima", styles["small"]),
+        _safe_paragraph("Importo", styles["small"]),
         _safe_paragraph("Nota", styles["small"]),
-        _safe_paragraph("Fonte", styles["small"]),
+        _safe_paragraph("Evidenza", styles["small"]),
     ]]
     for item in payload["costi"]:
         cost_rows.append(
             [
-                _safe_paragraph(item["code"], styles["body"]),
+                _safe_paragraph(item["group"], styles["body"]),
                 _safe_paragraph(item["label"], styles["body"]),
-                _safe_paragraph(item["stima"], styles["body"], context="money"),
-                _safe_paragraph(item["nota"], styles["muted"]),
-                _safe_paragraph(item["fonte"], styles["muted"]),
+                _optional_paragraph(item["amount"], styles["body"], context="money"),
+                _optional_paragraph(item["note"], styles["muted"]),
+                _optional_paragraph(item["evidence"], styles["muted"]),
             ]
         )
 
-    story.append(_card_table(cost_rows, [page_width * 0.08, page_width * 0.3, page_width * 0.17, page_width * 0.25, page_width * 0.2], header=True))
+    story.append(_card_table(cost_rows, [page_width * 0.18, page_width * 0.24, page_width * 0.14, page_width * 0.22, page_width * 0.22], header=True))
     story.append(Spacer(1, 5))
     story.append(_card_table(
-        [[_safe_paragraph("Totale costi extra", styles["small"]), _safe_paragraph(payload["costi_totale"], styles["body"], context="money")]],
+        [[_safe_paragraph("Totale extra acquirente", styles["small"]), _safe_paragraph(payload["costi_totale"], styles["body"], context="money")]],
         [page_width * 0.35, page_width * 0.65],
     ))
 
