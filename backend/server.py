@@ -17173,7 +17173,7 @@ def generate_report_html(analysis: Dict, result: Dict) -> str:
         </div>
         
         <div class="section">
-            <h2>9. LEGAL KILLERS CHECKLIST</h2>
+            <h2>9. RISCHI E PUNTI CRITICI</h2>
             {legal_html or '<p style="color: #71717a;">Nessun dato disponibile</p>'}
         </div>
         

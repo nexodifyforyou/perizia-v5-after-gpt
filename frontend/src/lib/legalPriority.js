@@ -7,10 +7,10 @@ const toComparableText = (value) =>
     .toLowerCase();
 
 export const LEGAL_KIND_BY_CATEGORY = {
-  occupazione: 'material_blocker',
+  occupazione: 'caution_watch',
   pignoramento_esecuzione: 'execution_context',
-  ipoteca_formalita: 'material_blocker',
-  difformita_urb_cat: 'material_blocker',
+  ipoteca_formalita: 'execution_context',
+  difformita_urb_cat: 'caution_watch',
   agibilita_docs: 'caution_watch',
   accesso_vincolo: 'caution_watch',
   servitu_usi_civici: 'background_note'
@@ -99,9 +99,11 @@ export const isWeakBackgroundLegalSummary = (textRaw) => {
 export const buildCanonicalLegalPriorityMeta = ({ key = '', title = '', detail = '', evidenceText = '' }) => {
   const canonicalKey = canonicalizeAttentionFieldKey(key, title, detail);
   const category = inferCanonicalLegalCategory({ key: canonicalKey, title, detail, evidenceText });
+  const combinedText = toComparableText(`${title} ${detail} ${evidenceText}`);
+  const hasExplicitHardBlocker = /(insanabil|non sanabil|non regolarizzabil|abuso non regolarizzabil|bene non trasferibil|non trasferibil|intrasferibil|non commerciabil)/.test(combinedText);
   const kind = isPositiveOrNeutralLegalTruth(canonicalKey, detail)
     ? 'neutral_truth'
-    : (LEGAL_KIND_BY_CATEGORY[category] || 'background_note');
+    : (hasExplicitHardBlocker ? 'material_blocker' : (LEGAL_KIND_BY_CATEGORY[category] || 'background_note'));
   return {
     canonicalKey,
     category,

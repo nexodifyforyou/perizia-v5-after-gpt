@@ -1228,6 +1228,7 @@ def _strip_customer_internal_provenance(value: Any) -> Any:
 def sanitize_customer_facing_result(result: Dict[str, Any]) -> Dict[str, Any]:
     if not isinstance(result, dict):
         return result
+    _normalize_customer_legal_taxonomy(result)
     for key in list(result.keys()):
         key_text = str(key)
         if key_text in _CUSTOMER_INTERNAL_AUTHORITY_KEYS or key_text.startswith("authority_") or "shadow_" in key_text:
@@ -1472,6 +1473,789 @@ def _dedup_legal_killer_items(items: List[Dict[str, Any]]) -> List[Dict[str, Any
         seen.add(key)
         out.append(item)
     return out
+
+
+_LEGAL_HARD_BLOCKER_RE = re.compile(
+    r"\b(?:"
+    r"insanabil[ei]|non\s+sanabil[ei]|non\s+regolarizzabil[ei]|"
+    r"abuso\s+non\s+regolarizzabil[ei]|bene\s+non\s+trasferibil[ei]|"
+    r"non\s+trasferibil[ei]|intrasferibil[ei]|non\s+commerciabil[ei]|"
+    r"impossibil(?:e|ita|ità)\s+(?:il\s+)?trasferimento"
+    r")\b",
+    re.I,
+)
+_LEGAL_FORMALITY_RE = re.compile(
+    r"\b(?:pignorament|ipotec|formalit[aà]|trascrizion|iscrizion|oneri?\s+di\s+cancellazione|"
+    r"decreto\s+di\s+trasferimento)\b",
+    re.I,
+)
+_LEGAL_PROCEDURE_HANDLED_RE = re.compile(
+    r"\b(?:a\s+carico\s+della\s+procedura|saranno\s+cancellat|da\s+cancellare\s+con\s+il\s+decreto|"
+    r"formalità\s+a\s+carico\s+della\s+procedura|formalita\s+a\s+carico\s+della\s+procedura)\b",
+    re.I,
+)
+_LEGAL_OPPONIBILITA_RE = re.compile(r"\bopponibil", re.I)
+_LEGAL_NON_OPPONIBILE_RE = re.compile(
+    r"\b(?:"
+    r"non\s+(?:e\s+|è\s+|risulta\s+|sia\s+|sono\s+|siano\s+)?opponibil\w*|"
+    r"non\s+opponibil\w*\s+(?:alla\s+procedura|all['’]aggiudicatario|all['’]acquirente)|"
+    r"inopponibil\w*"
+    r")\b",
+    re.I,
+)
+_LEGAL_UNKNOWN_OPPONIBILITA_RE = re.compile(
+    r"\b(?:"
+    r"non\s+(?:verificabil\w*|determinabil\w*|specificat\w*|chiarit\w*)|"
+    r"da\s+verificare|"
+    r"manca(?:no)?|"
+    r"serve(?:ono)?|"
+    r"necessar\w+\s+verifica"
+    r")\b.{0,120}\bopponibil",
+    re.I | re.S,
+)
+_LEGAL_POSITIVE_OPPONIBILE_RE = re.compile(
+    r"\b(?:"
+    r"(?:contratto|titolo|locazione)\s+(?:di\s+locazione\s+)?opponibil\w*|"
+    r"opponibil\w+\s+(?:alla\s+procedura|all['’]aggiudicatario|all['’]acquirente)|"
+    r"locazione\s+opponibil\w*"
+    r")\b",
+    re.I,
+)
+_LEGAL_BUYER_BURDEN_RE = re.compile(
+    r"\b(?:"
+    r"(?:onere|oneri|obbligo|obblighi|vincolo|vincoli|spesa|spese|formalità|formalita)"
+    r".{0,100}\b(?:a\s+carico|permane(?:\w*)?\s+a\s+carico|resta(?:no)?\s+a\s+carico)"
+    r"\s+(?:dell['’]aggiudicatario|dell['’]acquirente|del\s+compratore|della\s+parte\s+acquirente)|"
+    r"(?:a\s+carico|permane(?:\w*)?\s+a\s+carico|resta(?:no)?\s+a\s+carico)"
+    r"\s+(?:dell['’]aggiudicatario|dell['’]acquirente|del\s+compratore|della\s+parte\s+acquirente)"
+    r".{0,100}\b(?:onere|oneri|obbligo|obblighi|vincolo|vincoli|spesa|spese|formalità|formalita)"
+    r")\b",
+    re.I | re.S,
+)
+_LEGAL_OCCUPANCY_RE = re.compile(
+    r"\b(?:occupat|occupazion\w*|locat|contratto\s+di\s+locazione|liberazione|"
+    r"rilascio\s+(?:dell?'?immobile|del\s+bene|dei\s+beni|dell?'?unit[aà]|dell?'?alloggio|del\s+fabbricato))\b",
+    re.I,
+)
+_LEGAL_DEBTOR_OCCUPANCY_RE = re.compile(
+    r"\boccupat\w*\s+(?:dal|dalla|da\s+parte\s+del)\s+(?:debitore|esecutat[oa])\b",
+    re.I,
+)
+_LEGAL_AGIBILITA_RE = re.compile(r"\b(?:agibil\w*|abitabil\w*)", re.I)
+_LEGAL_URBANISTICA_RE = re.compile(
+    r"\b(?:urbanistic\w*|ediliz\w*|catastal\w*|difform\w*|sanator\w*|condono|"
+    r"regolarizz\w*|ripristin\w*|demolizion\w*|abuso|abusi)\b",
+    re.I,
+)
+_LEGAL_SERVITU_RE = re.compile(r"\b(?:servit[uù]|accesso|stradella|passaggio|barriera)\b", re.I)
+_LEGAL_USI_CIVICI_RE = re.compile(r"\b(?:usi\s+civici|diritti\s+demaniali|censo|livello)\b", re.I)
+_LEGAL_NEGATED_USI_CIVICI_RE = re.compile(
+    r"\b(?:non\s+sono\s+presenti|nessun[aoei]?|non\s+risultan[ao])\b.{0,120}\b(?:usi\s+civici|diritti\s+demaniali)\b",
+    re.I | re.S,
+)
+_LEGAL_POSITIVE_USI_CIVICI_RE = re.compile(
+    r"\b(?:gravato|gravata|soggett[oa]|presenz[ae]|present[ei]|esistenz[ae]|risultan[oa])\b.{0,120}\b"
+    r"(?:usi\s+civici|diritti\s+demaniali)\b",
+    re.I | re.S,
+)
+_LEGAL_HEADING_ONLY_USI_CIVICI_RE = re.compile(
+    r"^\s*(?:servit[uù],?\s*)?censo,?\s*livello,?\s*usi\s+civici\b",
+    re.I,
+)
+_LEGAL_DANGEROUS_WORDING_REPLACEMENTS = (
+    (re.compile(r"\blegal\s+killers?\b", re.I), "rischi e punti critici"),
+    (re.compile(r"\bkiller\b", re.I), "punto critico"),
+    (re.compile(r"\bblockers?\b", re.I), "punti da verificare"),
+    (re.compile(r"\bblocchi\s+principali\b", re.I), "punti principali da verificare"),
+    (re.compile(r"\bi\s+principali\s+blocker\s+sono\b", re.I), "i principali punti da verificare sono"),
+    (re.compile(r"\bgrave\s+rischio\b", re.I), "rischio da verificare"),
+    (re.compile(r"\bnon\s+conveniente\b", re.I), "da valutare con regola economica esplicita"),
+)
+_LEGAL_DANGEROUS_WORDING_RE = re.compile(
+    r"\b(?:legal\s+killers?|killer|blockers?|grave\s+rischio|problema\s+grave|"
+    r"blocco\s+automatico|non\s+conveniente)\b",
+    re.I,
+)
+
+
+def _legal_taxonomy_text_key(value: Any) -> str:
+    text = re.sub(r"\s+", " ", str(value or "").strip().lower())
+    text = (
+        text.replace("à", "a")
+        .replace("è", "e")
+        .replace("é", "e")
+        .replace("ì", "i")
+        .replace("ò", "o")
+        .replace("ù", "u")
+    )
+    return re.sub(r"[^a-z0-9\s]", "", text)
+
+
+def _legal_taxonomy_blob(item: Dict[str, Any]) -> str:
+    if not isinstance(item, dict):
+        return ""
+    parts: List[str] = []
+    for key in (
+        "killer",
+        "flag_it",
+        "headline_it",
+        "label_it",
+        "title_it",
+        "action",
+        "action_it",
+        "reason_it",
+        "explanation_it",
+        "status",
+        "severity",
+        "category",
+    ):
+        value = item.get(key)
+        if value not in (None, ""):
+            parts.append(str(value))
+    for ev in item.get("evidence") if isinstance(item.get("evidence"), list) else []:
+        if isinstance(ev, dict):
+            parts.append(str(ev.get("quote") or ""))
+            parts.append(str(ev.get("search_hint") or ""))
+    return " ".join(parts)
+
+
+def _legal_blob_without_negative_opponibilita(blob: str) -> str:
+    return _LEGAL_NON_OPPONIBILE_RE.sub(" ", str(blob or ""))
+
+
+def _legal_has_positive_opponibile(blob: str) -> bool:
+    cleaned = _legal_blob_without_negative_opponibilita(blob)
+    return bool(_LEGAL_POSITIVE_OPPONIBILE_RE.search(cleaned))
+
+
+def _legal_topic_for_blob(blob: str) -> str:
+    for name, pattern in (
+        ("buyer_burden", _LEGAL_BUYER_BURDEN_RE),
+        ("formalities", _LEGAL_FORMALITY_RE),
+        ("opponibilita", _LEGAL_OPPONIBILITA_RE),
+        ("agibilita", _LEGAL_AGIBILITA_RE),
+        ("urbanistica", _LEGAL_URBANISTICA_RE),
+        ("occupancy", _LEGAL_OCCUPANCY_RE),
+        ("servitu", _LEGAL_SERVITU_RE),
+        ("usi_civici", _LEGAL_USI_CIVICI_RE),
+    ):
+        if pattern.search(blob):
+            return name
+    return "generic"
+
+
+def _legal_item_scope_identity(item: Dict[str, Any]) -> str:
+    if not isinstance(item, dict):
+        return "document"
+    scope = item.get("scope") if isinstance(item.get("scope"), dict) else {}
+    if scope:
+        return _scope_identity(scope)
+    lot = item.get("lot_number") or item.get("lot") or item.get("lotto")
+    bene = item.get("bene_number") or item.get("bene") or item.get("bene_id")
+    blob = _legal_taxonomy_blob(item)
+    if not lot:
+        match = re.search(r"\blotto\s*(?:n[.°]?\s*)?(\d+)\b", blob, re.I)
+        if match:
+            lot = match.group(1)
+    if not bene:
+        match = re.search(r"\bbene\s*(?:n[.°]?\s*)?(\d+)\b", blob, re.I)
+        if match:
+            bene = match.group(1)
+    if lot or bene:
+        return f"lot:{lot or ''}|bene:{bene or ''}"
+    return "document"
+
+
+def _legal_scope_display_label(item: Dict[str, Any]) -> str:
+    if not isinstance(item, dict):
+        return ""
+    scope = item.get("scope") if isinstance(item.get("scope"), dict) else {}
+    lot = (
+        scope.get("lot_number")
+        or item.get("lot_number")
+        or item.get("lot")
+        or item.get("lotto")
+    )
+    bene = (
+        scope.get("bene_number")
+        or item.get("bene_number")
+        or item.get("bene")
+        or item.get("bene_id")
+    )
+    blob = _legal_taxonomy_blob(item)
+    if not lot:
+        match = re.search(r"\blotto\s*(?:n[.°]?\s*)?(\d+)\b", blob, re.I)
+        if match:
+            lot = match.group(1)
+    if not bene:
+        match = re.search(r"\bbene\s*(?:n[.°]?\s*)?(\d+)\b", blob, re.I)
+        if match:
+            bene = match.group(1)
+    parts: List[str] = []
+    if lot:
+        parts.append(f"Lotto {lot}")
+    if bene:
+        parts.append(f"Bene {bene}")
+    return " - ".join(parts)
+
+
+def _apply_scope_to_legal_title(title: str, item: Dict[str, Any]) -> str:
+    scope_label = _legal_scope_display_label(item)
+    if not scope_label:
+        return title
+    title_key = _legal_taxonomy_text_key(title)
+    scope_key = _legal_taxonomy_text_key(scope_label)
+    if title_key.startswith(scope_key):
+        return title
+    return f"{scope_label}: {title}"
+
+
+def _legal_classification_rank(item: Dict[str, Any]) -> int:
+    classification = str(item.get("classification") or "").strip().lower()
+    if classification in {"blocker", "material_blocker"}:
+        return 4
+    if classification in {"risk", "risk_to_verify"}:
+        return 3
+    if classification in {"attention", "caution", "caution_watch"}:
+        return 2
+    if classification in {"fact", "info", "neutral_truth"}:
+        return 1
+    status = str(item.get("severity") or item.get("status") or "").strip().upper()
+    if status in {"BLOCKER", "RED"} and bool(item.get("is_legal_killer") or item.get("is_blocker")):
+        return 4
+    if status in {"RED", "AMBER", "GIALLO"}:
+        return 3 if status == "RED" else 2
+    if status in {"INFO", "GREEN", "VERDE"}:
+        return 1
+    return 0
+
+
+def _merge_page_lists(*sources: Any, limit: int = 12) -> List[int]:
+    pages: List[int] = []
+    for source in sources:
+        for page in _normalize_page_list(source):
+            if page not in pages:
+                pages.append(page)
+            if len(pages) >= limit:
+                return pages
+    return pages
+
+
+def _merged_legal_item(existing: Dict[str, Any], incoming: Dict[str, Any]) -> Dict[str, Any]:
+    incoming_wins = _legal_classification_rank(incoming) > _legal_classification_rank(existing)
+    winner = copy.deepcopy(incoming if incoming_wins else existing)
+    loser = existing if incoming_wins else incoming
+    winner["evidence"] = _normalize_evidence_list(existing.get("evidence"), incoming.get("evidence"), limit=8)
+    for key in ("supporting_pages", "pages"):
+        merged_pages = _merge_page_lists(existing.get(key), incoming.get(key), _pages_from_evidence(winner.get("evidence", [])))
+        if merged_pages:
+            winner[key] = merged_pages
+    incoming_action = _clean_it_text(incoming.get("action") or incoming.get("action_it") or incoming.get("recommended_action_it"))
+    existing_action = _clean_it_text(existing.get("action") or existing.get("action_it") or existing.get("recommended_action_it"))
+    winner_action = _clean_it_text(winner.get("action") or winner.get("action_it") or winner.get("recommended_action_it"))
+    if len(incoming_action) > len(winner_action):
+        winner["action"] = incoming_action
+        winner["recommended_action_it"] = incoming_action
+    elif len(existing_action) > len(winner_action):
+        winner["action"] = existing_action
+        winner["recommended_action_it"] = existing_action
+    if not winner.get("recommended_action_it") and winner.get("action"):
+        winner["recommended_action_it"] = winner["action"]
+    if not winner.get("evidence") and loser.get("evidence"):
+        winner["evidence"] = _normalize_evidence_list(loser.get("evidence"), limit=8)
+    return winner
+
+
+def _legal_item_title(item: Dict[str, Any]) -> str:
+    for key in ("killer", "flag_it", "headline_it", "label_it", "title_it", "label", "title"):
+        value = item.get(key) if isinstance(item, dict) else None
+        if isinstance(value, str) and value.strip():
+            return _clean_it_text(value).rstrip(".")
+    return "Punto da verificare"
+
+
+def _legal_has_hard_blocker_evidence(item: Dict[str, Any]) -> bool:
+    blob = _legal_taxonomy_blob(item)
+    if not _LEGAL_HARD_BLOCKER_RE.search(blob):
+        return False
+    return True
+
+
+def _legal_item_has_taxonomy_signal(item: Dict[str, Any]) -> bool:
+    if not isinstance(item, dict):
+        return False
+    if str(item.get("classification") or "").strip().lower() in {"fact", "attention", "risk", "blocker"}:
+        return True
+    blob = _legal_taxonomy_blob(item)
+    if not blob.strip():
+        return False
+    if _LEGAL_DANGEROUS_WORDING_RE.search(blob):
+        return True
+    for pattern in (
+        _LEGAL_HARD_BLOCKER_RE,
+        _LEGAL_BUYER_BURDEN_RE,
+        _LEGAL_FORMALITY_RE,
+        _LEGAL_OPPONIBILITA_RE,
+        _LEGAL_OCCUPANCY_RE,
+        _LEGAL_AGIBILITA_RE,
+        _LEGAL_URBANISTICA_RE,
+        _LEGAL_SERVITU_RE,
+        _LEGAL_USI_CIVICI_RE,
+    ):
+        if pattern.search(blob):
+            return True
+    return "da verificare" in _legal_item_title(item).lower()
+
+
+def _legal_is_false_positive_usi_civici(item: Dict[str, Any]) -> bool:
+    title = _legal_item_title(item).lower()
+    blob = _legal_taxonomy_blob(item)
+    if "usi civici" not in title and "diritti demaniali" not in title:
+        return False
+    if _LEGAL_POSITIVE_USI_CIVICI_RE.search(blob) and not _LEGAL_NEGATED_USI_CIVICI_RE.search(blob):
+        return False
+    if _LEGAL_NEGATED_USI_CIVICI_RE.search(blob):
+        return True
+    evidence = item.get("evidence") if isinstance(item.get("evidence"), list) else []
+    if not evidence:
+        return True
+    quotes = [str(ev.get("quote") or "").strip() for ev in evidence if isinstance(ev, dict)]
+    if quotes and all(_LEGAL_HEADING_ONLY_USI_CIVICI_RE.search(q) or "servit" in q.lower() for q in quotes):
+        return True
+    if "usi civici" in blob.lower() and not _LEGAL_POSITIVE_USI_CIVICI_RE.search(blob):
+        return True
+    return False
+
+
+def _legal_classification_for_item(item: Dict[str, Any]) -> Optional[Dict[str, str]]:
+    if not isinstance(item, dict):
+        return None
+    blob = _legal_taxonomy_blob(item)
+    title = _legal_item_title(item)
+    if _legal_is_false_positive_usi_civici(item):
+        return None
+    if _legal_has_hard_blocker_evidence(item):
+        return {
+            "classification": "blocker",
+            "badge_it": "Blocco",
+            "status": "RED",
+            "action": "Verificare immediatamente con legale/professionista: la perizia contiene linguaggio esplicitamente bloccante.",
+        }
+    if _LEGAL_BUYER_BURDEN_RE.search(blob):
+        return {
+            "classification": "risk",
+            "badge_it": "Rischio da verificare",
+            "status": "AMBER",
+            "action": "Onere o vincolo indicato a carico dell'acquirente/aggiudicatario: verificare natura, costi e cancellabilità.",
+        }
+    if _LEGAL_FORMALITY_RE.search(blob):
+        if _LEGAL_PROCEDURE_HANDLED_RE.search(blob):
+            return {
+                "classification": "fact",
+                "badge_it": "Fatto",
+                "status": "INFO",
+                "action": "Formalità/pignoramento/ipoteca rilevati: verificare gestione e cancellazione nella procedura.",
+            }
+        return {
+            "classification": "attention",
+            "badge_it": "Da verificare",
+            "status": "AMBER",
+            "action": "Formalità/pignoramento/ipoteca rilevati: verificare cancellazione, costi e procedura.",
+        }
+    if _LEGAL_OPPONIBILITA_RE.search(blob):
+        if _LEGAL_NON_OPPONIBILE_RE.search(blob):
+            return {
+                "classification": "attention",
+                "badge_it": "Da verificare",
+                "status": "AMBER",
+                "action": "Titolo indicato come non opponibile: verificare comunque tempi di liberazione e coerenza con la procedura.",
+            }
+        if _LEGAL_UNKNOWN_OPPONIBILITA_RE.search(blob):
+            return {
+                "classification": "attention",
+                "badge_it": "Da verificare",
+                "status": "AMBER",
+                "action": "Opponibilità non determinata dalla perizia: verificare titolo, data certa e registrazione prima dell'offerta.",
+            }
+        if _legal_has_positive_opponibile(blob) and _LEGAL_OCCUPANCY_RE.search(blob):
+            return {
+                "classification": "risk",
+                "badge_it": "Rischio da verificare",
+                "status": "AMBER",
+                "action": "Opponibilità/occupazione: verificare durata, registrazione, data certa e impatto sui tempi di rilascio.",
+            }
+        return {
+            "classification": "attention",
+            "badge_it": "Da verificare",
+            "status": "AMBER",
+            "action": "Opponibilità/occupazione: punto da verificare con legale/professionista.",
+        }
+    if _LEGAL_AGIBILITA_RE.search(blob):
+        return {
+            "classification": "risk",
+            "badge_it": "Rischio da verificare",
+            "status": "AMBER",
+            "action": "Agibilità/abitabilità: verificare documentazione, pratiche necessarie e impatto tecnico.",
+        }
+    if _LEGAL_URBANISTICA_RE.search(blob):
+        if re.search(r"\bregolarizzabil", blob, re.I):
+            return {
+                "classification": "risk",
+                "badge_it": "Rischio da verificare",
+                "status": "AMBER",
+                "action": "Difformità/regolarizzazione: verificare sanabilità, costi e tempi con un tecnico.",
+            }
+        return {
+            "classification": "risk",
+            "badge_it": "Rischio da verificare",
+            "status": "AMBER",
+            "action": "Regolarità urbanistica/catastale: verificare con tecnico prima dell'offerta.",
+        }
+    if _LEGAL_OCCUPANCY_RE.search(blob):
+        if _LEGAL_DEBTOR_OCCUPANCY_RE.search(blob):
+            return {
+                "classification": "attention",
+                "badge_it": "Da verificare",
+                "status": "AMBER",
+                "action": "Occupazione del debitore/esecutato: verificare tempi e modalità di liberazione, senza trattarla come blocco automatico.",
+            }
+        return {
+            "classification": "risk",
+            "badge_it": "Rischio da verificare",
+            "status": "AMBER",
+            "action": "Occupazione: verificare titolo, opponibilità e tempi pratici di liberazione.",
+        }
+    if _LEGAL_SERVITU_RE.search(blob):
+        return {
+            "classification": "attention",
+            "badge_it": "Da verificare",
+            "status": "AMBER",
+            "action": "Accesso/servitù: verificare titoli, modalità d'uso e impatto pratico.",
+        }
+    if _LEGAL_USI_CIVICI_RE.search(blob):
+        return {
+            "classification": "attention",
+            "badge_it": "Da verificare",
+            "status": "AMBER",
+            "action": "Diritti/usi civici: verificare la fonte specifica; non trattare come blocco senza evidenza esplicita.",
+        }
+    if "da verificare" in title.lower():
+        return {
+            "classification": "attention",
+            "badge_it": "Da verificare",
+            "status": "AMBER",
+            "action": "Punto da verificare prima dell'offerta.",
+        }
+    return {
+        "classification": "attention",
+        "badge_it": "Da verificare",
+        "status": "AMBER",
+        "action": "Verificare il punto con il professionista prima dell'offerta.",
+    }
+
+
+def _legal_safe_title(original_title: str, classification: str, blob: str) -> str:
+    title = _clean_it_text(original_title).rstrip(".")
+    title = re.sub(r"\s+", " ", title).strip()
+    if not title:
+        title = "Punto da verificare"
+    if classification != "blocker":
+        title = re.sub(r"\bLegal\s+Killer\b", "Punto critico", title, flags=re.I)
+        title = re.sub(r"\bkiller\b", "punto critico", title, flags=re.I)
+        title = re.sub(r"\bgrave\b", "da verificare", title, flags=re.I)
+        title = re.sub(r"\s*/\s*GRAVE\b", "", title, flags=re.I)
+    if _LEGAL_BUYER_BURDEN_RE.search(blob):
+        return "Onere/vincolo a carico acquirente: rischio da verificare"
+    if _LEGAL_FORMALITY_RE.search(blob):
+        return "Formalità/pignoramento/ipoteca rilevati"
+    if _LEGAL_OPPONIBILITA_RE.search(blob):
+        return "Opponibilità/occupazione: punto da verificare"
+    if _LEGAL_AGIBILITA_RE.search(blob):
+        return "Agibilità/abitabilità: rischio da verificare"
+    if _LEGAL_URBANISTICA_RE.search(blob):
+        return "Difformità/regolarizzazione: rischio da verificare"
+    if _LEGAL_OCCUPANCY_RE.search(blob):
+        if classification == "attention" and _LEGAL_DEBTOR_OCCUPANCY_RE.search(blob):
+            return "Occupazione: punto da verificare"
+        return "Occupazione: rischio da verificare"
+    if _LEGAL_SERVITU_RE.search(blob):
+        return "Accesso/servitù: punto da verificare"
+    return title
+
+
+def _normalize_legal_item(item: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    if _legal_is_false_positive_usi_civici(item):
+        return None
+    if not _legal_item_has_taxonomy_signal(item):
+        return copy.deepcopy(item)
+    meta = _legal_classification_for_item(item)
+    if meta is None:
+        return copy.deepcopy(item)
+    fixed = copy.deepcopy(item)
+    blob = _legal_taxonomy_blob(fixed)
+    original_title = _legal_item_title(fixed)
+    safe_title = _legal_safe_title(original_title, meta["classification"], blob)
+    safe_title = _apply_scope_to_legal_title(safe_title, fixed)
+    fixed["killer"] = safe_title
+    fixed["classification"] = meta["classification"]
+    fixed["badge_it"] = meta["badge_it"]
+    fixed["severity_label_it"] = meta["badge_it"]
+    fixed["is_legal_killer"] = meta["classification"] == "blocker"
+    fixed["is_blocker"] = meta["classification"] == "blocker"
+    fixed["status"] = meta["status"]
+    fixed["status_it"] = meta["badge_it"]
+    action = _clean_it_text(fixed.get("action") or fixed.get("action_it") or fixed.get("verify_next_it"))
+    if not action or action.lower() in {_clean_it_text(original_title).lower(), _clean_it_text(safe_title).lower()}:
+        action = meta["action"]
+    fixed["action"] = _clean_it_text(action)
+    if not fixed.get("recommended_action_it"):
+        fixed["recommended_action_it"] = fixed["action"]
+    return fixed
+
+
+def _legal_item_semantic_key(item: Dict[str, Any]) -> str:
+    if not isinstance(item, dict):
+        return ""
+    title = _legal_item_title(item)
+    blob = _legal_taxonomy_blob(item)
+    return "|".join([_legal_topic_for_blob(blob), _legal_taxonomy_text_key(title), _legal_item_scope_identity(item)])
+
+
+def _dedupe_normalized_legal_items(items: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    out: List[Dict[str, Any]] = []
+    seen: Dict[str, Dict[str, Any]] = {}
+    index_by_key: Dict[str, int] = {}
+    for item in items:
+        normalized = _normalize_legal_item(item)
+        if not normalized:
+            continue
+        key = _legal_item_semantic_key(normalized)
+        existing = seen.get(key)
+        if existing is None:
+            seen[key] = normalized
+            index_by_key[key] = len(out)
+            out.append(normalized)
+            continue
+        merged = _merged_legal_item(existing, normalized)
+        seen[key] = merged
+        out[index_by_key[key]] = merged
+    return out
+
+
+def _normalize_legal_killers_section(section: Any) -> Dict[str, Any]:
+    section_dict = copy.deepcopy(section) if isinstance(section, dict) else {}
+    had_items_key = "items" in section_dict
+    had_top_items_key = "top_items" in section_dict
+    items = section_dict.get("items") if isinstance(section_dict.get("items"), list) else []
+    top_items = section_dict.get("top_items") if isinstance(section_dict.get("top_items"), list) else []
+    if not items and not top_items:
+        return section_dict
+    normalized_items = _dedupe_normalized_legal_items(
+        [item for item in items if isinstance(item, dict)]
+        + [item for item in top_items if isinstance(item, dict)]
+    )
+    if had_items_key or had_top_items_key or normalized_items:
+        section_dict["items"] = normalized_items
+    if had_top_items_key:
+        section_dict["top_items"] = []
+    if _legal_section_has_taxonomy(section_dict):
+        section_dict["section_label_it"] = "Rischi e punti critici"
+        section_dict["section_description_it"] = (
+            "Elementi estratti dalla perizia separati tra fatti, punti da verificare, rischi e blocchi espliciti."
+        )
+        resolver_meta = section_dict.get("resolver_meta") if isinstance(section_dict.get("resolver_meta"), dict) else {}
+        resolver_meta["taxonomy"] = "facts_attention_risks_blockers_v1"
+        section_dict["resolver_meta"] = resolver_meta
+    return section_dict
+
+
+def _legal_section_has_taxonomy(section: Any) -> bool:
+    if not isinstance(section, dict):
+        return False
+    for key in ("items", "top_items"):
+        for item in section.get(key) if isinstance(section.get(key), list) else []:
+            if isinstance(item, dict) and str(item.get("classification") or "").strip().lower() in {
+                "fact",
+                "attention",
+                "risk",
+                "blocker",
+            }:
+                return True
+    return False
+
+
+def _red_flag_title(item: Dict[str, Any]) -> str:
+    for key in ("flag_it", "title_it", "label_it", "title", "label", "killer"):
+        value = item.get(key) if isinstance(item, dict) else None
+        if isinstance(value, str) and value.strip():
+            return _clean_it_text(value).rstrip(".")
+    return "Punto da verificare"
+
+
+def _normalize_red_flag_item(item: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    if not isinstance(item, dict):
+        return None
+    pseudo = {
+        "killer": _red_flag_title(item),
+        "status": item.get("severity") or item.get("status"),
+        "action": item.get("action_it") or item.get("action") or item.get("detail"),
+        "evidence": copy.deepcopy(item.get("evidence") or []),
+        "category": item.get("category"),
+    }
+    meta = _legal_classification_for_item(pseudo)
+    fixed = copy.deepcopy(item)
+    if meta:
+        blob = _legal_taxonomy_blob(pseudo)
+        title = _legal_safe_title(_red_flag_title(item), meta["classification"], blob)
+        title = _apply_scope_to_legal_title(title, pseudo)
+        fixed["flag_it"] = title + "."
+        fixed["severity"] = "RED" if meta["classification"] == "blocker" else meta["status"]
+        fixed["classification"] = meta["classification"]
+        fixed["badge_it"] = meta["badge_it"]
+        if not fixed.get("action_it") or "killer" in str(fixed.get("action_it")).lower():
+            fixed["action_it"] = _clean_it_text(meta["action"])
+    if "classification" not in fixed:
+        fixed["classification"] = "attention"
+        fixed["badge_it"] = "Da verificare"
+    return fixed
+
+
+def _dedupe_red_flags(flags: Any) -> List[Dict[str, Any]]:
+    if not isinstance(flags, list):
+        return []
+    out: List[Dict[str, Any]] = []
+    seen: Dict[str, Dict[str, Any]] = {}
+    for raw in flags:
+        if isinstance(raw, str):
+            raw = {"flag_it": raw, "severity": "AMBER"}
+        if not isinstance(raw, dict):
+            continue
+        item = _normalize_red_flag_item(raw)
+        if not item:
+            continue
+        pseudo = {
+            "killer": _red_flag_title(item),
+            "category": item.get("category"),
+            "classification": item.get("classification"),
+            "evidence": item.get("evidence") or [],
+            "scope": item.get("scope") if isinstance(item.get("scope"), dict) else None,
+        }
+        key = _legal_item_semantic_key(pseudo)
+        existing = seen.get(key)
+        if existing is None:
+            seen[key] = item
+            out.append(item)
+            continue
+        existing["evidence"] = _normalize_evidence_list(existing.get("evidence"), item.get("evidence"), limit=8)
+        if _legal_classification_rank(item) > _legal_classification_rank(existing):
+            existing["severity"] = item.get("severity")
+            existing["classification"] = item.get("classification")
+            existing["badge_it"] = item.get("badge_it")
+        if len(str(item.get("action_it") or "")) > len(str(existing.get("action_it") or "")):
+            existing["action_it"] = item.get("action_it")
+    return out
+
+
+def _legal_item_from_red_flag(flag: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    if not isinstance(flag, dict):
+        return None
+    pseudo = {
+        "killer": _red_flag_title(flag),
+        "status": flag.get("severity") or flag.get("status"),
+        "action": flag.get("action_it") or flag.get("action") or flag.get("detail"),
+        "evidence": copy.deepcopy(flag.get("evidence") or []),
+        "category": flag.get("category"),
+        "classification": flag.get("classification"),
+        "scope": flag.get("scope") if isinstance(flag.get("scope"), dict) else None,
+    }
+    return _normalize_legal_item(pseudo)
+
+
+def _dedupe_cross_customer_legal_surfaces(result: Dict[str, Any]) -> None:
+    section = result.get("section_9_legal_killers")
+    if not isinstance(section, dict):
+        return
+    items = section.get("items") if isinstance(section.get("items"), list) else []
+    if not items:
+        return
+
+    canonical_items: List[Dict[str, Any]] = [item for item in items if isinstance(item, dict)]
+    index_by_key: Dict[str, int] = {}
+    for index, item in enumerate(canonical_items):
+        key = _legal_item_semantic_key(item)
+        if key:
+            index_by_key[key] = index
+
+    for flags_key in ("red_flags_operativi", "section_11_red_flags"):
+        flags = result.get(flags_key)
+        if not isinstance(flags, list):
+            continue
+        kept_flags: List[Dict[str, Any]] = []
+        for flag in flags:
+            if not isinstance(flag, dict):
+                kept_flags.append(flag)
+                continue
+            legal_item = _legal_item_from_red_flag(flag)
+            if not legal_item:
+                kept_flags.append(flag)
+                continue
+            key = _legal_item_semantic_key(legal_item)
+            section_index = index_by_key.get(key)
+            if section_index is None:
+                kept_flags.append(flag)
+                continue
+            merged = _merged_legal_item(canonical_items[section_index], legal_item)
+            canonical_items[section_index] = merged
+        result[flags_key] = kept_flags
+
+    section["items"] = canonical_items
+    if "top_items" in section:
+        section["top_items"] = []
+
+
+def _rewrite_conservative_text(value: Any) -> Any:
+    if isinstance(value, dict):
+        return {k: _rewrite_conservative_text(v) for k, v in value.items()}
+    if isinstance(value, list):
+        return [_rewrite_conservative_text(v) for v in value]
+    if not isinstance(value, str):
+        return value
+    text = value
+    for pattern, replacement in _LEGAL_DANGEROUS_WORDING_REPLACEMENTS:
+        text = pattern.sub(replacement, text)
+    text = re.sub(r"\bBlocchi:\s*", "Punti da verificare: ", text, flags=re.I)
+    text = re.sub(r"\bblocco automatico\b", "punto da verificare", text, flags=re.I)
+    return text
+
+
+def _normalize_customer_legal_taxonomy(result: Dict[str, Any]) -> None:
+    if not isinstance(result, dict):
+        return
+    if isinstance(result.get("section_9_legal_killers"), dict):
+        result["section_9_legal_killers"] = _normalize_legal_killers_section(result["section_9_legal_killers"])
+    for key in ("red_flags_operativi", "section_11_red_flags"):
+        if isinstance(result.get(key), list):
+            result[key] = _dedupe_red_flags(result[key])
+    _dedupe_cross_customer_legal_surfaces(result)
+    for key in ("decision_rapida_narrated", "decision_rapida_client", "section_2_decisione_rapida", "summary_for_client", "summary_for_client_bundle"):
+        if key in result:
+            result[key] = _rewrite_conservative_text(result[key])
+    cdc = result.get("customer_decision_contract")
+    if isinstance(cdc, dict):
+        if isinstance(result.get("section_9_legal_killers"), dict) and (
+            "section_9_legal_killers" in cdc or _legal_section_has_taxonomy(result["section_9_legal_killers"])
+        ):
+            cdc["section_9_legal_killers"] = copy.deepcopy(result["section_9_legal_killers"])
+        for key in ("red_flags_operativi", "section_11_red_flags"):
+            if isinstance(result.get(key), list):
+                if key in cdc:
+                    cdc[key] = copy.deepcopy(result[key])
+            elif isinstance(cdc.get(key), list):
+                cdc[key] = _dedupe_red_flags(cdc[key])
+        _dedupe_cross_customer_legal_surfaces(cdc)
+        for key in ("decision_rapida_narrated", "decision_rapida_client", "section_2_decisione_rapida", "summary_for_client", "summary_for_client_bundle"):
+            if key in cdc:
+                cdc[key] = _rewrite_conservative_text(cdc[key])
 
 
 def _build_legal_killers(existing: Dict[str, Any], issues: List[Dict[str, Any]]) -> Dict[str, Any]:

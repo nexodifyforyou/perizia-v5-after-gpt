@@ -533,15 +533,20 @@ const mapCanonicalIssueToLegalItem = (issue, idx) => {
   const detail = buildCanonicalIssueBody(issue);
   if (!title || !detail) return null;
   const classification = classifyCanonicalIssue(issue);
+  const evidenceText = Array.isArray(issue?.evidence)
+    ? issue.evidence.map((ev) => `${safeRender(ev?.quote, '')} ${safeRender(ev?.search_hint, '')}`).join(' ')
+    : '';
+  const hardBlockerText = normalizeComparableText(`${title} ${detail} ${evidenceText}`);
+  const isExplicitHardBlocker = /(insanabil|non sanabil|non regolarizzabil|abuso non regolarizzabil|bene non trasferibil|non trasferibil|intrasferibil|non commerciabil)/.test(hardBlockerText);
   return {
     key: issue?.issue_id || `canonical_legal_${idx}`,
     killer: title,
     action: detail,
     explanation_it: detail,
     status: classification.severity,
-    status_it: safeRender(issue?.status_it || issue?.status, ''),
+    status_it: safeRender(issue?.badge_it || issue?.status_it || issue?.status, ''),
     evidence: Array.isArray(issue?.evidence) ? issue.evidence : [],
-    kind: classification.group === 'missingData' ? 'caution_watch' : 'material_blocker',
+    kind: isExplicitHardBlocker ? 'material_blocker' : 'caution_watch',
     contextLabel: getCanonicalIssueScopeLabel(issue),
     family: safeRender(issue?.family || issue?.key, ''),
   };
@@ -1344,12 +1349,13 @@ const MoneyMapSummary = ({ summary, totalLabel }) => {
   );
 };
 
-// Legal Killer Item Component with Evidence - supports both old and ROMA STANDARD formats
+// Legal critical item component with evidence - supports both old and ROMA STANDARD formats
 const LegalKillerItem = ({ name, data }) => {
   const status = normalizeUiSeverity(data?.status, 'AMBER');
   const evidence = getEvidence(data);
   const hasEvidence = evidence.length > 0;
   const pages = hasEvidence ? [...new Set(evidence.map(e => e.page).filter(Boolean))] : [];
+  const badge = safeRender(data?.badge_it || data?.severity_label_it || data?.status_it, '');
   
   const getStatusIcon = (status) => {
     if (status === 'RED') return <XCircle className="w-5 h-5 text-red-400" />;
@@ -1412,7 +1418,7 @@ const LegalKillerItem = ({ name, data }) => {
             </p>
           )}
         </div>
-        <span className="font-mono text-xs px-2 py-1 rounded bg-zinc-800">{status}</span>
+        <span className="font-mono text-xs px-2 py-1 rounded bg-zinc-800">{badge || status}</span>
       </div>
     </div>
   );
@@ -3065,17 +3071,17 @@ const AnalysisResult = () => {
     servitu_usi_civici: 'GIALLO'
   };
   const legalKindByCategory = {
-    occupazione: 'material_blocker',
+    occupazione: 'caution_watch',
     pignoramento_esecuzione: 'execution_context',
-    ipoteca_formalita: 'material_blocker',
-    difformita_urb_cat: 'material_blocker',
+    ipoteca_formalita: 'execution_context',
+    difformita_urb_cat: 'caution_watch',
     agibilita_docs: 'caution_watch',
     accesso_vincolo: 'caution_watch',
     servitu_usi_civici: 'background_note'
   };
   const legalKindLabelMap = {
     execution_context: 'Contesto esecutivo',
-    material_blocker: 'Blocco materiale',
+    material_blocker: 'Blocco esplicito',
     caution_watch: 'Cautela / verifica',
     background_note: 'Nota di sfondo'
   };
@@ -3143,7 +3149,18 @@ const AnalysisResult = () => {
       ].join(' '));
       if (category === 'occupazione' && hasPositiveOccupancyTruth) return;
       if (category === 'agibilita_docs' && hasPositiveAgibilitaTruth && !/(non|assen|manc|irregolar)/.test(sourceText)) return;
-      const kind = legalKindByCategory[category];
+      const combinedSourceText = normalizeComparableText([
+        source?.killer,
+        source?.label_it,
+        source?.status_it,
+        source?.reason_it,
+        source?.action_required_it,
+        source?.value_it,
+        source?.evidence?.[0]?.quote,
+        source?.evidence?.[0]?.search_hint
+      ].join(' '));
+      const hasExplicitHardBlocker = /(insanabil|non sanabil|non regolarizzabil|abuso non regolarizzabil|bene non trasferibil|non trasferibil|intrasferibil|non commerciabil)/.test(combinedSourceText);
+      const kind = hasExplicitHardBlocker ? 'material_blocker' : legalKindByCategory[category];
       out.push({
         killer: safeRender(pickCustomerFacingTitle(source, categoryLabelMap[category]), categoryLabelMap[category]),
         headlineEn: safeRender(source?.headline_en || source?.label_en, categoryLabelMapEn[category]),
@@ -3261,7 +3278,7 @@ const AnalysisResult = () => {
 
     return [
       { key: 'execution_context', title: 'Contesto esecutivo', items: groups.execution_context },
-      { key: 'material_blocker', title: 'Blocchi materiali', items: groups.material_blocker },
+      { key: 'material_blocker', title: 'Blocchi espliciti', items: groups.material_blocker },
       { key: 'caution_watch', title: 'Cautele / verifiche', items: groups.caution_watch },
       { key: 'background_note', title: 'Note di sfondo', items: groups.background_note }
     ].filter((group) => Array.isArray(group.items) && group.items.length > 0);
@@ -3578,7 +3595,7 @@ const AnalysisResult = () => {
   const displayDecisionItSafe = sanitizeHeroSummaryText(displayDecisionIt)
     || bundleSummaryIt
     || deterministicDecisioneIt
-    || 'Analisi documento completata. Verificare le sezioni Costi, Legal Killers e Red Flags.';
+    || 'Analisi documento completata. Verificare le sezioni Costi, Rischi e punti critici e Red Flags.';
   const displayDecisionEnSafe = sanitizeHeroSummaryText(displayDecisionEn) || bundleSummaryEn || '';
   const displayHeaderDriverItSafe = bundleSummaryIt || sanitizeHeroSummaryText(displayHeaderDriverIt) || criticitaRows[0]?.text || '';
   const displayHeaderSummaryItSafe = bundleSummaryIt || sanitizeHeroSummaryText(displayHeaderSummaryIt) || deterministicDecisioneIt || '';
@@ -3589,7 +3606,7 @@ const AnalysisResult = () => {
   );
   const displaySummaryForClientIt = sanitizeHeroSummaryText(rawSummaryForClientIt)
     || deterministicDecisioneIt
-    || 'Analisi documento completata. Punti da verificare: consultare Costi, Legal Killers e Red Flags.';
+    || 'Analisi documento completata. Punti da verificare: consultare Costi, Rischi e punti critici e Red Flags.';
   const rawSummaryForClientEn = safeRender(
     summary.summary_en,
     shouldUseCanonicalSummaryFallback ? summaryFallbackEn : ''
@@ -4059,7 +4076,7 @@ const AnalysisResult = () => {
           <TabsList className="mb-6 h-auto w-full justify-start overflow-x-auto border border-zinc-800 bg-zinc-900 p-1">
             <TabsTrigger value="overview" data-testid="tab-overview">Panoramica</TabsTrigger>
             <TabsTrigger value="costs" data-testid="tab-costs">Costi</TabsTrigger>
-            <TabsTrigger value="legal" data-testid="tab-legal">Legal Killers</TabsTrigger>
+            <TabsTrigger value="legal" data-testid="tab-legal">Rischi critici</TabsTrigger>
             <TabsTrigger value="details" data-testid="tab-details">Dettagli</TabsTrigger>
             <TabsTrigger value="flags" data-testid="tab-flags">Red Flags</TabsTrigger>
           </TabsList>
@@ -4669,15 +4686,15 @@ const AnalysisResult = () => {
             </div>
           </TabsContent>
           
-          {/* Legal Killers Tab */}
+          {/* Legal critical risks tab */}
           <TabsContent value="legal" className="space-y-6">
             <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-6">
               <div className="flex items-center gap-3 mb-2">
                 <Scale className="w-6 h-6 text-red-400" />
-                <h2 className="text-xl font-serif font-bold text-zinc-100">Legal Killers Checklist</h2>
+                <h2 className="text-xl font-serif font-bold text-zinc-100">Rischi e punti critici</h2>
               </div>
               <p className="text-xs text-zinc-500 mb-6">
-                Verifiche critiche che possono bloccare l'acquisto. I riferimenti alle pagine indicano dove verificare nel documento.
+                Fatti, punti da verificare, rischi e blocchi espliciti estratti dalla perizia. I riferimenti alle pagine indicano dove controllare nel documento.
               </p>
               
               {Object.keys(legalKillersObj).length > 0 ? (
@@ -4687,7 +4704,7 @@ const AnalysisResult = () => {
                   ))}
                 </div>
               ) : (
-                <p className="text-zinc-500 text-center py-8">Nessun blocker legale materiale con evidenza sostanziale disponibile</p>
+                <p className="text-zinc-500 text-center py-8">Nessun blocco legale esplicito con evidenza sostanziale disponibile</p>
               )}
 
               {groupedLegalDetailSections.length > 0 && (

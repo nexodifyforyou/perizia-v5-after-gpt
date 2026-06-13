@@ -41,7 +41,7 @@ REQUIRED_SECTIONS = [
     "Lots / Composizione Lotto",
     "Decisione Rapida",
     "Costi",
-    "Legal Killers",
+    "Rischi e punti critici",
     "Dettagli per bene",
     "Red Flags",
     "Disclaimer / Footer",
@@ -608,7 +608,10 @@ def _legal_killers_payload(result: Dict[str, Any]) -> List[Dict[str, str]]:
         killer = sanitize_value(item.get("killer") or item.get("label_it") or item.get("label") or "", context="legal")
         if _is_placeholder(killer):
             continue
-        status = sanitize_value(item.get("status_it") or item.get("status"), context="status")
+        status = sanitize_value(
+            item.get("badge_it") or item.get("severity_label_it") or item.get("status_it") or item.get("status"),
+            context="status",
+        )
         action = sanitize_value(
             item.get("explanation_it") or item.get("reason_it") or item.get("action_required_it") or item.get("action"),
             context="action",
@@ -693,7 +696,10 @@ def _red_flags_payload(result: Dict[str, Any]) -> List[Dict[str, str]]:
             continue
         if not isinstance(item, dict):
             continue
-        title = sanitize_value(item.get("label") or item.get("title_it") or item.get("title") or f"Red Flag {idx}", context="action")
+        title = sanitize_value(
+            item.get("flag_it") or item.get("label") or item.get("title_it") or item.get("title") or f"Red Flag {idx}",
+            context="action",
+        )
         detail = sanitize_value(
             item.get("action_it") or item.get("explanation_it") or item.get("explanation") or item.get("detail") or item.get("reason_it"),
             context="action",
@@ -957,12 +963,12 @@ def _build_story(payload: Dict[str, Any], styles: Dict[str, ParagraphStyle], pag
         [page_width * 0.35, page_width * 0.65],
     ))
 
-    # 6) Legal Killers
-    story.append(_safe_paragraph("6. Legal Killers", styles["h2"]))
+    # 6) Rischi e punti critici
+    story.append(_safe_paragraph("6. Rischi e punti critici", styles["h2"]))
     legal = payload["legal_killers"]
     legal_rows = [[
         _safe_paragraph("Voce", styles["small"]),
-        _safe_paragraph("Status", styles["small"]),
+        _safe_paragraph("Classificazione", styles["small"]),
         _safe_paragraph("Azione", styles["small"]),
         _safe_paragraph("Evidenza", styles["small"]),
     ]]
@@ -977,7 +983,7 @@ def _build_story(payload: Dict[str, Any], styles: Dict[str, ParagraphStyle], pag
                 ]
             )
     else:
-        legal_rows.append([_safe_paragraph("Nessun legal killer strutturato disponibile", styles["muted"]), "", "", ""])
+        legal_rows.append([_safe_paragraph("Nessun blocco legale esplicito disponibile", styles["muted"]), "", "", ""])
     story.append(_card_table(legal_rows, [page_width * 0.26, page_width * 0.14, page_width * 0.28, page_width * 0.32], header=True))
 
     # 7) Dettagli per bene

@@ -21,6 +21,7 @@ from customer_decision_contract import (
     _build_legal_killers,
     _extract_amount_after_term,
 )
+from pdf_report import _legal_killers_payload, _red_flags_payload
 
 
 BANNED_FIELDS = {
@@ -237,6 +238,403 @@ def test_strip_customer_response_internal_fields_does_not_mutate_source_object()
     assert cleaned["result"]["qa_gate"] == {"status": "PASS"}
 
 
+def test_legal_taxonomy_downgrades_generic_opponibilita_and_formalities_preserving_evidence():
+    result = {
+        "section_9_legal_killers": {
+            "items": [
+                {
+                    "killer": "Opponibilità: rischio grave / killer",
+                    "status": "RED",
+                    "action": "Trattare come legal killer.",
+                    "evidence": [{"page": 8, "quote": "Contratto di locazione indicato in perizia."}],
+                },
+                {
+                    "killer": "Pignoramento presente = problema grave",
+                    "status": "RED",
+                    "evidence": [
+                        {
+                            "page": 14,
+                            "quote": "Verbale di pignoramento. Formalità a carico della procedura.",
+                        }
+                    ],
+                },
+                {
+                    "killer": "Ipoteca giudiziale",
+                    "status": "ROSSO",
+                    "evidence": [
+                        {
+                            "page": 74,
+                            "quote": "FORMALITÀ DA CANCELLARE CON IL DECRETO DI TRASFERIMENTO. Ipoteca volontaria.",
+                        }
+                    ],
+                },
+            ],
+            "top_items": [],
+        },
+        "customer_decision_contract": {
+            "section_9_legal_killers": {"items": []},
+        },
+    }
+
+    sanitize_customer_facing_result(result)
+
+    items = result["section_9_legal_killers"]["items"]
+    assert [item["classification"] for item in items] == ["attention", "fact"]
+    assert [item["is_legal_killer"] for item in items] == [False, False]
+    assert [item["status"] for item in items] == ["AMBER", "INFO"]
+    assert items[0]["killer"] == "Opponibilità/occupazione: punto da verificare"
+    assert items[1]["killer"] == "Formalità/pignoramento/ipoteca rilevati"
+    assert items[0]["evidence"][0]["page"] == 8
+    assert items[1]["evidence"][0]["quote"] == "Verbale di pignoramento. Formalità a carico della procedura."
+    assert {ev["page"] for ev in items[1]["evidence"]} == {14, 74}
+    assert result["customer_decision_contract"]["section_9_legal_killers"] == result["section_9_legal_killers"]
+
+
+def test_legal_taxonomy_non_opponibile_does_not_match_positive_opponibile_risk():
+    result = {
+        "section_9_legal_killers": {
+            "items": [
+                {
+                    "killer": "Locazione non opponibile all'aggiudicatario",
+                    "status": "RED",
+                    "action": "Trattare come rischio da contratto opponibile.",
+                    "evidence": [
+                        {
+                            "page": 12,
+                            "quote": "Il contratto di locazione è non opponibile all'aggiudicatario.",
+                        }
+                    ],
+                }
+            ],
+            "top_items": [],
+        }
+    }
+
+    sanitize_customer_facing_result(result)
+
+    item = result["section_9_legal_killers"]["items"][0]
+    assert item["classification"] == "attention"
+    assert item["status"] == "AMBER"
+    assert item["is_legal_killer"] is False
+    assert item["is_blocker"] is False
+    assert item["killer"] == "Opponibilità/occupazione: punto da verificare"
+
+
+def test_legal_taxonomy_unknown_opponibilita_stays_uncertain_not_blocker_or_fake_safe():
+    result = {
+        "section_9_legal_killers": {
+            "items": [
+                {
+                    "killer": "Opponibilità occupazione non verificabile",
+                    "status": "RED",
+                    "evidence": [
+                        {
+                            "page": 9,
+                            "quote": "Manca il titolo opponibile; l'opponibilità deve essere verificata.",
+                        }
+                    ],
+                }
+            ],
+            "top_items": [],
+        }
+    }
+
+    sanitize_customer_facing_result(result)
+
+    item = result["section_9_legal_killers"]["items"][0]
+    assert item["classification"] == "attention"
+    assert item["status"] == "AMBER"
+    assert item["is_legal_killer"] is False
+    assert item["is_blocker"] is False
+    assert item["badge_it"] == "Da verificare"
+
+
+def test_legal_taxonomy_occupato_dal_debitore_is_not_legal_killer():
+    result = {
+        "section_9_legal_killers": {
+            "items": [
+                {
+                    "killer": "Occupazione: legal killer",
+                    "status": "RED",
+                    "evidence": [{"page": 6, "quote": "L'immobile risulta occupato dal debitore esecutato."}],
+                }
+            ],
+            "top_items": [],
+        }
+    }
+
+    sanitize_customer_facing_result(result)
+
+    item = result["section_9_legal_killers"]["items"][0]
+    assert item["killer"] == "Occupazione: punto da verificare"
+    assert item["classification"] == "attention"
+    assert item["status"] == "AMBER"
+    assert item["is_legal_killer"] is False
+
+
+def test_legal_taxonomy_explicit_buyer_side_burden_remains_risk():
+    result = {
+        "section_9_legal_killers": {
+            "items": [
+                {
+                    "killer": "Onere a carico dell'aggiudicatario",
+                    "status": "INFO",
+                    "evidence": [
+                        {
+                            "page": 18,
+                            "quote": "Permane a carico dell'acquirente l'onere di regolarizzazione indicato in perizia.",
+                        }
+                    ],
+                }
+            ],
+            "top_items": [],
+        }
+    }
+
+    sanitize_customer_facing_result(result)
+
+    item = result["section_9_legal_killers"]["items"][0]
+    assert item["killer"] == "Onere/vincolo a carico acquirente: rischio da verificare"
+    assert item["classification"] == "risk"
+    assert item["status"] == "AMBER"
+    assert item["is_legal_killer"] is False
+    assert "acquirente" in item["action"]
+
+
+def test_legal_taxonomy_cross_section_dedupe_keeps_highest_severity_and_evidence_pages():
+    duplicate_section = {
+        "killer": "Agibilità/abitabilità",
+        "status": "INFO",
+        "evidence": [{"page": 20, "quote": "Certificato di agibilità da verificare."}],
+    }
+    duplicate_top = {
+        "killer": "Agibilità/abitabilità: rischio da verificare",
+        "status": "AMBER",
+        "evidence": [{"page": 21, "quote": "Agibilità non rinvenuta tra gli allegati."}],
+    }
+    duplicate_flag = {
+        "flag_it": "Agibilità/abitabilità: rischio da verificare.",
+        "severity": "RED",
+        "action_it": "Verificare certificato di agibilità e pratiche edilizie.",
+        "evidence": [{"page": 22, "quote": "Documentazione di abitabilità assente agli atti."}],
+    }
+    result = {
+        "section_9_legal_killers": {
+            "items": [copy.deepcopy(duplicate_section)],
+            "top_items": [copy.deepcopy(duplicate_top)],
+        },
+        "red_flags_operativi": [copy.deepcopy(duplicate_flag)],
+        "section_11_red_flags": [copy.deepcopy(duplicate_flag)],
+        "customer_decision_contract": {
+            "section_9_legal_killers": {"items": [], "top_items": []},
+            "red_flags_operativi": [copy.deepcopy(duplicate_flag)],
+            "section_11_red_flags": [copy.deepcopy(duplicate_flag)],
+        },
+    }
+
+    sanitize_customer_facing_result(result)
+
+    section = result["section_9_legal_killers"]
+    assert section["top_items"] == []
+    assert len(section["items"]) == 1
+    item = section["items"][0]
+    assert item["killer"] == "Agibilità/abitabilità: rischio da verificare"
+    assert item["classification"] == "risk"
+    assert item["status"] == "AMBER"
+    assert {ev["page"] for ev in item["evidence"]} == {20, 21, 22}
+    assert result["red_flags_operativi"] == []
+    assert result["section_11_red_flags"] == []
+    assert result["customer_decision_contract"]["section_9_legal_killers"] == section
+    assert result["customer_decision_contract"]["red_flags_operativi"] == []
+    assert result["customer_decision_contract"]["section_11_red_flags"] == []
+
+
+def test_legal_taxonomy_keeps_explicit_non_sanabile_as_blocker():
+    result = {
+        "section_9_legal_killers": {
+            "items": [
+                {
+                    "killer": "Abuso non sanabile",
+                    "status": "RED",
+                    "evidence": [{"page": 21, "quote": "Il manufatto costituisce abuso non sanabile."}],
+                }
+            ],
+            "top_items": [],
+        }
+    }
+
+    sanitize_customer_facing_result(result)
+
+    item = result["section_9_legal_killers"]["items"][0]
+    assert item["classification"] == "blocker"
+    assert item["badge_it"] == "Blocco"
+    assert item["status"] == "RED"
+    assert item["is_legal_killer"] is True
+    assert item["evidence"] == [{"page": 21, "quote": "Il manufatto costituisce abuso non sanabile."}]
+
+
+def test_legal_taxonomy_dedupes_red_flags_and_conservatizes_decisione_rapida():
+    duplicate_flag = {
+        "flag_it": "Agibilità assente / non rilasciata.",
+        "severity": "RED",
+        "action_it": "Legal killer da bloccare.",
+        "evidence": [{"page": 46, "quote": "L'immobile non risulta agibile."}],
+    }
+    result = {
+        "red_flags_operativi": [copy.deepcopy(duplicate_flag), copy.deepcopy(duplicate_flag)],
+        "section_11_red_flags": [copy.deepcopy(duplicate_flag), copy.deepcopy(duplicate_flag)],
+        "decision_rapida_narrated": {
+            "it": "Blocchi principali: Immobile occupato. I principali blocker sono occupazione e grave rischio; non conveniente.",
+            "bullets_it": ["Legal killer da verificare."],
+        },
+        "customer_decision_contract": {
+            "red_flags_operativi": [copy.deepcopy(duplicate_flag), copy.deepcopy(duplicate_flag)],
+            "section_11_red_flags": [copy.deepcopy(duplicate_flag), copy.deepcopy(duplicate_flag)],
+            "decision_rapida_narrated": {
+                "it": "Blocchi principali: blocker.",
+            },
+        },
+    }
+
+    sanitize_customer_facing_result(result)
+
+    assert len(result["red_flags_operativi"]) == 1
+    assert len(result["section_11_red_flags"]) == 1
+    flag = result["red_flags_operativi"][0]
+    assert flag["classification"] == "risk"
+    assert flag["badge_it"] == "Rischio da verificare"
+    assert flag["severity"] == "AMBER"
+    assert flag["evidence"][0]["page"] == 46
+
+    decision_text = json.dumps(result["decision_rapida_narrated"], ensure_ascii=False).lower()
+    assert "blocker" not in decision_text
+    assert "killer" not in decision_text
+    assert "grave rischio" not in decision_text
+    assert "non conveniente" not in decision_text
+    assert "punti" in decision_text or "punto" in decision_text
+
+    cdc = result["customer_decision_contract"]
+    assert cdc["red_flags_operativi"] == result["red_flags_operativi"]
+    assert cdc["section_11_red_flags"] == result["section_11_red_flags"]
+    assert "blocker" not in json.dumps(cdc["decision_rapida_narrated"], ensure_ascii=False).lower()
+
+
+def test_legal_taxonomy_does_not_treat_abitabilita_rilascio_as_occupancy_duplicate():
+    occupancy = {
+        "flag_it": "Occupazione rilevata.",
+        "severity": "RED",
+        "action_it": "Verifica titolo e tempi di liberazione.",
+        "evidence": [{"page": 3, "quote": "Attualmente l'immobile è occupato dal debitore."}],
+    }
+    agibilita = {
+        "flag_it": "Agibilità da verificare.",
+        "severity": "RED",
+        "action_it": "Verificare certificato di agibilità/abitabilità e titoli edilizi richiamati in perizia.",
+        "evidence": [
+            {
+                "page": 7,
+                "quote": "Nonostante il rilascio della autorizzazione di abitabilità, l'immobile non risulta urbanisticamente regolare.",
+            }
+        ],
+    }
+    timeline = {
+        "flag_it": "Delivery timeline da verificare.",
+        "severity": "RED",
+        "action_it": "Verificare i documenti richiamati in perizia per chiudere il punto su delivery timeline.",
+        "evidence": [{"page": 64, "quote": "Tempi necessari per la regolarizzazione: 24 mesi."}],
+    }
+    result = {
+        "red_flags_operativi": [
+            copy.deepcopy(occupancy),
+            copy.deepcopy(agibilita),
+            copy.deepcopy(timeline),
+            copy.deepcopy(occupancy),
+        ],
+        "section_11_red_flags": [
+            copy.deepcopy(occupancy),
+            copy.deepcopy(agibilita),
+            copy.deepcopy(timeline),
+            copy.deepcopy(occupancy),
+        ],
+        "customer_decision_contract": {
+            "red_flags_operativi": [],
+            "section_11_red_flags": [],
+        },
+    }
+
+    sanitize_customer_facing_result(result)
+
+    titles = [item["flag_it"] for item in result["red_flags_operativi"]]
+    assert titles.count("Occupazione: punto da verificare.") == 1
+    assert "Agibilità/abitabilità: rischio da verificare." in titles
+    assert "Difformità/regolarizzazione: rischio da verificare." in titles
+    assert len(result["red_flags_operativi"]) == 3
+    assert result["section_11_red_flags"] == result["red_flags_operativi"]
+    assert result["customer_decision_contract"]["red_flags_operativi"] == result["red_flags_operativi"]
+
+
+def test_legal_taxonomy_drops_heading_only_usi_civici_noise():
+    result = {
+        "section_9_legal_killers": {
+            "items": [
+                {
+                    "killer": "Usi civici",
+                    "status": "SI",
+                    "evidence": [
+                        {
+                            "page": 17,
+                            "quote": "SERVITÙ, CENSO, LIVELLO, USI CIVICI. Il bene pignorato non risulta oggetto di procedura espropriativa.",
+                        }
+                    ],
+                },
+                {
+                    "killer": "Servitù rilevata",
+                    "status": "GIALLO",
+                    "evidence": [{"page": 17, "quote": "Il passaggio pedonale viene usufruito da entrambi i proprietari."}],
+                },
+            ],
+            "top_items": [],
+        }
+    }
+
+    sanitize_customer_facing_result(result)
+
+    labels = [item["killer"] for item in result["section_9_legal_killers"]["items"]]
+    assert labels == ["Accesso/servitù: punto da verificare"]
+    assert result["section_9_legal_killers"]["items"][0]["classification"] == "attention"
+
+
+def test_pdf_payload_uses_legal_taxonomy_badges_and_red_flag_titles():
+    result = {
+        "section_9_legal_killers": {
+            "items": [
+                {
+                    "killer": "Formalità/pignoramento/ipoteca rilevati",
+                    "status": "INFO",
+                    "badge_it": "Fatto",
+                    "action": "Verificare gestione e cancellazione nella procedura.",
+                    "evidence": [{"page": 74, "quote": "FORMALITÀ DA CANCELLARE CON IL DECRETO DI TRASFERIMENTO."}],
+                }
+            ]
+        },
+        "section_11_red_flags": [
+            {
+                "flag_it": "Opponibilità/occupazione: punto da verificare.",
+                "severity": "AMBER",
+                "action_it": "Verificare titolo e opponibilità.",
+            }
+        ],
+    }
+
+    legal = _legal_killers_payload(result)
+    flags = _red_flags_payload(result)
+
+    assert legal[0]["status"] == "Fatto"
+    assert legal[0]["killer"] == "Formalità/pignoramento/ipoteca rilevati"
+    assert "p.74" in legal[0]["evidence"]
+    assert flags[0]["title"] == "Opponibilità/occupazione: punto da verificare."
+
+
 def test_sanitize_customer_facing_result_strips_internal_controls_only_from_customer_structures():
     result = {
         "issues": [
@@ -351,6 +749,37 @@ def test_sanitize_customer_facing_result_strips_internal_controls_only_from_cust
     assert result["dati_certi_del_lotto"]["diritto_reale"]["source"] == "Perizia"
     assert "resolver_meta" not in result
     assert result["verifier_runtime"]["contract_state"] == "unresolved_explained"
+
+
+def test_internal_leak_sanitizer_still_returns_zero_leaks():
+    result = {
+        "issues": [
+            {
+                "headline_it": "Punto da verificare.",
+                "contract_state": "unresolved_explained",
+                "source_path": "internal.path",
+                "explanation_fallback_reason": "no_packet",
+                "evidence": [{"page": 1, "quote": "Punto da verificare."}],
+            }
+        ],
+        "customer_decision_contract": {
+            "issues": [
+                {
+                    "headline_it": "Punto da verificare.",
+                    "llm_explanation_used": False,
+                    "source_path": "internal.path",
+                }
+            ]
+        },
+    }
+
+    sanitize_customer_facing_result(result)
+
+    hits = []
+    for key in CUSTOMER_KEYS:
+        if key in result:
+            hits.extend(_collect_customer_hits(result[key], f"result.{key}"))
+    assert hits == []
 
 
 def test_separate_internal_runtime_removes_runtime_keys_from_customer_result():
