@@ -6,6 +6,8 @@ import { Button } from '../components/ui/button';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '../components/ui/tabs';
 import { EvidenceBadge, EvidenceDetail, DataValueWithEvidence } from '../components/EvidenceDisplay';
 import HeadlineVerifyModal from '../components/HeadlineVerifyModal';
+import TechnicalFeedbackModal from '../components/TechnicalFeedbackModal';
+import { MessageSquarePlus } from 'lucide-react';
 import { 
   FileText, 
   AlertTriangle, 
@@ -1534,7 +1536,7 @@ const MultiLotSelector = ({ lots, selectedLot, onSelectLot }) => {
           <tbody>
             {lots.map((lot, idx) => (
               <tr 
-                key={lot.lot_number || idx}
+                key={`lot-row-${lot.lot_number || 'unknown'}-${idx}`}
                 className={`border-b border-zinc-800 cursor-pointer transition-colors ${
                   selectedLot === idx ? 'bg-gold/20' : 'hover:bg-zinc-800/50'
                 }`}
@@ -1560,7 +1562,7 @@ const MultiLotSelector = ({ lots, selectedLot, onSelectLot }) => {
           className="bg-zinc-900 border border-zinc-700 rounded-lg px-4 py-2 text-zinc-100 focus:border-gold focus:outline-none"
         >
           {lots.map((lot, idx) => (
-            <option key={lot.lot_number || idx} value={idx}>
+            <option key={`lot-option-${lot.lot_number || 'unknown'}-${idx}`} value={idx}>
               Lotto {lot.lot_number} - {lot.prezzo_base_eur || 'TBD'}
             </option>
           ))}
@@ -1583,6 +1585,8 @@ const AnalysisResult = () => {
   const [selectedLotIndex, setSelectedLotIndex] = useState(0);
   const [activeTab, setActiveTab] = useState('overview');
   const [headlineModal, setHeadlineModal] = useState({ open: false, fieldKey: null });
+  const [feedbackModalOpen, setFeedbackModalOpen] = useState(false);
+  const canGiveTechnicalFeedback = Boolean(user?.is_beta_partner || user?.is_master_admin);
 
   const fetchAnalysis = async () => {
     const params = new URLSearchParams(location.search);
@@ -1947,7 +1951,7 @@ const AnalysisResult = () => {
         (valoreStimaDisplay && valoreStimaDisplay !== 'Non specificato in perizia')
       );
       return {
-        key: bene?.bene_id || bene?.bene_number || idx,
+        key: `legacy-bene-${bene?.bene_id || bene?.bene_number || idx + 1}-${idx}`,
         title: beneNumber ? `Bene ${beneNumber}` : `Bene ${idx + 1}`,
         tipologia: safeRender(tipologia, ''),
         location: safeRender(locationRaw, ''),
@@ -1971,7 +1975,7 @@ const AnalysisResult = () => {
     const superficieValue = parseNumericEuro(item?.superficie_mq);
     const valoreStimaValue = parseNumericEuro(item?.valore_stima_eur);
     return {
-      key: item?.bene_number ?? idx,
+      key: `contract-bene-${item?.bene_number ?? idx + 1}-${idx}`,
       title: item?.bene_number ? `Bene ${item.bene_number}` : `Bene ${idx + 1}`,
       tipologia: safeRender(item?.tipologia, ''),
       location: safeRender(item?.short_location, ''),
@@ -3787,6 +3791,17 @@ const AnalysisResult = () => {
             Torna allo storico
           </Link>
           <div className="flex items-center gap-3 self-start sm:self-auto">
+            {canGiveTechnicalFeedback && (
+              <Button
+                onClick={() => setFeedbackModalOpen(true)}
+                variant="outline"
+                data-testid="share-technical-feedback-btn"
+                className="border-gold/40 text-gold hover:bg-gold/10 hover:border-gold/60"
+              >
+                <MessageSquarePlus className="w-4 h-4 mr-2" />
+                Condividi valutazione tecnica
+              </Button>
+            )}
             <Button
               onClick={() => setShowDeleteModal(true)}
               variant="outline"
@@ -3798,6 +3813,19 @@ const AnalysisResult = () => {
             </Button>
           </div>
         </div>
+
+        {canGiveTechnicalFeedback && (
+          <TechnicalFeedbackModal
+            open={feedbackModalOpen}
+            onOpenChange={setFeedbackModalOpen}
+            analysisId={analysisId}
+            caseId={analysis?.case_id || null}
+            fileName={analysis?.file_name || null}
+            documentHash={analysis?.document_hash || analysis?.input_sha256 || null}
+            prefill={{ feedbackLevel: 'report', sectionKey: 'altro' }}
+            onSubmitted={() => setFeedbackModalOpen(false)}
+          />
+        )}
 
         {/* Delete Confirmation Modal */}
         {showDeleteModal && (

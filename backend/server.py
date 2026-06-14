@@ -25,6 +25,7 @@ from fastapi.openapi.utils import get_openapi
 from PyPDF2 import PdfReader, PdfWriter
 import pdfplumber
 import io
+import csv
 import hashlib
 import zipfile
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
@@ -82,6 +83,31 @@ GOOGLE_CLIENT_ID = os.environ.get("GOOGLE_CLIENT_ID", "").strip()
 GOOGLE_CLIENT_SECRET = os.environ.get("GOOGLE_CLIENT_SECRET", "").strip()
 GOOGLE_OAUTH_REDIRECT_URI = os.environ.get("GOOGLE_OAUTH_REDIRECT_URI", "").strip()
 MASTER_ADMIN_EMAIL = os.environ.get('MASTER_ADMIN_EMAIL', 'admin@nexodify.com')
+ADMIN_EMAILS = frozenset()
+
+# Comma-separated email allowlists. Admin emails inherit the existing master-admin
+# capabilities; beta emails get only the beta credit exemption and dashboard.
+def _parse_email_allowlist(raw: Optional[str]) -> frozenset:
+    if not raw:
+        return frozenset()
+    return frozenset(
+        part.strip().lower()
+        for part in str(raw).split(",")
+        if part and part.strip()
+    )
+
+ADMIN_EMAILS = _parse_email_allowlist(
+    os.environ.get('ADMIN_EMAILS', 'nexodifyforyou@gmail.com')
+)
+BETA_UNLIMITED_EMAILS = _parse_email_allowlist(
+    os.environ.get('BETA_UNLIMITED_EMAILS', 'geomazzantiriccardo@gmail.com')
+)
+BETA_PARTNER_DEFAULT_TYPE = os.environ.get('BETA_PARTNER_DEFAULT_TYPE', 'geometra')
+ADMIN_OWNER_FEEDBACK_NAME = os.environ.get('ADMIN_OWNER_FEEDBACK_NAME', 'Syed / Nexodify Admin')
+# Optional display-name mapping for known beta partners (email -> name).
+BETA_PARTNER_NAMES = {
+    'geomazzantiriccardo@gmail.com': 'Geom. Riccardo Mazzanti',
+}
 DOC_AI_TIMEOUT_SECONDS = int(os.environ.get('DOC_AI_TIMEOUT_SECONDS', '30'))
 LLM_TIMEOUT_SECONDS = int(os.environ.get('LLM_TIMEOUT_SECONDS', '45'))
 PIPELINE_TIMEOUT_SECONDS = int(os.environ.get('PIPELINE_TIMEOUT_SECONDS', '120'))
@@ -590,6 +616,35 @@ def _is_master_admin_email(email: Optional[str]) -> bool:
     return bool(email and email.lower() == MASTER_ADMIN_EMAIL.lower())
 
 
+def _is_admin_email(email: Optional[str]) -> bool:
+    if not email:
+        return False
+    normalized = email.strip().lower()
+    return _is_master_admin_email(normalized) or normalized in ADMIN_EMAILS
+
+
+def _user_is_admin(user: Optional["User"]) -> bool:
+    return bool(user and _is_admin_email(user.email))
+
+
+def _is_beta_unlimited_email(email: Optional[str]) -> bool:
+    """True only for explicitly allowlisted beta partner emails."""
+    return bool(email and email.strip().lower() in BETA_UNLIMITED_EMAILS)
+
+
+def _is_credit_exempt_user(user: Optional["User"]) -> bool:
+    """Credit-block/debit exemption: admin/owner or allowlisted beta partner."""
+    if user is None:
+        return False
+    return _user_is_admin(user) or _is_beta_unlimited_email(user.email)
+
+
+def _beta_partner_name_for_email(email: Optional[str]) -> Optional[str]:
+    if not email:
+        return None
+    return BETA_PARTNER_NAMES.get(email.strip().lower())
+
+
 def _is_complete_quota(quota: Any) -> bool:
     if not isinstance(quota, dict):
         return False
@@ -877,7 +932,7 @@ def _admin_override_perizia_credit_wallet(
     plan_override: Optional[str] = None,
 ) -> Dict[str, Any]:
     plan_id = str(plan_override or user_doc.get("plan") or "").strip().lower()
-    is_master_admin = _is_master_admin_email(user_doc.get("email"))
+    is_master_admin = _is_admin_email(user_doc.get("email"))
     current_wallet = _normalize_perizia_credit_wallet(user_doc, plan_id=plan_id, is_master_admin=is_master_admin)
     if is_master_admin:
         return current_wallet
@@ -943,7 +998,7 @@ async def _persist_perizia_credit_wallet(
     finalized_wallet = _finalize_perizia_credit_wallet(
         wallet,
         plan_id=plan_override or user_doc.get("plan"),
-        is_master_admin=_is_master_admin_email(user_doc.get("email")),
+        is_master_admin=_is_admin_email(user_doc.get("email")),
     )
     updated_quota = _quota_snapshot(user_doc.get("quota"))
     updated_quota["perizia_scans_remaining"] = finalized_wallet["total_available"]
@@ -963,7 +1018,7 @@ async def _persist_perizia_credit_wallet(
 
 def _normalize_account_state(user_doc: Dict[str, Any]) -> Dict[str, Any]:
     normalized_email = str(user_doc.get("email") or "").strip().lower()
-    is_master_admin = _is_master_admin_email(normalized_email)
+    is_master_admin = _is_admin_email(normalized_email)
 
     if is_master_admin:
         plan = "enterprise"
@@ -987,6 +1042,7 @@ def _normalize_account_state(user_doc: Dict[str, Any]) -> Dict[str, Any]:
     subscription_state = _normalize_subscription_state({**user_doc, "plan": plan})
     quota["perizia_scans_remaining"] = perizia_credits["total_available"]
 
+    is_beta_partner = _is_beta_unlimited_email(normalized_email)
     feature_access = {
         "can_use_assistant": is_master_admin,
         "can_use_image_forensics": is_master_admin,
@@ -994,6 +1050,9 @@ def _normalize_account_state(user_doc: Dict[str, Any]) -> Dict[str, Any]:
 
     return {
         "is_master_admin": is_master_admin,
+        "is_beta_partner": is_beta_partner,
+        "beta_partner_name": _beta_partner_name_for_email(normalized_email),
+        "beta_partner_type": BETA_PARTNER_DEFAULT_TYPE if is_beta_partner else None,
         "plan": plan,
         "quota": quota,
         "perizia_credits": perizia_credits,
@@ -1048,6 +1107,9 @@ def _build_user_response(user: User) -> Dict[str, Any]:
     )
     normalized = _normalize_account_state(user_response)
     user_response["is_master_admin"] = normalized["is_master_admin"]
+    user_response["is_beta_partner"] = normalized["is_beta_partner"]
+    user_response["beta_partner_name"] = normalized["beta_partner_name"]
+    user_response["beta_partner_type"] = normalized["beta_partner_type"]
     user_response["plan"] = normalized["plan"]
     user_response["quota"] = normalized["quota"].copy()
     user_response["perizia_credits"] = normalized["perizia_credits"]
@@ -1104,13 +1166,21 @@ async def require_auth(request: Request) -> User:
     return user
 
 async def require_master_admin(request: Request) -> User:
-    """Require master admin user with matching email"""
+    """Require admin/owner user with matching configured email."""
     user = await require_auth(request)
-    if not user.is_master_admin:
-        raise HTTPException(status_code=403, detail="Forbidden")
-    if not _is_master_admin_email(user.email):
+    if not _user_is_admin(user):
         raise HTTPException(status_code=403, detail="Forbidden")
     return user
+
+
+async def require_beta_or_admin(request: Request) -> User:
+    """Require an authenticated beta partner or admin/owner."""
+    user = await require_auth(request)
+    if _user_is_admin(user):
+        return user
+    if _is_beta_unlimited_email(user.email):
+        return user
+    raise HTTPException(status_code=403, detail="Forbidden")
 
 
 def _feature_access_flags(user: Optional[User]) -> Dict[str, bool]:
@@ -11334,7 +11404,7 @@ async def _grant_starter_checkout_if_needed(
     before_wallet = _normalize_perizia_credit_wallet(
         user_doc,
         plan_id=user_doc.get("plan"),
-        is_master_admin=_is_master_admin_email(user_doc.get("email")),
+        is_master_admin=_is_admin_email(user_doc.get("email")),
     )
     after_wallet = _append_pack_grant(
         before_wallet,
@@ -11534,7 +11604,7 @@ async def _grant_subscription_invoice_if_needed(
     before_wallet = _normalize_perizia_credit_wallet(
         user_doc,
         plan_id=user_doc.get("plan"),
-        is_master_admin=_is_master_admin_email(user_doc.get("email")),
+        is_master_admin=_is_admin_email(user_doc.get("email")),
     )
     if invoice_id in set(before_wallet.get("processed_invoice_ids") or []):
         return False
@@ -11959,7 +12029,7 @@ async def _apply_quota_debit_with_ledger(
     description_it: str,
     metadata: Optional[Dict[str, Any]] = None,
 ) -> bool:
-    if user.is_master_admin:
+    if _user_is_admin(user):
         return False
     debit_amount = int(amount or 0)
     if debit_amount <= 0 or field not in ACCOUNT_QUOTA_FIELDS:
@@ -12001,7 +12071,14 @@ async def _apply_perizia_credit_debit_with_ledger(
     description_it: str,
     metadata: Optional[Dict[str, Any]] = None,
 ) -> bool:
-    if user.is_master_admin:
+    if _user_is_admin(user):
+        return False
+    if _is_beta_unlimited_email(user.email):
+        logger.info(
+            f"beta_partner_unlimited_access user={user.email} "
+            f"reason=beta_partner_unlimited_access reference_type={reference_type} "
+            f"reference_id={reference_id} debit=skipped amount={amount}"
+        )
         return False
     debit_amount = max(0, int(amount or 0))
     if debit_amount <= 0:
@@ -12013,7 +12090,7 @@ async def _apply_perizia_credit_debit_with_ledger(
     before_wallet = _normalize_perizia_credit_wallet(
         user_doc,
         plan_id=user_doc.get("plan"),
-        is_master_admin=_is_master_admin_email(user_doc.get("email")),
+        is_master_admin=_is_admin_email(user_doc.get("email")),
     )
     if before_wallet["total_available"] < debit_amount:
         return False
@@ -12312,7 +12389,7 @@ async def _get_or_create_authenticated_user(email: str, name: Optional[str], pic
     picture_url = str(picture or "").strip() or None
 
     existing_user = await db.users.find_one({"email": email}, {"_id": 0})
-    is_master = _is_master_admin_email(email)
+    is_master = _is_admin_email(email)
 
     if existing_user:
         user_id = existing_user["user_id"]
@@ -16083,7 +16160,15 @@ async def analyze_perizia(request: Request, file: UploadFile = File(...)):
         )
 
     remaining_perizia_credits = int(user.quota.get("perizia_scans_remaining", 0) or 0)
-    if remaining_perizia_credits < required_perizia_credits and not user.is_master_admin:
+    beta_unlimited = _is_beta_unlimited_email(user.email)
+    if beta_unlimited:
+        logger.info(
+            f"[{request_id}] beta_partner_unlimited_access user={user.email} "
+            f"reason=beta_partner_unlimited_access pages={uploaded_pages_count} "
+            f"required_credits={required_perizia_credits} remaining_credits={remaining_perizia_credits} "
+            f"credit_block=skipped"
+        )
+    if remaining_perizia_credits < required_perizia_credits and not _is_credit_exempt_user(user):
         raise HTTPException(
             status_code=403,
             detail={
@@ -17139,7 +17224,7 @@ def generate_report_html(analysis: Dict, result: Dict) -> str:
         </div>
         
         <div class="section">
-            <h2>3. PORTAFOGLIO COSTI (MONEY BOX)</h2>
+            <h2>3. Costi - Portafoglio costi (Money Box)</h2>
             {money_items_html or '<p style="color: #71717a;">Nessun dato sui costi disponibile - Verifica necessaria</p>'}
             <div class="total">
                 <div style="display: flex; justify-content: space-between; align-items: center;">
@@ -17173,7 +17258,7 @@ def generate_report_html(analysis: Dict, result: Dict) -> str:
         </div>
         
         <div class="section">
-            <h2>9. RISCHI E PUNTI CRITICI</h2>
+            <h2>9. Rischi e punti critici</h2>
             {legal_html or '<p style="color: #71717a;">Nessun dato disponibile</p>'}
         </div>
         
@@ -18402,7 +18487,7 @@ async def admin_user_update(user_id: str, request: Request):
     if plan:
         if plan not in SUBSCRIPTION_PLANS:
             raise HTTPException(status_code=400, detail="Invalid plan")
-        target_is_master = _is_master_admin_email(target_user.get("email"))
+        target_is_master = _is_admin_email(target_user.get("email"))
         if target_is_master and plan != "enterprise":
             raise HTTPException(status_code=400, detail="Cannot downgrade master admin plan")
         if not target_is_master and plan == "enterprise":
@@ -19838,6 +19923,668 @@ async def root():
 async def health():
     return {"status": "healthy", "timestamp": datetime.now(timezone.utc).isoformat()}
 
+# ============================================================================
+# BETA PARTNER STRUCTURED FEEDBACK (Mazzanti beta dashboard)
+# ----------------------------------------------------------------------------
+# Stores structured expert feedback on AI-generated reports in the
+# `beta_feedback` collection. This is an internal, non-public learning/evaluation
+# dataset. Nothing here trains or fine-tunes any model. Existing analysis
+# documents and product logic are never mutated by this module.
+# ============================================================================
+
+BETA_SECTION_LABELS_IT: Dict[str, str] = {
+    "panoramica_lotto": "Panoramica lotto",
+    "dettagli": "Dettagli",
+    "costi_oneri": "Costi e oneri",
+    "rischi_punti_critici": "Rischi e punti critici",
+    "red_flags": "Red flags",
+    "occupazione": "Occupazione",
+    "urbanistica_catastale": "Urbanistica e catastale",
+    "formalita": "Formalità",
+    "quote_diritto_reale": "Quote e diritto reale",
+    "superficie": "Superficie",
+    "decisione_rapida": "Decisione rapida",
+    "pdf_finale": "PDF finale",
+    "altro": "Altro",
+}
+
+BETA_FEEDBACK_LEVELS = {
+    "report", "section", "specific_item", "extracted_field", "page_reference", "pdf_output",
+}
+
+BETA_FEEDBACK_PRIORITIES = {"bassa", "media", "alta", "bloccante"}
+
+BETA_FEEDBACK_CONFIDENCE = {"sicuro", "abbastanza_sicuro", "da_verificare"}
+
+BETA_EXPECTED_CLASSIFICATIONS = {
+    "fatto_rilevato", "punto_di_attenzione", "rischio_da_verificare",
+    "blocco", "non_applicabile", "non_so",
+}
+
+BETA_ITEM_SCOPE_TYPES = {"procedura", "lotto", "bene", "subalterno", "unknown"}
+
+BETA_PARTNER_TYPES = {"geometra", "avvocato", "investitore", "altro"}
+
+BETA_FEEDBACK_STATUSES = {
+    "new", "reviewed", "accepted", "rejected", "fixed", "needs_clarification",
+}
+
+# Part 5 — learning-ready label normalization. Maps feedback_type -> learning_label.
+BETA_LEARNING_LABEL_MAP: Dict[str, Dict[str, Any]] = {
+    "corretto": {
+        "is_error": False, "error_category": None, "correction_needed": False,
+        "model_should_learn": True, "human_review_required": False,
+    },
+    "parzialmente_corretto": {
+        "is_error": True, "error_category": "partial_error", "correction_needed": True,
+        "model_should_learn": True, "human_review_required": True,
+    },
+    "sbagliato": {
+        "is_error": True, "error_category": "wrong_output", "correction_needed": True,
+        "model_should_learn": True, "human_review_required": True,
+    },
+    "manca_informazione": {
+        "is_error": True, "error_category": "missing_information", "correction_needed": True,
+        "model_should_learn": True, "human_review_required": True,
+    },
+    "classificazione_troppo_forte": {
+        "is_error": True, "error_category": "over_classification", "correction_needed": True,
+        "model_should_learn": True, "human_review_required": True,
+    },
+    "classificazione_troppo_debole": {
+        "is_error": True, "error_category": "under_classification", "correction_needed": True,
+        "model_should_learn": True, "human_review_required": True,
+    },
+    "fonte_pagina_errata": {
+        "is_error": True, "error_category": "wrong_source_page", "correction_needed": True,
+        "model_should_learn": True, "human_review_required": True,
+    },
+    "valore_estratto_errato": {
+        "is_error": True, "error_category": "wrong_extracted_value", "correction_needed": True,
+        "model_should_learn": True, "human_review_required": True,
+    },
+    "duplicato": {
+        "is_error": True, "error_category": "duplicate_output", "correction_needed": True,
+        "model_should_learn": True, "human_review_required": True,
+    },
+    "non_utile": {
+        "is_error": False, "error_category": "low_utility", "correction_needed": False,
+        "model_should_learn": True, "human_review_required": True,
+    },
+    "wording_confuso": {
+        "is_error": True, "error_category": "unclear_wording", "correction_needed": True,
+        "model_should_learn": True, "human_review_required": True,
+    },
+    "altro": {
+        "is_error": True, "error_category": "other", "correction_needed": True,
+        "model_should_learn": True, "human_review_required": True,
+    },
+}
+
+BETA_FEEDBACK_TYPES = set(BETA_LEARNING_LABEL_MAP.keys())
+
+BETA_COMMENT_MAX_LEN = 5000
+BETA_SHORT_TEXT_MAX_LEN = 2000
+BETA_TINY_TEXT_MAX_LEN = 512
+
+
+def _derive_beta_learning_label(feedback_type: str) -> Dict[str, Any]:
+    """Part 5: derive the learning_label deterministically from feedback_type."""
+    mapping = BETA_LEARNING_LABEL_MAP.get(feedback_type)
+    if mapping is None:
+        # Unknown types are treated as 'altro' so nothing is silently dropped.
+        mapping = BETA_LEARNING_LABEL_MAP["altro"]
+    return dict(mapping)
+
+
+def _sanitize_beta_text(value: Any, max_len: int) -> Optional[str]:
+    """Trim, length-limit and strip control chars from free-text feedback input."""
+    if value is None:
+        return None
+    text = str(value)
+    # Strip null bytes / most C0 control chars except tab/newline/carriage-return.
+    text = "".join(ch for ch in text if ch in "\t\n\r" or ord(ch) >= 32)
+    text = text.strip()
+    if not text:
+        return None
+    if len(text) > max_len:
+        text = text[:max_len]
+    return text
+
+
+def _coerce_scalar(value: Any, max_len: int = BETA_TINY_TEXT_MAX_LEN) -> Any:
+    """Allow string/number scalars; coerce everything else to a trimmed string."""
+    if value is None:
+        return None
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        return value
+    return _sanitize_beta_text(value, max_len)
+
+
+class BetaFeedbackItemReference(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    item_id: Optional[str] = None
+    item_title: Optional[str] = None
+    item_path: Optional[str] = None
+    item_topic: Optional[str] = None
+    item_scope_type: Optional[str] = None
+    item_scope_label: Optional[str] = None
+    page_reference: Optional[Any] = None
+    evidence_quote: Optional[str] = None
+
+
+class BetaFeedbackOriginalOutput(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    title: Optional[str] = None
+    summary: Optional[str] = None
+    extracted_value: Optional[Any] = None
+    classification: Optional[str] = None
+    severity: Optional[str] = None
+    badge: Optional[str] = None
+    page: Optional[Any] = None
+    evidence: Optional[str] = None
+
+
+class BetaFeedbackCreate(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    analysis_id: Optional[str] = None
+    case_id: Optional[str] = None
+    file_name: Optional[str] = None
+    document_hash: Optional[str] = None
+
+    feedback_level: str = "report"
+    section_key: str = "altro"
+
+    item_reference: Optional[BetaFeedbackItemReference] = None
+    original_ai_output: Optional[BetaFeedbackOriginalOutput] = None
+
+    feedback_type: str
+    priority: str = "media"
+
+    expert_comment: str
+    expected_correction: Optional[str] = None
+    expected_classification: Optional[str] = None
+    expert_confidence: Optional[str] = None
+
+    page_reference: Optional[Any] = None
+
+    permission_for_learning: bool = True
+    source: str = "report_feedback_modal"
+
+
+class BetaFeedbackStatusUpdate(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    status: Optional[str] = None
+    admin_notes: Optional[str] = None
+
+
+def _normalize_beta_item_reference(ref: Optional[BetaFeedbackItemReference]) -> Dict[str, Any]:
+    if ref is None:
+        ref = BetaFeedbackItemReference()
+    scope_type = ref.item_scope_type
+    if scope_type is not None and scope_type not in BETA_ITEM_SCOPE_TYPES:
+        scope_type = "unknown"
+    return {
+        "item_id": _sanitize_beta_text(ref.item_id, BETA_TINY_TEXT_MAX_LEN),
+        "item_title": _sanitize_beta_text(ref.item_title, BETA_SHORT_TEXT_MAX_LEN),
+        "item_path": _sanitize_beta_text(ref.item_path, BETA_TINY_TEXT_MAX_LEN),
+        "item_topic": _sanitize_beta_text(ref.item_topic, BETA_TINY_TEXT_MAX_LEN),
+        "item_scope_type": scope_type,
+        "item_scope_label": _sanitize_beta_text(ref.item_scope_label, BETA_TINY_TEXT_MAX_LEN),
+        "page_reference": _coerce_scalar(ref.page_reference),
+        "evidence_quote": _sanitize_beta_text(ref.evidence_quote, BETA_SHORT_TEXT_MAX_LEN),
+    }
+
+
+def _normalize_beta_original_output(out: Optional[BetaFeedbackOriginalOutput]) -> Dict[str, Any]:
+    if out is None:
+        out = BetaFeedbackOriginalOutput()
+    return {
+        "title": _sanitize_beta_text(out.title, BETA_SHORT_TEXT_MAX_LEN),
+        "summary": _sanitize_beta_text(out.summary, BETA_COMMENT_MAX_LEN),
+        "extracted_value": _coerce_scalar(out.extracted_value),
+        "classification": _sanitize_beta_text(out.classification, BETA_TINY_TEXT_MAX_LEN),
+        "severity": _sanitize_beta_text(out.severity, BETA_TINY_TEXT_MAX_LEN),
+        "badge": _sanitize_beta_text(out.badge, BETA_TINY_TEXT_MAX_LEN),
+        "page": _coerce_scalar(out.page),
+        "evidence": _sanitize_beta_text(out.evidence, BETA_SHORT_TEXT_MAX_LEN),
+    }
+
+
+def _public_beta_feedback(doc: Dict[str, Any]) -> Dict[str, Any]:
+    """Strip internal mongo fields for API responses."""
+    clean = {k: v for k, v in doc.items() if k != "_id"}
+    return clean
+
+
+@api_router.post("/beta-feedback")
+async def create_beta_feedback(request: Request, payload: BetaFeedbackCreate):
+    """Create a structured beta feedback record. Auth required."""
+    user = await require_auth(request)
+
+    feedback_type = (payload.feedback_type or "").strip()
+    if feedback_type not in BETA_FEEDBACK_TYPES:
+        raise HTTPException(status_code=422, detail="feedback_type non valido")
+
+    expert_comment = _sanitize_beta_text(payload.expert_comment, BETA_COMMENT_MAX_LEN)
+    if not expert_comment:
+        raise HTTPException(status_code=422, detail="expert_comment obbligatorio")
+
+    feedback_level = payload.feedback_level if payload.feedback_level in BETA_FEEDBACK_LEVELS else "report"
+    section_key = payload.section_key if payload.section_key in BETA_SECTION_LABELS_IT else "altro"
+    priority = payload.priority if payload.priority in BETA_FEEDBACK_PRIORITIES else "media"
+    expert_confidence = payload.expert_confidence if payload.expert_confidence in BETA_FEEDBACK_CONFIDENCE else None
+    expected_classification = (
+        payload.expected_classification
+        if payload.expected_classification in BETA_EXPECTED_CLASSIFICATIONS
+        else None
+    )
+    source = payload.source if payload.source in {"beta_dashboard", "report_feedback_modal", "admin_entry"} else "report_feedback_modal"
+
+    analysis_id = _sanitize_beta_text(payload.analysis_id, BETA_TINY_TEXT_MAX_LEN)
+    case_id = _sanitize_beta_text(payload.case_id, BETA_TINY_TEXT_MAX_LEN)
+    file_name = _sanitize_beta_text(payload.file_name, BETA_SHORT_TEXT_MAX_LEN)
+    document_hash = _sanitize_beta_text(payload.document_hash, BETA_TINY_TEXT_MAX_LEN)
+
+    is_admin = _user_is_admin(user)
+
+    # Validate analysis ownership unless admin (and only when an analysis_id is given).
+    if analysis_id and not is_admin:
+        owned = await db.perizia_analyses.find_one(
+            {"analysis_id": analysis_id, "user_id": user.user_id},
+            {"_id": 0, "analysis_id": 1, "case_id": 1, "file_name": 1},
+        )
+        if not owned:
+            raise HTTPException(status_code=403, detail="Analisi non associata all'utente")
+        if not case_id:
+            case_id = owned.get("case_id")
+        if not file_name:
+            file_name = owned.get("file_name")
+
+    learning_label = _derive_beta_learning_label(feedback_type)
+
+    is_beta_partner = _is_beta_unlimited_email(user.email)
+    now_iso = _now_iso()
+    feedback_id = f"betafb_{uuid.uuid4().hex[:16]}"
+    doc: Dict[str, Any] = {
+        "id": feedback_id,
+        "created_at": now_iso,
+        "updated_at": now_iso,
+        "user_id": user.user_id,
+        "user_email": user.email,
+        "user_role": "admin" if is_admin else ("beta_partner" if is_beta_partner else "user"),
+        "beta_partner_name": ADMIN_OWNER_FEEDBACK_NAME if is_admin else (_beta_partner_name_for_email(user.email) or user.name),
+        "beta_partner_type": BETA_PARTNER_DEFAULT_TYPE if is_beta_partner else "altro",
+        "analysis_id": analysis_id,
+        "case_id": case_id,
+        "file_name": file_name,
+        "document_hash": document_hash,
+        "feedback_level": feedback_level,
+        "section_key": section_key,
+        "section_label_it": BETA_SECTION_LABELS_IT.get(section_key, "Altro"),
+        "item_reference": _normalize_beta_item_reference(payload.item_reference),
+        "original_ai_output": _normalize_beta_original_output(payload.original_ai_output),
+        "feedback_type": feedback_type,
+        "priority": priority,
+        "expert_comment": expert_comment,
+        "expected_correction": _sanitize_beta_text(payload.expected_correction, BETA_COMMENT_MAX_LEN),
+        "expected_classification": expected_classification,
+        "expert_confidence": expert_confidence,
+        "page_reference": _coerce_scalar(payload.page_reference),
+        "learning_label": learning_label,
+        "status": "new",
+        "admin_notes": None,
+        "reviewed_by": None,
+        "reviewed_at": None,
+        "permission_for_learning": bool(payload.permission_for_learning),
+        "source": source,
+    }
+
+    await db.beta_feedback.insert_one(dict(doc))
+    logger.info(
+        f"beta_feedback_created id={feedback_id} user={user.email} "
+        f"analysis_id={analysis_id} type={feedback_type} priority={priority}"
+    )
+    return {"ok": True, "feedback": _public_beta_feedback(doc)}
+
+
+@api_router.get("/beta-feedback/my")
+async def get_my_beta_feedback(request: Request, limit: int = 100, skip: int = 0):
+    """Return feedback submitted by the current user only."""
+    user = await require_auth(request)
+    safe_limit = max(1, min(int(limit or 100), 200))
+    safe_skip = max(0, int(skip or 0))
+    query = {"user_id": user.user_id}
+    total = await db.beta_feedback.count_documents(query)
+    items = await db.beta_feedback.find(query, {"_id": 0}).sort("created_at", -1).skip(safe_skip).limit(safe_limit).to_list(safe_limit)
+    return {"items": items, "total": total, "limit": safe_limit, "skip": safe_skip}
+
+
+def _build_beta_feedback_admin_query(
+    *,
+    user_email: Optional[str],
+    analysis_id: Optional[str],
+    section_key: Optional[str],
+    feedback_type: Optional[str],
+    priority: Optional[str],
+    status: Optional[str],
+    date_from: Optional[str],
+    date_to: Optional[str],
+    model_should_learn: Optional[bool],
+    error_category: Optional[str],
+) -> Dict[str, Any]:
+    query: Dict[str, Any] = {}
+    if user_email:
+        query["user_email"] = {"$regex": re.escape(user_email), "$options": "i"}
+    if analysis_id:
+        query["analysis_id"] = analysis_id
+    if section_key:
+        query["section_key"] = section_key
+    if feedback_type:
+        query["feedback_type"] = feedback_type
+    if priority:
+        query["priority"] = priority
+    if status:
+        query["status"] = status
+    if model_should_learn is not None:
+        query["learning_label.model_should_learn"] = model_should_learn
+    if error_category:
+        query["learning_label.error_category"] = error_category
+    date_query = _date_range_query("created_at", date_from, date_to)
+    return _merge_query(query, date_query) if date_query else query
+
+
+@api_router.get("/admin/beta-feedback")
+async def admin_list_beta_feedback(
+    request: Request,
+    user_email: Optional[str] = None,
+    analysis_id: Optional[str] = None,
+    section_key: Optional[str] = None,
+    feedback_type: Optional[str] = None,
+    priority: Optional[str] = None,
+    status: Optional[str] = None,
+    date_from: Optional[str] = None,
+    date_to: Optional[str] = None,
+    model_should_learn: Optional[bool] = None,
+    error_category: Optional[str] = None,
+    page: int = 1,
+    page_size: int = 50,
+):
+    """Admin: list all beta feedback with filters."""
+    admin_user = await require_master_admin(request)
+    page = max(1, page)
+    page_size = max(1, min(200, page_size))
+    query = _build_beta_feedback_admin_query(
+        user_email=user_email, analysis_id=analysis_id, section_key=section_key,
+        feedback_type=feedback_type, priority=priority, status=status,
+        date_from=date_from, date_to=date_to, model_should_learn=model_should_learn,
+        error_category=error_category,
+    )
+    total = await db.beta_feedback.count_documents(query)
+    items = await db.beta_feedback.find(query, {"_id": 0}).sort("created_at", -1).skip((page - 1) * page_size).limit(page_size).to_list(page_size)
+
+    # Aggregate summary metrics for the admin command center.
+    all_for_metrics = await db.beta_feedback.find({}, {
+        "_id": 0, "status": 1, "priority": 1, "section_key": 1,
+        "learning_label.error_category": 1, "learning_label.is_error": 1,
+    }).to_list(None)
+    metrics = _compute_beta_feedback_metrics(all_for_metrics)
+
+    await _write_admin_audit(admin_user, "ADMIN_API_VIEW", meta={"endpoint": "beta-feedback", "page": page})
+    return {
+        "items": items, "page": page, "page_size": page_size, "total": total,
+        "metrics": metrics,
+    }
+
+
+def _compute_beta_feedback_metrics(rows: List[Dict[str, Any]]) -> Dict[str, Any]:
+    total = len(rows)
+    new_count = sum(1 for r in rows if r.get("status") == "new")
+    accepted = sum(1 for r in rows if r.get("status") == "accepted")
+    high_priority = sum(1 for r in rows if r.get("priority") in {"alta", "bloccante"})
+    error_categories: Dict[str, int] = {}
+    sections: Dict[str, int] = {}
+    for r in rows:
+        cat = (r.get("learning_label") or {}).get("error_category")
+        if cat:
+            error_categories[cat] = error_categories.get(cat, 0) + 1
+        sec = r.get("section_key")
+        if r.get("priority") in {"alta", "bloccante"} or (r.get("learning_label") or {}).get("is_error"):
+            if sec:
+                sections[sec] = sections.get(sec, 0) + 1
+    top_error_category = max(error_categories.items(), key=lambda kv: kv[1])[0] if error_categories else None
+    top_section = max(sections.items(), key=lambda kv: kv[1])[0] if sections else None
+    return {
+        "total": total,
+        "new": new_count,
+        "accepted": accepted,
+        "high_priority": high_priority,
+        "top_error_category": top_error_category,
+        "top_problematic_section": top_section,
+        "error_category_breakdown": error_categories,
+    }
+
+
+@api_router.patch("/admin/beta-feedback/{feedback_id}")
+async def admin_update_beta_feedback(feedback_id: str, request: Request, payload: BetaFeedbackStatusUpdate):
+    """Admin: update status / admin_notes / reviewer of a feedback record."""
+    admin_user = await require_master_admin(request)
+    existing = await db.beta_feedback.find_one({"id": feedback_id}, {"_id": 0})
+    if not existing:
+        raise HTTPException(status_code=404, detail="Feedback non trovato")
+
+    update_fields: Dict[str, Any] = {"updated_at": _now_iso()}
+    if payload.status is not None:
+        if payload.status not in BETA_FEEDBACK_STATUSES:
+            raise HTTPException(status_code=422, detail="status non valido")
+        update_fields["status"] = payload.status
+    if payload.admin_notes is not None:
+        update_fields["admin_notes"] = _sanitize_beta_text(payload.admin_notes, BETA_COMMENT_MAX_LEN)
+    update_fields["reviewed_by"] = admin_user.email
+    update_fields["reviewed_at"] = _now_iso()
+
+    await db.beta_feedback.update_one({"id": feedback_id}, {"$set": update_fields})
+    await _write_admin_audit(admin_user, "ADMIN_BETA_FEEDBACK_UPDATE", meta={
+        "feedback_id": feedback_id, "status": update_fields.get("status"),
+    })
+    updated = await db.beta_feedback.find_one({"id": feedback_id}, {"_id": 0})
+    return {"ok": True, "feedback": updated}
+
+
+BETA_EXPORT_CSV_COLUMNS = [
+    "id", "created_at", "updated_at", "user_email", "user_role",
+    "beta_partner_name", "beta_partner_type", "analysis_id", "case_id", "file_name",
+    "feedback_level", "section_key", "section_label_it",
+    "item_path", "item_title", "page_reference",
+    "original_title", "original_classification", "original_severity", "original_value",
+    "feedback_type", "priority", "expert_comment", "expected_correction",
+    "expected_classification", "expert_confidence",
+    "is_error", "error_category", "correction_needed", "model_should_learn",
+    "human_review_required", "status", "permission_for_learning", "source",
+]
+
+
+def _beta_feedback_to_csv_row(doc: Dict[str, Any]) -> Dict[str, Any]:
+    item_ref = doc.get("item_reference") or {}
+    original = doc.get("original_ai_output") or {}
+    label = doc.get("learning_label") or {}
+    return {
+        "id": doc.get("id"),
+        "created_at": doc.get("created_at"),
+        "updated_at": doc.get("updated_at"),
+        "user_email": doc.get("user_email"),
+        "user_role": doc.get("user_role"),
+        "beta_partner_name": doc.get("beta_partner_name"),
+        "beta_partner_type": doc.get("beta_partner_type"),
+        "analysis_id": doc.get("analysis_id"),
+        "case_id": doc.get("case_id"),
+        "file_name": doc.get("file_name"),
+        "feedback_level": doc.get("feedback_level"),
+        "section_key": doc.get("section_key"),
+        "section_label_it": doc.get("section_label_it"),
+        "item_path": item_ref.get("item_path"),
+        "item_title": item_ref.get("item_title"),
+        "page_reference": doc.get("page_reference") if doc.get("page_reference") is not None else item_ref.get("page_reference"),
+        "original_title": original.get("title"),
+        "original_classification": original.get("classification"),
+        "original_severity": original.get("severity"),
+        "original_value": original.get("extracted_value"),
+        "feedback_type": doc.get("feedback_type"),
+        "priority": doc.get("priority"),
+        "expert_comment": doc.get("expert_comment"),
+        "expected_correction": doc.get("expected_correction"),
+        "expected_classification": doc.get("expected_classification"),
+        "expert_confidence": doc.get("expert_confidence"),
+        "is_error": label.get("is_error"),
+        "error_category": label.get("error_category"),
+        "correction_needed": label.get("correction_needed"),
+        "model_should_learn": label.get("model_should_learn"),
+        "human_review_required": label.get("human_review_required"),
+        "status": doc.get("status"),
+        "permission_for_learning": doc.get("permission_for_learning"),
+        "source": doc.get("source"),
+    }
+
+
+@api_router.get("/admin/beta-feedback/export")
+async def admin_export_beta_feedback(
+    request: Request,
+    format: str = "json",
+    user_email: Optional[str] = None,
+    analysis_id: Optional[str] = None,
+    section_key: Optional[str] = None,
+    feedback_type: Optional[str] = None,
+    priority: Optional[str] = None,
+    status: Optional[str] = None,
+    date_from: Optional[str] = None,
+    date_to: Optional[str] = None,
+    model_should_learn: Optional[bool] = None,
+    error_category: Optional[str] = None,
+):
+    """Admin: export structured feedback as JSON or CSV.
+
+    Only stored evidence / original_ai_output snippets are exported; full document
+    contents are never exposed through this endpoint.
+    """
+    admin_user = await require_master_admin(request)
+    query = _build_beta_feedback_admin_query(
+        user_email=user_email, analysis_id=analysis_id, section_key=section_key,
+        feedback_type=feedback_type, priority=priority, status=status,
+        date_from=date_from, date_to=date_to, model_should_learn=model_should_learn,
+        error_category=error_category,
+    )
+    docs = await db.beta_feedback.find(query, {"_id": 0}).sort("created_at", -1).to_list(None)
+    await _write_admin_audit(admin_user, "ADMIN_BETA_FEEDBACK_EXPORT", meta={
+        "format": format, "count": len(docs),
+    })
+
+    fmt = (format or "json").lower()
+    if fmt == "csv":
+        buffer = io.StringIO()
+        writer = csv.DictWriter(buffer, fieldnames=BETA_EXPORT_CSV_COLUMNS, extrasaction="ignore")
+        writer.writeheader()
+        for doc in docs:
+            writer.writerow(_beta_feedback_to_csv_row(doc))
+        buffer.seek(0)
+        return StreamingResponse(
+            iter([buffer.getvalue()]),
+            media_type="text/csv",
+            headers={"Content-Disposition": "attachment; filename=beta_feedback_export.csv"},
+        )
+
+    if fmt == "jsonl":
+        lines = "\n".join(json.dumps(doc, ensure_ascii=False) for doc in docs)
+        return StreamingResponse(
+            iter([lines]),
+            media_type="application/x-ndjson",
+            headers={"Content-Disposition": "attachment; filename=beta_feedback_export.jsonl"},
+        )
+
+    return {"items": docs, "total": len(docs)}
+
+
+@api_router.get("/beta/dashboard-summary")
+async def beta_dashboard_summary(request: Request):
+    """Beta partner / admin dashboard: per-user analyses + feedback synthesis."""
+    user = await require_beta_or_admin(request)
+
+    analyses = await db.perizia_analyses.find(
+        {"user_id": user.user_id},
+        {
+            "_id": 0, "analysis_id": 1, "case_id": 1, "file_name": 1,
+            "created_at": 1, "status": 1, "pages_count": 1,
+            "result.section_1_semaforo_generale.status": 1,
+            "result.semaforo_generale.status": 1,
+        },
+    ).sort("created_at", -1).limit(100).to_list(100)
+
+    feedback_rows = await db.beta_feedback.find(
+        {"user_id": user.user_id},
+        {"_id": 0, "analysis_id": 1, "created_at": 1, "status": 1, "feedback_type": 1,
+         "priority": 1, "learning_label.error_category": 1},
+    ).to_list(None)
+
+    # Per-analysis feedback aggregation.
+    by_analysis: Dict[str, Dict[str, Any]] = {}
+    for fb in feedback_rows:
+        aid = fb.get("analysis_id") or "__none__"
+        bucket = by_analysis.setdefault(aid, {"count": 0, "unresolved": 0, "last_feedback_at": None})
+        bucket["count"] += 1
+        if fb.get("status") in {"new", "needs_clarification"}:
+            bucket["unresolved"] += 1
+        created = fb.get("created_at")
+        if created and (bucket["last_feedback_at"] is None or str(created) > str(bucket["last_feedback_at"])):
+            bucket["last_feedback_at"] = created
+
+    analysis_rows = []
+    for a in analyses:
+        aid = a.get("analysis_id")
+        agg = by_analysis.get(aid, {"count": 0, "unresolved": 0, "last_feedback_at": None})
+        semaforo = (
+            (a.get("result", {}).get("section_1_semaforo_generale", {}) or {}).get("status")
+            or (a.get("result", {}).get("semaforo_generale", {}) or {}).get("status")
+        )
+        analysis_rows.append({
+            "analysis_id": aid,
+            "case_id": a.get("case_id"),
+            "file_name": a.get("file_name"),
+            "created_at": a.get("created_at"),
+            "status": a.get("status"),
+            "pages_count": a.get("pages_count"),
+            "semaforo_status": semaforo,
+            "feedback_count": agg["count"],
+            "unresolved_feedback_count": agg["unresolved"],
+            "last_feedback_at": agg["last_feedback_at"],
+        })
+
+    # Feedback synthesis metric cards (Part 2C).
+    def _count_type(t: str) -> int:
+        return sum(1 for fb in feedback_rows if fb.get("feedback_type") == t)
+
+    synthesis = {
+        "feedback_totali": len(feedback_rows),
+        "correzioni_tecniche": sum(
+            1 for fb in feedback_rows
+            if fb.get("feedback_type") in {"sbagliato", "parzialmente_corretto", "valore_estratto_errato", "wording_confuso", "fonte_pagina_errata"}
+        ),
+        "informazioni_mancanti": _count_type("manca_informazione"),
+        "classificazioni_troppo_forti": _count_type("classificazione_troppo_forte"),
+        "classificazioni_troppo_deboli": _count_type("classificazione_troppo_debole"),
+        "osservazioni_alta_priorita": sum(1 for fb in feedback_rows if fb.get("priority") in {"alta", "bloccante"}),
+    }
+
+    return {
+        "user": {
+            "email": user.email,
+            "name": _beta_partner_name_for_email(user.email) or user.name,
+            "is_beta_partner": _is_beta_unlimited_email(user.email),
+            "is_master_admin": bool(user.is_master_admin),
+        },
+        "analyses": analysis_rows,
+        "synthesis": synthesis,
+    }
+
+
 # Include the router in the main app
 app.include_router(api_router)
 
@@ -19939,6 +20686,13 @@ async def ensure_indexes():
         (db.admin_audit_log, "admin_email"),
         (db.admin_audit_log, "action"),
         (db.admin_audit_log, "target_user_id"),
+        (db.beta_feedback, "user_id"),
+        (db.beta_feedback, "created_at"),
+        (db.beta_feedback, "analysis_id"),
+        (db.beta_feedback, "section_key"),
+        (db.beta_feedback, "feedback_type"),
+        (db.beta_feedback, "status"),
+        (db.beta_feedback, "user_email"),
     ]
     for collection, field in index_specs:
         try:

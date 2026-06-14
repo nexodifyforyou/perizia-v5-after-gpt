@@ -26,7 +26,9 @@ import {
   Clock,
   Shield,
   Users,
-  Menu
+  Menu,
+  FlaskConical,
+  MessageSquareText
 } from 'lucide-react';
 import axios from 'axios';
 import { toast } from 'sonner';
@@ -54,6 +56,9 @@ const Sidebar = ({ user, logout }) => {
     { icon: <CreditCard className="w-5 h-5" />, label: 'Abbonamento', path: '/billing' },
     { icon: <User className="w-5 h-5" />, label: 'Profilo', path: '/profile' },
   ];
+  if (accountState.isBetaPartner || accountState.isMasterAdmin) {
+    navItems.splice(1, 0, { icon: <FlaskConical className="w-5 h-5" />, label: 'Beta Partner', path: '/beta/dashboard' });
+  }
   const adminItems = [
     { icon: <Shield className="w-5 h-5" />, label: 'Overview', path: '/admin' },
     { icon: <Users className="w-5 h-5" />, label: 'Utenti', path: '/admin/users' },
@@ -61,6 +66,7 @@ const Sidebar = ({ user, logout }) => {
     { icon: <Image className="w-5 h-5" />, label: 'Immagini', path: '/admin/images' },
     { icon: <MessageSquare className="w-5 h-5" />, label: 'Assistente', path: '/admin/assistant' },
     { icon: <CreditCard className="w-5 h-5" />, label: 'Transazioni', path: '/admin/transactions' },
+    { icon: <MessageSquareText className="w-5 h-5" />, label: 'Beta Feedback', path: '/admin/beta-feedback' },
   ];
 
   const handleLogout = async () => {

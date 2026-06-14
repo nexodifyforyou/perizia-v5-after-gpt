@@ -31,6 +31,9 @@ export const getAccountState = (user) => {
 
   return {
     isMasterAdmin: Boolean(user?.is_master_admin),
+    isBetaPartner: Boolean(user?.is_beta_partner),
+    betaPartnerName: user?.beta_partner_name || null,
+    betaPartnerType: user?.beta_partner_type || null,
     planId,
     planLabel: PLAN_LABELS[planId] || String(planId || 'free'),
     quota: {

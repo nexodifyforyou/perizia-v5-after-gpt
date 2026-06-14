@@ -26,6 +26,8 @@ import AdminPerizie from "./pages/admin/AdminPerizie";
 import AdminImages from "./pages/admin/AdminImages";
 import AdminAssistant from "./pages/admin/AdminAssistant";
 import AdminTransactions from "./pages/admin/AdminTransactions";
+import AdminBetaFeedback from "./pages/admin/AdminBetaFeedback";
+import BetaDashboard from "./pages/BetaDashboard";
 import { Sidebar } from "./pages/Dashboard";
 
 // Context
@@ -82,6 +84,32 @@ const AdminRoute = ({ children }) => {
   }
 
   if (!user?.is_master_admin) {
+    return <Navigate to="/dashboard" replace />;
+  }
+
+  return children;
+};
+
+const BetaRoute = ({ children }) => {
+  const { user, loading } = useAuth();
+  const location = useLocation();
+
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-[#09090b] flex items-center justify-center">
+        <div className="text-center">
+          <div className="w-12 h-12 border-4 border-gold border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
+          <p className="text-zinc-400 font-mono text-sm">Authenticating...</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (!user) {
+    return <Navigate to="/" state={{ from: location }} replace />;
+  }
+
+  if (!user?.is_beta_partner && !user?.is_master_admin) {
     return <Navigate to="/dashboard" replace />;
   }
 
@@ -189,6 +217,9 @@ function AppRouter() {
       <Route path="/profile" element={
         <ProtectedRoute><Profile /></ProtectedRoute>
       } />
+      <Route path="/beta/dashboard" element={
+        <BetaRoute><BetaDashboard /></BetaRoute>
+      } />
       <Route path="/admin" element={
         <AdminRoute><AdminOverview /></AdminRoute>
       } />
@@ -209,6 +240,9 @@ function AppRouter() {
       } />
       <Route path="/admin/transactions" element={
         <AdminRoute><AdminTransactions /></AdminRoute>
+      } />
+      <Route path="/admin/beta-feedback" element={
+        <AdminRoute><AdminBetaFeedback /></AdminRoute>
       } />
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
