@@ -396,7 +396,9 @@ async def test_persisted_detail_outbound_sanitizer_strips_full_response_internal
         "amount_eur": 391849,
         "evidence": [{"page": 40, "quote": "Valore finale di stima"}],
     }
-    assert response["result"]["qa_gate"] == {"status": "PASS"}
+    # qa_gate is an internal QA container (model name, corrections, critique) and
+    # is moved to the internal runtime sidecar, never exposed in customer output.
+    assert "qa_gate" not in response["result"]
     field_state = response["result"]["customer_decision_contract"]["field_states"]["stato_occupativo"]
     assert field_state["value"] == "LIBERO"
     assert field_state["status"] == "OK"

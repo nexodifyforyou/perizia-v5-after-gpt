@@ -276,7 +276,7 @@ const AnalysisPrintView = () => {
                 <div key={item.key} className="print-info-card">
                   <div className="print-status-row">
                     <p className="print-card-title">{item.title}</p>
-                    <span className="print-status-badge">{item.status}</span>
+                    <span className="print-status-badge">{item.badge || item.status}</span>
                   </div>
                   <p className="print-card-value">{item.detail}</p>
                   <EvidenceFootnote evidence={item.evidence} showQuote={false} />
@@ -325,7 +325,7 @@ const AnalysisPrintView = () => {
               {model.flags.length > 0 ? model.flags.map((flag) => (
                 <div key={flag.key} className="print-flag-row">
                   <div className="print-flag-meta">
-                    <span className="print-status-badge">{flag.severity}</span>
+                    <span className="print-status-badge">{flag.badge || flag.severity}</span>
                     <p className="print-card-title">{flag.title}</p>
                   </div>
                   <p className="print-card-subvalue">{flag.detail}</p>

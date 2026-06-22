@@ -1306,10 +1306,10 @@ if __name__ == "__main__":
     # Quick local smoke tool when run directly.
     demo_analysis = {"analysis_id": "demo", "case_id": "case_demo", "file_name": "demo.pdf", "created_at": datetime.now(timezone.utc).isoformat()}
     demo_result = {
-        "case_header": {"procedure": {"value": "R.G.E. 123/2024"}, "tribunale": {"value": "Roma"}, "lotto": {"value": "1"}, "address": {"value": "Via Demo 1"}},
+        "case_header": {"procedure": {"value": "R.G.E. 123/2024"}, "tribunale": {"value": "Tribunale Demo"}, "lotto": {"value": "1"}, "address": {"value": "Via Demo 1"}},
         "section_1_semaforo_generale": {"status": "AMBER", "reason_it": "Verifica documentale richiesta"},
         "decision_rapida_client": {"risk_level_it": "Rischio Medio", "summary_it": "Procedere con verifiche tecniche e legali."},
-        "lots": [{"lot_number": "1", "prezzo_base_eur": "EUR 100000", "ubicazione": "Roma", "superficie_mq": "85", "diritto_reale": "Piena proprieta"}],
+        "lots": [{"lot_number": "1", "prezzo_base_eur": "EUR 100000", "ubicazione": "Città Demo", "superficie_mq": "85", "diritto_reale": "Piena proprieta"}],
         "money_box": {"items": [{"code": "A", "label_it": "Regolarizzazione", "stima_euro": 12000, "stima_nota": "Stima indicativa"}]},
         "legal_killers_checklist": {"items": [{"killer": "Occupazione", "status": "AMBER", "reason_it": "Da verificare"}]},
         "summary_for_client": {"summary_it": "Demo", "disclaimer_it": "Documento informativo"},

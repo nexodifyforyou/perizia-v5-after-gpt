@@ -183,7 +183,7 @@ BENE_REF_PAT = re.compile(r"\bBene\s+N[°\.]\s*([0-9]+)", re.IGNORECASE)
 
 # Strip leading property-type labels from a captured comune string.
 # TABLE_LOC_PAT captures everything before "(PROV) –", so bene-header lines like
-# "Appartamento Roma (RM) – Via Foo 5" yield comune="Appartamento Roma".
+# "Appartamento Città (XX) – Via Foo 5" could yield comune="Appartamento Città".
 # These prefixes are unambiguous property-category nouns that cannot start a real
 # Italian comune name; strip them to recover the bare comune.
 _PROPERTY_TYPE_PREFIX_PAT = re.compile(
@@ -292,7 +292,7 @@ def _parse_match(m: re.Match, pattern_name: str) -> Optional[Dict[str, Optional[
             return None
 
         comune = re.sub(r"\s+", " ", comune.strip()).strip(".,")
-        # Strip leading property-type labels (e.g. "Appartamento Roma" → "Roma")
+        # Strip leading property-type labels (e.g. "Appartamento Città" → "Città")
         comune = _PROPERTY_TYPE_PREFIX_PAT.sub("", comune).strip()
         if not comune:
             return None
