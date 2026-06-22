@@ -577,6 +577,7 @@ def _compact_issue(value: Any) -> Dict[str, Any]:
         return {}
     out = {
         "severity": _safe_text(value.get("severity") or value.get("status"), 40),
+        "classification": _safe_text(value.get("classification"), 60),
         "family": _safe_text(value.get("family") or value.get("category") or value.get("theme"), 80),
         "headline_it": _safe_text(
             value.get("headline_it") or value.get("title_it") or value.get("killer") or value.get("flag_it"),
@@ -793,6 +794,215 @@ def _collect_numeric_amounts(value: Any, parent_key: str = "") -> Set[float]:
     return amounts
 
 
+# Severe urbanistic/commerciability markers that must not be softened into a
+# generic "da verificare" by the narrator. Mirrors the deterministic detector.
+_SEVERE_URBANISTIC_MARKER_RE = re.compile(
+    r"non\s+conform|"
+    r"\bgrav[ei]\b|"
+    r"non\s+commerciabil|commerciabilit[aà]\s+limitat|non\s+liberamente\s+commerciabil|"
+    r"sanatoria\s+non\s+rilasciat|sanatoria\s+non\s+conclus|"
+    r"condono\s+(?:pendente|non\s+definit|non\s+rilasciat)|"
+    r"abuso\s+edilizi|abusi\s+edilizi|"
+    r"insanabil|non\s+sanabil|non\s+regolarizzabil|"
+    r"fiscalizzazion|vendita\s+forzat",
+    re.I,
+)
+# Soft verbs the narrator may use, but never as the *only* characterization of a
+# severe urbanistic finding.
+_SOFT_VERB_RE = re.compile(
+    r"\b(?:da\s+)?(?:verificar\w*|approfondir\w*|chiarir\w*|controllar\w*|accertar\w*|valutar\w*)\b",
+    re.I,
+)
+_URBANISTIC_TOPIC_RE = re.compile(
+    r"urbanistic\w*|commerciabil\w*|difformit\w*|sanatori\w*|condono|abus\w*\s+edilizi|"
+    r"regolarizzazion\w*|accertamento\s+di\s+conformit",
+    re.I,
+)
+_FORMALITY_TERMS_RE = re.compile(
+    r"\b(?:ipotec\w*|pignorament\w*|formalit[aà]|gravam\w*|trascrizion\w*|sequestr\w*)\b",
+    re.I,
+)
+# A phrase that attributes an economic burden to the buyer.
+_BUYER_COST_PHRASE_RE = re.compile(
+    r"a\s+carico\s+dell\W*acquirente|a\s+carico\s+del\s+compratore|"
+    r"costo\s+per\s+l\W*acquirente|spesa\s+per\s+l\W*acquirente|onere\s+per\s+l\W*acquirente|"
+    r"deve\s+pagare|dovr[aà]\s+pagare|deve\s+versare|da\s+pagare|"
+    r"\besbors\w*|si\s+aggiung\w*\s+al\s+prezzo|costo\s+aggiuntiv\w*\s+per\s+l\W*acquirente",
+    re.I,
+)
+# Phrases that make a buyer-cost mention safe (procedure-borne, cancellable,
+# explicitly *not* a cost, or merely a valuation component).
+_BUYER_COST_SAFE_RE = re.compile(
+    r"a\s+carico\s+della\s+procedura|non\s+a\s+carico\s+dell|"
+    r"cancellabil\w*|si\s+cancell\w*|da\s+cancellar\w*|con\s+(?:il\s+)?decreto\s+di\s+trasferimento|"
+    r"non\s+(?:è|e|sono|costituisc\w*|rappresent\w*|comport\w*)\s+(?:un\s+|dei\s+|delle\s+|degli\s+)?(?:cost\w*|esbors\w*|oner\w*)|"
+    r"non\s+automatic\w*|component\w*\s+(?:valutativ\w*|estimativ\w*)|segnal\w*\s+(?:economic\w*\s+)?da\s+verificar",
+    re.I,
+)
+
+
+def _money_label(item: Dict[str, Any]) -> str:
+    if not isinstance(item, dict):
+        return ""
+    return _safe_text(item.get("label_it") or item.get("reason_it") or item.get("voce") or item.get("label"), 180)
+
+
+def _classify_issue_bucket(item: Dict[str, Any]) -> str:
+    """Map a compacted issue/flag/killer onto the deterministic decision bucket."""
+    if not isinstance(item, dict):
+        return "attention"
+    classification = str(item.get("classification") or "").strip().lower()
+    severity = str(item.get("severity") or item.get("status") or "").strip().upper()
+    family = str(item.get("family") or "").strip().lower()
+    blob = _normalize_for_similarity(
+        " ".join(str(item.get(key) or "") for key in ("headline_it", "action_it", "family"))
+    )
+    if classification in {"blocker", "critical_blocker", "material_blocker"} or severity == "BLOCKER":
+        return "blocker"
+    if classification in {"severe_risk_to_verify", "risk", "risk_to_verify"} or severity in {"RED", "ROSSO"}:
+        return "risk"
+    if classification in {"fact", "fatto"} or family in {"formalities", "legal_background"} or (
+        _FORMALITY_TERMS_RE.search(blob) and severity in {"", "INFO", "GRIGIO", "GREY"}
+    ):
+        return "fact"
+    if classification in {"attention", "attenzione"} or severity in {"AMBER", "GIALLO", "YELLOW"}:
+        return "attention"
+    return "attention"
+
+
+def _iter_fact_pack_findings(fact_pack: Dict[str, Any]) -> List[Dict[str, Any]]:
+    findings: List[Dict[str, Any]] = []
+    seen: Set[str] = set()
+    for collection_key in ("legal_killers", "issues", "red_flags"):
+        items = fact_pack.get(collection_key) if isinstance(fact_pack.get(collection_key), list) else []
+        for item in items:
+            if not isinstance(item, dict):
+                continue
+            headline = _safe_text(item.get("headline_it"), 180)
+            key = _normalize_for_similarity(headline)
+            if not headline or key in seen:
+                continue
+            seen.add(key)
+            findings.append(item)
+    return findings
+
+
+def _approved_money_box_view(box: Dict[str, Any]) -> Dict[str, List[str]]:
+    if not isinstance(box, dict):
+        box = {}
+    line_items: List[Dict[str, Any]] = []
+    for key in ("items", "cost_signals_to_verify"):
+        if isinstance(box.get(key), list):
+            line_items.extend([it for it in box[key] if isinstance(it, dict)])
+
+    buyer_costs_confirmed: List[str] = []
+    buyer_costs_to_verify: List[str] = []
+    non_additive: List[str] = []
+    formalities: List[str] = []
+
+    def _push(bucket: List[str], label: str) -> None:
+        label = label.strip()
+        if label and label.lower() not in {x.lower() for x in bucket}:
+            bucket.append(label)
+
+    for item in box.get("valuation_deductions") or []:
+        if isinstance(item, dict):
+            _push(non_additive, _money_label(item))
+    for item in box.get("qualitative_burdens") or []:
+        if isinstance(item, dict):
+            _push(formalities, _money_label(item))
+
+    for item in line_items:
+        label = _money_label(item)
+        if not label:
+            continue
+        if _FORMALITY_TERMS_RE.search(_normalize_for_similarity(label)):
+            _push(formalities, label)
+            continue
+        if item.get("additive_to_extra_total") is False:
+            _push(non_additive, label)
+            continue
+        if item.get("confirmed_buyer_side_obligation") is True:
+            _push(buyer_costs_confirmed, label)
+        else:
+            _push(buyer_costs_to_verify, label)
+
+    return {
+        "buyer_costs_confirmed": buyer_costs_confirmed[:6],
+        "buyer_costs_to_verify": buyer_costs_to_verify[:6],
+        "non_additive_valuation_references": non_additive[:6],
+        "formalities_as_facts": formalities[:6],
+    }
+
+
+def _build_constrained_narrator_input(fact_pack: Dict[str, Any]) -> Dict[str, Any]:
+    """Restricted, deterministic-approved view handed to the narrator.
+
+    Only customer-safe approved findings reach the model; raw noisy money
+    candidates are never exposed as facts.
+    """
+    approved_blockers: List[str] = []
+    approved_risks: List[str] = []
+    approved_attention: List[str] = []
+    approved_facts: List[str] = []
+    for item in _iter_fact_pack_findings(fact_pack):
+        headline = _safe_text(item.get("headline_it"), 180).rstrip(".")
+        bucket = _classify_issue_bucket(item)
+        target = {
+            "blocker": approved_blockers,
+            "risk": approved_risks,
+            "attention": approved_attention,
+            "fact": approved_facts,
+        }[bucket]
+        if headline and headline.lower() not in {x.lower() for x in target}:
+            target.append(headline)
+
+    semaforo = fact_pack.get("semaforo") if isinstance(fact_pack.get("semaforo"), dict) else {}
+    top_blockers = [t for t in (semaforo.get("top_blockers") or []) if str(t or "").strip()]
+    top_driver = ""
+    if top_blockers:
+        top_driver = _safe_text(top_blockers[0], 180).rstrip(".")
+    elif approved_blockers:
+        top_driver = approved_blockers[0]
+    elif approved_risks:
+        top_driver = approved_risks[0]
+
+    money_box = fact_pack.get("money_box") if isinstance(fact_pack.get("money_box"), dict) else {}
+    return {
+        "top_decision_driver": top_driver,
+        "approved_blockers": approved_blockers[:6],
+        "approved_risks": approved_risks[:6],
+        "approved_attention_points": approved_attention[:6],
+        "approved_facts": approved_facts[:6],
+        "approved_money_box": _approved_money_box_view(money_box),
+    }
+
+
+_FORBIDDEN_CLAIMS = {
+    "no_extra_buyer_cost_unless_additive_true": True,
+    "no_ipoteca_pignoramento_as_buyer_cost": True,
+    "no_valuation_discount_as_new_cost": True,
+    "no_legal_conclusion_beyond_classifier": True,
+}
+
+
+def _fact_pack_has_severe_urbanistic_signal(fact_pack: Dict[str, Any]) -> bool:
+    """True when the deterministic layer carries a severe urbanistic finding."""
+    approved = fact_pack.get("approved") if isinstance(fact_pack.get("approved"), dict) else {}
+    candidates: List[str] = []
+    for key in ("approved_blockers", "approved_risks"):
+        candidates.extend(str(x) for x in (approved.get(key) or []))
+    for item in _iter_fact_pack_findings(fact_pack):
+        blob = " ".join(str(item.get(k) or "") for k in ("headline_it", "action_it"))
+        if _URBANISTIC_TOPIC_RE.search(blob):
+            candidates.append(blob)
+    urban = (fact_pack.get("field_states") or {}).get("regolarita_urbanistica") if isinstance(fact_pack.get("field_states"), dict) else None
+    if isinstance(urban, dict):
+        candidates.append(str(urban.get("value") or urban.get("status") or ""))
+    blob = " ".join(candidates)
+    return bool(_URBANISTIC_TOPIC_RE.search(blob) and _SEVERE_URBANISTIC_MARKER_RE.search(blob))
+
+
 def build_clean_customer_decision_fact_pack(result: Dict[str, Any]) -> Dict[str, Any]:
     """Build the bounded Gemini input from final customer-facing contract data only."""
     cdc = result.get("customer_decision_contract") if isinstance(result.get("customer_decision_contract"), dict) else {}
@@ -860,6 +1070,8 @@ def build_clean_customer_decision_fact_pack(result: Dict[str, Any]) -> Dict[str,
             ),
         },
     }
+    fact_pack["approved"] = _build_constrained_narrator_input(fact_pack)
+    fact_pack["forbidden_claims"] = dict(_FORBIDDEN_CLAIMS)
     fact_pack["allowed_amounts_eur"] = sorted(_collect_numeric_amounts(fact_pack))
     serialized = json.dumps(fact_pack, ensure_ascii=False, separators=(",", ":"))
     if len(serialized) > 14000:
@@ -868,6 +1080,7 @@ def build_clean_customer_decision_fact_pack(result: Dict[str, Any]) -> Dict[str,
                 fact_pack[collection_key] = fact_pack[collection_key][:4]
         if isinstance(fact_pack.get("lots"), list):
             fact_pack["lots"] = fact_pack["lots"][:6]
+        fact_pack["approved"] = _build_constrained_narrator_input(fact_pack)
     return fact_pack
 
 
@@ -907,20 +1120,38 @@ Se cost_signals_to_verify contiene un totale più componenti interne, descrivi "
 Se ci sono deprezzamenti, spiega che sono componenti estimative/valutative, non esborsi automatici.
 Se ci sono formalità/ipoteche, spiega che sono segnali procedurali/legali da verificare o da cancellare secondo procedura, non costi extra automatici dell'acquirente.
 
+Il tuo ruolo è SOLO narrativo:
+- spiega le evidenze deterministiche già approvate nel campo "approved";
+- dai priorità al perché il driver principale (approved.top_decision_driver) conta;
+- scrivi una sintesi esecutiva leggibile e una narrazione di decisione;
+- collega i rischi principali, senza ripetere meccanicamente ogni scheda.
+
+Il livello deterministico è l'unico proprietario di: classificazione, severità, costo acquirente / non acquirente, blocco/rischio/fatto legale, trattamento formalità, trattamento deprezzamento 30%, priorità urbanistica/commerciabilità.
+
+Vincoli "forbidden_claims" (sempre attivi):
+- NON dichiarare costi a carico dell'acquirente se non sono in approved.approved_money_box.buyer_costs_confirmed con marcatura additiva.
+- NON trattare ipoteca/pignoramento/formalità cancellabili come costi dell'acquirente.
+- NON trasformare deprezzamenti/sconti di stima in nuovi costi acquirente.
+- NON aggiungere conclusioni legali oltre la classificazione deterministica.
+- Se esiste un blocco urbanistico/commerciabilità grave, NON ridurlo a un generico "da verificare": riporta la gravità (es. non conforme/grave, non commerciabile, sanatoria non rilasciata).
+- Devi menzionare approved.top_decision_driver se presente.
+
 Restituisci SOLO JSON valido, senza markdown, senza testo extra.
 
 Schema JSON obbligatorio:
 {
-  "summary_it": "max 70 parole, descrizione fattuale del caso",
-  "decisione_rapida_it": "max 90 parole, consiglio operativo prudenziale e specifico per il compratore",
-  "main_risk_it": "rischio principale, se presente; altrimenti 'Rischio principale non determinabile automaticamente'",
-  "why_it_matters_it": "perché il rischio principale incide sulla decisione d'offerta",
-  "before_offer_it": [
+  "executive_summary_it": "max 80 parole, sintesi esecutiva leggibile che spiega il caso e il driver principale",
+  "decision_focus_it": "max 90 parole, narrazione operativa: come dovrebbe ragionare il compratore prima dell'offerta",
+  "top_reason_to_pause_it": "il motivo principale per fermarsi a riflettere, coerente con il driver deterministico",
+  "what_to_verify_before_offer_it": [
     "controllo concreto 1",
     "controllo concreto 2",
     "controllo concreto 3"
   ],
-  "not_to_confuse_it": "spiegazione breve di cosa non va confuso, ad esempio valori di stima/deprezzamenti/formalità vs costi buyer-side"
+  "what_is_not_extra_cost_it": [
+    "cosa NON è un costo extra per l'acquirente (es. deprezzamenti, ipoteche/pignoramenti cancellabili, valori di stima)"
+  ],
+  "confidence_note_it": "breve nota su cosa resta da verificare e sul grado di certezza"
 }"""
 
 
@@ -1040,12 +1271,159 @@ def _extract_lot_counts(text: Any) -> Set[int]:
 
 def _combined_payload_text(payload: Dict[str, Any]) -> str:
     parts: List[str] = []
-    for key in ("summary_it", "decisione_rapida_it", "main_risk_it", "why_it_matters_it", "not_to_confuse_it"):
+    for key in (
+        "summary_it",
+        "decisione_rapida_it",
+        "main_risk_it",
+        "why_it_matters_it",
+        "not_to_confuse_it",
+        "confidence_note_it",
+    ):
         parts.append(str(payload.get(key) or ""))
-    before = payload.get("before_offer_it")
-    if isinstance(before, list):
-        parts.extend(str(item or "") for item in before)
+    for list_key in ("before_offer_it", "what_is_not_extra_cost_it"):
+        values = payload.get(list_key)
+        if isinstance(values, list):
+            parts.extend(str(item or "") for item in values)
     return " ".join(parts)
+
+
+_NARRATOR_ALIAS_MAP = {
+    "executive_summary_it": "summary_it",
+    "decision_focus_it": "decisione_rapida_it",
+    "top_reason_to_pause_it": "main_risk_it",
+    "what_to_verify_before_offer_it": "before_offer_it",
+}
+
+
+def _coerce_narrator_payload_aliases(payload: Dict[str, Any]) -> Dict[str, Any]:
+    """Accept the constrained output contract and back-fill the legacy keys.
+
+    The downstream apply/validate pipeline and the regression test-suite use the
+    legacy field names; the narrator now emits the constrained contract, so map
+    new -> legacy without dropping the new keys.
+    """
+    if not isinstance(payload, dict):
+        return {}
+    coerced = dict(payload)
+    for new_key, legacy_key in _NARRATOR_ALIAS_MAP.items():
+        if not coerced.get(legacy_key) and coerced.get(new_key) not in (None, "", []):
+            coerced[legacy_key] = coerced[new_key]
+    if not coerced.get("not_to_confuse_it"):
+        not_extra = coerced.get("what_is_not_extra_cost_it")
+        if isinstance(not_extra, list):
+            joined = " ".join(str(x).strip() for x in not_extra if str(x or "").strip())
+            if joined:
+                coerced["not_to_confuse_it"] = joined
+        elif isinstance(not_extra, str) and not_extra.strip():
+            coerced["not_to_confuse_it"] = not_extra.strip()
+    if not coerced.get("why_it_matters_it") and coerced.get("top_reason_to_pause_it"):
+        coerced["why_it_matters_it"] = str(coerced["top_reason_to_pause_it"])
+    return coerced
+
+
+def _claims_formality_as_buyer_cost(text: str) -> bool:
+    """Gemini may not turn cancellable ipoteca/pignoramento/formalità into a buyer cost."""
+    normalized = _normalize_for_similarity(text)
+    for match in _FORMALITY_TERMS_RE.finditer(normalized):
+        window = normalized[max(0, match.start() - 90): match.end() + 90]
+        if _BUYER_COST_PHRASE_RE.search(window) and not _BUYER_COST_SAFE_RE.search(window):
+            return True
+    return False
+
+
+_VALUATION_TERM_RE = re.compile(r"deprezzament\w*|deprezz\w*|valore\s+di\s+stima|valutazion\w*\s+estimativ\w*|sconto\s+di\s+stima", re.I)
+
+
+def _claims_valuation_discount_as_buyer_cost(text: str) -> bool:
+    """A valuation discount / deprezzamento is never a new buyer cost."""
+    normalized = _normalize_for_similarity(text)
+    for match in _VALUATION_TERM_RE.finditer(normalized):
+        window = normalized[max(0, match.start() - 80): match.end() + 90]
+        if _BUYER_COST_PHRASE_RE.search(window) and not _BUYER_COST_SAFE_RE.search(window):
+            return True
+    return False
+
+
+_INVENTED_LIBERATION_COST_RE = re.compile(
+    r"(?:cost\w*|spes\w*|oner\w*)\s+(?:di|della|per)\s+(?:liberazion\w*|sgomber\w*|rilasci\w*)|"
+    r"(?:cost\w*|spes\w*|oner\w*)\s+(?:di|della|per)\s+(?:regolarizzazion\w*|sanatori\w*)\s+(?:pari\s+a|di\s+euro|a\s+carico\s+dell)",
+    re.I,
+)
+
+
+def _invents_regularization_or_liberation_cost(text: str, fact_pack: Dict[str, Any]) -> bool:
+    if _fact_pack_has_confirmed_buyer_side_obligation(fact_pack):
+        return False
+    normalized = _normalize_for_similarity(text)
+    if not _INVENTED_LIBERATION_COST_RE.search(normalized):
+        return False
+    # Only an asserted *charge* counts; a verification signal is allowed.
+    return bool(_BUYER_COST_PHRASE_RE.search(normalized) or re.search(r"pari\s+a|ammont\w*\s+a", normalized))
+
+
+def _approved_blockers(fact_pack: Dict[str, Any]) -> List[str]:
+    approved = fact_pack.get("approved") if isinstance(fact_pack.get("approved"), dict) else {}
+    return [str(x) for x in (approved.get("approved_blockers") or []) if str(x or "").strip()]
+
+
+def _topic_terms_for(headline: str) -> List[str]:
+    blob = _normalize_for_similarity(headline)
+    terms: List[str] = []
+    for _group, group_terms in _RISK_KEYWORD_GROUPS.items():
+        for term in group_terms:
+            if _normalize_for_similarity(term) and _normalize_for_similarity(term) in blob:
+                terms.append(_normalize_for_similarity(term))
+    return terms
+
+
+def _omits_top_blocker(text: str, fact_pack: Dict[str, Any]) -> bool:
+    blockers = _approved_blockers(fact_pack)
+    if not blockers:
+        return False
+    top = blockers[0]
+    normalized = _normalize_for_similarity(text)
+    terms = _topic_terms_for(top)
+    if not terms:
+        # Fall back to salient words from the headline (length >= 5).
+        terms = [w for w in _normalize_for_similarity(top).split() if len(w) >= 5][:4]
+    if not terms:
+        return False
+    return not any(term in normalized for term in terms)
+
+
+def _softens_severe_urbanistic(text: str, fact_pack: Dict[str, Any]) -> bool:
+    if not _fact_pack_has_severe_urbanistic_signal(fact_pack):
+        return False
+    if not _URBANISTIC_TOPIC_RE.search(text):
+        # The narrator dropped the urbanistic topic entirely -> handled by omit check.
+        return False
+    if _SEVERE_URBANISTIC_MARKER_RE.search(text):
+        return False
+    # Mentions urbanistica but only with soft "da verificare"-style wording.
+    return bool(_SOFT_VERB_RE.search(text))
+
+
+def _is_duplicative_of_cards(payload: Dict[str, Any], fact_pack: Dict[str, Any]) -> bool:
+    """Reject narration that mechanically restates the deterministic card titles."""
+    headlines = [str(item.get("headline_it") or "") for item in _iter_fact_pack_findings(fact_pack)]
+    headlines = [h for h in headlines if h.strip()]
+    if len(headlines) < 2:
+        return False
+    summary = str(payload.get("summary_it") or "")
+    if not summary.strip():
+        return False
+    joined = "; ".join(headlines[:4])
+    if _near_identical_text(summary, joined):
+        return True
+    headline_tokens: Set[str] = set()
+    for headline in headlines:
+        headline_tokens.update(w for w in _normalize_for_similarity(headline).split() if len(w) >= 4)
+    summary_tokens = [w for w in _normalize_for_similarity(summary).split() if len(w) >= 4]
+    if len(summary_tokens) < 6:
+        return False
+    residual = [w for w in summary_tokens if w not in headline_tokens]
+    # Almost every meaningful word is just a card-title word -> no narrative value.
+    return len(set(residual)) <= 3
 
 
 def _field_value(fact_pack: Dict[str, Any], key: str) -> str:
@@ -1272,6 +1650,7 @@ def _contrary_field_claims(text: str, fact_pack: Dict[str, Any]) -> List[str]:
 
 def validate_gemini_decision_payload(payload: Dict[str, Any], fact_pack: Dict[str, Any]) -> List[str]:
     errors: List[str] = []
+    payload = _coerce_narrator_payload_aliases(payload)
     required_string_keys = (
         "summary_it",
         "decisione_rapida_it",
@@ -1315,8 +1694,20 @@ def validate_gemini_decision_payload(payload: Dict[str, Any], fact_pack: Dict[st
         errors.append("invalid:unsupported_buyer_cost_claim")
     if _has_additive_double_counting_language(combined, fact_pack):
         errors.append("invalid:money_box_double_counting_language")
+    if _claims_formality_as_buyer_cost(combined):
+        errors.append("invalid:formality_as_buyer_cost")
+    if _claims_valuation_discount_as_buyer_cost(combined):
+        errors.append("invalid:valuation_discount_as_buyer_cost")
+    if _invents_regularization_or_liberation_cost(combined, fact_pack):
+        errors.append("invalid:invented_regularization_or_liberation_cost")
     if _has_confident_occupancy_claim_with_weak_evidence(combined, fact_pack):
         errors.append("invalid:unsupported_confident_occupancy_claim")
+    if _omits_top_blocker(combined, fact_pack):
+        errors.append("invalid:omits_top_blocker")
+    if _softens_severe_urbanistic(combined, fact_pack):
+        errors.append("invalid:softened_severe_urbanistic")
+    if _is_duplicative_of_cards(payload, fact_pack):
+        errors.append("invalid:duplicative_of_risk_cards")
     unsupported_risks = _unsupported_risk_keywords(combined, fact_pack)
     if unsupported_risks:
         errors.append("invalid:unsupported_risk:" + ",".join(unsupported_risks[:3]))
@@ -1470,12 +1861,57 @@ def _fallback_field_topics(fact_pack: Dict[str, Any]) -> List[str]:
     return topics
 
 
+def _join_human(items: List[str]) -> str:
+    items = [i for i in items if i]
+    if not items:
+        return ""
+    if len(items) == 1:
+        return items[0]
+    return ", ".join(items[:-1]) + " e " + items[-1]
+
+
+def _fallback_severe_urbanistic_lead(fact_pack: Dict[str, Any]) -> str:
+    """Narrative lead for severe urbanistic/commerciability cases (non-duplicative)."""
+    approved = fact_pack.get("approved") if isinstance(fact_pack.get("approved"), dict) else {}
+    parts = list(approved.get("approved_blockers") or []) + list(approved.get("approved_risks") or [])
+    for item in _iter_fact_pack_findings(fact_pack):
+        parts.append(" ".join(str(item.get(k) or "") for k in ("headline_it", "action_it")))
+    urban = (fact_pack.get("field_states") or {}).get("regolarita_urbanistica") if isinstance(fact_pack.get("field_states"), dict) else None
+    if isinstance(urban, dict):
+        parts.append(str(urban.get("value") or urban.get("status") or ""))
+    blob = " ".join(parts)
+    signals: List[str] = []
+    if re.search(r"non\s+conform|\bgrav", blob, re.I):
+        signals.append("non conformità grave")
+    if re.search(r"sanatoria\s+non\s+(?:rilasciat|conclus)|condono\s+(?:pendente|non\s+definit)", blob, re.I):
+        signals.append("sanatoria non rilasciata")
+    if re.search(r"non\s+commerciabil|commerciabilit[aà]\s+limitat|vendita\s+forzat|non\s+liberamente\s+commerciabil", blob, re.I):
+        signals.append("possibile limitazione alla commerciabilità fuori dalla vendita forzata")
+    if re.search(r"abus\w*\s+edilizi", blob, re.I):
+        signals.append("abuso edilizio")
+    if re.search(r"insanabil|non\s+sanabil|non\s+regolarizzabil", blob, re.I):
+        signals.append("difformità non sanabile")
+    if not signals:
+        signals.append("una non conformità urbanistica rilevante")
+    return (
+        "La criticità principale non è solo l'agibilità o l'occupazione, ma la regolarità "
+        "urbanistica/commerciabilità: la perizia segnala " + _join_human(signals) + "."
+    )
+
+
 def build_deterministic_separated_fallback_payload(
     result: Dict[str, Any],
     narrator_meta: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
-    """Build safe separated fallback copy from the final cleaned customer contract."""
+    """Build safe separated fallback copy from the final cleaned customer contract.
+
+    The fallback leads with the highest-priority issue and explains why it
+    matters, rather than mechanically restating the deterministic risk cards.
+    """
     fact_pack = build_clean_customer_decision_fact_pack(result)
+    approved = fact_pack.get("approved") if isinstance(fact_pack.get("approved"), dict) else {}
+    top_driver = _safe_text(approved.get("top_decision_driver"), 180).rstrip(".")
+    severe_urbanistic = _fact_pack_has_severe_urbanistic_signal(fact_pack)
     issue_headlines = _fallback_issue_headlines(fact_pack)
     has_money_signals = _fallback_money_box_has_signals(fact_pack)
     non_additive_money = _fallback_money_box_non_additive(fact_pack)
@@ -1483,20 +1919,33 @@ def build_deterministic_separated_fallback_payload(
     is_multi_lot = bool(fact_pack.get("is_multi_lot")) or int(fact_pack.get("lots_count") or 0) > 1
 
     summary_parts = [_fallback_lot_phrase(fact_pack)]
-    if issue_headlines:
-        summary_parts.append("Rischi documentati: " + "; ".join(issue_headlines[:3]) + ".")
+    if severe_urbanistic:
+        summary_parts.append(_fallback_severe_urbanistic_lead(fact_pack))
+        summary_parts.append("Prima di un'offerta serve una verifica tecnica e legale mirata su questo punto, non solo sulle altre voci.")
+    elif top_driver:
+        summary_parts.append(
+            f"Il punto che pesa di più sulla decisione riguarda «{top_driver}»: incide su tempi, "
+            "verifiche necessarie e margine d'offerta, più di una semplice formalità documentale."
+        )
+        secondary = [h for h in issue_headlines[1:3] if h]
+        if secondary:
+            summary_parts.append("Restano da chiudere anche " + _join_human([s.lower() for s in secondary]) + ".")
     else:
         summary_parts.append("I campi puliti non isolano un rischio principale determinabile automaticamente.")
     if has_money_signals:
         if non_additive_money:
-            summary_parts.append("Il Money Box contiene segnali economici con eventuali componenti interne non additive.")
+            summary_parts.append("Eventuali importi sono segnali con componenti interne non additive, non costi automatici per l'acquirente.")
         else:
-            summary_parts.append("Il Money Box contiene segnali economici da verificare.")
+            summary_parts.append("Eventuali importi indicati restano segnali economici da verificare, non costi automatici.")
     if has_valuation_deductions:
-        summary_parts.append("Sono presenti componenti valutative o deprezzamenti separati dai costi da verificare.")
-    factual_summary = _fallback_compact_sentence(" ".join(summary_parts), 650)
+        summary_parts.append("Deprezzamenti e valori di stima restano componenti valutative separate dai costi da verificare.")
+    factual_summary = _fallback_compact_sentence(" ".join(summary_parts), 720)
 
     topics = _fallback_field_topics(fact_pack)
+    if severe_urbanistic and not any("urbanistic" in t for t in topics):
+        topics.insert(0, "regolarità urbanistica e commerciabilità")
+    elif severe_urbanistic:
+        topics.sort(key=lambda t: 0 if "urbanistic" in t else 1)
     if has_money_signals:
         topics.append("eventuale incidenza economica degli importi segnalati")
     if has_valuation_deductions:
@@ -1550,12 +1999,23 @@ def build_deterministic_separated_fallback_payload(
         else:
             deduped_checks.append("Conservare margine prudenziale finché i punti non documentati restano aperti.")
 
-    main_risk = issue_headlines[0] if issue_headlines else "Rischio principale non determinabile automaticamente"
-    why = (
-        "Il punto incide su tempi, margine di offerta e verifiche tecniche o documentali necessarie prima del rilancio."
-        if issue_headlines
-        else "L'assenza di un rischio principale automatico richiede comunque verifica dei campi non chiusi prima dell'offerta."
-    )
+    if severe_urbanistic:
+        main_risk = "Regolarità urbanistica/commerciabilità: non conformità grave da chiudere prima dell'offerta"
+    elif top_driver:
+        main_risk = top_driver
+    elif issue_headlines:
+        main_risk = issue_headlines[0]
+    else:
+        main_risk = "Rischio principale non determinabile automaticamente"
+    if severe_urbanistic:
+        why = (
+            "Una non conformità urbanistica grave o un limite di commerciabilità può incidere su sanabilità, "
+            "tempi, valore di rivendita e sulla possibilità stessa di rivendere fuori dalla vendita forzata."
+        )
+    elif issue_headlines or top_driver:
+        why = "Il punto incide su tempi, margine di offerta e verifiche tecniche o documentali necessarie prima del rilancio."
+    else:
+        why = "L'assenza di un rischio principale automatico richiede comunque verifica dei campi non chiusi prima dell'offerta."
     if has_money_signals and non_additive_money:
         not_to_confuse = (
             "Totali e componenti interne del Money Box non vanno sommati due volte; valori di stima, deprezzamenti e formalità non sono costi automatici."
@@ -1569,13 +2029,28 @@ def build_deterministic_separated_fallback_payload(
             "Valori di stima, deprezzamenti e formalità non vanno trasformati in costi automatici senza una classificazione strutturata."
         )
 
+    main_risk_clean = _fallback_compact_sentence(main_risk, 420)
+    why_clean = _fallback_compact_sentence(why, 520)
+    not_to_confuse_clean = _fallback_compact_sentence(not_to_confuse, 520)
+    checks = deduped_checks[:5]
+    not_extra_list = [
+        "Deprezzamenti e valori di stima restano componenti valutative, non un importo aggiuntivo per chi acquista.",
+        "Ipoteche e pignoramenti cancellabili con il decreto di trasferimento sono formalità procedurali, non importi dovuti da chi acquista.",
+    ]
     return {
         "summary_it": factual_summary,
         "decisione_rapida_it": decisione,
-        "main_risk_it": _fallback_compact_sentence(main_risk, 420),
-        "why_it_matters_it": _fallback_compact_sentence(why, 520),
-        "before_offer_it": deduped_checks[:5],
-        "not_to_confuse_it": _fallback_compact_sentence(not_to_confuse, 520),
+        "main_risk_it": main_risk_clean,
+        "why_it_matters_it": why_clean,
+        "before_offer_it": checks,
+        "not_to_confuse_it": not_to_confuse_clean,
+        # Constrained output contract (mirrors the Gemini schema, deterministic copy).
+        "executive_summary_it": factual_summary,
+        "decision_focus_it": decisione,
+        "top_reason_to_pause_it": main_risk_clean,
+        "what_to_verify_before_offer_it": list(checks),
+        "what_is_not_extra_cost_it": not_extra_list,
+        "confidence_note_it": _fallback_compact_sentence(why, 360),
         "generation_mode": "deterministic_separated_fallback",
         "provider": "deterministic",
         "model": None,
@@ -1583,14 +2058,27 @@ def build_deterministic_separated_fallback_payload(
 
 
 def _normalize_gemini_payload(payload: Dict[str, Any], *, provider: str, model: str) -> Dict[str, Any]:
+    payload = _coerce_narrator_payload_aliases(payload)
     before_offer = payload.get("before_offer_it") if isinstance(payload.get("before_offer_it"), list) else []
+    before_offer_clean = [_safe_text(item, 260) for item in before_offer if _safe_text(item, 260)][:5]
+    not_extra_src = payload.get("what_is_not_extra_cost_it")
+    if not isinstance(not_extra_src, list):
+        not_extra_src = [payload.get("not_to_confuse_it")] if payload.get("not_to_confuse_it") else []
+    not_extra_clean = [_safe_text(item, 260) for item in not_extra_src if _safe_text(item, 260)][:5]
     normalized = {
         "summary_it": _safe_text(payload.get("summary_it"), 900),
         "decisione_rapida_it": _safe_text(payload.get("decisione_rapida_it"), 1100),
         "main_risk_it": _safe_text(payload.get("main_risk_it"), 420),
         "why_it_matters_it": _safe_text(payload.get("why_it_matters_it"), 520),
-        "before_offer_it": [_safe_text(item, 260) for item in before_offer if _safe_text(item, 260)][:5],
+        "before_offer_it": before_offer_clean,
         "not_to_confuse_it": _safe_text(payload.get("not_to_confuse_it"), 520),
+        # Constrained output contract (exposed additively for customer surfaces).
+        "executive_summary_it": _safe_text(payload.get("summary_it"), 900),
+        "decision_focus_it": _safe_text(payload.get("decisione_rapida_it"), 1100),
+        "top_reason_to_pause_it": _safe_text(payload.get("main_risk_it"), 420),
+        "what_to_verify_before_offer_it": list(before_offer_clean),
+        "what_is_not_extra_cost_it": not_extra_clean,
+        "confidence_note_it": _safe_text(payload.get("confidence_note_it"), 420),
         "generation_mode": "gemini_clean_contract",
         "provider": provider,
         "model": model,
@@ -1831,6 +2319,7 @@ async def build_decisione_rapida_narration(
             return None, meta
         fact_pack = build_clean_customer_decision_fact_pack(result)
         prompt = _build_gemini_prompt(fact_pack, request_id)
+        raw = ""
         try:
             raw = await _call_gemini_narrator_llm(
                 api_key=gemini_key,
@@ -1845,9 +2334,11 @@ async def build_decisione_rapida_narration(
             meta["errors"].append(meta["error"])
             return None, meta
         except Exception as e:
-            meta["status"] = "ERROR"
+            meta["status"] = "REJECTED_INVALID_PAYLOAD" if raw else "ERROR"
             meta["error"] = f"gemini_error:{str(e)[:160]}"
             meta["errors"].append(meta["error"])
+            if raw:
+                meta["_rejected_text"] = raw
             return None, meta
 
         validation_errors = validate_gemini_decision_payload(parsed, fact_pack)
@@ -1855,6 +2346,7 @@ async def build_decisione_rapida_narration(
             meta["status"] = "REJECTED_VALIDATION"
             meta["error"] = validation_errors[0]
             meta["errors"].extend(validation_errors[:8])
+            meta["_rejected_payload"] = parsed
             return None, meta
 
         narrated = _normalize_gemini_payload(parsed, provider="gemini", model=gemini_model)

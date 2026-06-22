@@ -11,6 +11,7 @@ from perizia_canonical_pipeline.llm_resolution_pack import (
     discover_openai_config,
     resolve_single_issue,
 )
+from urbanistic_warning_priority import promote_severe_urbanistic_customer_warning
 
 
 _FIELD_FAMILY = {
@@ -986,6 +987,19 @@ _CUSTOMER_INTERNAL_CONTROL_KEYS = {
     "candidate",
     "candidates",
     "step3_candidates",
+    "rejected_payload",
+    "rejected_text",
+    "validation_error",
+    "rejected_narration",
+    "source_paths",
+    "signal_groups",
+    # Internal QA-gate critique: must never reach customer-facing output.
+    # (qa_gate.status is preserved; only the critique sub-fields are stripped.)
+    "section_verdicts",
+    "contradictions_detected",
+    "recommended_action",
+    "qa_critique",
+    "validator_notes",
 }
 
 _CUSTOMER_INTERNAL_MARKER_VALUES = {
@@ -1084,7 +1098,16 @@ _CUSTOMER_RESULT_INTERNAL_RUNTIME_KEYS = {
     "canonical_freeze_explanations",
     "debug",
     "internal_runtime",
+    # Internal QA gate: holds model name, corrections_applied, invariants,
+    # section_verdicts and critique. The urbanistic promotion consumes it for the
+    # severity decision during sanitize; it is then moved to the internal runtime
+    # sidecar so it never reaches customer-facing API/HTML/PDF.
+    "qa_gate",
+    "customer_contract_qa_gate",
 }
+
+# Internal QA containers to drop from the customer_decision_contract mirror.
+_CUSTOMER_INTERNAL_QA_MIRROR_KEYS = ("qa_gate", "customer_contract_qa_gate")
 
 
 def _is_customer_internal_marker(value: Any) -> bool:
@@ -1125,6 +1148,7 @@ def _sanitize_customer_response_string(value: str) -> Any:
     stripped = value.strip()
     if not stripped:
         return value
+    value = re.sub(r"\blegal\s+killers?\b", "rischi e punti critici", value, flags=re.IGNORECASE)
     if _AUTH_MACHINE_CODE_RE.fullmatch(stripped):
         return _DROP_CUSTOMER_RESPONSE_VALUE
     if stripped.startswith("AUTH_"):
@@ -1228,7 +1252,11 @@ def _strip_customer_internal_provenance(value: Any) -> Any:
 def sanitize_customer_facing_result(result: Dict[str, Any]) -> Dict[str, Any]:
     if not isinstance(result, dict):
         return result
+    # Persisted analyses skip full contract recomputation on reads. Project from
+    # existing structured evidence before and after taxonomy normalization.
+    promote_severe_urbanistic_customer_warning(result)
     _normalize_customer_legal_taxonomy(result)
+    promote_severe_urbanistic_customer_warning(result)
     for key in list(result.keys()):
         key_text = str(key)
         if key_text in _CUSTOMER_INTERNAL_AUTHORITY_KEYS or key_text.startswith("authority_") or "shadow_" in key_text:
@@ -1249,6 +1277,12 @@ def separate_internal_runtime_from_customer_result(result: Dict[str, Any]) -> Di
     for key in _CUSTOMER_RESULT_INTERNAL_RUNTIME_KEYS:
         if key in result:
             internal_runtime[key] = copy.deepcopy(result.pop(key))
+    # The customer_decision_contract mirror must not retain internal QA containers.
+    cdc = result.get("customer_decision_contract")
+    if isinstance(cdc, dict):
+        for key in _CUSTOMER_INTERNAL_QA_MIRROR_KEYS:
+            if key in cdc:
+                internal_runtime.setdefault(f"customer_decision_contract.{key}", copy.deepcopy(cdc.pop(key)))
     return internal_runtime
 
 
@@ -1712,7 +1746,9 @@ def _apply_scope_to_legal_title(title: str, item: Dict[str, Any]) -> str:
 
 def _legal_classification_rank(item: Dict[str, Any]) -> int:
     classification = str(item.get("classification") or "").strip().lower()
-    if classification in {"blocker", "material_blocker"}:
+    if classification in {"critical_blocker", "blocker", "material_blocker"}:
+        return 5
+    if classification == "severe_risk_to_verify":
         return 4
     if classification in {"risk", "risk_to_verify"}:
         return 3
@@ -1784,7 +1820,9 @@ def _legal_has_hard_blocker_evidence(item: Dict[str, Any]) -> bool:
 def _legal_item_has_taxonomy_signal(item: Dict[str, Any]) -> bool:
     if not isinstance(item, dict):
         return False
-    if str(item.get("classification") or "").strip().lower() in {"fact", "attention", "risk", "blocker"}:
+    if str(item.get("classification") or "").strip().lower() in {
+        "fact", "attention", "risk", "risk_to_verify", "severe_risk_to_verify", "blocker", "critical_blocker"
+    }:
         return True
     blob = _legal_taxonomy_blob(item)
     if not blob.strip():
@@ -1832,13 +1870,28 @@ def _legal_classification_for_item(item: Dict[str, Any]) -> Optional[Dict[str, s
         return None
     blob = _legal_taxonomy_blob(item)
     title = _legal_item_title(item)
+    explicit_classification = str(item.get("classification") or "").strip().lower()
+    if explicit_classification == "critical_blocker":
+        return {
+            "classification": "critical_blocker",
+            "badge_it": "Blocco critico",
+            "status": "BLOCKER",
+            "action": "Verificare immediatamente con tecnico e legale prima dell'offerta.",
+        }
+    if explicit_classification == "severe_risk_to_verify":
+        return {
+            "classification": "severe_risk_to_verify",
+            "badge_it": "Rischio grave",
+            "status": "RED",
+            "action": "Verificare con tecnico e legale prima dell'offerta.",
+        }
     if _legal_is_false_positive_usi_civici(item):
         return None
     if _legal_has_hard_blocker_evidence(item):
         return {
-            "classification": "blocker",
-            "badge_it": "Blocco",
-            "status": "RED",
+            "classification": "critical_blocker",
+            "badge_it": "Blocco critico",
+            "status": "BLOCKER",
             "action": "Verificare immediatamente con legale/professionista: la perizia contiene linguaggio esplicitamente bloccante.",
         }
     if _LEGAL_BUYER_BURDEN_RE.search(blob):
@@ -1959,7 +2012,7 @@ def _legal_safe_title(original_title: str, classification: str, blob: str) -> st
     title = re.sub(r"\s+", " ", title).strip()
     if not title:
         title = "Punto da verificare"
-    if classification != "blocker":
+    if classification not in {"blocker", "critical_blocker", "severe_risk_to_verify"}:
         title = re.sub(r"\bLegal\s+Killer\b", "Punto critico", title, flags=re.I)
         title = re.sub(r"\bkiller\b", "punto critico", title, flags=re.I)
         title = re.sub(r"\bgrave\b", "da verificare", title, flags=re.I)
@@ -1973,6 +2026,8 @@ def _legal_safe_title(original_title: str, classification: str, blob: str) -> st
     if _LEGAL_AGIBILITA_RE.search(blob):
         return "Agibilità/abitabilità: rischio da verificare"
     if _LEGAL_URBANISTICA_RE.search(blob):
+        if classification in {"critical_blocker", "severe_risk_to_verify"}:
+            return title
         return "Difformità/regolarizzazione: rischio da verificare"
     if _LEGAL_OCCUPANCY_RE.search(blob):
         if classification == "attention" and _LEGAL_DEBTOR_OCCUPANCY_RE.search(blob):
@@ -2000,8 +2055,8 @@ def _normalize_legal_item(item: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     fixed["classification"] = meta["classification"]
     fixed["badge_it"] = meta["badge_it"]
     fixed["severity_label_it"] = meta["badge_it"]
-    fixed["is_legal_killer"] = meta["classification"] == "blocker"
-    fixed["is_blocker"] = meta["classification"] == "blocker"
+    fixed["is_legal_killer"] = meta["classification"] in {"blocker", "critical_blocker"}
+    fixed["is_blocker"] = meta["classification"] in {"blocker", "critical_blocker"}
     fixed["status"] = meta["status"]
     fixed["status_it"] = meta["badge_it"]
     action = _clean_it_text(fixed.get("action") or fixed.get("action_it") or fixed.get("verify_next_it"))
@@ -2078,7 +2133,10 @@ def _legal_section_has_taxonomy(section: Any) -> bool:
                 "fact",
                 "attention",
                 "risk",
+                "risk_to_verify",
+                "severe_risk_to_verify",
                 "blocker",
+                "critical_blocker",
             }:
                 return True
     return False
@@ -2109,7 +2167,7 @@ def _normalize_red_flag_item(item: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         title = _legal_safe_title(_red_flag_title(item), meta["classification"], blob)
         title = _apply_scope_to_legal_title(title, pseudo)
         fixed["flag_it"] = title + "."
-        fixed["severity"] = "RED" if meta["classification"] == "blocker" else meta["status"]
+        fixed["severity"] = "BLOCKER" if meta["classification"] in {"blocker", "critical_blocker"} else meta["status"]
         fixed["classification"] = meta["classification"]
         fixed["badge_it"] = meta["badge_it"]
         if not fixed.get("action_it") or "killer" in str(fixed.get("action_it")).lower():

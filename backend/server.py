@@ -42,6 +42,10 @@ from narrator import (
     build_summary_for_client_bundle,
     scrub_customer_facing_stale_money_labels,
 )
+from narration_rejection_log import (
+    pop_rejected_narration_data,
+    store_rejected_narration_artifact,
+)
 from cost_market_ranges import market_range_for_item
 from customer_decision_contract import (
     apply_customer_decision_contract,
@@ -7986,7 +7990,14 @@ def _decision_narrator_config() -> Tuple[str, bool, Optional[str], Optional[str]
     return provider, enabled, model, OPENAI_API_KEY, None
 
 
-async def _apply_post_qa_decision_narrator(result: Dict[str, Any], *, request_id: str) -> Dict[str, Any]:
+async def _apply_post_qa_decision_narrator(
+    result: Dict[str, Any],
+    *,
+    request_id: str,
+    analysis_id: str = "",
+    case_id: str = "",
+    run_id: str = "",
+) -> Dict[str, Any]:
     provider, enabled, model, api_key, timeout_seconds = _decision_narrator_config()
     scrub_customer_facing_stale_money_labels(result)
     narrated_payload, narrator_meta = await build_decisione_rapida_narration(
@@ -7998,6 +8009,27 @@ async def _apply_post_qa_decision_narrator(result: Dict[str, Any], *, request_id
         api_key=api_key,
         timeout_seconds=timeout_seconds,
     )
+    rejected_data = pop_rejected_narration_data(narrator_meta)
+    if rejected_data:
+        try:
+            artifact_path = store_rejected_narration_artifact(
+                analysis_id=analysis_id,
+                case_id=case_id,
+                run_id=run_id,
+                provider=narrator_meta.get("provider"),
+                model=narrator_meta.get("model"),
+                narrator_meta=narrator_meta,
+                rejected_data=rejected_data,
+            )
+            logger.warning(
+                "[%s] narrator_rejected artifact=%s analysis_id=%s status=%s",
+                request_id,
+                artifact_path,
+                analysis_id,
+                narrator_meta.get("status"),
+            )
+        except Exception as artifact_exc:
+            logger.exception("[%s] narrator_rejection_artifact_failed: %s", request_id, artifact_exc)
     result["narrator_meta"] = narrator_meta
     if (
         narrated_payload
@@ -13205,10 +13237,10 @@ async def stripe_webhook(request: Request):
         return {"received": True}
 
 # ===================
-# COMPREHENSIVE PERIZIA SYSTEM PROMPT - NEXODIFY ROMA STANDARD
+# COMPREHENSIVE PERIZIA SYSTEM PROMPT - NEXODIFY STANDARD
 # ===================
 
-PERIZIA_SYSTEM_PROMPT = """YOU ARE: Nexodify Auction Scan Engine - ROMA STANDARD v1.0
+PERIZIA_SYSTEM_PROMPT = """YOU ARE: Nexodify Auction Scan Engine - STANDARD v1.0
 
 Your task is to produce an AUDIT-GRADE analysis of Italian Perizia/CTU documents for real estate auctions.
 The output must be a structured report that a legal/real estate professional can use to make informed decisions.
@@ -13224,7 +13256,7 @@ CRITICAL RULES - NON-NEGOTIABLE
 
 2. ZERO HALLUCINATIONS: Only extract what is ACTUALLY written. Never invent data.
 
-3. 12-SECTION FORMAT: Follow the exact structure below (Roma 1-12 order)
+3. 12-SECTION FORMAT: Follow the exact standard 1-12 structure below
 
 4. SEMAFORO RULES:
    - ROSSO: abusi insanabili, condono non definito, occupazione opponibile senza titolo
@@ -13445,7 +13477,7 @@ OUTPUT JSON STRUCTURE (12 SECTIONS)
   "qa_pass": {
     "status": "PASS|WARN|FAIL",
     "checks": [
-      {"code": "QA-1 Format Lock", "result": "OK|FAIL", "note": "ordine Roma 1-12 rispettato"},
+      {"code": "QA-1 Format Lock", "result": "OK|FAIL", "note": "ordine standard 1-12 rispettato"},
       {"code": "QA-2 Zero Empty Fields", "result": "OK|FAIL", "note": "dove manca dato: Non specificato in Perizia"},
       {"code": "QA-3 Page Anchors", "result": "OK|FAIL", "note": "riferimenti pagina presenti"},
       {"code": "QA-4 Money Box", "result": "OK|FAIL", "note": "voci CTU valorizzate"},
@@ -13508,7 +13540,7 @@ D) MONEY BOX HONESTY
 E) OUTPUT
 - Return ONLY valid JSON (no markdown)."""
 async def analyze_perizia_with_llm(pdf_text: str, pages: List[Dict], file_name: str, user: User, case_id: str, run_id: str, input_sha256: str) -> Dict:
-    """Analyze perizia using LLM with comprehensive ROMA STANDARD prompt"""
+    """Analyze perizia using the comprehensive standard prompt."""
     import re
     
     # ===========================================================================
@@ -13899,7 +13931,7 @@ ISTRUZIONI CRITICHE (CONTRATTO VINCOLANTE)
    - Se Money Box ha € con fonte vuota → qa_pass.status="FAIL"
    - Se Legal Killers ha SI/NO senza evidence → qa_pass.status="FAIL"
 
-8. OUTPUT: Restituisci SOLO JSON valido nel formato ROMA STANDARD.
+8. OUTPUT: Restituisci SOLO JSON valido nel formato standard.
    NON aggiungere markdown, commenti o testo extra.
 
 INIZIA L'ANALISI:"""
@@ -14529,7 +14561,7 @@ def apply_deterministic_fixes(result: Dict, pdf_text: str, pages: List[Dict], de
     
     # Standard QA checks
     qa_checks.extend([
-        {"code": "QA-1 Format Lock", "result": "OK", "note": "ordine Roma 1-12 rispettato"},
+        {"code": "QA-1 Format Lock", "result": "OK", "note": "ordine standard 1-12 rispettato"},
         {"code": "QA-2 Zero Empty Fields", "result": "OK", "note": "dove manca dato: Non specificato in Perizia"},
         {"code": "QA-3 Page Anchors", "result": "OK", "note": "riferimenti pagina presenti"},
         {"code": "QA-4 Money Box", "result": "OK" if total_min > 0 else "WARN", "note": f"totale: EUR {total_min:,}"},
@@ -16502,7 +16534,13 @@ async def analyze_perizia(request: Request, file: UploadFile = File(...)):
     apply_customer_decision_contract(result)
     _sync_lots_overview_from_result_lots(result)
     try:
-        narrator_meta = await _apply_post_qa_decision_narrator(result, request_id=request_id)
+        narrator_meta = await _apply_post_qa_decision_narrator(
+            result,
+            request_id=request_id,
+            analysis_id=analysis_id,
+            case_id=case_id,
+            run_id=run_id,
+        )
     except Exception as _narrator_exc:
         narrator_meta = {
             "enabled": True,
@@ -16975,7 +17013,7 @@ async def confirm_perizia_field(analysis_id: str, payload: ConfirmationLogReques
         request,
     )
 def generate_report_html(analysis: Dict, result: Dict) -> str:
-    """Generate HTML report from analysis - supports ROMA STANDARD format with multi-lot"""
+    """Generate HTML report from analysis with multi-lot support."""
     
     # Support both old and new format
     report_header = result.get("report_header", {})

@@ -848,7 +848,7 @@ const MessageInjectionCard = ({ msg }) => {
   );
 };
 
-// Money Box Item Component with Evidence - supports both old and ROMA STANDARD formats
+// Money Box Item Component with Evidence - supports both legacy and standard formats
 const MoneyBoxItem = ({ item }) => {
   const [expandedEvidence, setExpandedEvidence] = useState(false);
   const evidence = getItemEvidence(item);
@@ -1351,7 +1351,7 @@ const MoneyMapSummary = ({ summary, totalLabel }) => {
   );
 };
 
-// Legal critical item component with evidence - supports both old and ROMA STANDARD formats
+// Legal critical item component with evidence - supports both legacy and standard formats
 const LegalKillerItem = ({ name, data }) => {
   const status = normalizeUiSeverity(data?.status, 'AMBER');
   const evidence = getEvidence(data);
@@ -1728,10 +1728,10 @@ const AnalysisResult = () => {
     );
   }
 
-  // Extract result data - ROMA STANDARD format with backwards compatibility
+  // Extract result data - standard format with backwards compatibility
   const result = analysis.result || {};
   
-  // NEW ROMA STANDARD sections (primary)
+  // New standard sections (primary)
   const reportHeader = result.report_header || {};
   const section1 = result.section_1_semaforo_generale || {};
   const section2 = result.section_2_decisione_rapida || {};

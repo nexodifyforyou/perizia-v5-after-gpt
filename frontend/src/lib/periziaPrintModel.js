@@ -464,7 +464,7 @@ const buildLegalItems = (result) => {
     return allWeak;
   };
 
-  const pushItem = (key, title, status, detail, evidence) => {
+  const pushItem = (key, title, status, detail, evidence, badge = '') => {
     const renderedTitle = safeRender(title, '');
     const renderedDetail = safeRender(detail, '');
     if (!renderedTitle || !renderedDetail || renderedDetail === MISSING_TEXT) return;
@@ -489,6 +489,7 @@ const buildLegalItems = (result) => {
     if (existing) {
       existing.evidence = [...new Map([...existing.evidence, ...(Array.isArray(evidence) ? evidence.slice(0, 2) : [])].map((ev, idx) => [`${safeRender(ev?.page, '')}|${safeRender(ev?.quote, '')}|${idx}`, ev])).values()].slice(0, 2);
       if (renderedDetail.length > existing.detail.length) existing.detail = renderedDetail;
+      if (!existing.badge && badge) existing.badge = safeRender(badge, '');
       return;
     }
     items.push({
@@ -496,6 +497,7 @@ const buildLegalItems = (result) => {
       semanticKey,
       title: renderedTitle,
       status: normalizeSeverity(status),
+      badge: safeRender(badge, ''),
       detail: renderedDetail,
       evidence: Array.isArray(evidence) ? evidence.slice(0, 2) : [],
       kind,
@@ -515,7 +517,8 @@ const buildLegalItems = (result) => {
       pickCustomerFacingTitle(item),
       item?.status_it || item?.status,
       pickCustomerIssueText(item),
-      item?.evidence
+      item?.evidence,
+      item?.badge_it || item?.severity_label_it || item?.status_it
     );
   });
 
@@ -741,7 +744,7 @@ const buildFlags = (result, legalItems = []) => {
     }
     return '';
   };
-  const pushItem = (key, title, detail, severity, evidence) => {
+  const pushItem = (key, title, detail, severity, evidence, badge = '') => {
     const renderedTitle = safeRender(title, '');
     const renderedDetail = safeRender(detail, '');
     if (!renderedTitle || !renderedDetail) return;
@@ -755,6 +758,7 @@ const buildFlags = (result, legalItems = []) => {
       existing.evidence = mergeEvidence(existing.evidence, evidence).slice(0, 2);
       if (renderedDetail.length > existing.detail.length) existing.detail = renderedDetail;
       if (renderedTitle.length > existing.title.length) existing.title = renderedTitle;
+      if (!existing.badge && badge) existing.badge = safeRender(badge, '');
       return;
     }
     items.push({
@@ -763,6 +767,7 @@ const buildFlags = (result, legalItems = []) => {
       title: renderedTitle,
       detail: renderedDetail,
       severity: normalizeSeverity(severity),
+      badge: safeRender(badge, ''),
       evidence: Array.isArray(evidence) ? evidence.slice(0, 2) : [],
     });
   };
@@ -779,20 +784,22 @@ const buildFlags = (result, legalItems = []) => {
       pickCustomerFacingTitle(flag),
       pickCustomerFlagText(flag),
       flag?.severity || flag?.status || 'AMBER',
-      flag?.evidence
+      flag?.evidence,
+      flag?.badge_it || flag?.severity_label_it || flag?.status_it
     );
   });
 
   const canonicalPrintAttentionItems = getCanonicalTopAttentionItems(legalItems);
 
   canonicalPrintAttentionItems.forEach((item, index) => {
-    if (!item || item.kind === 'background_note' || item.kind === 'execution_context') return;
+    if (!item || item.kind === 'background_note') return;
     pushItem(
       `legal-${index}`,
       item.title,
       item.detail,
       item.status,
-      item.evidence
+      item.evidence,
+      item.badge
     );
   });
 

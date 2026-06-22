@@ -98,6 +98,36 @@ describe('periziaPrintModel', () => {
     );
   });
 
+  test('print legal and attention cards preserve promoted customer severity badges', () => {
+    const model = buildPeriziaPrintReportModel({
+      result: {
+        section_9_legal_killers: {
+          top_items: [{
+            issue_id: 'urbanistica_customer_priority',
+            killer: 'Urbanistica: non conformità grave / commerciabilità limitata',
+            status: 'RED',
+            badge_it: 'Blocco critico',
+            classification: 'blocker',
+            explanation_it: 'La perizia indica che il bene non è commerciabile fuori vendita forzata.',
+            evidence: [{ page: 9, quote: 'Il bene non è commerciabile al di fuori di vendita forzata.' }],
+          }],
+        },
+        section_11_red_flags: [{
+          issue_id: 'urbanistica_customer_priority',
+          flag_it: 'Urbanistica: non conformità grave / commerciabilità limitata',
+          severity: 'BLOCKER',
+          badge_it: 'Blocco critico',
+          action_it: 'Verificare con tecnico e legale prima dell’offerta.',
+          evidence: [{ page: 9, quote: 'Il bene non è commerciabile al di fuori di vendita forzata.' }],
+        }],
+        panoramica_contract: {},
+      },
+    });
+
+    expect(model.legal[0]).toEqual(expect.objectContaining({ badge: 'Blocco critico' }));
+    expect(model.flags[0]).toEqual(expect.objectContaining({ badge: 'Blocco critico' }));
+  });
+
   test('print cover summary prefers summary_for_client_bundle over dirty legacy summaries', () => {
     const model = buildPeriziaPrintReportModel({
       result: {

@@ -467,7 +467,7 @@ def test_legal_taxonomy_keeps_explicit_non_sanabile_as_blocker():
 
     item = result["section_9_legal_killers"]["items"][0]
     assert item["classification"] == "blocker"
-    assert item["badge_it"] == "Blocco"
+    assert item["badge_it"] == "Blocco critico"
     assert item["status"] == "RED"
     assert item["is_legal_killer"] is True
     assert item["evidence"] == [{"page": 21, "quote": "Il manufatto costituisce abuso non sanabile."}]
