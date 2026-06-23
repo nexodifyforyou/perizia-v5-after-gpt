@@ -176,7 +176,7 @@ export const buildCustomerCostPolicy = (result) => {
       __policy_key: `explicit-${index}`,
       __policy_label: label,
       __policy_amount: amount,
-      __policy_note: 'Costo buyer-side esplicitamente quantificato nella perizia.',
+      __policy_note: 'Costo a carico dell’acquirente esplicitamente quantificato nella perizia.',
       __policy_evidence: getItemEvidence(item),
     });
   });
@@ -199,7 +199,7 @@ export const buildCustomerCostPolicy = (result) => {
     groundedUnquantifiedBurdens.push({
       key: `burden-${index}`,
       label,
-      note: 'Onere buyer-side grounded in perizia, non quantificato in modo difendibile.',
+      note: 'Importo da verificare prima dell’offerta: onere indicato in perizia ma senza un importo certo da sommare al prezzo.',
       evidence,
     });
   });
@@ -211,20 +211,20 @@ export const buildCustomerCostPolicy = (result) => {
       kind: 'explicit_total',
       text: formatMoney(explicitTotal),
       note: groundedUnquantifiedBurdens.length > 0
-        ? 'Totale di soli costi buyer-side esplicitamente supportati; oneri non quantificati esclusi dal totale.'
-        : 'Totale di soli costi buyer-side esplicitamente supportati.',
+        ? 'Totale dei soli costi a carico dell’acquirente esplicitamente indicati in perizia; gli importi da verificare non sono inclusi nel totale.'
+        : 'Totale dei soli costi a carico dell’acquirente esplicitamente indicati in perizia.',
     };
   } else if (groundedUnquantifiedBurdens.length > 0) {
     totalSummary = {
       kind: 'non_quantified',
-      text: 'NON QUANTIFICATO IN PERIZIA',
-      note: 'Sono presenti oneri buyer-side grounded, ma la perizia non supporta un totale numerico difendibile.',
+      text: 'Costi extra confermati: non quantificati in perizia.',
+      note: 'La perizia non indica un importo certo da sommare automaticamente al prezzo a carico dell’aggiudicatario. Sono però presenti importi da verificare prima dell’offerta (vedi elenco).',
     };
   } else {
     totalSummary = {
       kind: 'none',
-      text: 'Nessun costo extra lato acquirente difendibile rilevato nella perizia.',
-      note: 'Deprezzamenti e segnali legali restano separati dalle superfici costi buyer-side.',
+      text: 'Costi extra confermati: non quantificati in perizia.',
+      note: 'La perizia non indica un importo certo da sommare automaticamente al prezzo a carico dell’aggiudicatario. Sono però presenti valori, deprezzamenti, formalità o importi da verificare prima dell’offerta.',
     };
   }
 
@@ -235,7 +235,7 @@ export const buildCustomerCostPolicy = (result) => {
         : '',
       amountNumeric: parseNumericEuro(valuation?.deprezzamenti_eur),
       evidence: getEvidence(valuation?.evidence?.deprezzamenti_eur),
-      note: 'Deprezzamento di perizia: non equivale automaticamente a cassa extra lato acquirente.',
+      note: 'I deprezzamenti indicati dal perito risultano già considerati nella stima/prezzo. Non vanno sommati automaticamente al prezzo.',
     },
     explicitBuyerCosts,
     groundedUnquantifiedBurdens,

@@ -31,6 +31,7 @@ import { downloadPdfBlob } from '../utils/pdfDownload';
 import { parseSurfaceNumber } from '../lib/surfaceFormatting';
 import { resolveAgibilitaDetail } from '../lib/agibilita';
 import { buildCustomerCostPolicy } from '../lib/costPolicy';
+import { buildVerificationTasks, buildCostVerificationSeed, buildFormalitiesVerificationSeed } from '../lib/verificationTasks';
 import { buildCanonicalLegalPriorityMeta, getCanonicalTopAttentionText, isWeakBackgroundLegalSummary, pickCanonicalTopAttentionItem } from '../lib/legalPriority';
 
 const API_URL = process.env.REACT_APP_BACKEND_URL;
@@ -299,9 +300,9 @@ const buildDeterministicDecisioneIt = ({ criticitaRows, occupancyStatus, moneyTo
     parts.push(`Stato occupativo rilevato: ${occClean}.`);
   }
   if (moneyTotalStatusCode === 'no_defensible_total') {
-    parts.push("Nessun totale extra a carico dell'acquirente quantificato in modo difendibile: vedere Costi.");
+    parts.push("Costi extra confermati: non quantificati in perizia. Importi da verificare nella sezione Costi.");
   } else if (moneyTotalStatusCode === 'explicit_total') {
-    parts.push("Totale buyer-side esplicitamente supportato in perizia: dettaglio in Costi.");
+    parts.push("Costi extra a carico dell'acquirente esplicitamente indicati in perizia: dettaglio in Costi.");
   } else {
     parts.push('Punti monetari nella sezione Costi.');
   }
@@ -450,7 +451,7 @@ const CANONICAL_ISSUE_GROUP_TITLES = {
 
 const CANONICAL_ISSUE_KIND_LABELS = {
   confirmed_risk: 'Rischio confermato',
-  unresolved_conflict: 'Conflitto irrisolto',
+  unresolved_conflict: 'Da approfondire',
   coverage_gap: 'Copertura documento',
   cost_uncertainty: 'Incertezza costi'
 };
@@ -1318,9 +1319,9 @@ const MoneyMapSummary = ({ summary, totalLabel }) => {
           <p className="text-[11px] text-zinc-500 mt-0.5">Quadro deterministico delle voci monetarie classificate.</p>
         </div>
         <div className="text-right">
-          <p className="text-[10px] uppercase tracking-wide text-zinc-500">Totale buyer-side</p>
+          <p className="text-[10px] uppercase tracking-wide text-zinc-500">Costi extra a carico dell'acquirente</p>
           <p className={`font-mono text-base font-semibold ${isExplicit ? 'text-gold' : 'text-amber-300'}`}>
-            {totalLabel || safeText(totalStatus.label_it, 'Non quantificato in modo difendibile')}
+            {totalLabel || safeText(totalStatus.label_it, 'Costi extra confermati: non quantificati in perizia.')}
           </p>
         </div>
       </div>
@@ -1748,8 +1749,7 @@ const AnalysisResult = () => {
   const summaryData = result.summary_for_client || {};
   const summaryBundle = result.summary_for_client_bundle || {};
   const decisionClient = result.decision_rapida_client || {};
-  const qaPass = result.qa_pass || {};
-  
+
   // Get lots array for multi-lot support
   const lots = result.lots || [];
   const isMultiLot = lots.length > 1;
@@ -1847,7 +1847,6 @@ const AnalysisResult = () => {
   const checklist = Array.isArray(section12) && section12.length > 0 ? section12 : 
                     (Array.isArray(result.checklist_pre_offerta) ? result.checklist_pre_offerta : []);
   const summary = summaryData;
-  const qa = qaPass.status ? qaPass : (result.qa || {});
   const fieldStates = result.field_states || {};
   const canonicalIssues = Array.isArray(result.issues) ? result.issues : [];
   const datiAsta = result.dati_asta || result.dati_certi_del_lotto?.dati_asta || result.dati_certi?.dati_asta;
@@ -3005,7 +3004,7 @@ const AnalysisResult = () => {
     occupazione: 'Occupancy issue',
     pignoramento_esecuzione: 'Foreclosure / execution context',
     ipoteca_formalita: 'Encumbrances to be cancelled',
-    difformita_urb_cat: 'Urban / cadastral discrepancies',
+    difformita_urb_cat: 'Difformità urbanistico-catastali',
     agibilita_docs: 'Habitability / technical documentation issue',
     accesso_vincolo: 'Access / binding restriction to verify',
     servitu_usi_civici: 'Easement / civic-use issue'
@@ -3308,7 +3307,7 @@ const AnalysisResult = () => {
 
   const redFlagKindLabels = {
     confirmed_risk: 'Rischio confermato',
-    unresolved_conflict: 'Conflitto irrisolto',
+    unresolved_conflict: 'Da approfondire',
     coverage_gap: 'Copertura documento',
     cost_uncertainty: 'Incertezza costi'
   };
@@ -3564,14 +3563,6 @@ const AnalysisResult = () => {
     fallbackText: displayDecisionEn,
     itemTextKeys: ['headlineEn', 'headline_en']
   });
-  const canonicalTopAttentionNeedle = normalizeComparableText(topAttentionLegalItem?.killer || '');
-  const summaryMentionsCanonicalIssue = canonicalTopAttentionNeedle
-    ? normalizeComparableText(summary.summary_it).includes(canonicalTopAttentionNeedle)
-    : true;
-  const summaryHasGenericDocumentFraming = /^(il documento riguarda|analisi del documento|the document pertains|analysis of document)/.test(normalizeComparableText(summary.summary_it || summary.summary_en));
-  const shouldUseCanonicalSummaryFallback = Boolean(topAttentionLegalItem) && (!summaryMentionsCanonicalIssue || summaryHasGenericDocumentFraming);
-  const summaryFallbackIt = [displayDecisionIt, decisionBulletsIt[0]].filter(Boolean).join('. ').trim();
-  const summaryFallbackEn = [displayHeaderSummaryEn, decisionBulletsEn[0]].filter(Boolean).join('. ').trim();
   const bundleSummaryIt = sanitizeHeroSummaryText(safeRender(summaryBundle.decision_summary_it, ''));
   const bundleSummaryEn = sanitizeHeroSummaryText(safeRender(summaryBundle.decision_summary_en, ''));
 
@@ -3586,6 +3577,21 @@ const AnalysisResult = () => {
   const criticitaRows = dedupeCriticitaRows(
     rawCriticitaCandidates.map((driver) => buildCriticitaRow(driver, getEvidence))
   ).slice(0, 5);
+  // Turn criticità + money/formalità signals into actionable customer verification
+  // tasks (what / why / pages). Seeds cover costs and procedural formalità even
+  // when no explicit criticità row mentions them.
+  const verificationSeedExtras = [];
+  const moneyBoxSignalPages = asArray(moneyBoxSignals)
+    .flatMap((sig) => getEvidence(sig).map((e) => Number(e?.page)));
+  if (hasMoneyBoxSignalsOnly || moneyBoxSignalPages.length > 0) {
+    verificationSeedExtras.push(buildCostVerificationSeed(moneyBoxSignalPages));
+  }
+  const formalitiesPages = asArray(moneyMapFormalities)
+    .flatMap((f) => getEvidence(f).map((e) => Number(e?.page)));
+  if (formalitiesPages.length > 0) {
+    verificationSeedExtras.push(buildFormalitiesVerificationSeed(formalitiesPages));
+  }
+  const verificationTasks = buildVerificationTasks(criticitaRows, { extras: verificationSeedExtras });
   const occupancyStatusForHero = (
     safeRender(occupativo?.status_it, '')
     || safeRender(occupativo?.status, '')
@@ -3604,18 +3610,6 @@ const AnalysisResult = () => {
   const displayHeaderDriverItSafe = bundleSummaryIt || sanitizeHeroSummaryText(displayHeaderDriverIt) || criticitaRows[0]?.text || '';
   const displayHeaderSummaryItSafe = bundleSummaryIt || sanitizeHeroSummaryText(displayHeaderSummaryIt) || deterministicDecisioneIt || '';
   const displayHeaderSummaryEnSafe = bundleSummaryEn || sanitizeHeroSummaryText(displayHeaderSummaryEn) || '';
-  const rawSummaryForClientIt = safeRender(
-    summary.summary_it,
-    shouldUseCanonicalSummaryFallback ? summaryFallbackIt : ''
-  );
-  const displaySummaryForClientIt = sanitizeHeroSummaryText(rawSummaryForClientIt)
-    || deterministicDecisioneIt
-    || 'Analisi documento completata. Punti da verificare: consultare Costi, Rischi e punti critici e Red Flags.';
-  const rawSummaryForClientEn = safeRender(
-    summary.summary_en,
-    shouldUseCanonicalSummaryFallback ? summaryFallbackEn : ''
-  );
-  const displaySummaryForClientEn = sanitizeHeroSummaryText(rawSummaryForClientEn);
 
   // Debug logging for troubleshooting
   if (process.env.NODE_ENV === 'development') {
@@ -3956,7 +3950,8 @@ const AnalysisResult = () => {
                   to={`/analysis/${analysisId}/print`}
                   target="_blank"
                   rel="noreferrer"
-                  className="inline-flex items-center gap-2 rounded-md border border-zinc-700 px-3 py-2 text-sm text-zinc-200 transition-colors hover:border-zinc-500 hover:bg-zinc-800"
+                  data-testid="print-view-btn"
+                  className="inline-flex items-center gap-2 rounded-md bg-gold px-3 py-2 text-sm font-medium text-zinc-950 transition-colors hover:bg-gold-dim"
                 >
                   <FileText className="w-4 h-4" />
                   Vista stampa
@@ -3964,8 +3959,8 @@ const AnalysisResult = () => {
                 <Button
                   disabled
                   data-testid="download-pdf-btn"
-                  title="Temporaneamente non disponibile"
-                  className="bg-gold text-zinc-950 hover:bg-gold-dim disabled:cursor-not-allowed disabled:opacity-60"
+                  title="Usa Vista stampa per salvare il report in PDF dal browser."
+                  className="border border-zinc-700 bg-transparent text-zinc-400 hover:bg-zinc-800 disabled:cursor-not-allowed disabled:opacity-60"
                 >
                   <FileDown className="w-4 h-4 mr-2" />
                   Scarica Report
@@ -3976,9 +3971,6 @@ const AnalysisResult = () => {
               </div>
               <p className="ml-auto max-w-xs text-xs text-zinc-400">
                 Sintesi operativa: priorità alle verifiche indicate.
-              </p>
-              <p className="ml-auto max-w-xs text-[11px] text-zinc-500">
-                Operational summary: prioritize the checks listed.
               </p>
             </div>
           </div>
@@ -4111,51 +4103,57 @@ const AnalysisResult = () => {
           
           {/* Overview Tab */}
           <TabsContent value="overview" className="space-y-6">
-            {/* Summary for Client - Section 12 Style */}
-            <div className="relative rounded-xl border border-zinc-800 bg-zinc-900 p-5 sm:p-6">
-              {/* QA Badge - Small Corner */}
-              <div className={`mb-4 inline-flex items-center gap-1 rounded px-2 py-1 text-xs font-mono sm:absolute sm:right-4 sm:top-4 ${
-                safeRender(qa.status) === 'PASS' ? 'bg-emerald-500/20 text-emerald-400' :
-                safeRender(qa.status) === 'FAIL' ? 'bg-red-500/20 text-red-400' :
-                'bg-amber-500/20 text-amber-400'
-              }`}>
-                {safeRender(qa.status) === 'PASS' ? (
-                  <CheckCircle className="w-3 h-3" />
-                ) : safeRender(qa.status) === 'FAIL' ? (
-                  <XCircle className="w-3 h-3" />
-                ) : (
-                  <AlertTriangle className="w-3 h-3" />
-                )}
-                <span>QA: {safeRender(qa.status, 'PENDING')}</span>
-              </div>
-              
-              <h2 className="text-xl font-serif font-bold text-zinc-100 mb-4">
-                📋 Summary for Client
-              </h2>
-              
-              {/* Recommendation - Main message */}
-              {(summary.raccomandazione || summary.summary_it) && (
-                <div className="mb-4 space-y-3">
-                  {summary.raccomandazione && (
-                    <div className="p-4 bg-amber-500/10 border-l-4 border-amber-500 rounded-r-lg">
-                      <p className="text-zinc-200 font-medium">
-                        ⚠️ {safeRender(summary.raccomandazione)}
-                      </p>
+            {/* Prossime verifiche — actionable verification tasks (what / why / pages) */}
+            <div className="rounded-xl border border-zinc-800 bg-zinc-900 p-5 sm:p-6">
+              <h2 className="text-xl font-serif font-bold text-zinc-100 mb-1">Prossime verifiche</h2>
+              <p className="text-xs text-zinc-500 mb-4">
+                Cosa controllare prima dell&apos;offerta, perché conta e dove trovarlo in perizia.
+              </p>
+
+              {verificationTasks.length > 0 ? (
+                <div className="space-y-3">
+                  {verificationTasks.map((task, idx) => (
+                    <div key={`vtask-${idx}`} className="p-4 bg-zinc-950 rounded-lg border border-zinc-800">
+                      <div className="flex flex-wrap items-start justify-between gap-2">
+                        <p className="text-sm font-semibold text-zinc-100">{task.title_it}</p>
+                        <div className="flex flex-wrap items-center gap-2">
+                          {task.urgency && (
+                            <span className="text-[10px] uppercase tracking-wide px-2 py-0.5 rounded border border-amber-500/40 text-amber-300">
+                              {task.urgency}
+                            </span>
+                          )}
+                          {task.pages.length > 0 && (
+                            <span className="inline-flex items-center gap-1 text-xs font-mono text-gold">
+                              <FileText className="w-3 h-3" />
+                              p. {task.pages.join(', ')}
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                      {task.detail_it && (
+                        <p className="text-xs text-zinc-400 italic mt-1">{task.detail_it}</p>
+                      )}
+                      <div className="mt-2 space-y-1">
+                        <p className="text-sm text-zinc-300">
+                          <span className="text-zinc-500">Cosa verificare: </span>{task.what_to_verify_it}
+                        </p>
+                        <p className="text-xs text-zinc-400">
+                          <span className="text-zinc-500">Perché conta: </span>{task.why_it_matters_it}
+                        </p>
+                        {task.who_should_verify_it && (
+                          <p className="text-xs text-zinc-500">A chi rivolgersi: {task.who_should_verify_it}</p>
+                        )}
+                      </div>
                     </div>
-                  )}
-                  
-                  <div className="p-4 bg-zinc-950 rounded-lg">
-                    <p className="text-zinc-300 leading-relaxed">{displaySummaryForClientIt}</p>
-                  </div>
-                  
-                  {displaySummaryForClientEn && (
-                    <div className="p-4 bg-zinc-950/50 rounded-lg border-l-2 border-gold/30">
-                      <p className="text-zinc-400 text-sm italic">{displaySummaryForClientEn}</p>
-                    </div>
-                  )}
+                  ))}
                 </div>
+              ) : (
+                <p className="text-sm text-zinc-400">
+                  Nessuna verifica specifica emersa dall&apos;analisi automatica. Si consiglia comunque di
+                  confermare con un tecnico i punti delle sezioni Costi e Rischi prima dell&apos;offerta.
+                </p>
               )}
-              
+
               {/* Disclaimer */}
               <div className="text-xs text-zinc-600 mt-4 pt-4 border-t border-zinc-800">
                 <p>📌 {safeRender(summary.disclaimer_it, 'Documento informativo. Non costituisce consulenza legale.')}</p>
@@ -4164,7 +4162,7 @@ const AnalysisResult = () => {
 
             {/* Case Summary - Principal Facts */}
             <div className="rounded-xl border border-zinc-800 bg-zinc-900 p-5 sm:p-6">
-              <h2 className="text-xl font-serif font-bold text-zinc-100 mb-4">Case Summary</h2>
+              <h2 className="text-xl font-serif font-bold text-zinc-100 mb-4">Riepilogo del caso</h2>
               <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
                 <PanoramicaDataValueCard
                   label="Tribunale"
@@ -4295,8 +4293,8 @@ const AnalysisResult = () => {
                 </div>
               ) : hasMoneyBoxSignalsOnly ? (
                 <div className="space-y-2">
-                  <p className="text-sm text-amber-300">Totale extra non quantificato in modo difendibile.</p>
-                  <p className="text-xs text-zinc-400">Segnali economici presenti nel Money Box da verificare:</p>
+                  <p className="text-sm text-amber-300">Costi extra confermati: non quantificati in perizia.</p>
+                  <p className="text-xs text-zinc-400">Importi da verificare prima dell'offerta:</p>
                   <ul className="space-y-1">
                     {moneyBoxSignals.slice(0, 4).map((sig, idx) => (
                       <li key={sig.code || idx} className="text-xs text-zinc-300">
@@ -4700,7 +4698,7 @@ const AnalysisResult = () => {
 
               <div className="mt-6 p-4 bg-gold/10 border border-gold/30 rounded-lg">
                 <div className="flex items-center justify-between gap-3">
-                  <span className="text-lg font-semibold text-zinc-100">Sintesi costi buyer-side</span>
+                  <span className="text-lg font-semibold text-zinc-100">Sintesi costi extra a carico dell'acquirente</span>
                   <span className={`text-right text-xl font-mono font-bold ${
                     costTotalSummary.kind === 'explicit_total' ? 'text-gold' : 'text-amber-400'
                   }`}>

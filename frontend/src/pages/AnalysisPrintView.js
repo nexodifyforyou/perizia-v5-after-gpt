@@ -201,6 +201,31 @@ const AnalysisPrintView = () => {
             <div className="print-section-header">
               <p className="print-section-index">02</p>
               <div>
+                <h2 className="print-section-title">Prossime verifiche</h2>
+                <p className="print-section-description">Cosa controllare prima dell'offerta, perche conta e dove trovarlo in perizia.</p>
+              </div>
+            </div>
+            <div className="print-list">
+              {model.verificationTasks.length > 0 ? model.verificationTasks.map((task, idx) => (
+                <div key={`vtask-${idx}`} className="print-flag-row">
+                  <div className="print-flag-meta">
+                    {task.urgency ? <span className="print-status-badge">{task.urgency}</span> : null}
+                    <p className="print-card-title">{task.title_it}</p>
+                  </div>
+                  {task.detail_it ? <p className="print-card-subvalue">{task.detail_it}</p> : null}
+                  <p className="print-card-value"><strong>Cosa verificare:</strong> {task.what_to_verify_it}</p>
+                  <p className="print-card-subvalue"><strong>Perche conta:</strong> {task.why_it_matters_it}</p>
+                  {task.who_should_verify_it ? <p className="print-card-subvalue">A chi rivolgersi: {task.who_should_verify_it}</p> : null}
+                  {task.pages.length > 0 ? <p className="print-card-subvalue">Riferimento perizia: p. {task.pages.join(', ')}</p> : null}
+                </div>
+              )) : <p className="print-empty-state">Nessuna verifica specifica emersa dall'analisi automatica. Confermare comunque con un tecnico i punti delle sezioni Costi e Verifiche legali prima dell'offerta.</p>}
+            </div>
+          </section>
+
+          <section className="print-section section-break">
+            <div className="print-section-header">
+              <p className="print-section-index">03</p>
+              <div>
                 <h2 className="print-section-title">Costi</h2>
                 <p className="print-section-description">Quadro economico sintetico con distinzione fra perizia, stime operative e voci da approfondire.</p>
               </div>
@@ -213,7 +238,7 @@ const AnalysisPrintView = () => {
                 <EvidenceFootnote evidence={model.costs.valuationAdjustments.evidence} />
               </div>
               <div className="print-info-card accent">
-                <p className="print-card-label">Sintesi costi buyer-side</p>
+                <p className="print-card-label">Sintesi costi extra a carico dell&apos;acquirente</p>
                 <p className="print-card-value">{model.costs.totalSummary.text}</p>
                 <p className="print-card-subvalue">{model.costs.totalSummary.note}</p>
               </div>
@@ -265,7 +290,7 @@ const AnalysisPrintView = () => {
 
           <section className="print-section section-break">
             <div className="print-section-header">
-              <p className="print-section-index">03</p>
+              <p className="print-section-index">04</p>
               <div>
                 <h2 className="print-section-title">Verifiche legali prioritarie</h2>
                 <p className="print-section-description">Controlli che possono incidere in modo materiale sulla convenienza o sulla fattibilita dell'acquisto.</p>
@@ -287,7 +312,7 @@ const AnalysisPrintView = () => {
 
           <section className="print-section section-break">
             <div className="print-section-header">
-              <p className="print-section-index">04</p>
+              <p className="print-section-index">05</p>
               <div>
                 <h2 className="print-section-title">Dettagli per bene</h2>
                 <p className="print-section-description">Lettura ordinata dei singoli beni con dati chiave, profili tecnici e riferimenti essenziali alla perizia.</p>
@@ -315,7 +340,7 @@ const AnalysisPrintView = () => {
 
           <section className="print-section section-break">
             <div className="print-section-header">
-              <p className="print-section-index">05</p>
+              <p className="print-section-index">06</p>
               <div>
                 <h2 className="print-section-title">Punti di attenzione</h2>
                 <p className="print-section-description">Elementi da verificare prima dell'offerta per evitare sorprese economiche o procedurali.</p>

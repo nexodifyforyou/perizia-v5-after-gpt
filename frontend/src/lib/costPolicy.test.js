@@ -88,6 +88,7 @@ describe('buildCustomerCostPolicy', () => {
     expect(policy.explicitBuyerCosts).toHaveLength(0);
     expect(policy.groundedUnquantifiedBurdens).toHaveLength(0);
     expect(policy.totalSummary.kind).toBe('none');
-    expect(policy.totalSummary.text).toBe('Nessun costo extra lato acquirente difendibile rilevato nella perizia.');
+    expect(policy.totalSummary.text).toBe('Costi extra confermati: non quantificati in perizia.');
+    expect(policy.totalSummary.text).not.toMatch(/difendibile/i);
   });
 });

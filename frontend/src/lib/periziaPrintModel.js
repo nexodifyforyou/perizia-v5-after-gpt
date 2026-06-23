@@ -8,6 +8,7 @@ import {
   pickCanonicalTopAttentionItem
 } from './legalPriority';
 import { buildCustomerCostPolicy } from './costPolicy';
+import { buildVerificationTasks, buildCostVerificationSeed } from './verificationTasks';
 import { resolveAgibilitaDetail } from './agibilita';
 
 const MISSING_TEXT = 'Non specificato in perizia';
@@ -835,6 +836,15 @@ export const buildPeriziaPrintReportModel = (rawAnalysis) => {
   const costBuckets = buildCostBuckets(result);
   const legalItems = buildLegalItems(result);
   const flags = buildFlags(result, legalItems);
+  // Actionable verification tasks (what / why / pages) from legal + flag findings,
+  // plus a cost seed when the perizia carries unquantified buyer costs to verify.
+  const verificationCostPages = (costBuckets.groundedUnquantifiedBurdens || [])
+    .flatMap((b) => (Array.isArray(b.evidence) ? b.evidence.map((e) => Number(e?.page)) : []));
+  const verificationExtras = [];
+  if (verificationCostPages.length > 0 || costBuckets.totalSummary?.kind === 'non_quantified') {
+    verificationExtras.push(buildCostVerificationSeed(verificationCostPages));
+  }
+  const verificationTasks = buildVerificationTasks([...legalItems, ...flags], { extras: verificationExtras });
   const rawCoverSummaryIt = safeRender(
     pickFirstNonEmpty(
       narratedDecision.it,
@@ -927,6 +937,7 @@ export const buildPeriziaPrintReportModel = (rawAnalysis) => {
     legal: legalItems,
     details,
     flags,
+    verificationTasks,
     disclaimer: {
       it: safeRender(summary.disclaimer_it, 'Documento informativo. Non costituisce consulenza legale. Consultare un professionista qualificato.'),
       en: safeRender(summary.disclaimer_en, 'Informational document. Not legal advice. Consult a qualified professional.'),

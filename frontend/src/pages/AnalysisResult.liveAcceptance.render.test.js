@@ -195,9 +195,16 @@ describe('AnalysisResult live customer acceptance', () => {
     await renderAnalysisResult(loadFixture(analysisId));
 
     expect(fullText()).toContain('Panoramica');
-    expect(fullText()).toContain('Legal Killers');
+    expect(fullText()).toContain('Rischi critici');
     expect(fullText()).toContain('Red Flags');
     expect(fullText()).toContain(expectedSummary);
+
+    // Customer report must not surface the duplicate client-summary card, the
+    // internal QA badge, or internal conflict-resolution wording.
+    expect(fullText()).toContain('Prossime verifiche');
+    expect(fullText()).not.toContain('Summary for Client');
+    expect(fullText()).not.toContain('QA:');
+    expect(fullText()).not.toContain('Conflitto irrisolto');
 
     for (const phrase of BANNED_PHRASES) {
       expect(fullText().toLowerCase()).not.toContain(phrase.toLowerCase());

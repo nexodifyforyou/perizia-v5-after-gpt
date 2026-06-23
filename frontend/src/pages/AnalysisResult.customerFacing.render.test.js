@@ -224,11 +224,20 @@ describe('AnalysisResult customer-facing render', () => {
     await renderAnalysisResult();
 
     expectTextPresent('Clean bundle summary');
-    expectTextPresent('Clean factual summary');
-    expectTextPresent('Clean decision guidance');
     expectTextAbsent('INTERNAL DIRTY summary');
     expectTextAbsent('INTERNAL DIRTY action');
     expectTextAbsent('INTERNAL DIRTY explanation');
+
+    // Customer report shows only the Decisione Rapida executive summary — no
+    // duplicate "Summary for Client" card and no internal QA badge.
+    expectTextAbsent('Summary for Client');
+    expectTextAbsent('Clean factual summary');
+    expectTextAbsent('QA: PASS');
+
+    // Actionable verification tasks (what / why) replace the old client-summary card.
+    expectTextPresent('Prossime verifiche');
+    expectTextPresent('Cosa verificare:');
+    expectTextPresent('Perché conta:');
 
     await clickByTestId('tab-legal');
     expectTextPresent('Clean explanation_it');
