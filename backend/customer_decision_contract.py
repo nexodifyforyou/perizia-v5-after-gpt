@@ -1249,9 +1249,53 @@ def _strip_customer_internal_provenance(value: Any) -> Any:
     return value
 
 
+_MONEY_BOX_GROUP_KEYS = (
+    "items",
+    "buyer_costs_confirmed",
+    "buyer_cost_signals_to_verify",
+    "cost_signals_to_verify",
+    "valuation_references",
+    "valuation_reference_amounts",
+    "price_references",
+    "valuation_deductions",
+    "cadastral_values",
+    "formalities_and_procedural_amounts",
+    "other_monetary_mentions",
+    "qualitative_burdens",
+    "excluded_non_buyer_cost_amounts",
+    "unsupported_or_unknown_amounts",
+)
+
+
+def _drop_customer_hidden_money_items(result: Dict[str, Any]) -> None:
+    """Remove money rows flagged ``customer_visible is False`` from every money box.
+
+    Unsafe/suppressed fragments and duplicate value echoes are retained in the
+    internal projection for audit but must never reach the customer payload.
+    """
+    def _filter_box(box: Any) -> None:
+        if not isinstance(box, dict):
+            return
+        for key in _MONEY_BOX_GROUP_KEYS:
+            rows = box.get(key)
+            if isinstance(rows, list):
+                box[key] = [
+                    row for row in rows
+                    if not (isinstance(row, dict) and row.get("customer_visible") is False)
+                ]
+
+    for key in ("money_box", "section_3_money_box"):
+        _filter_box(result.get(key))
+    cdc = result.get("customer_decision_contract")
+    if isinstance(cdc, dict):
+        _filter_box(cdc.get("money_box"))
+        _filter_box(cdc.get("section_3_money_box"))
+
+
 def sanitize_customer_facing_result(result: Dict[str, Any]) -> Dict[str, Any]:
     if not isinstance(result, dict):
         return result
+    _drop_customer_hidden_money_items(result)
     # Persisted analyses skip full contract recomputation on reads. Project from
     # existing structured evidence before and after taxonomy normalization.
     promote_severe_urbanistic_customer_warning(result)

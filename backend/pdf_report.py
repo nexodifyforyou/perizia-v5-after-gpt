@@ -426,6 +426,10 @@ def _money_group_entries(money_box: Dict[str, Any]) -> List[Tuple[str, List[Dict
         for item in rows:
             if not isinstance(item, dict):
                 continue
+            # Suppressed/unsafe money fragments are kept in the box for audit only
+            # and must never reach the customer report (HTML/PDF).
+            if item.get("customer_visible") is False:
+                continue
             key = (
                 _strip_internal_money_code(item.get("customer_title_it") or item.get("label_it") or item.get("label") or ""),
                 str(item.get("customer_amount_label") or item.get("amount_eur") or item.get("amount") or item.get("stima_euro") or ""),

@@ -1105,6 +1105,12 @@ def make_customer_money_item(
     resolver_role = str(candidate.get("semantic_base_role") or candidate.get("role") or "")
     role_label_role = _RESOLVER_ROLE_TO_LABEL_ROLE.get(resolver_role)
     role_title = _RESOLVER_ROLE_TO_TITLE_IT.get(resolver_role)
+    # A fragment demoted out of the value section must never keep its old
+    # role-based valuation/price title (e.g. "Valore di stima / mercato").
+    force_generic_title = bool(classification.get("force_generic_money_title"))
+    if force_generic_title:
+        role_title = None
+        role_label_role = None
     base_label = role_title or _GROUP_LABEL_PREFIX.get(group, "Importo monetario")
     label = f"{base_label}: {amount_text}" if amount_text else base_label
     evidence = _evidence_from_candidate(candidate)
@@ -1182,9 +1188,14 @@ def make_customer_money_item(
         "verification_note_it": str(verification_note) if verification_note else None,
         "contract_state": contract_state,
         "customer_visible_amount_status": visible_status,
+        # Customer renderers (API/HTML/PDF/frontend) must drop items flagged hidden:
+        # suppressed unsafe fragments are kept in the box for audit only.
+        "customer_visible": not bool(classification.get("customer_hidden")),
         "evidence": evidence,
         "fonte_perizia": {"value": "Perizia", "evidence": evidence},
     }
+    if classification.get("value_suppression_reason"):
+        payload["value_suppression_reason"] = str(classification.get("value_suppression_reason"))
     return payload
 
 
@@ -1748,6 +1759,200 @@ def _augment_with_evidence_quote_amounts(money_value: Dict[str, Any]) -> int:
     return added
 
 
+# --- General money plausibility / rate normalization (display-time gate) -----
+#
+# Even after role classification, a valuation/price *display* group can still
+# receive amounts that must never be shown to a customer as a valuation or a
+# price headline:
+#   - unit rates (€/mq, €/ha, €/mese) and incomes (canone) misread as totals,
+#   - percentages (deprezzamento %) carried in as if they were euro amounts,
+#   - tiny OCR/table fragments implausible against the resolved lot anchor.
+# This gate runs at money-box assembly time, after classification, and demotes
+# such candidates into the suppressed ``unsupported_or_unknown_amounts`` bucket
+# so they keep an audit trail but never appear as Prezzo / Stima. It never
+# touches buyer-cost groups and never overrides an explicit buyer obligation.
+
+_GLOBAL_LOT_KEY = "__GLOBAL__"
+# A credible valuation/price headline used as a per-lot anchor must be at least
+# this large; below it we do not trust an amount enough to anchor plausibility.
+_ANCHOR_MIN_EUR = 8000.0
+# An amount routed to a valuation/price display group that is smaller than this
+# fraction of the resolved anchor is treated as an implausible fragment.
+_ANCHOR_PLAUSIBILITY_RATIO = 0.10
+
+_VALUE_DISPLAY_GROUPS = {"valuation_references", "price_references"}
+# Customer-visible groups where a unit-rate / percentage / income marker on the
+# amount itself is enough to suppress it (kept for audit, hidden from the report).
+_MARKER_SUPPRESSION_GROUPS = {"valuation_references", "price_references", "other_monetary_mentions"}
+# Roles trusted to define a per-lot valuation/price anchor.
+_VALUE_ANCHOR_ROLES = {
+    "base_auction",
+    "final_value",
+    "final_valuation_after_deductions",
+    "judicial_sale_value",
+    "market_value",
+    "price",
+}
+# Roles whose amount, when routed to a value-display group, is subject to the
+# anchor-implausibility check. ``final_valuation_after_deductions`` is excluded
+# because it is, by construction, smaller than the gross value and is a
+# legitimate reconstructed headline; raw unknown_money fragments are included so
+# tiny table/rendita shards (e.g. €832) stop appearing as a valuation reference.
+_VALUE_IMPLAUSIBILITY_ROLES = {
+    "base_auction",
+    "final_value",
+    "judicial_sale_value",
+    "market_value",
+    "price",
+    "unknown_money",
+}
+
+# Tight-window markers (matched against the candidate's amount_raw / raw_value,
+# i.e. the few characters around the number) that prove the amount itself is a
+# unit rate or an income figure rather than a property total.
+_RATE_OR_INCOME_RAW_RE = re.compile(
+    r"€\s*/\s*(?:mq|m²|m2|ha|mc|m3|mese|mensil\w*|anno|annu\w*|settiman\w*)"
+    r"|/\s*(?:mq|m²|m2|ha|mc|m3)\b"
+    r"|\bcanon\w*|\baffitt\w*|\bindennit\w*\s+(?:di\s+)?occupazion\w*",
+    re.IGNORECASE,
+)
+_PERCENT_RAW_RE = re.compile(r"\d\s*%")
+
+_VALUE_SUPPRESSION_EXPLANATION = {
+    "percentuale": (
+        "Valore percentuale (es. deprezzamento %) non convertito in euro: non mostrato "
+        "come prezzo o valore di stima."
+    ),
+    "tariffa_unitaria_o_canone": (
+        "Importo unitario o canone (es. €/mq, canone): è una tariffa di riferimento, "
+        "non un valore totale del bene."
+    ),
+    "implausibile_rispetto_all_ancora": (
+        "Importo troppo piccolo rispetto al valore/prezzo di riferimento del lotto per "
+        "essere un valore di stima o un prezzo: probabile frammento da tabella/OCR."
+    ),
+}
+
+
+def _candidate_effective_role(candidate: Dict[str, Any]) -> str:
+    role = str(candidate.get("role") or "")
+    base_role = str(candidate.get("semantic_base_role") or "")
+    effective = base_role if role in {"component_of_total", "total_candidate", "unknown_money"} else role
+    return effective or role
+
+
+def _candidate_lot_key(candidate: Dict[str, Any]) -> str:
+    lot = candidate.get("lot_label")
+    if isinstance(lot, str) and lot.strip():
+        return lot.strip()
+    return _GLOBAL_LOT_KEY
+
+
+def _resolve_value_anchors(eligible: Iterable[Dict[str, Any]]) -> Tuple[Dict[str, float], float]:
+    """Resolve a trusted per-lot valuation/price anchor plus a global fallback.
+
+    Only genuine, non-rate, non-percentage valuation/price roles at or above
+    ``_ANCHOR_MIN_EUR`` qualify. Returns ``(per_lot_anchor, global_anchor)``.
+    Per-lot anchors are preferred; the global anchor is only a fallback for lots
+    that have no trustworthy headline of their own.
+    """
+    by_lot: Dict[str, float] = {}
+    for candidate in eligible:
+        if _candidate_effective_role(candidate) not in _VALUE_ANCHOR_ROLES:
+            continue
+        amount = _candidate_amount(candidate)
+        if amount is None or amount < _ANCHOR_MIN_EUR:
+            continue
+        raw = _normalize_text(candidate.get("amount_raw") or candidate.get("raw_value") or "")
+        if _RATE_OR_INCOME_RAW_RE.search(raw) or _PERCENT_RAW_RE.search(raw):
+            continue
+        lot = _candidate_lot_key(candidate)
+        if amount > by_lot.get(lot, 0.0):
+            by_lot[lot] = amount
+    global_anchor = max(by_lot.values()) if by_lot else 0.0
+    return by_lot, global_anchor
+
+
+def _hide_unknown_money_value_duplicates(items: List[Dict[str, Any]]) -> None:
+    """Hide raw unknown_money rows that merely duplicate a real value already shown.
+
+    When the same (amount, lot) is present both as a strong value role
+    (market_value/final_value/base_auction/...) and as a generic ``unknown_money``
+    row, the unknown_money copy is flagged ``customer_visible=False`` so the
+    customer never sees the same figure twice (once labelled, once as
+    "Importo monetario").
+    """
+    strong: set = set()
+    for item in items:
+        if str(item.get("role") or "") != "unknown_money" and item.get("amount_eur") is not None:
+            strong.add((item.get("amount_eur"), item.get("lot_id")))
+    for item in items:
+        if (
+            str(item.get("role") or "") == "unknown_money"
+            and (item.get("amount_eur"), item.get("lot_id")) in strong
+        ):
+            item["customer_visible"] = False
+            item["value_suppression_reason"] = "duplicate_of_value_anchor"
+
+
+def _value_suppression_reason(
+    candidate: Dict[str, Any],
+    group: str,
+    anchors: Tuple[Dict[str, float], float],
+) -> Optional[str]:
+    """Return a suppression reason if a customer-visible money candidate is unsafe, else None."""
+    role = _candidate_effective_role(candidate)
+    # Amounts explicitly labelled as unit references are allowed to display as a
+    # supporting rate (honest "Riferimento unitario €/mq" card), never as a total.
+    if role == "unit_price_reference":
+        return None
+    raw = _normalize_text(candidate.get("amount_raw") or candidate.get("raw_value") or "")
+    # Tight-window markers prove the amount itself is a percentage, a unit rate or
+    # an income figure regardless of role. These are suppressed from every visible
+    # money group (value/price headlines AND the generic "altri importi" bucket).
+    if group in _MARKER_SUPPRESSION_GROUPS:
+        if _PERCENT_RAW_RE.search(raw):
+            return "percentuale"
+        if _RATE_OR_INCOME_RAW_RE.search(raw):
+            return "tariffa_unitaria_o_canone"
+    # Anchor implausibility: a real valore di stima / mercato / prezzo base — or a
+    # raw fragment masquerading as one — cannot be a tiny fraction of the lot's own
+    # trusted anchor. Applies only to value/price display groups; genuine valuation
+    # deductions and decurtazione components keep their own groups and are not gated.
+    if group in _VALUE_DISPLAY_GROUPS and role in _VALUE_IMPLAUSIBILITY_ROLES:
+        by_lot, global_anchor = anchors
+        anchor = by_lot.get(_candidate_lot_key(candidate)) or global_anchor
+        amount = _candidate_amount(candidate)
+        if anchor > 0 and amount is not None and amount < anchor * _ANCHOR_PLAUSIBILITY_RATIO:
+            return "implausibile_rispetto_all_ancora"
+    return None
+
+
+def _demote_value_fragment(classification: Dict[str, Any], reason: str) -> Dict[str, Any]:
+    """Move an unsafe value-display candidate out of the Prezzo/Stima section.
+
+    The amount is kept (audit-visible) under ``other_monetary_mentions`` with a
+    neutral title so it is never rendered as a valuation/price headline.
+    """
+    classification = dict(classification)
+    classification["group"] = "other_monetary_mentions"
+    classification["buyer_relevance"] = "none"
+    classification["additive_to_extra_total"] = False
+    classification["explanation_it"] = _VALUE_SUPPRESSION_EXPLANATION.get(
+        reason, "Importo non mostrato come valore o prezzo per evitare un dato fuorviante."
+    )
+    classification["verification_note_it"] = (
+        "Verificare manualmente nella perizia originale se l'importo è un valore, una tariffa o un frammento."
+    )
+    classification["label_role"] = "suppressed_value_fragment"
+    classification["value_suppression_reason"] = reason
+    classification["force_generic_money_title"] = True
+    # Unsafe fragments are suppressed from every customer-facing surface, kept in
+    # the box only for audit/regression. Never shown as a generic money mention.
+    classification["customer_hidden"] = True
+    return classification
+
+
 def _build_projected_money_box(money_value: Dict[str, Any], legacy_result: Dict[str, Any]) -> Tuple[Optional[Dict[str, Any]], Dict[str, Any]]:
     raw_candidates = money_value.get("money_candidates") if isinstance(money_value.get("money_candidates"), list) else []
     candidates = [candidate for candidate in raw_candidates if isinstance(candidate, dict)]
@@ -1793,6 +1998,11 @@ def _build_projected_money_box(money_value: Dict[str, Any], legacy_result: Dict[
 
     eligible = sorted(eligible, key=_priority)
 
+    # Resolve trusted per-lot/global valuation anchors once, then use them to
+    # suppress implausible fragments, unit rates and percentages from the
+    # customer value/price display groups.
+    value_anchors = _resolve_value_anchors(eligible)
+
     grouped: Dict[str, List[Dict[str, Any]]] = {key: [] for key in _GROUP_LIMITS}
     counters: Dict[str, int] = {key: 0 for key in _GROUP_LIMITS}
     classified_total_candidate: Optional[Dict[str, Any]] = None
@@ -1810,6 +2020,13 @@ def _build_projected_money_box(money_value: Dict[str, Any], legacy_result: Dict[
         if group not in grouped:
             group = "other_monetary_mentions"
             classification["group"] = group
+        # General money normalization: never show a unit rate, a percentage or an
+        # anchor-implausible fragment as a Prezzo / Stima. Demote to the suppressed
+        # bucket (kept for audit, hidden from the value/price display).
+        suppression_reason = _value_suppression_reason(candidate, group, value_anchors)
+        if suppression_reason:
+            classification = _demote_value_fragment(classification, suppression_reason)
+            group = "other_monetary_mentions"
         if counters[group] >= _GROUP_LIMITS[group]:
             continue
         counters[group] += 1
@@ -1846,6 +2063,11 @@ def _build_projected_money_box(money_value: Dict[str, Any], legacy_result: Dict[
     buyer_signals = _consolidate_repeated_items(grouped["buyer_cost_signals_to_verify"])
     valuation_refs = _consolidate_repeated_items(grouped["valuation_references"])
     price_refs = _consolidate_repeated_items(grouped["price_references"])
+    # Hide raw unknown_money rows that merely echo a value already shown with a
+    # proper label (e.g. a duplicate €312.708 "Importo monetario" next to the real
+    # "Valore di stima / mercato: € 312.708").
+    _hide_unknown_money_value_duplicates(valuation_refs)
+    _hide_unknown_money_value_duplicates(price_refs)
     valuation_deds = _consolidate_repeated_items(grouped["valuation_deductions"])
     cadastral_vals = _consolidate_repeated_items(grouped["cadastral_values"])
     formalities = _consolidate_repeated_items(grouped["formalities_and_procedural_amounts"])
