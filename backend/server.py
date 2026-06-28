@@ -20626,6 +20626,18 @@ async def beta_dashboard_summary(request: Request):
 # Include the router in the main app
 app.include_router(api_router)
 
+# Correctness Mode v2 (isolated, feature-flagged, admin-only by default).
+# Registered beside the existing pipeline; never replaces or weakens it.
+# Wrapped defensively so a problem here can never break app startup.
+try:
+    from correctness_v2.api import router as correctness_v2_router
+
+    # api_router (prefix="/api") is already included above, so register the
+    # correctness_v2 router directly on the app under the same /api prefix.
+    app.include_router(correctness_v2_router, prefix="/api")
+except Exception as _cv2_exc:  # pragma: no cover - defensive startup guard
+    logger.warning(f"correctness_v2 router not registered: {_cv2_exc}")
+
 def custom_openapi():
     if app.openapi_schema:
         return app.openapi_schema
