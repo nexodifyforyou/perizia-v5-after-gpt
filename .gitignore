@@ -122,6 +122,10 @@ backend/*.bak*
 # Runtime uploads (never commit)
 uploads/
 
+# Correctness Mode v2 job artifacts (runtime, never commit)
+_correctness_v2/
+backend/_correctness_v2/
+
 # Test fixtures (versioned)
 !backend/tests/fixtures/perizie/
 !backend/tests/fixtures/perizie/1859886_c_perizia.pdf
