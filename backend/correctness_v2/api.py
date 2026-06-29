@@ -22,7 +22,7 @@ from typing import Any, Dict, List
 
 from fastapi import APIRouter, HTTPException, Request
 
-from . import artifacts, feature_flags, job_status
+from . import artifacts, feature_flags, job_status, openai_client
 from .orchestrator import start_job
 
 router = APIRouter(prefix="/analysis/perizia", tags=["correctness_v2"])
@@ -98,7 +98,14 @@ async def correctness_v2_start(analysis_id: str, request: Request) -> Dict[str, 
     def _page_loader(aid: str) -> List[Dict[str, Any]]:
         return server._load_pages_for_analysis(aid, pages_count)
 
-    status = start_job(analysis_id, _page_loader, is_admin=is_admin)
+    # Inject the real OpenAI caller so the job runs the full Step 2 pipeline
+    # (analyst -> validator -> contract). Quality-blocked jobs never reach it.
+    status = start_job(
+        analysis_id,
+        _page_loader,
+        is_admin=is_admin,
+        openai_caller=openai_client.call_openai_json,
+    )
 
     # Admin responses keep raw artifact paths; non-admin would be sanitized, but
     # this endpoint is admin-only so we return the full diagnostic payload.

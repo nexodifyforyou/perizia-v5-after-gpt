@@ -32,6 +32,13 @@ JOB_STATUS_FILE = "job_status.json"
 INPUT_PAGES_FILE = "input_pages.json"
 PDF_QUALITY_FILE = "pdf_quality_report.json"
 ERROR_FILE = "error.json"
+# Step 2 artifacts.
+ANALYST_WORKSHEET_FILE = "analyst_worksheet.json"
+VERIFIED_CONTRACT_FILE = "verified_report_contract.json"
+OPENAI_REQUEST_FILE = "openai_request.json"
+OPENAI_RESPONSE_FILE = "openai_response.json"
+VALIDATOR_REPORT_FILE = "validator_report.json"
+LOT_REPORT_FILE = "lot_report.json"
 
 
 def _now_iso() -> str:
@@ -101,6 +108,31 @@ def save_pdf_quality_report(job_id: str, report: Dict[str, Any]) -> str:
 
 def save_error(job_id: str, error_payload: Dict[str, Any]) -> str:
     return save_json(job_id, ERROR_FILE, error_payload)
+
+
+def save_analyst_worksheet(job_id: str, worksheet: Dict[str, Any]) -> str:
+    return save_json(job_id, ANALYST_WORKSHEET_FILE, worksheet)
+
+
+def save_verified_contract(job_id: str, contract: Dict[str, Any]) -> str:
+    return save_json(job_id, VERIFIED_CONTRACT_FILE, contract)
+
+
+def save_openai_request(job_id: str, request_payload: Dict[str, Any]) -> str:
+    """Persist the redacted OpenAI request (must NOT contain secrets)."""
+    return save_json(job_id, OPENAI_REQUEST_FILE, request_payload)
+
+
+def save_openai_response(job_id: str, response_payload: Dict[str, Any]) -> str:
+    return save_json(job_id, OPENAI_RESPONSE_FILE, response_payload)
+
+
+def save_validator_report(job_id: str, report: Dict[str, Any]) -> str:
+    return save_json(job_id, VALIDATOR_REPORT_FILE, report)
+
+
+def save_lot_report(job_id: str, report: Dict[str, Any]) -> str:
+    return save_json(job_id, LOT_REPORT_FILE, report)
 
 
 def read_json(job_id: str, filename: str) -> Optional[Dict[str, Any]]:
