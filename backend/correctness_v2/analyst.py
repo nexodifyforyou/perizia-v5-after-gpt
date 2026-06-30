@@ -171,10 +171,32 @@ def build_messages(
     pages: List[Dict[str, Any]],
     *,
     max_context_chars: Optional[int] = None,
+    target_lot: Optional[str] = None,
 ) -> List[Dict[str, str]]:
     budget = max_context_chars or openai_client.resolve_max_context_chars()
     doc = _pages_text(pages, budget)
+
+    # When re-analyzing a single selected lot, instruct the model to focus on ONLY
+    # that lot. The page subset is already isolated, but preamble/common pages can
+    # still NAME other lots — without this the model tends to re-list every lot it
+    # sees in lots[], which then trips the multi-lot validator. Generic: the lot id
+    # is whatever the caller selected; no document is hardcoded.
+    if target_lot:
+        focus = (
+            f"STAI ANALIZZANDO ESCLUSIVAMENTE IL LOTTO {target_lot}. Le pagine fornite "
+            f"sono il contesto isolato del Lotto {target_lot} (più eventuali pagine comuni "
+            "all'intera procedura). Estrai SOLO i dati del Lotto "
+            f"{target_lot}: indirizzo, diritto, occupazione, conformità, formalità e importi "
+            f"del Lotto {target_lot}. IGNORA qualsiasi dato specifico di altri lotti anche se "
+            "citato nelle pagine comuni. NON popolare l'array 'lots' con altri lotti: al "
+            f"massimo una sola voce per il Lotto {target_lot}. Non fondere mai importi o "
+            "caratteristiche di lotti diversi.\n\n"
+        )
+    else:
+        focus = ""
+
     user = (
+        f"{focus}"
         "Analizza la seguente perizia ed estrai il foglio di lavoro JSON secondo "
         "lo schema. Cita sempre le pagine in 'evidence_pages'.\n\n"
         f"{doc}"
@@ -515,6 +537,7 @@ def run_analyst(
     openai_caller: Optional[OpenAICaller] = None,
     model: Optional[str] = None,
     max_context_chars: Optional[int] = None,
+    target_lot: Optional[str] = None,
 ) -> AnalystResult:
     """
     Generate and normalize the analyst worksheet.
@@ -528,7 +551,7 @@ def run_analyst(
     """
     caller = openai_caller or openai_client.call_openai_json
     resolved_model = model or openai_client.resolve_model()
-    messages = build_messages(pages, max_context_chars=max_context_chars)
+    messages = build_messages(pages, max_context_chars=max_context_chars, target_lot=target_lot)
     redacted = openai_client.redacted_request(messages, model=resolved_model)
 
     try:

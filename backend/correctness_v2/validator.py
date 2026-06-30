@@ -518,7 +518,7 @@ def _check_lots(worksheet: Dict[str, Any], report: _Report) -> None:
     diverts such jobs to manual review, and this check is the defense-in-depth
     net for any direct validation.
     """
-    lot_ids = lots_mod.worksheet_lot_ids(worksheet)
+    lot_ids = lots_mod.distinct_lots(worksheet)
     if len(lot_ids) >= 2:
         report.error(
             "MULTI_LOT_SELECTION_UNCLEAR",
@@ -526,11 +526,13 @@ def _check_lots(worksheet: Dict[str, Any], report: _Report) -> None:
             f"worksheet mixes {len(lot_ids)} distinct lots ({', '.join(lot_ids)}); a single "
             "lot must be selected before a customer contract can be built (no lot blending)",
         )
-    for field in lots_mod.contaminated_flat_fields(worksheet):
+    # Any single worksheet string that splices two lots together is contamination —
+    # this covers address/ownership AND money/occupancy/compliance/formality fields.
+    for field in lots_mod.contaminated_worksheet_fields(worksheet):
         report.error(
             "LOT_CONTAMINATION",
             field["path"],
-            f"flat field '{field['path']}' mixes data from lots {field['lot_ids']}",
+            f"field '{field['path']}' mixes data from lots {field['lot_ids']}",
         )
 
 
@@ -547,6 +549,29 @@ def _check_regularizable_not_blocking(worksheet: Dict[str, Any], report: _Report
                 f"area '{item.get('area')}' is regularizable with cost/timing but marked as "
                 "blocking saleability",
             )
+
+
+def check_selected_lot_present(lot_ids: List[str], selected_lot_id: Any) -> Optional[Dict[str, Any]]:
+    """Return a violation dict if ``selected_lot_id`` is not among the document's lots.
+
+    Generic helper used by the orchestrator before re-analyzing a chosen lot: a
+    selected lot that does not exist in a multi-lot document must fail closed rather
+    than silently analyzing the wrong (or no) lot.
+    """
+    from . import lots as _lots
+    want = _lots.normalize_lot_token(selected_lot_id) or str(selected_lot_id or "").strip()
+    known = {str(x) for x in (lot_ids or [])}
+    if want and want in known:
+        return None
+    return {
+        "code": "SELECTED_LOT_NOT_FOUND",
+        "severity": "error",
+        "path": "selected_lot_id",
+        "detail": (
+            f"selected lot '{selected_lot_id}' (normalized '{want}') is not among the "
+            f"document's lots ({sorted(known)})"
+        ),
+    }
 
 
 # ---------------------------------------------------------------------------

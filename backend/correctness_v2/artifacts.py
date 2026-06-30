@@ -39,6 +39,12 @@ OPENAI_REQUEST_FILE = "openai_request.json"
 OPENAI_RESPONSE_FILE = "openai_response.json"
 VALIDATOR_REPORT_FILE = "validator_report.json"
 LOT_REPORT_FILE = "lot_report.json"
+# Step 3 lot-aware artifacts.
+LOT_INDEX_FILE = "lot_index.json"
+PER_LOT_PACKETS_FILE = "per_lot_packets.json"
+SELECTED_LOT_CONTEXT_FILE = "selected_lot_context.json"
+LOT_SELECTION_REQUIRED_FILE = "lot_selection_required.json"
+ANALYZE_ALL_RESULT_FILE = "analyze_all_result.json"
 
 
 def _now_iso() -> str:
@@ -133,6 +139,33 @@ def save_validator_report(job_id: str, report: Dict[str, Any]) -> str:
 
 def save_lot_report(job_id: str, report: Dict[str, Any]) -> str:
     return save_json(job_id, LOT_REPORT_FILE, report)
+
+
+def save_lot_index(job_id: str, index: Dict[str, Any]) -> str:
+    return save_json(job_id, LOT_INDEX_FILE, index)
+
+
+def save_per_lot_packets(job_id: str, packets: Dict[str, Any]) -> str:
+    return save_json(job_id, PER_LOT_PACKETS_FILE, packets)
+
+
+def save_selected_lot_context(job_id: str, context: Dict[str, Any]) -> str:
+    return save_json(job_id, SELECTED_LOT_CONTEXT_FILE, context)
+
+
+def save_lot_selection_required(job_id: str, payload: Dict[str, Any]) -> str:
+    return save_json(job_id, LOT_SELECTION_REQUIRED_FILE, payload)
+
+
+def save_analyze_all_result(job_id: str, payload: Dict[str, Any]) -> str:
+    return save_json(job_id, ANALYZE_ALL_RESULT_FILE, payload)
+
+
+def save_lot_subartifact(job_id: str, lot_id: str, filename: str, data: Dict[str, Any]) -> str:
+    """Save a per-lot artifact under jobs/{job_id}/lots/{lot_id}/{filename} (analyze_all)."""
+    safe_lot = str(lot_id).replace("/", "_").replace("..", "_")
+    rel = os.path.join("lots", safe_lot, filename)
+    return save_json(job_id, rel, data)
 
 
 def read_json(job_id: str, filename: str) -> Optional[Dict[str, Any]]:

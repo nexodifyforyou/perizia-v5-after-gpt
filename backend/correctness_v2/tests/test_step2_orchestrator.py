@@ -99,27 +99,34 @@ def test_validation_failure_blocks_contract(artifacts_root):
     assert not (job_dir / artifacts.VERIFIED_CONTRACT_FILE).exists()
 
 
-def test_multi_lot_gate_needs_manual_review_no_blended_contract(artifacts_root):
-    # A worksheet that blends two lots must NOT become a single contract; the job
-    # stops at NEEDS_MANUAL_REVIEW with a per-lot index, fail-closed.
+def test_multi_lot_no_selection_returns_lot_selection_required(artifacts_root):
+    # A multi-lot document with no chosen lot must NOT be blended into one contract;
+    # the job returns LOT_SELECTION_REQUIRED (expected behavior, not a failure) with a
+    # per-lot index + packets so the caller can choose a lot or analyze_all.
     caller = fake_caller_returning(make_multilot_worksheet())
     status = orchestrator.start_job(
         "an_multilot", _loader(GENERIC_PERIZIA_PAGES), is_admin=True, openai_caller=caller
     )
-    assert status["status"] == JobStatus.NEEDS_MANUAL_REVIEW, status
+    assert status["status"] == JobStatus.LOT_SELECTION_REQUIRED, status
     assert status["multi_lot"] is True
     assert status["lot_ids"] == ["1", "2"]
-    assert status["manual_review_required"] is True
     assert status["selected_lot"] is None
     assert status["contract_generated"] is False
     assert status["safe_to_show_customer"] is False
-    assert status["reason_code"] == "MULTI_LOT_MANUAL_REVIEW_REQUIRED"
-    assert status["lot_index"]  # per-lot index preserved
+    assert status["reason_code"] == "LOT_SELECTION_REQUIRED"
+    assert status["blended_report_prevented"] is True
+    assert status["available_lots"]  # per-lot index preserved
+    # analyze_all is advertised as a supported action.
+    actions = {a["action"]: a for a in status["available_actions"]}
+    assert actions["analyze_all"]["analyze_all_supported"] is True
 
     job_dir = artifacts.job_dir(status["job_id"])
-    # No blended contract; the lot report IS persisted.
+    # No blended contract; lot index + packets + selection artifact ARE persisted.
     assert not (job_dir / artifacts.VERIFIED_CONTRACT_FILE).exists()
     assert (job_dir / artifacts.LOT_REPORT_FILE).exists()
+    assert (job_dir / artifacts.LOT_INDEX_FILE).exists()
+    assert (job_dir / artifacts.PER_LOT_PACKETS_FILE).exists()
+    assert (job_dir / artifacts.LOT_SELECTION_REQUIRED_FILE).exists()
     assert (job_dir / artifacts.ANALYST_WORKSHEET_FILE).exists()
 
 
