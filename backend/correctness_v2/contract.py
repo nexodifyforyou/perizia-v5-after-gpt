@@ -522,6 +522,52 @@ def _lot_summary(lot_report: Optional[Dict[str, Any]]) -> Dict[str, Any]:
     }
 
 
+_AUCTION_TERM_FIELDS = {
+    "prezzo_base_asta": "Prezzo base d'asta",
+    "offerta_minima": "Offerta minima",
+    "rialzo_minimo": "Rialzo minimo",
+    "cauzione": "Cauzione",
+}
+
+
+def _merge_shared_summary_rows(
+    money: Dict[str, Any], shared_summary_rows: List[Dict[str, Any]]
+) -> None:
+    """Merge the selected lot's deterministic shared-summary rows into the money view.
+
+    These rows come from :func:`lot_packets.project_shared_summary_rows`: money
+    lines on shared multi-lot pages that are clearly tagged with THIS lot's id
+    (e.g. "LOTTO 1 - PREZZO BASE D'ASTA: € 64.198,00"). They are document text
+    read deterministically — not model claims — so they carry their own explicit
+    textual support. A row is only added when no approximately-equal amount is
+    already visible in the same section, so nothing is double-listed.
+    """
+    for row in shared_summary_rows or []:
+        amount = row.get("amount")
+        if amount is None:
+            continue
+        field = row.get("field")
+        out_row = {
+            "label": row.get("label") or "Importo da tabella riassuntiva",
+            "amount": float(amount),
+            "kind": "auction_term" if field in _AUCTION_TERM_FIELDS else "lot_summary_value",
+            "source": "shared_summary_projection",
+            "evidence_pages": list(row.get("evidence_pages") or []),
+        }
+        if field in _AUCTION_TERM_FIELDS:
+            section = money["auction_terms"]
+        else:
+            section = money["valuation_chain"]
+        already = any(
+            r.get("amount") is not None and _approx_equal(float(r["amount"]), float(amount))
+            for r in section
+        )
+        if already:
+            continue
+        section.append(out_row)
+        money["money_table"].append(out_row)
+
+
 def build_contract(
     *,
     worksheet: Dict[str, Any],
@@ -530,9 +576,11 @@ def build_contract(
     job_id: str,
     source_pdf_quality_status: str,
     lot_report: Optional[Dict[str, Any]] = None,
+    shared_summary_rows: Optional[List[Dict[str, Any]]] = None,
 ) -> Dict[str, Any]:
     """Build the deterministic, renderer-ready verified report contract."""
     money = _money_sections(worksheet, validator_report)
+    _merge_shared_summary_rows(money, shared_summary_rows or [])
     return {
         "schema_version": CONTRACT_SCHEMA_VERSION,
         "analysis_id": analysis_id,
@@ -549,6 +597,9 @@ def build_contract(
         "procedure_cancelled_formalities": money["procedure_cancelled_formalities"],
         "uncertain_money": money["uncertain_money"],
         "needs_manual_review_money": money["needs_manual_review_money"],
+        # Raw lot-tagged rows projected from shared multi-lot summary pages
+        # (deterministic; this lot only). Kept verbatim for provenance.
+        "shared_summary_money": [dict(r) for r in shared_summary_rows or []],
         "legal_formalities": _legal_formalities_view(worksheet),
         "buyer_action_checklist": _buyer_action_checklist(worksheet),
         "evidence_index": _evidence_index(worksheet),

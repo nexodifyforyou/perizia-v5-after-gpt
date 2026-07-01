@@ -28,6 +28,7 @@ normal and are tracked per lot, never treated as separate lots.
 
 from __future__ import annotations
 
+import re
 from typing import Any, Dict, List, Optional
 
 from . import lots as lots_mod
@@ -225,6 +226,152 @@ def _bene_ids_for_pages(pages: Optional[List[Dict[str, Any]]], page_numbers: Lis
 
 
 # ---------------------------------------------------------------------------
+# Shared-summary row projection (lot-tagged rows on shared pages -> lot packets)
+# ---------------------------------------------------------------------------
+# A shared multi-lot page (summary table, TOC, "schema riassuntivo") is excluded
+# wholesale from single-lot re-analysis to prevent contamination — but its ROWS
+# are often clearly lot-tagged ("LOTTO 1 - PREZZO BASE D'ASTA: € 64.198,00").
+# Those rows are projected deterministically into the matching lot's money so the
+# information is preserved without ever re-entering the model. A row whose lot
+# association is unclear is preserved under uncertain_money (manual review),
+# never blended into a lot.
+
+# Euro amounts in Italian notation: "€ 64.198,00", "€1.234", "Euro 950,50".
+_AMOUNT_RE = re.compile(
+    r"(?:€|\beuro\b)\s*(\d{1,3}(?:[.\s]\d{3})+(?:,\d{1,2})?|\d+(?:,\d{1,2})?)",
+    re.IGNORECASE,
+)
+# Lot tag with position info (works on the raw line; the pattern is accent-free).
+_LOT_TAG_RE = re.compile(r"\blott[oi]\s+(?:n[.°ºo]*\s*)?(\d{1,3})\b", re.IGNORECASE)
+# Trailing TOC dot-leaders ("....... 41") stripped from row labels.
+_DOT_LEADER_RE = re.compile(r"\.{3,}\s*\d*\s*$")
+
+_LABEL_CHARS = 140
+
+# Generic canonical money fields recognized from a row's own words (keyword ->
+# field). Checked in order; never document-specific.
+_ROW_FIELD_KEYWORDS = [
+    ("offerta minima", "offerta_minima"),
+    ("rialzo minimo", "rialzo_minimo"),
+    ("cauzione", "cauzione"),
+    ("prezzo base", "prezzo_base_asta"),
+    ("base d'asta", "prezzo_base_asta"),
+    ("base dasta", "prezzo_base_asta"),
+    ("valore di mercato", "market_value"),
+    ("valore di vendita", "sale_value"),
+    ("stato di fatto", "current_state_value"),
+]
+
+
+def _parse_it_amount(raw: str) -> Optional[float]:
+    try:
+        return float(raw.replace(" ", "").replace(".", "").replace(",", "."))
+    except (TypeError, ValueError):
+        return None
+
+
+def _row_field(label: str) -> Optional[str]:
+    n = lots_mod._norm(label)
+    for keyword, field in _ROW_FIELD_KEYWORDS:
+        if keyword in n:
+            return field
+    return None
+
+
+def _clean_label(text: str) -> str:
+    label = _DOT_LEADER_RE.sub("", text.strip())
+    label = _AMOUNT_RE.sub("", label).strip(" .:;-–")
+    return label[:_LABEL_CHARS] or "Importo da tabella riassuntiva"
+
+
+def project_shared_summary_rows(
+    pages: Optional[List[Dict[str, Any]]],
+    segmentation: Dict[str, Any],
+) -> Dict[str, Any]:
+    """Project lot-tagged money rows found on shared multi-lot pages.
+
+    Scans every shared page line by line. An amount is assigned to a lot ONLY
+    when its row is clearly tagged with exactly that one lot (single lot tag on
+    the line, or — on a line naming several lots — the nearest lot tag BEFORE the
+    amount). Everything else is preserved as uncertain. Rows repeated across
+    shared pages (TOC + summary) are deduplicated with unioned evidence.
+
+    Returns ``{"projected": {lot_id: [row, ...]}, "uncertain": [row, ...]}``
+    where each row is ``{label, amount, field, evidence_pages, source}``
+    (``field`` is a canonical money field or None).
+    """
+    shared = set(segmentation.get("shared_pages", []))
+    projected: Dict[str, Dict[Any, Dict[str, Any]]] = {}
+    uncertain: Dict[Any, Dict[str, Any]] = {}
+
+    def add(bucket: Dict[Any, Dict[str, Any]], key: Any, row: Dict[str, Any], page: int) -> None:
+        existing = bucket.get(key)
+        if existing is None:
+            bucket[key] = row
+        elif page not in existing["evidence_pages"]:
+            existing["evidence_pages"].append(page)
+
+    for idx, entry in enumerate(pages or [], start=1):
+        num = _page_number(entry, idx)
+        if num not in shared:
+            continue
+        for line in _page_text(entry).splitlines():
+            amounts = list(_AMOUNT_RE.finditer(line))
+            if not amounts:
+                continue
+            tags = list(_LOT_TAG_RE.finditer(line))
+            for m in amounts:
+                amount = _parse_it_amount(m.group(1))
+                if amount is None:
+                    continue
+                lot_id: Optional[str] = None
+                segment = line
+                if len(tags) == 1:
+                    lot_id = tags[0].group(1)
+                elif len(tags) >= 2:
+                    # Nearest lot tag BEFORE the amount; its segment ends at the
+                    # next lot tag so labels never mix two lots.
+                    before = [t for t in tags if t.start() < m.start()]
+                    if before:
+                        tag = before[-1]
+                        nxt = next((t for t in tags if t.start() > tag.start()), None)
+                        if nxt is None or m.start() < nxt.start():
+                            lot_id = tag.group(1)
+                            segment = line[tag.start(): nxt.start() if nxt else len(line)]
+                label = _clean_label(segment)
+                field = _row_field(segment)
+                if lot_id is not None:
+                    row = {
+                        "label": label,
+                        "amount": amount,
+                        "field": field,
+                        "evidence_pages": [num],
+                        "source": "shared_summary_projection",
+                    }
+                    add(projected.setdefault(lot_id, {}),
+                        (field or lots_mod._norm(label), round(amount, 2)), row, num)
+                else:
+                    row = {
+                        "label": label,
+                        "amount": amount,
+                        "field": field,
+                        "evidence_pages": [num],
+                        "source": "shared_summary_projection",
+                        "manual_review": True,
+                        "reason": (
+                            "Importo su pagina riassuntiva multi-lotto senza riga "
+                            "chiaramente associata a un lotto."
+                        ),
+                    }
+                    add(uncertain, (lots_mod._norm(label), round(amount, 2)), row, num)
+
+    return {
+        "projected": {lid: list(rows.values()) for lid, rows in sorted(projected.items())},
+        "uncertain": list(uncertain.values()),
+    }
+
+
+# ---------------------------------------------------------------------------
 # Strict per-lot money assignment (evidence-page -> lot, never blended)
 # ---------------------------------------------------------------------------
 _GLOBAL = "__global__"
@@ -324,6 +471,7 @@ def _empty_lot_money() -> Dict[str, Any]:
     section["deductions"] = []
     section["buyer_side_costs"] = []
     section["procedure_cancelled_formalities"] = []
+    section["shared_summary_rows"] = []
     return section
 
 
@@ -336,6 +484,7 @@ def _row(label: str, amount: Any, evidence_pages: Any, **extra) -> Dict[str, Any
 def build_lot_money(
     worksheet: Dict[str, Any],
     segmentation: Dict[str, Any],
+    pages: Optional[List[Dict[str, Any]]] = None,
 ) -> Dict[str, Any]:
     """Assign every monetary value to a lot, to global/common, or to uncertain_money.
 
@@ -344,6 +493,11 @@ def build_lot_money(
     mixed pages, or with no evidence are NEVER blended into a lot — they are
     preserved under ``uncertain_money`` with their evidence and a manual_review
     flag. No significant amount is dropped.
+
+    When ``pages`` is provided, clearly lot-tagged rows on shared summary pages
+    are additionally projected into the matching lot (see
+    :func:`project_shared_summary_rows`) — never blended, unclear rows stay
+    uncertain.
     """
     page_lot = _page_lot_map(segmentation)
     money = worksheet.get("money") or {}
@@ -430,12 +584,41 @@ def build_lot_money(
                  reason=u.get("reason") or "Importo segnalato come incerto dall'analista.")
         )
 
+    # 6) Shared-summary projection: clearly lot-tagged rows on shared multi-lot
+    #    pages land in their lot (rows + canonical field fill-in when the lot has
+    #    no value yet); unclear rows are preserved as uncertain (deduplicated
+    #    against amounts already listed there).
+    if pages:
+        proj = project_shared_summary_rows(pages, segmentation)
+        for lid, rows in proj["projected"].items():
+            section = by_lot.setdefault(lid, _empty_lot_money())
+            for row in rows:
+                section["shared_summary_rows"].append(dict(row))
+                field = row.get("field")
+                if field and section.get(field) is None:
+                    section[field] = {
+                        "amount": row["amount"],
+                        "evidence_pages": list(row["evidence_pages"]),
+                        "source": "shared_summary_projection",
+                    }
+        for row in proj["uncertain"]:
+            if any(_amount_close(row["amount"], u.get("amount")) for u in uncertain):
+                continue
+            uncertain.append(dict(row, kind="uncertain"))
+
     return {
         "by_lot": by_lot,
         "global": global_money,
         "uncertain_money": uncertain,
         "needs_manual_review_money": bool(uncertain),
     }
+
+
+def _amount_close(a: Any, b: Any) -> bool:
+    try:
+        return abs(float(a) - float(b)) <= 1.0
+    except (TypeError, ValueError):
+        return False
 
 
 def build_lot_index(
@@ -455,7 +638,7 @@ def build_lot_index(
     lot_ids = lot_report.get("lot_ids") or sorted(
         segmentation.get("lot_pages", {}).keys(), key=lambda s: int(s) if s.isdigit() else 1_000_000
     )
-    lot_money = build_lot_money(worksheet, segmentation)
+    lot_money = build_lot_money(worksheet, segmentation, pages)
 
     lots_out: List[Dict[str, Any]] = []
     for lid in lot_ids:
@@ -536,7 +719,7 @@ def build_per_lot_packets(
     lot_ids = lot_report.get("lot_ids") or sorted(
         segmentation.get("lot_pages", {}).keys(), key=lambda s: int(s) if s.isdigit() else 1_000_000
     )
-    lot_money = build_lot_money(worksheet, segmentation)
+    lot_money = build_lot_money(worksheet, segmentation, pages)
 
     global_pages = segmentation.get("global_pages", [])
     shared_pages = segmentation.get("shared_pages", [])
@@ -655,7 +838,7 @@ def build_selected_lot_context(
     lot_money = _empty_lot_money()
     global_money = _empty_lot_money()
     if worksheet is not None:
-        money = build_lot_money(worksheet, segmentation)
+        money = build_lot_money(worksheet, segmentation, pages)
         lot_money = money["by_lot"].get(lot_id, _empty_lot_money())
         global_money = money["global"]
 

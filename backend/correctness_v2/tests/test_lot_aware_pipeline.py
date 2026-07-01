@@ -52,7 +52,39 @@ def test_multi_bene_single_lot_not_blocked(artifacts_root):
     )
     # Several beni in ONE lot is normal -> a contract is produced, never blocked.
     assert status["status"] == JobStatus.CONTRACT_READY, status
+    assert status["status"] != JobStatus.LOT_SELECTION_REQUIRED
     assert status["contract_generated"] is True
+    # ONE lot contract carrying both beni — beni are tracked, never split into lots.
+    import json as _json
+
+    job_dir = artifacts.job_dir(status["job_id"])
+    contract = _json.loads((job_dir / artifacts.VERIFIED_CONTRACT_FILE).read_text())
+    assert contract["lot_summary"]["multi_lot"] is False
+    assert contract["lot_summary"]["multi_bene"] is True
+    assert contract["lot_summary"]["bene_count"] >= 2
+    assert not (job_dir / artifacts.LOT_SELECTION_REQUIRED_FILE).exists()
+
+
+def test_multi_bene_apartment_plus_garage_pages_stay_single_lot(artifacts_root):
+    # Lotto 1 with Bene 1 (appartamento) + Bene 2 (garage) + Bene 3 (terreno)
+    # described in the PAGE TEXT too: bene mentions must never count as lots.
+    pages = [
+        {
+            "page_number": p["page_number"],
+            "text": p["text"] + (
+                " Bene N. 1: appartamento ad uso abitativo. Bene N. 2: garage e "
+                "cantina di pertinenza. Bene N. 3: terreno annesso."
+            ),
+        }
+        for p in GENERIC_PERIZIA_PAGES
+    ]
+    caller = fake_caller_returning(make_multibene_single_lot_worksheet())
+    status = orchestrator.start_job(
+        "an_multibene_pages", _loader(pages), is_admin=True, openai_caller=caller
+    )
+    assert status["status"] == JobStatus.CONTRACT_READY, status
+    assert status["status"] != JobStatus.LOT_SELECTION_REQUIRED
+    assert status.get("multi_lot") is False
 
 
 # C) multi-lot, no selection ----------------------------------------------

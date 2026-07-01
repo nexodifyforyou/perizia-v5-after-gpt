@@ -376,6 +376,7 @@ def _build_single_lot_contract(
     extra: Optional[Dict[str, Any]] = None,
     current_stage: Optional[str] = None,
     message: str = STEP2_OK_MESSAGE,
+    shared_summary_rows: Optional[List[Dict[str, Any]]] = None,
 ) -> Dict[str, Any]:
     """Validate a single-lot worksheet and build the verified contract (CONTRACT_READY).
 
@@ -410,6 +411,7 @@ def _build_single_lot_contract(
             job_id=job_id,
             source_pdf_quality_status=source_quality,
             lot_report=lot_report,
+            shared_summary_rows=shared_summary_rows,
         )
     except Exception as exc:
         return _finish_contract_build_failed(
@@ -517,6 +519,9 @@ def _run_selected_lot(
     )
 
     sub_lot_report = lots_mod.build_lot_report(result.worksheet, selected_pages)
+    # This lot's clearly tagged money rows projected from the excluded shared
+    # summary pages (deterministic; other lots' rows never enter this contract).
+    shared_rows = (context.get("lot_money") or {}).get("shared_summary_rows") or []
     extra = {
         "multi_lot": True,
         "selected_lot": str(norm_lot),
@@ -538,6 +543,7 @@ def _run_selected_lot(
         extra=extra,
         current_stage=_step3_stage("selected_lot_contract_ready"),
         message=STEP3_SELECTED_LOT_MESSAGE,
+        shared_summary_rows=shared_rows,
     )
 
 
@@ -637,6 +643,9 @@ def _run_analyze_all(
                 job_id=job_id,
                 source_pdf_quality_status=source_quality,
                 lot_report=sub_lot_report,
+                shared_summary_rows=(
+                    (context.get("lot_money") or {}).get("shared_summary_rows") or []
+                ),
             )
         except Exception as exc:  # noqa: BLE001 - recorded per lot, never blended
             entry.update({"status": JobStatus.FAILED_CONTRACT_BUILD, "reason": str(exc)})
