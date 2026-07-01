@@ -316,7 +316,7 @@ def fake_sequence_caller(worksheets_raw: List[Dict[str, Any]]):
         # The user message embeds the page blocks ("=== PAGINA n ===").
         user = next((m.get("content", "") for m in messages if m.get("role") == "user"), "")
         pages_seen = [int(n) for n in re.findall(r"=== PAGINA (\d+) ===", user)]
-        calls.append({"model": model, "pages_seen": pages_seen})
+        calls.append({"model": model, "pages_seen": pages_seen, "user_text": user})
         return {
             "content": json.dumps(ws, ensure_ascii=False),
             "model": model or "fake-model",

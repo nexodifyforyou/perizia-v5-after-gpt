@@ -283,6 +283,41 @@ def _assign_lot(evidence_pages: Optional[List[int]], page_lot: Dict[int, str]) -
     return None
 
 
+def classify_compliance_scope(
+    worksheet: Dict[str, Any],
+    segmentation: Dict[str, Any],
+) -> List[Dict[str, Any]]:
+    """Classify each whole-document compliance section as lot-specific, global
+    or unclear, by mapping its evidence pages through the page segmentation.
+
+    Part of the whole-document map: a compliance statement is only usable for a
+    selected lot when its scope is that lot or clearly global; 'unclear' scope
+    must stay an uncertainty, never a conformity claim.
+    """
+    page_lot = _page_lot_map(segmentation)
+    out: List[Dict[str, Any]] = []
+    for i, item in enumerate(worksheet.get("technical_compliance") or []):
+        ev = list(item.get("evidence_pages") or [])
+        target = _assign_lot(ev, page_lot)
+        if target == _GLOBAL:
+            scope, lot_id = "global", None
+        elif target is None:
+            scope, lot_id = "unclear", None
+        else:
+            scope, lot_id = "lot", str(target)
+        out.append(
+            {
+                "path": f"technical_compliance[{i}]",
+                "area": item.get("area"),
+                "classification": item.get("classification"),
+                "scope": scope,
+                "lot_id": lot_id,
+                "evidence_pages": ev,
+            }
+        )
+    return out
+
+
 def _empty_lot_money() -> Dict[str, Any]:
     section: Dict[str, Any] = {f: None for f, _ in _VALUE_FIELDS}
     section.update({f: None for f, _ in _AUCTION_FIELDS})
@@ -472,6 +507,9 @@ def build_lot_index(
         "lot_ids": [str(x) for x in lot_ids],
         "global_pages": segmentation.get("global_pages", []),
         "shared_pages": segmentation.get("shared_pages", []),
+        # Whole-document compliance map: each compliance section's scope
+        # (lot-specific / global / unclear) derived from its evidence pages.
+        "compliance_sections": classify_compliance_scope(worksheet, segmentation),
         "lots": lots_out,
         # Money that applies to the whole procedure, and amounts that could not be
         # safely tied to a single lot (preserved with evidence, never dropped).
@@ -554,6 +592,40 @@ def build_per_lot_packets(
         "global_money": lot_money["global"],
         "uncertain_money": lot_money["uncertain_money"],
         "needs_manual_review_money": lot_money["needs_manual_review_money"],
+    }
+
+
+def build_document_map(
+    lot_report: Dict[str, Any],
+    segmentation: Dict[str, Any],
+    lot_index: Dict[str, Any],
+    selected_lot_id: str,
+) -> Dict[str, Any]:
+    """Compact whole-document map handed to the selected-lot re-analysis prompt.
+
+    Built from the full-document pass (lot detection + segmentation + lot index)
+    so the second pass is not blind to the document structure. It carries ONLY
+    structure (lot ids, page buckets, beni, compliance-section scopes) — never
+    another lot's content. Compliance sections of OTHER lots are excluded; the
+    selected lot's own, global and unclear ones are kept (unclear stays an
+    uncertainty signal, never usable evidence).
+    """
+    lot_id = str(selected_lot_id)
+    lot_entry = next(
+        (L for L in lot_index.get("lots", []) if str(L.get("lot_id")) == lot_id), {}
+    )
+    return {
+        "lot_ids": [str(x) for x in lot_report.get("lot_ids", [])],
+        "selected_lot": lot_id,
+        "lot_pages": segmentation.get("lot_pages", {}).get(lot_id, []),
+        "global_pages": segmentation.get("global_pages", []),
+        "excluded_shared_pages": segmentation.get("shared_pages", []),
+        "bene_ids": list(lot_entry.get("bene_ids") or []),
+        "compliance_sections": [
+            c
+            for c in lot_index.get("compliance_sections", [])
+            if c.get("scope") in ("global", "unclear") or str(c.get("lot_id")) == lot_id
+        ],
     }
 
 

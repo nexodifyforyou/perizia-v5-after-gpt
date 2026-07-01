@@ -23,6 +23,7 @@ Rules enforced (see task spec):
 
 from __future__ import annotations
 
+import copy
 import unicodedata
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -30,6 +31,7 @@ from . import lots as lots_mod
 from .analyst import CANCELLABLE_FORMALITY_TYPES
 
 VALIDATOR_SCHEMA_VERSION = "cv2.validator.v1"
+COMPLIANCE_GATE_SCHEMA_VERSION = "cv2.compliance_gate.v1"
 
 STATUS_VALIDATED = "VALIDATED"
 STATUS_FAILED = "VALIDATION_FAILED"
@@ -169,14 +171,28 @@ def _check_evidence_pages_exist(
 
 
 def _check_important_claims_have_evidence(worksheet: Dict[str, Any], report: _Report) -> None:
-    """Important claims must carry page evidence (rule 1)."""
+    """Important claims must carry page evidence (rule 1).
+
+    Exception: a compliance entry already classified ``uncertain`` is an
+    uncertainty flag, not a claim — it may legitimately lack evidence (that is
+    WHY it is uncertain) and must not fail validation. It is surfaced as a
+    warning so the contract still carries the manual-review signal.
+    """
     for i, item in enumerate(worksheet["technical_compliance"]):
         if not item.get("evidence_pages"):
-            report.error(
-                "MISSING_EVIDENCE",
-                f"technical_compliance[{i}]",
-                f"compliance area '{item.get('area')}' has no evidence_pages",
-            )
+            if item.get("classification") == "uncertain":
+                report.warn(
+                    "MISSING_EVIDENCE_SOFT",
+                    f"technical_compliance[{i}]",
+                    f"uncertain compliance area '{item.get('area')}' has no evidence_pages "
+                    "(kept as manual-review uncertainty, not a claim)",
+                )
+            else:
+                report.error(
+                    "MISSING_EVIDENCE",
+                    f"technical_compliance[{i}]",
+                    f"compliance area '{item.get('area')}' has no evidence_pages",
+                )
     for i, item in enumerate(worksheet["legal_formalities"]):
         if not item.get("evidence_pages"):
             report.error(
@@ -572,6 +588,98 @@ def check_selected_lot_present(lot_ids: List[str], selected_lot_id: Any) -> Opti
             f"document's lots ({sorted(known)})"
         ),
     }
+
+
+# ---------------------------------------------------------------------------
+# Compliance evidence gate (deterministic downgrade, runs BEFORE validation)
+# ---------------------------------------------------------------------------
+def apply_compliance_evidence_gate(
+    worksheet: Dict[str, Any],
+    pages: List[Dict[str, Any]],
+) -> Tuple[Dict[str, Any], Dict[str, Any]]:
+    """Downgrade unsupported compliance claims to 'uncertain' (manual review).
+
+    Generic, document-agnostic rule (never defaults to conforming):
+      * 'conforming' is honored ONLY when the cited page text contains an
+        explicit conformity statement. Missing evidence, generic/administrative
+        text, or text not containing conformity language -> 'uncertain'.
+      * Any other classification with NO evidence pages at all -> 'uncertain'
+        (a claim that cannot be verified is preserved as an uncertainty flag,
+        never as a fact).
+
+    In the selected-lot pipeline the ``pages`` are already the isolated
+    lot+global subset, so evidence "not clearly tied to the selected lot"
+    naturally yields empty cited text here and is downgraded.
+
+    Returns ``(gated_worksheet, gate_report)``. The input worksheet is not
+    mutated. Downgrades are also appended to ``missing_or_uncertain`` so the
+    contract's uncertainty flags carry them. The validator's
+    UNSUPPORTED_COMPLIANCE_CLAIM check stays active as defense-in-depth for any
+    path that skips this gate.
+    """
+    gated = copy.deepcopy(worksheet)
+    page_index = _page_text_index(pages)
+    downgrades: List[Dict[str, Any]] = []
+
+    for i, item in enumerate(gated.get("technical_compliance") or []):
+        classification = item.get("classification")
+        if classification == "uncertain":
+            continue
+        ev_pages = list(item.get("evidence_pages") or [])
+        ev_text = _evidence_text(ev_pages, page_index)
+
+        reason: Optional[str] = None
+        if classification == "conforming":
+            if not ev_pages:
+                reason = (
+                    "classificata 'conforming' senza alcuna pagina di evidenza"
+                )
+            elif "conform" not in ev_text:
+                reason = (
+                    "classificata 'conforming' ma il testo citato non contiene una "
+                    "dichiarazione esplicita di conformità per il contesto analizzato"
+                )
+        elif not ev_pages:
+            reason = (
+                f"classificata '{classification}' senza alcuna pagina di evidenza"
+            )
+
+        if reason is None:
+            continue
+
+        downgrades.append(
+            {
+                "path": f"technical_compliance[{i}]",
+                "area": item.get("area"),
+                "from": classification,
+                "to": "uncertain",
+                "reason": reason,
+                "evidence_pages": ev_pages,
+            }
+        )
+        item["classification"] = "uncertain"
+        item["needs_manual_review"] = True
+        # A downgraded entry is an uncertainty flag, not a claim: citations to
+        # pages outside the analyzed context (e.g. another lot's pages) are
+        # dropped here (they are preserved in the gate report above) so the
+        # page-existence check does not fail a claim we already neutralized.
+        item["evidence_pages"] = [p for p in ev_pages if p in page_index]
+        note = (
+            f"Declassata a 'uncertain' (verifica manuale): {reason}."
+        )
+        item["notes"] = f"{item.get('notes')} {note}".strip() if item.get("notes") else note
+        gated.setdefault("missing_or_uncertain", []).append(
+            f"Conformità '{item.get('area')}': {reason}; stato impostato a "
+            "'uncertain' e richiesta verifica manuale."
+        )
+
+    gate_report = {
+        "schema_version": COMPLIANCE_GATE_SCHEMA_VERSION,
+        "checked_count": len(gated.get("technical_compliance") or []),
+        "downgrade_count": len(downgrades),
+        "downgrades": downgrades,
+    }
+    return gated, gate_report
 
 
 # ---------------------------------------------------------------------------

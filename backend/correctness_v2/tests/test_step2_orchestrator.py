@@ -85,9 +85,11 @@ def test_pdf_quality_blocked_does_not_call_openai(artifacts_root):
 
 
 def test_validation_failure_blocks_contract(artifacts_root):
-    # Worksheet with an out-of-range evidence page -> validator fails -> no contract.
+    # Worksheet with an out-of-range MONEY evidence page -> validator fails -> no
+    # contract. (A conforming compliance claim with a bad page is no longer a hard
+    # failure: the compliance evidence gate downgrades it to 'uncertain'.)
     raw = make_worksheet()
-    raw["technical_compliance"][0]["evidence_pages"] = [99]
+    raw["money"]["evidence_pages"] = [99]
     caller = fake_caller_returning(raw)
     status = orchestrator.start_job(
         "an_valfail", _loader(GENERIC_PERIZIA_PAGES), is_admin=True, openai_caller=caller

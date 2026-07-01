@@ -99,6 +99,54 @@ def test_selected_lot_analyzes_only_that_lot(artifacts_root):
     assert (job_dir / artifacts.VERIFIED_CONTRACT_FILE).exists()
 
 
+def test_selected_lot_unsupported_conforming_downgraded_not_failed(artifacts_root):
+    # The re-analysis claims 'conforming' for an administrative area whose cited
+    # page (3) has NO conformity statement. That must NOT fail the job with
+    # UNSUPPORTED_COMPLIANCE_CLAIM: the evidence gate downgrades it to
+    # 'uncertain' (manual review) and the contract is still produced.
+    reanalysis = single_lot_worksheet_on_page(2, "1")
+    reanalysis["technical_compliance"].append(
+        {
+            "area": "Completezza documentazione ex art. 567 c.p.c.",
+            "classification": "conforming",
+            "blocks_saleability": False,
+            "cost": None,
+            "timing": None,
+            "notes": None,
+            "evidence_pages": [3],  # page 3 has no conformity wording
+        }
+    )
+    caller = fake_sequence_caller([make_multilot_worksheet(), reanalysis])
+    status = orchestrator.start_job(
+        "an_ml_downgrade",
+        _loader(MULTI_LOT_PAGES),
+        is_admin=True,
+        openai_caller=caller,
+        selected_lot_id="1",
+    )
+    assert status["status"] == JobStatus.CONTRACT_READY, status
+    assert status["compliance_downgrade_count"] == 1
+
+    job_dir = artifacts.job_dir(status["job_id"])
+    assert (job_dir / artifacts.COMPLIANCE_GATE_FILE).exists()
+
+    import json
+
+    contract = json.loads((job_dir / artifacts.VERIFIED_CONTRACT_FILE).read_text())
+    cards = {c["area"]: c for c in contract["risk_cards"]}
+    card = cards["Completezza documentazione ex art. 567 c.p.c."]
+    assert card["classification"] == "uncertain"
+    # The downgrade is surfaced as an uncertainty flag, never as conformity.
+    assert any(
+        "Completezza documentazione" in str(f.get("detail"))
+        for f in contract["uncertainty_flags"]
+    )
+
+    # The second (re-analysis) call carried the whole-document map.
+    second_user = caller.calls[1]["user_text"]
+    assert "MAPPA DEL DOCUMENTO" in second_user
+
+
 def test_selected_lot_not_found_fails_closed(artifacts_root):
     caller = fake_sequence_caller([make_multilot_worksheet()])
     status = orchestrator.start_job(

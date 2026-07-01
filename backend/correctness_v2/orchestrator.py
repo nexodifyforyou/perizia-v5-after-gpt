@@ -383,6 +383,15 @@ def _build_single_lot_contract(
     only runs when exactly one safe lot context exists (single-lot doc, or a chosen
     lot's isolated re-analysis). Fails closed on validation / build errors.
     """
+    # Deterministic compliance evidence gate: unsupported 'conforming' claims (and
+    # claims with no evidence at all) are downgraded to 'uncertain' + manual review
+    # BEFORE validation, so the contract never overclaims and never defaults to
+    # conforming. The validator keeps its own overclaim checks as defense-in-depth.
+    worksheet, gate_report = validator_mod.apply_compliance_evidence_gate(worksheet, pages)
+    artifacts_saved["compliance_gate_report"] = artifacts.save_compliance_gate_report(
+        job_id, gate_report
+    )
+
     validator_report = validator_mod.validate_worksheet(worksheet, pages)
     artifacts_saved["validator_report"] = artifacts.save_validator_report(
         job_id, validator_report
@@ -417,6 +426,7 @@ def _build_single_lot_contract(
         "openai_model": model_name,
         "validation_status": validator_report.get("validation_status"),
         "validator_warning_count": validator_report.get("warning_count", 0),
+        "compliance_downgrade_count": gate_report.get("downgrade_count", 0),
         "contract_generated": True,
         "contract_schema_version": contract.get("schema_version"),
     }
@@ -484,9 +494,18 @@ def _run_selected_lot(
             ),
         )
 
+    # The whole-document map (lot detection + segmentation + compliance scopes)
+    # keeps the selected-lot pass oriented without exposing other lots' content.
+    document_map = lot_packets_mod.build_document_map(
+        lot_report, segmentation, lot_index, str(norm_lot)
+    )
     try:
         result = analyst_mod.run_analyst(
-            selected_pages, openai_caller=openai_caller, model=model, target_lot=str(norm_lot)
+            selected_pages,
+            openai_caller=openai_caller,
+            model=model,
+            target_lot=str(norm_lot),
+            document_map=document_map,
         )
     except AnalystError as exc:
         return _finish_analyst_failed(
@@ -568,9 +587,16 @@ def _run_analyze_all(
             per_lot_results.append(entry)
             continue
 
+        document_map = lot_packets_mod.build_document_map(
+            lot_report, segmentation, lot_index, str(norm_lot)
+        )
         try:
             result = analyst_mod.run_analyst(
-                selected_pages, openai_caller=openai_caller, model=model, target_lot=str(norm_lot)
+                selected_pages,
+                openai_caller=openai_caller,
+                model=model,
+                target_lot=str(norm_lot),
+                document_map=document_map,
             )
         except AnalystError as exc:
             entry.update({"status": JobStatus.FAILED_ANALYSIS, "reason": str(exc)})
@@ -580,7 +606,13 @@ def _run_analyze_all(
         artifacts.save_lot_subartifact(
             job_id, norm_lot, artifacts.ANALYST_WORKSHEET_FILE, result.worksheet
         )
-        validator_report = validator_mod.validate_worksheet(result.worksheet, selected_pages)
+        lot_worksheet, gate_report = validator_mod.apply_compliance_evidence_gate(
+            result.worksheet, selected_pages
+        )
+        artifacts.save_lot_subartifact(
+            job_id, norm_lot, artifacts.COMPLIANCE_GATE_FILE, gate_report
+        )
+        validator_report = validator_mod.validate_worksheet(lot_worksheet, selected_pages)
         artifacts.save_lot_subartifact(
             job_id, norm_lot, artifacts.VALIDATOR_REPORT_FILE, validator_report
         )
@@ -596,10 +628,10 @@ def _run_analyze_all(
             per_lot_results.append(entry)
             continue
 
-        sub_lot_report = lots_mod.build_lot_report(result.worksheet, selected_pages)
+        sub_lot_report = lots_mod.build_lot_report(lot_worksheet, selected_pages)
         try:
             contract = contract_mod.build_contract(
-                worksheet=result.worksheet,
+                worksheet=lot_worksheet,
                 validator_report=validator_report,
                 analysis_id=analysis_id,
                 job_id=job_id,
