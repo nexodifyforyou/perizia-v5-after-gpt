@@ -146,6 +146,40 @@ async def correctness_v2_job(analysis_id: str, job_id: str, request: Request) ->
     return status
 
 
+def _read_known_job_artifact(analysis_id: str, job_id: str, filename: str) -> Dict[str, Any]:
+    status = artifacts.read_job_status(job_id)
+    if not status or str(status.get("analysis_id")) != str(analysis_id):
+        raise HTTPException(status_code=404, detail="Job not found")
+    payload = artifacts.read_json(job_id, filename)
+    if not isinstance(payload, dict):
+        raise HTTPException(status_code=404, detail="Artifact not found")
+    return payload
+
+
+@router.get("/{analysis_id}/correctness-v2/jobs/{job_id}/customer-report")
+async def correctness_v2_customer_report(
+    analysis_id: str, job_id: str, request: Request
+) -> Dict[str, Any]:
+    await _resolve_user_and_guard(request)
+    return _read_known_job_artifact(analysis_id, job_id, artifacts.CUSTOMER_REPORT_FILE)
+
+
+@router.get("/{analysis_id}/correctness-v2/jobs/{job_id}/lot-selection-report")
+async def correctness_v2_lot_selection_report(
+    analysis_id: str, job_id: str, request: Request
+) -> Dict[str, Any]:
+    await _resolve_user_and_guard(request)
+    return _read_known_job_artifact(analysis_id, job_id, artifacts.LOT_SELECTION_REQUIRED_FILE)
+
+
+@router.get("/{analysis_id}/correctness-v2/jobs/{job_id}/validator-report")
+async def correctness_v2_validator_report(
+    analysis_id: str, job_id: str, request: Request
+) -> Dict[str, Any]:
+    await _resolve_user_and_guard(request)
+    return _read_known_job_artifact(analysis_id, job_id, artifacts.VALIDATOR_REPORT_FILE)
+
+
 @router.get("/{analysis_id}/correctness-v2/latest")
 async def correctness_v2_latest(analysis_id: str, request: Request) -> Dict[str, Any]:
     await _resolve_user_and_guard(request)

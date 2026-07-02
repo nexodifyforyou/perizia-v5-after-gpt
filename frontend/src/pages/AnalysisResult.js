@@ -7,6 +7,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '../components/ui/tabs'
 import { EvidenceBadge, EvidenceDetail, DataValueWithEvidence } from '../components/EvidenceDisplay';
 import HeadlineVerifyModal from '../components/HeadlineVerifyModal';
 import TechnicalFeedbackModal from '../components/TechnicalFeedbackModal';
+import CorrectnessV2Panel from '../components/correctness-v2/CorrectnessV2Panel';
 import { MessageSquarePlus } from 'lucide-react';
 import { 
   FileText, 
@@ -1588,6 +1589,7 @@ const AnalysisResult = () => {
   const [headlineModal, setHeadlineModal] = useState({ open: false, fieldKey: null });
   const [feedbackModalOpen, setFeedbackModalOpen] = useState(false);
   const canGiveTechnicalFeedback = Boolean(user?.is_beta_partner || user?.is_master_admin);
+  const canPreviewCorrectnessV2 = Boolean(user?.is_master_admin);
 
   const fetchAnalysis = async () => {
     const params = new URLSearchParams(location.search);
@@ -3888,6 +3890,8 @@ const AnalysisResult = () => {
             onSelectLot={setSelectedLotIndex} 
           />
         )}
+
+        <CorrectnessV2Panel analysisId={analysisId} isAdmin={canPreviewCorrectnessV2} />
 
         {/* Header with Semaforo */}
         <div className="mb-8 rounded-xl border border-zinc-800 bg-zinc-900 p-5 sm:p-6">
