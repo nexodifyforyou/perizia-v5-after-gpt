@@ -49,6 +49,48 @@ def test_gate_downgrades_conforming_without_conformity_text():
     assert "UNSUPPORTED_COMPLIANCE_CLAIM" not in _codes(report)
 
 
+def test_gate_downgrades_conforming_on_absent_declaration_only():
+    pages = GENERIC_PERIZIA_PAGES + [
+        {
+            "page_number": 3,
+            "text": (
+                "Certificazioni energetiche e dichiarazioni di conformità. "
+                "Non esiste la dichiarazione di conformità dell'impianto elettrico."
+            ),
+        }
+    ]
+    raw = make_worksheet()
+    raw["technical_compliance"][0]["evidence_pages"] = [3]
+    ws = normalize_worksheet(raw)
+    gated, gate = validator.apply_compliance_evidence_gate(ws, pages)
+
+    assert gate["downgrade_count"] == 1
+    assert gated["technical_compliance"][0]["classification"] == "uncertain"
+
+
+def test_gate_keeps_supported_regolare_agibile_claim_without_conforme_word():
+    pages = GENERIC_PERIZIA_PAGES + [
+        {
+            "page_number": 3,
+            "text": (
+                "L'immobile risulta regolare per la legge n. 47/1985. "
+                "L'immobile risulta agibile. "
+                "Durante il sopralluogo non sono state riscontrate incongruenze."
+            ),
+        }
+    ]
+    raw = make_worksheet()
+    raw["technical_compliance"][0]["evidence_pages"] = [3]
+    ws = normalize_worksheet(raw)
+    gated, gate = validator.apply_compliance_evidence_gate(ws, pages)
+
+    assert gate["downgrade_count"] == 0
+    assert gated["technical_compliance"][0]["classification"] == "conforming"
+    report = validator.validate_worksheet(gated, pages)
+    assert report["validation_status"] == validator.STATUS_VALIDATED
+    assert "UNSUPPORTED_COMPLIANCE_CLAIM" not in _codes(report)
+
+
 def test_gate_downgrades_any_claim_without_evidence():
     raw = make_worksheet()
     raw["technical_compliance"][1]["evidence_pages"] = []  # regularizable claim

@@ -24,6 +24,8 @@ Rules enforced (see task spec):
 from __future__ import annotations
 
 import copy
+import itertools
+import re
 import unicodedata
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -50,6 +52,14 @@ _NEGATIVE_TOKENS = [
     "non sanabil",
     "non regolarizzabil",
     "irregolarit",
+    "non risulta regolare",
+    "non risulta agibile",
+    "non sussiste corrispondenza",
+    "non esiste il certificato",
+    "non esiste la dichiarazione",
+    "assenza di certificato",
+    "assenza delle dichiarazioni",
+    "riscontrate incongruenze",
 ]
 _BUYER_BURDEN_TOKENS = [
     "a carico dell'aggiudicatario",
@@ -62,6 +72,12 @@ _BUYER_BURDEN_TOKENS = [
     "carico dell'aggiudicatario",
 ]
 _CANCELLABLE_LABEL_TOKENS = ["ipotec", "pignorament", "sequestr"]
+_CANCELLATION_MONEY_LABEL_TOKENS = [
+    "cancellaz",
+    "trascrizion",
+    "iscrizion",
+    "formalita",
+]
 
 # Canonical compliance-area anchors used to match risks to compliance entries.
 _AREA_ANCHORS = {
@@ -96,13 +112,76 @@ def _has_negative(text_norm: str) -> bool:
     return any(tok in text_norm for tok in _NEGATIVE_TOKENS)
 
 
+def _has_unnegated_phrase(text_norm: str, phrase: str) -> bool:
+    start = 0
+    while True:
+        idx = text_norm.find(phrase, start)
+        if idx < 0:
+            return False
+        preceding = text_norm[max(0, idx - 16):idx]
+        if "non " not in preceding:
+            return True
+        start = idx + len(phrase)
+
+
+def _has_positive_compliance_statement(text_norm: str) -> bool:
+    """Detect explicit positive compliance language without treating
+    "dichiarazione di conformita" as a positive claim by itself.
+    """
+    compact = " ".join(text_norm.split())
+    if re.search(r"\bconform[ei]\b", compact):
+        return True
+    if any(
+        phrase in compact
+        for phrase in (
+            "non sono state riscontrate incongruenze",
+            "non risultano difformita",
+            "non sono presenti difformita",
+            "non sono presenti abusi",
+        )
+    ):
+        return True
+    return any(
+        _has_unnegated_phrase(compact, phrase)
+        for phrase in (
+            "risulta regolare",
+            "risultano regolari",
+            "risulta agibile",
+            "risultano agibili",
+            "sussiste corrispondenza catastale",
+        )
+    )
+
+
 def _has_buyer_burden(text_norm: str) -> bool:
     return any(tok in text_norm for tok in _BUYER_BURDEN_TOKENS)
+
+
+def _is_cancellation_money_label(label: Any) -> bool:
+    n = _norm(label)
+    return any(tok in n for tok in _CANCELLATION_MONEY_LABEL_TOKENS)
 
 
 def _approx_equal(a: float, b: float) -> bool:
     tol = max(MONEY_ABS_TOLERANCE, MONEY_REL_TOLERANCE * max(abs(a), abs(b)))
     return abs(a - b) <= tol
+
+
+def _deduction_subset_for_delta(amounts: List[float], delta: float) -> Optional[List[int]]:
+    """Return indexes of deduction rows that explain a valuation delta.
+
+    Perizie sometimes present valuation as staged math, e.g. market value at
+    completed works -> current condition -> judicial sale value. In those cases
+    all rows are legitimate deductions, but only a subset belongs to the
+    market-to-current step.
+    """
+    if _approx_equal(delta, 0.0):
+        return []
+    for size in range(1, len(amounts) + 1):
+        for indexes in itertools.combinations(range(len(amounts)), size):
+            if _approx_equal(sum(amounts[i] for i in indexes), delta):
+                return list(indexes)
+    return None
 
 
 class _Report:
@@ -235,8 +314,44 @@ def _check_money_chains(worksheet: Dict[str, Any], report: _Report) -> None:
 
     chains_checked: List[str] = []
 
-    # current_state_value == market_value - regularization_costs
-    if market is not None and regularization is not None and current is not None:
+    deduction_amounts = [
+        float(item.get("amount"))
+        for item in (money.get("deductions") or [])
+        if item.get("amount") is not None and not _is_cancellation_money_label(item.get("label"))
+    ]
+
+    # current_state_value == market_value - explicit deductions, when the
+    # worksheet has a deprezzamenti/deductions table. If no explicit deductions
+    # exist, fall back to the older regularization-only chain.
+    if market is not None and current is not None and deduction_amounts:
+        total_deductions = sum(deduction_amounts)
+        chains_checked.append("market-deductions=current")
+        if not _approx_equal(current, market - total_deductions):
+            current_step = _deduction_subset_for_delta(deduction_amounts, market - current)
+            if current_step is None:
+                report.error(
+                    "MONEY_CHAIN_INCONSISTENT",
+                    "money",
+                    f"current_state_value ({current}) != market_value ({market}) - "
+                    f"deductions ({total_deductions}) = {market - total_deductions}",
+                )
+            else:
+                remaining = sum(
+                    amount
+                    for i, amount in enumerate(deduction_amounts)
+                    if i not in set(current_step)
+                )
+                chains_checked[-1] = "market-deduction-subset=current"
+                if sale is not None and remaining:
+                    chains_checked.append("current-remaining-deductions=sale")
+                    if not _approx_equal(sale, current - remaining):
+                        report.error(
+                            "MONEY_CHAIN_INCONSISTENT",
+                            "money",
+                            f"sale_value ({sale}) != current_state_value ({current}) - "
+                            f"remaining deductions ({remaining}) = {current - remaining}",
+                        )
+    elif market is not None and regularization is not None and current is not None:
         chains_checked.append("market-regularization=current")
         if not _approx_equal(current, market - regularization):
             report.error(
@@ -359,18 +474,31 @@ def _check_money_rows(
                 seen[dkey] = f"money.{coll}[{i}]"
 
     # 4) Same amount under a chain-cost role AND buyer-side role (justified-but-flagged).
-    chain_cost_amounts: List[float] = []
+    chain_cost_rows: List[Tuple[float, str]] = []
     for key in ("regularization_costs", "cancellation_costs"):
         val = money.get(key)
         if val:
-            chain_cost_amounts.append(float(val))
+            chain_cost_rows.append((float(val), key))
     for item in money.get("deductions", []):
         amt = item.get("amount")
         if amt:
-            chain_cost_amounts.append(float(amt))
+            chain_cost_rows.append((float(amt), str(item.get("label") or "")))
     for i, item in enumerate(money.get("buyer_side_costs", [])):
         amt = item.get("amount")
-        if amt and any(_approx_equal(float(amt), c) for c in chain_cost_amounts):
+        label_norm = _norm(item.get("label"))
+        if not amt:
+            continue
+        conflicting = False
+        for chain_amt, chain_label in chain_cost_rows:
+            chain_label_norm = _norm(chain_label)
+            if not _approx_equal(float(amt), chain_amt):
+                continue
+            if label_norm and chain_label_norm and (
+                label_norm in chain_label_norm or chain_label_norm in label_norm
+            ):
+                conflicting = True
+                break
+        if conflicting:
             report.warn(
                 "SAME_AMOUNT_CONFLICTING_KIND",
                 f"money.buyer_side_costs[{i}]",
@@ -491,7 +619,7 @@ def _check_compliance_contradictions(
         ev_text = _evidence_text(item.get("evidence_pages", []), page_index)
         if not ev_text:
             continue
-        has_conform = "conform" in ev_text
+        has_conform = _has_positive_compliance_statement(ev_text)
         has_negative = _has_negative(ev_text)
         if classification == "conforming" and not has_conform:
             report.error(
@@ -634,7 +762,7 @@ def apply_compliance_evidence_gate(
                 reason = (
                     "classificata 'conforming' senza alcuna pagina di evidenza"
                 )
-            elif "conform" not in ev_text:
+            elif not _has_positive_compliance_statement(ev_text):
                 reason = (
                     "classificata 'conforming' ma il testo citato non contiene una "
                     "dichiarazione esplicita di conformità per il contesto analizzato"

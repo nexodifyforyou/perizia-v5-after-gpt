@@ -74,6 +74,34 @@ def _money_row(label: str, amount: Optional[float], kind: str, evidence_pages: L
     }
 
 
+_MONEY_MERGE_TOKENS = {
+    "abitabil",
+    "agibil",
+    "cancellaz",
+    "conform",
+    "garanzia",
+    "ipotec",
+    "pignor",
+    "regolarizz",
+    "sanator",
+}
+
+
+def _money_label_tokens(label: Any) -> set:
+    norm = _norm(label)
+    return {tok for tok in _MONEY_MERGE_TOKENS if tok in norm}
+
+
+def _compatible_money_labels(a: Any, b: Any) -> bool:
+    left = _norm(a)
+    right = _norm(b)
+    if not left or not right:
+        return False
+    if left == right or left in right or right in left:
+        return True
+    return bool(_money_label_tokens(left) & _money_label_tokens(right))
+
+
 def _executive_summary_facts(worksheet: Dict[str, Any]) -> List[Dict[str, Any]]:
     ci = worksheet["case_identity"]
     ev = ci.get("evidence_pages", [])
@@ -164,34 +192,44 @@ def _risk_cards(worksheet: Dict[str, Any]) -> List[Dict[str, Any]]:
 
 
 def _merge_cost_rows(raw_costs: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-    """Collapse cost rows that share the same amount into one evidenced row.
+    """Collapse duplicate cost rows into one evidenced row.
 
     Generic de-duplication: a deduction breakdown line, the equivalent scalar
-    (regularization_costs / cancellation_costs) and a buyer-side line that all
-    carry the same amount represent the SAME money and become a single row. The
-    label is taken from whichever input row carries the most evidence, evidence
-    pages are unioned, and every contributing role is recorded so a single amount
-    that is both part of the valuation chain and a buyer-side cost is shown once
-    with a clear note instead of as confusing duplicates.
+    (regularization_costs / cancellation_costs) and a buyer-side line MAY
+    represent the same money, but equal amount alone is not enough. Different
+    concepts often share common amounts (e.g. a 5k risk deduction and a separate
+    5k practice cost). Rows merge only when the amount and label semantics are
+    compatible. The label is taken from whichever input row carries the most
+    evidence, evidence pages are unioned, and every contributing role is recorded.
     """
-    merged: Dict[float, Dict[str, Any]] = {}
-    order: List[float] = []
+    merged: List[Dict[str, Any]] = []
+
+    def _find_merge_target(row: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        amount = row["amount"]
+        if amount is None:
+            return None
+        for existing in merged:
+            if not _approx_equal(float(amount), float(existing["amount"])):
+                continue
+            if _compatible_money_labels(row.get("label"), existing.get("label")):
+                return existing
+        return None
+
     for r in raw_costs:
         amount = r["amount"]
         if amount is None or amount == 0:
             continue
-        key = round(float(amount), 2)
         ev = list(r.get("evidence_pages") or [])
-        if key not in merged:
-            merged[key] = {
+        m = _find_merge_target(r)
+        if m is None:
+            m = {
                 "label": r["label"],
                 "amount": float(amount),
                 "roles": set(),
                 "evidence_pages": [],
                 "_label_ev": -1,
             }
-            order.append(key)
-        m = merged[key]
+            merged.append(m)
         m["roles"].add(r["role"])
         for p in ev:
             if p not in m["evidence_pages"]:
@@ -201,8 +239,7 @@ def _merge_cost_rows(raw_costs: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
             m["_label_ev"] = len(ev)
 
     rows: List[Dict[str, Any]] = []
-    for key in order:
-        m = merged[key]
+    for m in merged:
         roles = m["roles"]
         chain_roles = roles & {"deduction", "regularization", "cancellation"}
         is_buyer = "buyer_side" in roles

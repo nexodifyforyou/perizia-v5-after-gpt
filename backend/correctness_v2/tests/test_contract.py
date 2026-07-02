@@ -58,6 +58,28 @@ def test_duplicate_money_rows_normalized_away():
             assert r["evidence_pages"], r
 
 
+def test_same_amount_different_money_concepts_not_merged():
+    raw = make_worksheet()
+    raw["money"]["deductions"] = [
+        {"label": "Rischio assunto per mancata garanzia", "amount": 3000.0, "evidence_pages": [2]},
+    ]
+    raw["money"]["regularization_costs"] = None
+    raw["money"]["current_state_value"] = 97000.0
+    raw["money"]["sale_value"] = 96700.0
+    raw["money"]["buyer_side_costs"] = [
+        {"label": "Pratiche per abitabilità", "amount": 3000.0, "evidence_pages": [2]},
+    ]
+    con, report = _build(raw)
+
+    assert report["validation_status"] == validator.STATUS_VALIDATED
+    chain_rows = [r for r in con["valuation_chain"] if r.get("amount") == 3000.0]
+    buyer_rows = [r for r in con["buyer_side_costs"] if r.get("amount") == 3000.0]
+    assert len(chain_rows) == 1
+    assert len(buyer_rows) == 1
+    assert chain_rows[0]["label"] == "Rischio assunto per mancata garanzia"
+    assert buyer_rows[0]["label"] == "Pratiche per abitabilità"
+
+
 def test_judicial_sale_value_always_visible():
     con, _ = _build(make_worksheet())
     # The judicial sale value is shown exactly once, in the valuation chain.
