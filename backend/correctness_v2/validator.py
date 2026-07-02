@@ -23,6 +23,9 @@ Rules enforced (see task spec):
 
 from __future__ import annotations
 
+import copy
+import itertools
+import re
 import unicodedata
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -30,6 +33,7 @@ from . import lots as lots_mod
 from .analyst import CANCELLABLE_FORMALITY_TYPES
 
 VALIDATOR_SCHEMA_VERSION = "cv2.validator.v1"
+COMPLIANCE_GATE_SCHEMA_VERSION = "cv2.compliance_gate.v1"
 
 STATUS_VALIDATED = "VALIDATED"
 STATUS_FAILED = "VALIDATION_FAILED"
@@ -48,6 +52,14 @@ _NEGATIVE_TOKENS = [
     "non sanabil",
     "non regolarizzabil",
     "irregolarit",
+    "non risulta regolare",
+    "non risulta agibile",
+    "non sussiste corrispondenza",
+    "non esiste il certificato",
+    "non esiste la dichiarazione",
+    "assenza di certificato",
+    "assenza delle dichiarazioni",
+    "riscontrate incongruenze",
 ]
 _BUYER_BURDEN_TOKENS = [
     "a carico dell'aggiudicatario",
@@ -60,6 +72,12 @@ _BUYER_BURDEN_TOKENS = [
     "carico dell'aggiudicatario",
 ]
 _CANCELLABLE_LABEL_TOKENS = ["ipotec", "pignorament", "sequestr"]
+_CANCELLATION_MONEY_LABEL_TOKENS = [
+    "cancellaz",
+    "trascrizion",
+    "iscrizion",
+    "formalita",
+]
 
 # Canonical compliance-area anchors used to match risks to compliance entries.
 _AREA_ANCHORS = {
@@ -94,13 +112,76 @@ def _has_negative(text_norm: str) -> bool:
     return any(tok in text_norm for tok in _NEGATIVE_TOKENS)
 
 
+def _has_unnegated_phrase(text_norm: str, phrase: str) -> bool:
+    start = 0
+    while True:
+        idx = text_norm.find(phrase, start)
+        if idx < 0:
+            return False
+        preceding = text_norm[max(0, idx - 16):idx]
+        if "non " not in preceding:
+            return True
+        start = idx + len(phrase)
+
+
+def _has_positive_compliance_statement(text_norm: str) -> bool:
+    """Detect explicit positive compliance language without treating
+    "dichiarazione di conformita" as a positive claim by itself.
+    """
+    compact = " ".join(text_norm.split())
+    if re.search(r"\bconform[ei]\b", compact):
+        return True
+    if any(
+        phrase in compact
+        for phrase in (
+            "non sono state riscontrate incongruenze",
+            "non risultano difformita",
+            "non sono presenti difformita",
+            "non sono presenti abusi",
+        )
+    ):
+        return True
+    return any(
+        _has_unnegated_phrase(compact, phrase)
+        for phrase in (
+            "risulta regolare",
+            "risultano regolari",
+            "risulta agibile",
+            "risultano agibili",
+            "sussiste corrispondenza catastale",
+        )
+    )
+
+
 def _has_buyer_burden(text_norm: str) -> bool:
     return any(tok in text_norm for tok in _BUYER_BURDEN_TOKENS)
+
+
+def _is_cancellation_money_label(label: Any) -> bool:
+    n = _norm(label)
+    return any(tok in n for tok in _CANCELLATION_MONEY_LABEL_TOKENS)
 
 
 def _approx_equal(a: float, b: float) -> bool:
     tol = max(MONEY_ABS_TOLERANCE, MONEY_REL_TOLERANCE * max(abs(a), abs(b)))
     return abs(a - b) <= tol
+
+
+def _deduction_subset_for_delta(amounts: List[float], delta: float) -> Optional[List[int]]:
+    """Return indexes of deduction rows that explain a valuation delta.
+
+    Perizie sometimes present valuation as staged math, e.g. market value at
+    completed works -> current condition -> judicial sale value. In those cases
+    all rows are legitimate deductions, but only a subset belongs to the
+    market-to-current step.
+    """
+    if _approx_equal(delta, 0.0):
+        return []
+    for size in range(1, len(amounts) + 1):
+        for indexes in itertools.combinations(range(len(amounts)), size):
+            if _approx_equal(sum(amounts[i] for i in indexes), delta):
+                return list(indexes)
+    return None
 
 
 class _Report:
@@ -169,14 +250,28 @@ def _check_evidence_pages_exist(
 
 
 def _check_important_claims_have_evidence(worksheet: Dict[str, Any], report: _Report) -> None:
-    """Important claims must carry page evidence (rule 1)."""
+    """Important claims must carry page evidence (rule 1).
+
+    Exception: a compliance entry already classified ``uncertain`` is an
+    uncertainty flag, not a claim — it may legitimately lack evidence (that is
+    WHY it is uncertain) and must not fail validation. It is surfaced as a
+    warning so the contract still carries the manual-review signal.
+    """
     for i, item in enumerate(worksheet["technical_compliance"]):
         if not item.get("evidence_pages"):
-            report.error(
-                "MISSING_EVIDENCE",
-                f"technical_compliance[{i}]",
-                f"compliance area '{item.get('area')}' has no evidence_pages",
-            )
+            if item.get("classification") == "uncertain":
+                report.warn(
+                    "MISSING_EVIDENCE_SOFT",
+                    f"technical_compliance[{i}]",
+                    f"uncertain compliance area '{item.get('area')}' has no evidence_pages "
+                    "(kept as manual-review uncertainty, not a claim)",
+                )
+            else:
+                report.error(
+                    "MISSING_EVIDENCE",
+                    f"technical_compliance[{i}]",
+                    f"compliance area '{item.get('area')}' has no evidence_pages",
+                )
     for i, item in enumerate(worksheet["legal_formalities"]):
         if not item.get("evidence_pages"):
             report.error(
@@ -219,8 +314,44 @@ def _check_money_chains(worksheet: Dict[str, Any], report: _Report) -> None:
 
     chains_checked: List[str] = []
 
-    # current_state_value == market_value - regularization_costs
-    if market is not None and regularization is not None and current is not None:
+    deduction_amounts = [
+        float(item.get("amount"))
+        for item in (money.get("deductions") or [])
+        if item.get("amount") is not None and not _is_cancellation_money_label(item.get("label"))
+    ]
+
+    # current_state_value == market_value - explicit deductions, when the
+    # worksheet has a deprezzamenti/deductions table. If no explicit deductions
+    # exist, fall back to the older regularization-only chain.
+    if market is not None and current is not None and deduction_amounts:
+        total_deductions = sum(deduction_amounts)
+        chains_checked.append("market-deductions=current")
+        if not _approx_equal(current, market - total_deductions):
+            current_step = _deduction_subset_for_delta(deduction_amounts, market - current)
+            if current_step is None:
+                report.error(
+                    "MONEY_CHAIN_INCONSISTENT",
+                    "money",
+                    f"current_state_value ({current}) != market_value ({market}) - "
+                    f"deductions ({total_deductions}) = {market - total_deductions}",
+                )
+            else:
+                remaining = sum(
+                    amount
+                    for i, amount in enumerate(deduction_amounts)
+                    if i not in set(current_step)
+                )
+                chains_checked[-1] = "market-deduction-subset=current"
+                if sale is not None and remaining:
+                    chains_checked.append("current-remaining-deductions=sale")
+                    if not _approx_equal(sale, current - remaining):
+                        report.error(
+                            "MONEY_CHAIN_INCONSISTENT",
+                            "money",
+                            f"sale_value ({sale}) != current_state_value ({current}) - "
+                            f"remaining deductions ({remaining}) = {current - remaining}",
+                        )
+    elif market is not None and regularization is not None and current is not None:
         chains_checked.append("market-regularization=current")
         if not _approx_equal(current, market - regularization):
             report.error(
@@ -343,18 +474,31 @@ def _check_money_rows(
                 seen[dkey] = f"money.{coll}[{i}]"
 
     # 4) Same amount under a chain-cost role AND buyer-side role (justified-but-flagged).
-    chain_cost_amounts: List[float] = []
+    chain_cost_rows: List[Tuple[float, str]] = []
     for key in ("regularization_costs", "cancellation_costs"):
         val = money.get(key)
         if val:
-            chain_cost_amounts.append(float(val))
+            chain_cost_rows.append((float(val), key))
     for item in money.get("deductions", []):
         amt = item.get("amount")
         if amt:
-            chain_cost_amounts.append(float(amt))
+            chain_cost_rows.append((float(amt), str(item.get("label") or "")))
     for i, item in enumerate(money.get("buyer_side_costs", [])):
         amt = item.get("amount")
-        if amt and any(_approx_equal(float(amt), c) for c in chain_cost_amounts):
+        label_norm = _norm(item.get("label"))
+        if not amt:
+            continue
+        conflicting = False
+        for chain_amt, chain_label in chain_cost_rows:
+            chain_label_norm = _norm(chain_label)
+            if not _approx_equal(float(amt), chain_amt):
+                continue
+            if label_norm and chain_label_norm and (
+                label_norm in chain_label_norm or chain_label_norm in label_norm
+            ):
+                conflicting = True
+                break
+        if conflicting:
             report.warn(
                 "SAME_AMOUNT_CONFLICTING_KIND",
                 f"money.buyer_side_costs[{i}]",
@@ -475,7 +619,7 @@ def _check_compliance_contradictions(
         ev_text = _evidence_text(item.get("evidence_pages", []), page_index)
         if not ev_text:
             continue
-        has_conform = "conform" in ev_text
+        has_conform = _has_positive_compliance_statement(ev_text)
         has_negative = _has_negative(ev_text)
         if classification == "conforming" and not has_conform:
             report.error(
@@ -518,7 +662,7 @@ def _check_lots(worksheet: Dict[str, Any], report: _Report) -> None:
     diverts such jobs to manual review, and this check is the defense-in-depth
     net for any direct validation.
     """
-    lot_ids = lots_mod.worksheet_lot_ids(worksheet)
+    lot_ids = lots_mod.distinct_lots(worksheet)
     if len(lot_ids) >= 2:
         report.error(
             "MULTI_LOT_SELECTION_UNCLEAR",
@@ -526,11 +670,13 @@ def _check_lots(worksheet: Dict[str, Any], report: _Report) -> None:
             f"worksheet mixes {len(lot_ids)} distinct lots ({', '.join(lot_ids)}); a single "
             "lot must be selected before a customer contract can be built (no lot blending)",
         )
-    for field in lots_mod.contaminated_flat_fields(worksheet):
+    # Any single worksheet string that splices two lots together is contamination —
+    # this covers address/ownership AND money/occupancy/compliance/formality fields.
+    for field in lots_mod.contaminated_worksheet_fields(worksheet):
         report.error(
             "LOT_CONTAMINATION",
             field["path"],
-            f"flat field '{field['path']}' mixes data from lots {field['lot_ids']}",
+            f"field '{field['path']}' mixes data from lots {field['lot_ids']}",
         )
 
 
@@ -547,6 +693,121 @@ def _check_regularizable_not_blocking(worksheet: Dict[str, Any], report: _Report
                 f"area '{item.get('area')}' is regularizable with cost/timing but marked as "
                 "blocking saleability",
             )
+
+
+def check_selected_lot_present(lot_ids: List[str], selected_lot_id: Any) -> Optional[Dict[str, Any]]:
+    """Return a violation dict if ``selected_lot_id`` is not among the document's lots.
+
+    Generic helper used by the orchestrator before re-analyzing a chosen lot: a
+    selected lot that does not exist in a multi-lot document must fail closed rather
+    than silently analyzing the wrong (or no) lot.
+    """
+    from . import lots as _lots
+    want = _lots.normalize_lot_token(selected_lot_id) or str(selected_lot_id or "").strip()
+    known = {str(x) for x in (lot_ids or [])}
+    if want and want in known:
+        return None
+    return {
+        "code": "SELECTED_LOT_NOT_FOUND",
+        "severity": "error",
+        "path": "selected_lot_id",
+        "detail": (
+            f"selected lot '{selected_lot_id}' (normalized '{want}') is not among the "
+            f"document's lots ({sorted(known)})"
+        ),
+    }
+
+
+# ---------------------------------------------------------------------------
+# Compliance evidence gate (deterministic downgrade, runs BEFORE validation)
+# ---------------------------------------------------------------------------
+def apply_compliance_evidence_gate(
+    worksheet: Dict[str, Any],
+    pages: List[Dict[str, Any]],
+) -> Tuple[Dict[str, Any], Dict[str, Any]]:
+    """Downgrade unsupported compliance claims to 'uncertain' (manual review).
+
+    Generic, document-agnostic rule (never defaults to conforming):
+      * 'conforming' is honored ONLY when the cited page text contains an
+        explicit conformity statement. Missing evidence, generic/administrative
+        text, or text not containing conformity language -> 'uncertain'.
+      * Any other classification with NO evidence pages at all -> 'uncertain'
+        (a claim that cannot be verified is preserved as an uncertainty flag,
+        never as a fact).
+
+    In the selected-lot pipeline the ``pages`` are already the isolated
+    lot+global subset, so evidence "not clearly tied to the selected lot"
+    naturally yields empty cited text here and is downgraded.
+
+    Returns ``(gated_worksheet, gate_report)``. The input worksheet is not
+    mutated. Downgrades are also appended to ``missing_or_uncertain`` so the
+    contract's uncertainty flags carry them. The validator's
+    UNSUPPORTED_COMPLIANCE_CLAIM check stays active as defense-in-depth for any
+    path that skips this gate.
+    """
+    gated = copy.deepcopy(worksheet)
+    page_index = _page_text_index(pages)
+    downgrades: List[Dict[str, Any]] = []
+
+    for i, item in enumerate(gated.get("technical_compliance") or []):
+        classification = item.get("classification")
+        if classification == "uncertain":
+            continue
+        ev_pages = list(item.get("evidence_pages") or [])
+        ev_text = _evidence_text(ev_pages, page_index)
+
+        reason: Optional[str] = None
+        if classification == "conforming":
+            if not ev_pages:
+                reason = (
+                    "classificata 'conforming' senza alcuna pagina di evidenza"
+                )
+            elif not _has_positive_compliance_statement(ev_text):
+                reason = (
+                    "classificata 'conforming' ma il testo citato non contiene una "
+                    "dichiarazione esplicita di conformità per il contesto analizzato"
+                )
+        elif not ev_pages:
+            reason = (
+                f"classificata '{classification}' senza alcuna pagina di evidenza"
+            )
+
+        if reason is None:
+            continue
+
+        downgrades.append(
+            {
+                "path": f"technical_compliance[{i}]",
+                "area": item.get("area"),
+                "from": classification,
+                "to": "uncertain",
+                "reason": reason,
+                "evidence_pages": ev_pages,
+            }
+        )
+        item["classification"] = "uncertain"
+        item["needs_manual_review"] = True
+        # A downgraded entry is an uncertainty flag, not a claim: citations to
+        # pages outside the analyzed context (e.g. another lot's pages) are
+        # dropped here (they are preserved in the gate report above) so the
+        # page-existence check does not fail a claim we already neutralized.
+        item["evidence_pages"] = [p for p in ev_pages if p in page_index]
+        note = (
+            f"Declassata a 'uncertain' (verifica manuale): {reason}."
+        )
+        item["notes"] = f"{item.get('notes')} {note}".strip() if item.get("notes") else note
+        gated.setdefault("missing_or_uncertain", []).append(
+            f"Conformità '{item.get('area')}': {reason}; stato impostato a "
+            "'uncertain' e richiesta verifica manuale."
+        )
+
+    gate_report = {
+        "schema_version": COMPLIANCE_GATE_SCHEMA_VERSION,
+        "checked_count": len(gated.get("technical_compliance") or []),
+        "downgrade_count": len(downgrades),
+        "downgrades": downgrades,
+    }
+    return gated, gate_report
 
 
 # ---------------------------------------------------------------------------

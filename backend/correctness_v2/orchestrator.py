@@ -24,7 +24,15 @@ import traceback
 from typing import Any, Callable, Dict, List, Optional
 
 from . import analyst as analyst_mod
-from . import artifacts, contract as contract_mod, feature_flags, job_status, lots as lots_mod, validator as validator_mod
+from . import (
+    artifacts,
+    contract as contract_mod,
+    feature_flags,
+    job_status,
+    lot_packets as lot_packets_mod,
+    lots as lots_mod,
+    validator as validator_mod,
+)
 from .analyst import AnalystError
 from .pdf_quality import assess_pdf_quality
 from .schemas import JobStatus, PdfQualityStatus
@@ -38,6 +46,11 @@ STEP1_OK_MESSAGE = (
 
 STEP2_OK_MESSAGE = (
     "Contract built from generic OpenAI analyst worksheet and deterministic validation."
+)
+
+STEP3_SELECTED_LOT_MESSAGE = (
+    "Single-lot contract built from the selected lot's isolated page context "
+    "(no lot blending)."
 )
 
 PageLoader = Callable[[str], List[Dict[str, Any]]]
@@ -57,6 +70,8 @@ def start_job(
     ocr_failed: bool = False,
     openai_caller: Optional[OpenAICaller] = None,
     model: Optional[str] = None,
+    selected_lot_id: Optional[str] = None,
+    analyze_all: bool = False,
 ) -> Dict[str, Any]:
     """
     Create and run a Correctness v2 job for ``analysis_id``.
@@ -146,7 +161,7 @@ def start_job(
                 admin_only,
             )
 
-        # Step 2 pipeline (analyst -> validator -> contract).
+        # Step 2/3 pipeline (analyst -> lot routing -> validator -> contract).
         return _run_step2(
             job_id=job_id,
             analysis_id=analysis_id,
@@ -157,6 +172,8 @@ def start_job(
             admin_only=admin_only,
             openai_caller=openai_caller,
             model=model,
+            selected_lot_id=selected_lot_id,
+            analyze_all=analyze_all,
         )
 
     except Exception as exc:  # FAIL CLOSED — never fall back to old analyzer.
@@ -211,11 +228,21 @@ def _run_step2(
     admin_only: bool,
     openai_caller: OpenAICaller,
     model: Optional[str],
+    selected_lot_id: Optional[str] = None,
+    analyze_all: bool = False,
 ) -> Dict[str, Any]:
-    """Run the generic Step 2 pipeline. Fails closed at every stage."""
+    """Run the generic lot-aware pipeline. Fails closed at every stage.
+
+    Flow:
+      analyst (full doc) -> lot detection -> route:
+        * single lot (incl. multi-bene) -> validator -> contract (CONTRACT_READY)
+        * multi-lot + analyze_all        -> per-lot contracts
+        * multi-lot + selected_lot_id    -> re-analyze that lot's pages only
+        * multi-lot + no selection       -> LOT_SELECTION_REQUIRED (never blended)
+    """
     source_quality = report.get("quality_status") or PdfQualityStatus.OK
 
-    # 1) OpenAI analyst worksheet.
+    # 1) OpenAI analyst worksheet (full document — used for lot detection + index).
     try:
         result = analyst_mod.run_analyst(pages, openai_caller=openai_caller, model=model)
     except AnalystError as exc:
@@ -245,19 +272,128 @@ def _run_step2(
         job_id, result.worksheet
     )
 
-    # 1b) Multi-lot gate (fail closed). A perizia with two or more lots must NEVER
-    # be blended into a single customer contract. We detect lots deterministically
-    # and, when more than one is present, stop at NEEDS_MANUAL_REVIEW with a
-    # per-lot index instead of guessing/contaminating.
+    # 1b) Lot detection (deterministic + wording-agnostic via the analyst lots[]).
     lot_report = lots_mod.build_lot_report(result.worksheet, pages)
     artifacts_saved["lot_report"] = artifacts.save_lot_report(job_id, lot_report)
-    if lot_report.get("multi_lot"):
-        return _finish_multilot_manual_review(
-            job_id, analysis_id, lot_report, artifacts_saved, created_at, admin_only
+
+    # SINGLE LOT (including multi-bene inside one lot): proceed normally. Multi-bene
+    # is never blocked — the gate keys only on distinct lots, never on beni.
+    if not lot_report.get("multi_lot"):
+        return _build_single_lot_contract(
+            job_id=job_id,
+            analysis_id=analysis_id,
+            worksheet=result.worksheet,
+            pages=pages,
+            lot_report=lot_report,
+            artifacts_saved=artifacts_saved,
+            created_at=created_at,
+            admin_only=admin_only,
+            source_quality=source_quality,
+            model_name=result.model,
+            extra={"multi_lot": False, "lot_count": lot_report.get("lot_count", 1)},
         )
 
-    # 2) Deterministic validator.
-    validator_report = validator_mod.validate_worksheet(result.worksheet, pages)
+    # MULTI-LOT: always build the inspectable lot index + per-lot packets. We never
+    # blend lots; the document is segmented page-by-page into per-lot contexts.
+    segmentation = lot_packets_mod.segment_pages(pages, lot_report.get("lot_ids"))
+    lot_index = lot_packets_mod.build_lot_index(result.worksheet, pages, lot_report, segmentation)
+    per_lot_packets = lot_packets_mod.build_per_lot_packets(result.worksheet, pages, lot_report, segmentation)
+    artifacts_saved["lot_index"] = artifacts.save_lot_index(job_id, lot_index)
+    artifacts_saved["per_lot_packets"] = artifacts.save_per_lot_packets(job_id, per_lot_packets)
+
+    if analyze_all:
+        return _run_analyze_all(
+            job_id=job_id,
+            analysis_id=analysis_id,
+            pages=pages,
+            worksheet=result.worksheet,
+            lot_report=lot_report,
+            segmentation=segmentation,
+            lot_index=lot_index,
+            artifacts_saved=artifacts_saved,
+            created_at=created_at,
+            admin_only=admin_only,
+            source_quality=source_quality,
+            openai_caller=openai_caller,
+            model=model,
+        )
+
+    if selected_lot_id is not None and str(selected_lot_id).strip() != "":
+        violation = validator_mod.check_selected_lot_present(
+            lot_report.get("lot_ids", []), selected_lot_id
+        )
+        if violation is not None:
+            return _finish_selected_lot_not_found(
+                job_id, analysis_id, selected_lot_id, lot_report, violation,
+                artifacts_saved, created_at, admin_only,
+            )
+        return _run_selected_lot(
+            job_id=job_id,
+            analysis_id=analysis_id,
+            pages=pages,
+            worksheet=result.worksheet,
+            lot_report=lot_report,
+            segmentation=segmentation,
+            lot_index=lot_index,
+            selected_lot_id=str(selected_lot_id).strip(),
+            artifacts_saved=artifacts_saved,
+            created_at=created_at,
+            admin_only=admin_only,
+            source_quality=source_quality,
+            openai_caller=openai_caller,
+            model=model,
+        )
+
+    # No selection, no analyze_all -> ask the caller to choose (expected behavior).
+    return _finish_lot_selection_required(
+        job_id, analysis_id, lot_report, lot_index, artifacts_saved, created_at, admin_only
+    )
+
+
+def _step2_stage(name: str) -> str:
+    return f"step2:{name}"
+
+
+def _step3_stage(name: str) -> str:
+    return f"step3:{name}"
+
+
+# ---------------------------------------------------------------------------
+# Single-lot contract build (shared by the single-lot and selected-lot paths)
+# ---------------------------------------------------------------------------
+def _build_single_lot_contract(
+    *,
+    job_id: str,
+    analysis_id: str,
+    worksheet: Dict[str, Any],
+    pages: List[Dict[str, Any]],
+    lot_report: Dict[str, Any],
+    artifacts_saved: Dict[str, Any],
+    created_at: str,
+    admin_only: bool,
+    source_quality: str,
+    model_name: str,
+    extra: Optional[Dict[str, Any]] = None,
+    current_stage: Optional[str] = None,
+    message: str = STEP2_OK_MESSAGE,
+    shared_summary_rows: Optional[List[Dict[str, Any]]] = None,
+) -> Dict[str, Any]:
+    """Validate a single-lot worksheet and build the verified contract (CONTRACT_READY).
+
+    This is the ONLY path that ever produces verified_report_contract.json, and it
+    only runs when exactly one safe lot context exists (single-lot doc, or a chosen
+    lot's isolated re-analysis). Fails closed on validation / build errors.
+    """
+    # Deterministic compliance evidence gate: unsupported 'conforming' claims (and
+    # claims with no evidence at all) are downgraded to 'uncertain' + manual review
+    # BEFORE validation, so the contract never overclaims and never defaults to
+    # conforming. The validator keeps its own overclaim checks as defense-in-depth.
+    worksheet, gate_report = validator_mod.apply_compliance_evidence_gate(worksheet, pages)
+    artifacts_saved["compliance_gate_report"] = artifacts.save_compliance_gate_report(
+        job_id, gate_report
+    )
+
+    validator_report = validator_mod.validate_worksheet(worksheet, pages)
     artifacts_saved["validator_report"] = artifacts.save_validator_report(
         job_id, validator_report
     )
@@ -267,15 +403,15 @@ def _run_step2(
             job_id, analysis_id, validator_report, artifacts_saved, created_at, admin_only
         )
 
-    # 3) Deterministic, renderer-ready contract.
     try:
         contract = contract_mod.build_contract(
-            worksheet=result.worksheet,
+            worksheet=worksheet,
             validator_report=validator_report,
             analysis_id=analysis_id,
             job_id=job_id,
             source_pdf_quality_status=source_quality,
             lot_report=lot_report,
+            shared_summary_rows=shared_summary_rows,
         )
     except Exception as exc:
         return _finish_contract_build_failed(
@@ -286,96 +422,479 @@ def _run_step2(
         job_id, contract
     )
 
-    extra = {
-        "message": STEP2_OK_MESSAGE,
+    payload_extra = {
+        "message": message,
         "pdf_quality_status": source_quality,
-        "openai_model": result.model,
+        "openai_model": model_name,
         "validation_status": validator_report.get("validation_status"),
         "validator_warning_count": validator_report.get("warning_count", 0),
+        "compliance_downgrade_count": gate_report.get("downgrade_count", 0),
         "contract_generated": True,
         "contract_schema_version": contract.get("schema_version"),
     }
+    if extra:
+        payload_extra.update(extra)
     payload = job_status.make_status(
         job_id=job_id,
         analysis_id=analysis_id,
         status=JobStatus.CONTRACT_READY,
-        current_stage=_step2_stage("contract_ready"),
+        current_stage=current_stage or _step2_stage("contract_ready"),
         admin_only=admin_only,
         customer_report_generated=False,  # admin-only / shadow: not customer-facing yet
         safe_to_show_customer=False,
         artifacts_saved=artifacts_saved,
         created_at=created_at,
-        extra=extra,
+        extra=payload_extra,
     )
     artifacts.save_job_status(job_id, payload)
     return payload
 
 
-def _step2_stage(name: str) -> str:
-    return f"step2:{name}"
+# ---------------------------------------------------------------------------
+# Multi-lot: selected lot -> re-analyze ONLY that lot's isolated pages
+# ---------------------------------------------------------------------------
+def _run_selected_lot(
+    *,
+    job_id: str,
+    analysis_id: str,
+    pages: List[Dict[str, Any]],
+    worksheet: Dict[str, Any],
+    lot_report: Dict[str, Any],
+    segmentation: Dict[str, Any],
+    lot_index: Dict[str, Any],
+    selected_lot_id: str,
+    artifacts_saved: Dict[str, Any],
+    created_at: str,
+    admin_only: bool,
+    source_quality: str,
+    openai_caller: OpenAICaller,
+    model: Optional[str],
+) -> Dict[str, Any]:
+    """Analyze ONLY the selected lot, from its isolated page context (no blending).
+
+    The selected lot's safe page subset (global + lot-specific pages, shared
+    multi-lot pages excluded) is re-analyzed into a fresh single-lot worksheet, then
+    validated and turned into a contract. Defense-in-depth: if the re-analysis still
+    looks multi-lot, validation fails closed.
+    """
+    norm_lot = lots_mod.normalize_lot_token(selected_lot_id) or selected_lot_id
+    selected_pages = lot_packets_mod.select_lot_pages(pages, segmentation, norm_lot)
+    context = lot_packets_mod.build_selected_lot_context(
+        pages, segmentation, norm_lot, lot_index, worksheet=worksheet
+    )
+    artifacts_saved["selected_lot_context"] = artifacts.save_selected_lot_context(job_id, context)
+
+    if not selected_pages:
+        # Nothing safe to analyze for this lot — genuine ambiguity, not a blend.
+        return _finish_lot_ambiguous(
+            job_id, analysis_id, selected_lot_id, lot_report,
+            artifacts_saved, created_at, admin_only,
+            detail=(
+                f"Per il lotto selezionato '{selected_lot_id}' non sono state isolate "
+                "pagine sicure (solo pagine globali/condivise). Selezione non risolvibile "
+                "automaticamente senza segmentazione manuale."
+            ),
+        )
+
+    # The whole-document map (lot detection + segmentation + compliance scopes)
+    # keeps the selected-lot pass oriented without exposing other lots' content.
+    document_map = lot_packets_mod.build_document_map(
+        lot_report, segmentation, lot_index, str(norm_lot)
+    )
+    try:
+        result = analyst_mod.run_analyst(
+            selected_pages,
+            openai_caller=openai_caller,
+            model=model,
+            target_lot=str(norm_lot),
+            document_map=document_map,
+        )
+    except AnalystError as exc:
+        return _finish_analyst_failed(
+            job_id, analysis_id, exc, artifacts_saved, created_at, admin_only
+        )
+
+    artifacts_saved["selected_lot_worksheet"] = artifacts.save_lot_subartifact(
+        job_id, norm_lot, artifacts.ANALYST_WORKSHEET_FILE, result.worksheet
+    )
+
+    sub_lot_report = lots_mod.build_lot_report(result.worksheet, selected_pages)
+    # This lot's clearly tagged money rows projected from the excluded shared
+    # summary pages (deterministic; other lots' rows never enter this contract).
+    shared_rows = (context.get("lot_money") or {}).get("shared_summary_rows") or []
+    extra = {
+        "multi_lot": True,
+        "selected_lot": str(norm_lot),
+        "lot_count": lot_report.get("lot_count"),
+        "lot_ids": lot_report.get("lot_ids", []),
+        "analyzed_pages": context.get("analysis_pages", []),
+    }
+    return _build_single_lot_contract(
+        job_id=job_id,
+        analysis_id=analysis_id,
+        worksheet=result.worksheet,
+        pages=selected_pages,
+        lot_report=sub_lot_report,
+        artifacts_saved=artifacts_saved,
+        created_at=created_at,
+        admin_only=admin_only,
+        source_quality=source_quality,
+        model_name=result.model,
+        extra=extra,
+        current_stage=_step3_stage("selected_lot_contract_ready"),
+        message=STEP3_SELECTED_LOT_MESSAGE,
+        shared_summary_rows=shared_rows,
+    )
 
 
-def _finish_multilot_manual_review(
+# ---------------------------------------------------------------------------
+# Multi-lot: analyze_all -> a separate contract per lot (never blended)
+# ---------------------------------------------------------------------------
+def _run_analyze_all(
+    *,
+    job_id: str,
+    analysis_id: str,
+    pages: List[Dict[str, Any]],
+    worksheet: Dict[str, Any],
+    lot_report: Dict[str, Any],
+    segmentation: Dict[str, Any],
+    lot_index: Dict[str, Any],
+    artifacts_saved: Dict[str, Any],
+    created_at: str,
+    admin_only: bool,
+    source_quality: str,
+    openai_caller: OpenAICaller,
+    model: Optional[str],
+) -> Dict[str, Any]:
+    """Analyze every lot separately, each from its own isolated page context.
+
+    Produces one independent (validated) contract per lot under
+    jobs/{job_id}/lots/{lot_id}/. No lot is blended with another. The parent job is
+    CONTRACT_READY only if every lot produced a contract; otherwise it is
+    NEEDS_MANUAL_REVIEW listing which lots could not be safely produced.
+    """
+    per_lot_results: List[Dict[str, Any]] = []
+    for lot_id in lot_report.get("lot_ids", []):
+        norm_lot = lots_mod.normalize_lot_token(lot_id) or lot_id
+        selected_pages = lot_packets_mod.select_lot_pages(pages, segmentation, norm_lot)
+        context = lot_packets_mod.build_selected_lot_context(
+            pages, segmentation, norm_lot, lot_index, worksheet=worksheet
+        )
+        artifacts.save_lot_subartifact(
+            job_id, norm_lot, artifacts.SELECTED_LOT_CONTEXT_FILE, context
+        )
+
+        entry: Dict[str, Any] = {
+            "lot_id": str(norm_lot),
+            "analyzed_pages": context.get("analysis_pages", []),
+        }
+        if not selected_pages:
+            entry.update({"status": JobStatus.NEEDS_MANUAL_REVIEW, "reason": "no_isolated_pages"})
+            per_lot_results.append(entry)
+            continue
+
+        document_map = lot_packets_mod.build_document_map(
+            lot_report, segmentation, lot_index, str(norm_lot)
+        )
+        try:
+            result = analyst_mod.run_analyst(
+                selected_pages,
+                openai_caller=openai_caller,
+                model=model,
+                target_lot=str(norm_lot),
+                document_map=document_map,
+            )
+        except AnalystError as exc:
+            entry.update({"status": JobStatus.FAILED_ANALYSIS, "reason": str(exc)})
+            per_lot_results.append(entry)
+            continue
+
+        artifacts.save_lot_subartifact(
+            job_id, norm_lot, artifacts.ANALYST_WORKSHEET_FILE, result.worksheet
+        )
+        lot_worksheet, gate_report = validator_mod.apply_compliance_evidence_gate(
+            result.worksheet, selected_pages
+        )
+        artifacts.save_lot_subartifact(
+            job_id, norm_lot, artifacts.COMPLIANCE_GATE_FILE, gate_report
+        )
+        validator_report = validator_mod.validate_worksheet(lot_worksheet, selected_pages)
+        artifacts.save_lot_subartifact(
+            job_id, norm_lot, artifacts.VALIDATOR_REPORT_FILE, validator_report
+        )
+        if validator_report.get("validation_status") != validator_mod.STATUS_VALIDATED:
+            entry.update(
+                {
+                    "status": JobStatus.CONTRACT_VALIDATION_FAILED,
+                    "violation_codes": sorted(
+                        {v.get("code") for v in validator_report.get("violations", []) if v.get("code")}
+                    ),
+                }
+            )
+            per_lot_results.append(entry)
+            continue
+
+        sub_lot_report = lots_mod.build_lot_report(lot_worksheet, selected_pages)
+        try:
+            contract = contract_mod.build_contract(
+                worksheet=lot_worksheet,
+                validator_report=validator_report,
+                analysis_id=analysis_id,
+                job_id=job_id,
+                source_pdf_quality_status=source_quality,
+                lot_report=sub_lot_report,
+                shared_summary_rows=(
+                    (context.get("lot_money") or {}).get("shared_summary_rows") or []
+                ),
+            )
+        except Exception as exc:  # noqa: BLE001 - recorded per lot, never blended
+            entry.update({"status": JobStatus.FAILED_CONTRACT_BUILD, "reason": str(exc)})
+            per_lot_results.append(entry)
+            continue
+
+        path = artifacts.save_lot_subartifact(
+            job_id, norm_lot, artifacts.VERIFIED_CONTRACT_FILE, contract
+        )
+        entry.update({"status": JobStatus.CONTRACT_READY, "contract_path": path})
+        per_lot_results.append(entry)
+
+    all_ok = bool(per_lot_results) and all(
+        e.get("status") == JobStatus.CONTRACT_READY for e in per_lot_results
+    )
+    aggregate = {
+        "analyze_all": True,
+        "lot_count": lot_report.get("lot_count"),
+        "lot_ids": lot_report.get("lot_ids", []),
+        "all_lots_ready": all_ok,
+        "per_lot_results": per_lot_results,
+    }
+    artifacts_saved["analyze_all_result"] = artifacts.save_analyze_all_result(job_id, aggregate)
+
+    status = JobStatus.CONTRACT_READY if all_ok else JobStatus.NEEDS_MANUAL_REVIEW
+    extra = {
+        "message": "analyze_all: una contratto verificato per ciascun lotto (nessuna fusione).",
+        "multi_lot": True,
+        "analyze_all": True,
+        "lot_count": lot_report.get("lot_count"),
+        "lot_ids": lot_report.get("lot_ids", []),
+        "per_lot_results": per_lot_results,
+        "all_lots_ready": all_ok,
+        "contract_generated": all_ok,
+    }
+    common = dict(
+        job_id=job_id,
+        analysis_id=analysis_id,
+        status=status,
+        current_stage=_step3_stage("analyze_all"),
+        admin_only=admin_only,
+        artifacts_saved=artifacts_saved,
+        created_at=created_at,
+        extra=extra,
+    )
+    if status == JobStatus.NEEDS_MANUAL_REVIEW:
+        payload = job_status.make_status(
+            customer_report_generated=False,
+            safe_to_show_customer=False,
+            reason_code="ANALYZE_ALL_PARTIAL",
+            reason_human="Alcuni lotti non hanno prodotto un contratto sicuro in modalità analyze_all.",
+            **common,
+        )
+    else:
+        payload = job_status.make_status(
+            customer_report_generated=False,
+            safe_to_show_customer=False,
+            **common,
+        )
+    artifacts.save_job_status(job_id, payload)
+    return payload
+
+
+# ---------------------------------------------------------------------------
+# Multi-lot: no selection -> LOT_SELECTION_REQUIRED (expected, not a failure)
+# ---------------------------------------------------------------------------
+def _finish_lot_selection_required(
     job_id: str,
     analysis_id: str,
     lot_report: Dict[str, Any],
+    lot_index: Dict[str, Any],
     artifacts_saved: Dict[str, Any],
     created_at: str,
     admin_only: bool,
 ) -> Dict[str, Any]:
-    """Multi-lot document -> NEEDS_MANUAL_REVIEW. No blended contract is built.
+    """Multi-lot document with no chosen lot -> LOT_SELECTION_REQUIRED.
 
-    This is not a hard failure: the analysis succeeded, but a single customer
-    contract cannot be safely produced without choosing a target lot. We preserve
-    the per-lot index (with evidence) so a human/UX can pick a lot next.
+    This is NOT a failure: the analysis succeeded and we segmented the document per
+    lot. No blended contract is produced. The caller must pick a target lot
+    (selected_lot_id) or request analyze_all.
     """
     lot_ids = lot_report.get("lot_ids", [])
     lot_count = lot_report.get("lot_count", len(lot_ids))
-    lot_index = [
+
+    available_lots = [
         {
             "lot_id": L.get("lot_id"),
-            "identifiers": L.get("identifiers", []),
-            "money": L.get("money", []),
-            "evidence_pages": L.get("evidence_pages", []),
+            "label": L.get("label"),
+            "address": L.get("address"),
+            "property_type": L.get("property_type"),
+            "ownership_right": L.get("ownership_right"),
+            "occupancy_summary": L.get("occupancy_summary"),
+            "key_money": L.get("key_money", []),
+            "page_evidence": L.get("page_evidence", []),
+            "confidence": L.get("confidence"),
+            "notes": L.get("notes", []),
         }
-        for L in lot_report.get("lots", [])
+        for L in lot_index.get("lots", [])
     ]
+
+    selection_payload = {
+        "schema_version": "cv2.lot_selection_required.v1",
+        "analysis_id": analysis_id,
+        "job_id": job_id,
+        "status": JobStatus.LOT_SELECTION_REQUIRED,
+        "reason_code": "LOT_SELECTION_REQUIRED",
+        "multi_lot": True,
+        "lot_count": lot_count,
+        "lot_ids": lot_ids,
+        "message": (
+            f"Rilevati {lot_count} lotti distinti. Selezionare un lotto da analizzare "
+            "oppure richiedere l'analisi di tutti i lotti. I lotti non vengono mai fusi."
+        ),
+        "available_lots": available_lots,
+        "available_actions": [
+            {
+                "action": "analyze_selected_lot",
+                "parameter": "selected_lot_id",
+                "values": lot_ids,
+            },
+            {"action": "analyze_all", "parameter": "analyze_all", "analyze_all_supported": True},
+        ],
+    }
+    artifacts_saved["lot_selection_required"] = artifacts.save_lot_selection_required(
+        job_id, selection_payload
+    )
+
     payload = job_status.make_status(
         job_id=job_id,
         analysis_id=analysis_id,
-        status=JobStatus.NEEDS_MANUAL_REVIEW,
-        current_stage=_step2_stage("multi_lot_manual_review"),
+        status=JobStatus.LOT_SELECTION_REQUIRED,
+        current_stage=_step3_stage("lot_selection_required"),
         admin_only=admin_only,
         customer_report_generated=False,
         safe_to_show_customer=False,
-        reason_code="MULTI_LOT_MANUAL_REVIEW_REQUIRED",
+        reason_code="LOT_SELECTION_REQUIRED",
         reason_human=(
-            f"La perizia contiene {lot_count} lotti distinti ({', '.join(lot_ids)}). "
-            "Non è possibile produrre un singolo report cliente senza selezionare il "
-            "lotto di interesse; i lotti non vengono mai fusi."
+            f"La perizia contiene {lot_count} lotti distinti ({', '.join(str(x) for x in lot_ids)}). "
+            "Selezionare un lotto (selected_lot_id) o richiedere analyze_all. I lotti non "
+            "vengono mai fusi."
         ),
-        troubleshoot_message=(
-            "Documento multi-lotto rilevato in modo deterministico. Il job si ferma a "
-            "NEEDS_MANUAL_REVIEW (fail-closed) per non contaminare i lotti. L'indice "
-            "per-lotto con le evidenze è in lot_report.json."
-        ),
-        next_steps=[
-            "Selezionare il lotto di interesse (input target-lot non ancora disponibile nell'API).",
-            "Rieseguire l'analisi sul singolo lotto selezionato.",
-            "Controllare lot_report.json per l'indice per-lotto con le evidenze.",
-        ],
         artifacts_saved=artifacts_saved,
         created_at=created_at,
         extra={
             "multi_lot": True,
             "lot_count": lot_count,
             "lot_ids": lot_ids,
-            "lot_index": lot_index,
-            "contaminated_fields": lot_report.get("contaminated_fields", []),
-            "manual_review_required": True,
+            "available_lots": available_lots,
+            "available_actions": selection_payload["available_actions"],
             "selected_lot": None,
-            "no_report": True,
             "contract_generated": False,
+            "blended_report_prevented": True,
+        },
+    )
+    artifacts.save_job_status(job_id, payload)
+    return payload
+
+
+def _finish_selected_lot_not_found(
+    job_id: str,
+    analysis_id: str,
+    selected_lot_id: Any,
+    lot_report: Dict[str, Any],
+    violation: Dict[str, Any],
+    artifacts_saved: Dict[str, Any],
+    created_at: str,
+    admin_only: bool,
+) -> Dict[str, Any]:
+    """Selected lot not present in a multi-lot document -> CONTRACT_VALIDATION_FAILED."""
+    lot_ids = lot_report.get("lot_ids", [])
+    error_path = artifacts.save_error(
+        job_id,
+        {
+            "status": JobStatus.CONTRACT_VALIDATION_FAILED,
+            "stage": "step3:selected_lot",
+            "reason_code": "SELECTED_LOT_NOT_FOUND",
+            "selected_lot_id": selected_lot_id,
+            "available_lot_ids": lot_ids,
+            "violation": violation,
+            "no_report": True,
+        },
+    )
+    artifacts_saved["error"] = error_path
+    payload = job_status.make_failure_status(
+        job_id=job_id,
+        analysis_id=analysis_id,
+        status=JobStatus.CONTRACT_VALIDATION_FAILED,
+        current_stage=_step3_stage("selected_lot_not_found"),
+        reason_code="SELECTED_LOT_NOT_FOUND",
+        reason_human=(
+            f"Il lotto selezionato '{selected_lot_id}' non esiste nel documento. "
+            f"Lotti disponibili: {', '.join(str(x) for x in lot_ids)}."
+        ),
+        troubleshoot_message=(
+            "La selezione del lotto non corrisponde ad alcun lotto rilevato. Nessun "
+            "report è stato generato (fail-closed). Controllare lot_index.json per i "
+            "lotti disponibili."
+        ),
+        next_steps=[
+            "Selezionare un selected_lot_id presente in lot_index.json.",
+            "Oppure richiedere analyze_all per analizzare tutti i lotti.",
+        ],
+        artifacts_saved=artifacts_saved,
+        created_at=created_at,
+        admin_only=admin_only,
+        extra={"no_report": True, "available_lot_ids": lot_ids, "selected_lot_id": selected_lot_id},
+    )
+    artifacts.save_job_status(job_id, payload)
+    return payload
+
+
+def _finish_lot_ambiguous(
+    job_id: str,
+    analysis_id: str,
+    selected_lot_id: Any,
+    lot_report: Dict[str, Any],
+    artifacts_saved: Dict[str, Any],
+    created_at: str,
+    admin_only: bool,
+    *,
+    detail: str,
+) -> Dict[str, Any]:
+    """Genuine ambiguity (no safe isolated pages for the chosen lot) -> NEEDS_MANUAL_REVIEW."""
+    payload = job_status.make_status(
+        job_id=job_id,
+        analysis_id=analysis_id,
+        status=JobStatus.NEEDS_MANUAL_REVIEW,
+        current_stage=_step3_stage("lot_ambiguous"),
+        admin_only=admin_only,
+        customer_report_generated=False,
+        safe_to_show_customer=False,
+        reason_code="LOT_SEGMENTATION_AMBIGUOUS",
+        reason_human=detail,
+        troubleshoot_message=(
+            "La segmentazione automatica non ha isolato pagine sicure per il lotto "
+            "selezionato. Revisione manuale necessaria; nessun lotto è stato fuso."
+        ),
+        next_steps=[
+            "Verificare la struttura del PDF per il lotto selezionato.",
+            "Eventualmente fornire un intervallo di pagine per il lotto.",
+        ],
+        artifacts_saved=artifacts_saved,
+        created_at=created_at,
+        extra={
+            "multi_lot": True,
+            "selected_lot": str(selected_lot_id),
+            "lot_ids": lot_report.get("lot_ids", []),
+            "contract_generated": False,
+            "manual_review_required": True,
         },
     )
     artifacts.save_job_status(job_id, payload)

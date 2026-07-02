@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import copy
 import json
+import re
 from typing import Any, Dict, List
 
 # Two-page generic perizia: all 6 key sections present, money on both pages,
@@ -215,6 +216,56 @@ def make_multibene_single_lot_worksheet() -> Dict[str, Any]:
 
 
 # ---------------------------------------------------------------------------
+# Multi-lot, page-segmentable fixture (each lot lives on its own pages)
+# ---------------------------------------------------------------------------
+# One self-contained lot block carrying ALL the tokens/numbers the validator needs
+# (identity, possesso, vincoli/oneri cancellate, conformità, valutazione, prezzo
+# base). Built generically from the single-lot GENERIC content — NOT a real city.
+_LOT_BLOCK = GENERIC_PERIZIA_PAGES[0]["text"] + " " + GENERIC_PERIZIA_PAGES[1]["text"]
+
+# 5 pages: a global preamble, then two pages per lot so each lot id appears >=2
+# times (page-text detection) and segmentation gets clean per-lot anchors.
+MULTI_LOT_PAGES: List[Dict[str, Any]] = [
+    {
+        "page_number": 1,
+        "text": (
+            "TRIBUNALE DI ESEMPIO - Procedura esecutiva. Premessa, metodologia di "
+            "stima e criteri generali. Identificazione dei beni, possesso, vincoli e "
+            "oneri, conformita, valutazione e costi sono dettagliati nei singoli lotti."
+        ),
+    },
+    {"page_number": 2, "text": _LOT_BLOCK},  # LOTTO 1 (explicit, full content)
+    {"page_number": 3, "text": "Segue la descrizione del LOTTO 1 e relativi allegati."},
+    {"page_number": 4, "text": _LOT_BLOCK.replace("LOTTO 1", "LOTTO 2")},  # LOTTO 2 full
+    {"page_number": 5, "text": "Segue la descrizione del LOTTO 2 e relativi allegati."},
+]
+
+
+def _remap_evidence(obj: Any, page: int) -> Any:
+    if isinstance(obj, dict):
+        return {
+            k: ([page] if k == "evidence_pages" else _remap_evidence(v, page))
+            for k, v in obj.items()
+        }
+    if isinstance(obj, list):
+        return [_remap_evidence(x, page) for x in obj]
+    return obj
+
+
+def single_lot_worksheet_on_page(page: int, lot_id: str = "1") -> Dict[str, Any]:
+    """A clean SINGLE-lot raw worksheet whose every evidence_pages points at ``page``.
+
+    Used as the re-analysis result for a selected lot: it cites only pages inside
+    the lot's isolated page subset, so it validates against that subset.
+    """
+    ws = base_raw_worksheet()
+    ws["case_identity"]["lotto"] = lot_id
+    ws["case_identity"]["address"] = f"Via del Lotto {lot_id}"
+    ws = _remap_evidence(ws, page)
+    return ws
+
+
+# ---------------------------------------------------------------------------
 # OpenAI seam fakes
 # ---------------------------------------------------------------------------
 def fake_caller_returning(worksheet_raw: Dict[str, Any]):
@@ -245,6 +296,34 @@ def fake_caller_raising(reason_code: str = "OPENAI_CALL_FAILED"):
     def _caller(messages, *, model=None, timeout=None):
         calls.append({"model": model})
         raise OpenAIClientError("simulated OpenAI failure", reason_code=reason_code)
+
+    _caller.calls = calls  # type: ignore[attr-defined]
+    return _caller
+
+
+def fake_sequence_caller(worksheets_raw: List[Dict[str, Any]]):
+    """A caller that returns each given raw worksheet in order across calls.
+
+    Records the pages it was asked to analyze so a test can assert that a selected
+    lot re-analysis only saw that lot's isolated page subset.
+    """
+    calls: List[Dict[str, Any]] = []
+    seq = list(worksheets_raw)
+
+    def _caller(messages, *, model=None, timeout=None):
+        idx = len(calls)
+        ws = seq[idx] if idx < len(seq) else seq[-1]
+        # The user message embeds the page blocks ("=== PAGINA n ===").
+        user = next((m.get("content", "") for m in messages if m.get("role") == "user"), "")
+        pages_seen = [int(n) for n in re.findall(r"=== PAGINA (\d+) ===", user)]
+        calls.append({"model": model, "pages_seen": pages_seen, "user_text": user})
+        return {
+            "content": json.dumps(ws, ensure_ascii=False),
+            "model": model or "fake-model",
+            "finish_reason": "stop",
+            "usage": {"total_tokens": 1},
+            "response_id": f"resp_fake_{idx}",
+        }
 
     _caller.calls = calls  # type: ignore[attr-defined]
     return _caller

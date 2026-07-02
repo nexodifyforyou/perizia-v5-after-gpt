@@ -85,11 +85,33 @@ def _build_admin_page_loader():
     return _fetch_pages_count
 
 
+def _parse_lot_selection(body: Any) -> Dict[str, Any]:
+    """Read optional lot-selection inputs from the request body (back-compatible).
+
+    Accepts {"selected_lot_id": "1"} or {"target_lot": "1"} and an optional
+    {"analyze_all": true}. No body / empty body keeps the original behavior.
+    """
+    if not isinstance(body, dict):
+        return {"selected_lot_id": None, "analyze_all": False}
+    raw_lot = body.get("selected_lot_id")
+    if raw_lot is None:
+        raw_lot = body.get("target_lot")
+    selected = None if raw_lot is None else str(raw_lot).strip() or None
+    return {"selected_lot_id": selected, "analyze_all": bool(body.get("analyze_all"))}
+
+
 @router.post("/{analysis_id}/correctness-v2/start")
 async def correctness_v2_start(analysis_id: str, request: Request) -> Dict[str, Any]:
     import server  # type: ignore
 
     user, is_admin = await _resolve_user_and_guard(request)
+
+    # Optional lot-selection body (no body still works for single-lot perizie).
+    try:
+        body = await request.json()
+    except Exception:
+        body = None
+    selection = _parse_lot_selection(body)
 
     # Resolve pages_count (also validates the analysis exists) up front.
     fetch_pages_count = _build_admin_page_loader()
@@ -98,13 +120,16 @@ async def correctness_v2_start(analysis_id: str, request: Request) -> Dict[str, 
     def _page_loader(aid: str) -> List[Dict[str, Any]]:
         return server._load_pages_for_analysis(aid, pages_count)
 
-    # Inject the real OpenAI caller so the job runs the full Step 2 pipeline
-    # (analyst -> validator -> contract). Quality-blocked jobs never reach it.
+    # Inject the real OpenAI caller so the job runs the full lot-aware pipeline
+    # (analyst -> lot routing -> validator -> contract). Quality-blocked jobs never
+    # reach it. Multi-lot with no selection returns LOT_SELECTION_REQUIRED.
     status = start_job(
         analysis_id,
         _page_loader,
         is_admin=is_admin,
         openai_caller=openai_client.call_openai_json,
+        selected_lot_id=selection["selected_lot_id"],
+        analyze_all=selection["analyze_all"],
     )
 
     # Admin responses keep raw artifact paths; non-admin would be sanitized, but

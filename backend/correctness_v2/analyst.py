@@ -77,7 +77,12 @@ _SYSTEM_PROMPT = (
     "3. Classifica ogni area di conformità tecnica SOLO con uno di questi valori: "
     "'conforming', 'non_conforming', 'regularizable', 'not_regularizable', "
     "'uncertain'. Se il testo dice che l'immobile è conforme, usa 'conforming' "
-    "e NON marcarlo come grave.\n"
+    "e NON marcarlo come grave. Usa 'conforming' SOLO se il testo contiene una "
+    "dichiarazione ESPLICITA di conformità/regolarità per quell'area, riferita al "
+    "bene o lotto analizzato. Se l'evidenza è assente, generica, puramente "
+    "amministrativa, o non chiaramente riferita al bene/lotto analizzato, usa "
+    "'uncertain'. NON dedurre MAI 'conforming' dall'assenza di problemi "
+    "segnalati: l'assenza di menzione NON è conformità.\n"
     "4. Non promuovere un problema minore o regolarizzabile a problema grave se "
     "il testo non lo supporta.\n"
     "5. Tieni SEPARATI i costi a carico dell'acquirente ('buyer_side_costs') "
@@ -167,14 +172,97 @@ def _pages_text(pages: List[Dict[str, Any]], max_chars: int) -> str:
     return "\n".join(parts)
 
 
+def _format_pages_list(pages: Any) -> str:
+    vals = [str(p) for p in (pages or [])]
+    return ", ".join(vals) if vals else "nessuna"
+
+
+def _document_map_text(document_map: Dict[str, Any], target_lot: str) -> str:
+    """Render the whole-document map (from the full-document pass) for the
+    selected-lot re-analysis prompt. Generic: only ids/pages, no document content."""
+    lot_ids = [str(x) for x in (document_map.get("lot_ids") or [])]
+    other_lots = [x for x in lot_ids if x != str(target_lot)]
+    lines = [
+        "MAPPA DEL DOCUMENTO (costruita da una lettura completa della perizia):",
+        f"- Lotti distinti rilevati nell'intero documento: {', '.join(lot_ids) or 'n/d'}",
+        f"- Lotto selezionato per questa analisi: {target_lot}",
+        f"- Pagine specifiche del Lotto {target_lot}: "
+        f"{_format_pages_list(document_map.get('lot_pages'))}",
+        f"- Pagine globali/comuni all'intera procedura: "
+        f"{_format_pages_list(document_map.get('global_pages'))}",
+        f"- Pagine condivise tra più lotti, ESCLUSE da questo contesto: "
+        f"{_format_pages_list(document_map.get('excluded_shared_pages'))}",
+    ]
+    if other_lots:
+        lines.append(
+            f"- Altri lotti presenti nel documento, DA IGNORARE: {', '.join(other_lots)}"
+        )
+    beni = document_map.get("bene_ids") or []
+    if beni:
+        lines.append(
+            f"- Beni del Lotto {target_lot}: {', '.join(str(b) for b in beni)}"
+        )
+    compliance = document_map.get("compliance_sections") or []
+    if compliance:
+        lines.append(
+            "- Sezioni di conformità rilevate nella lettura completa "
+            "(scope: lotto specifico / globale / unclear):"
+        )
+        for c in compliance:
+            lines.append(
+                f"  * {c.get('area')}: scope={c.get('scope')}"
+                + (f", lotto={c.get('lot_id')}" if c.get("lot_id") else "")
+            )
+    lines.append(
+        "Usa questa mappa SOLO per orientarti: i dati estratti devono comunque "
+        "provenire dalle pagine fornite qui sotto. Una sezione di conformità con "
+        "scope 'unclear' o riferita a un altro lotto NON è evidenza per il lotto "
+        f"{target_lot}: in quel caso usa 'uncertain'."
+    )
+    return "\n".join(lines) + "\n\n"
+
+
 def build_messages(
     pages: List[Dict[str, Any]],
     *,
     max_context_chars: Optional[int] = None,
+    target_lot: Optional[str] = None,
+    document_map: Optional[Dict[str, Any]] = None,
 ) -> List[Dict[str, str]]:
     budget = max_context_chars or openai_client.resolve_max_context_chars()
     doc = _pages_text(pages, budget)
+
+    # When re-analyzing a single selected lot, instruct the model to focus on ONLY
+    # that lot. The page subset is already isolated, but preamble/common pages can
+    # still NAME other lots — without this the model tends to re-list every lot it
+    # sees in lots[], which then trips the multi-lot validator. Generic: the lot id
+    # is whatever the caller selected; no document is hardcoded. The document map
+    # from the whole-document pass keeps the model oriented (it is not blind to the
+    # document structure) without feeding it other lots' content.
+    if target_lot:
+        focus = (
+            f"STAI ANALIZZANDO ESCLUSIVAMENTE IL LOTTO {target_lot}. Le pagine fornite "
+            f"sono il contesto isolato del Lotto {target_lot} (più eventuali pagine comuni "
+            "all'intera procedura). Estrai SOLO i dati del Lotto "
+            f"{target_lot}: indirizzo, diritto, occupazione, conformità, formalità e importi "
+            f"del Lotto {target_lot}. IGNORA qualsiasi dato specifico di altri lotti anche se "
+            "citato nelle pagine comuni. NON popolare l'array 'lots' con altri lotti: al "
+            f"massimo una sola voce per il Lotto {target_lot}. Non fondere mai importi o "
+            "caratteristiche di lotti diversi.\n"
+            "CONFORMITÀ (urbanistica, edilizia, catastale, impianti, agibilità): "
+            "classifica 'conforming' SOLO se una dichiarazione esplicita di conformità "
+            f"riguarda il Lotto {target_lot} o è chiaramente valida per l'intera "
+            "procedura. Se l'evidenza è assente, generica, amministrativa o non "
+            f"chiaramente riferita al Lotto {target_lot}, usa 'uncertain'. Non dedurre "
+            "mai la conformità dall'assenza di problemi.\n\n"
+        )
+        if document_map:
+            focus += _document_map_text(document_map, str(target_lot))
+    else:
+        focus = ""
+
     user = (
+        f"{focus}"
         "Analizza la seguente perizia ed estrai il foglio di lavoro JSON secondo "
         "lo schema. Cita sempre le pagine in 'evidence_pages'.\n\n"
         f"{doc}"
@@ -515,6 +603,8 @@ def run_analyst(
     openai_caller: Optional[OpenAICaller] = None,
     model: Optional[str] = None,
     max_context_chars: Optional[int] = None,
+    target_lot: Optional[str] = None,
+    document_map: Optional[Dict[str, Any]] = None,
 ) -> AnalystResult:
     """
     Generate and normalize the analyst worksheet.
@@ -528,7 +618,12 @@ def run_analyst(
     """
     caller = openai_caller or openai_client.call_openai_json
     resolved_model = model or openai_client.resolve_model()
-    messages = build_messages(pages, max_context_chars=max_context_chars)
+    messages = build_messages(
+        pages,
+        max_context_chars=max_context_chars,
+        target_lot=target_lot,
+        document_map=document_map,
+    )
     redacted = openai_client.redacted_request(messages, model=resolved_model)
 
     try:

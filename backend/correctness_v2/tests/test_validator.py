@@ -28,6 +28,67 @@ def test_money_chain_accepted_when_consistent():
     assert "current-cancellation=sale" in report["checks"]["money_chains_checked"]
 
 
+def test_money_chain_uses_explicit_deductions_when_present():
+    # If the source valuation table contains multiple deprezzamenti, the current
+    # value must reconcile against their sum, not only against regularization.
+    raw = make_worksheet()
+    raw["money"]["deductions"] = [
+        {"label": "Oneri di regolarizzazione", "amount": 5000.0, "evidence_pages": [2]},
+        {"label": "Rischio assunto per mancata garanzia", "amount": 3000.0, "evidence_pages": [2]},
+    ]
+    raw["money"]["regularization_costs"] = 5000.0
+    raw["money"]["current_state_value"] = 92000.0
+    raw["money"]["sale_value"] = 91700.0
+    ws = _normalized(raw)
+    report = validator.validate_worksheet(ws, GENERIC_PERIZIA_PAGES)
+    assert report["validation_status"] == validator.STATUS_VALIDATED, report["violations"]
+    assert "MONEY_CHAIN_INCONSISTENT" not in _codes(report)
+    assert "market-deductions=current" in report["checks"]["money_chains_checked"]
+
+
+def test_money_chain_accepts_staged_deductions_to_sale_value():
+    # Some perizie first discount a completed-works market value to current
+    # condition, then apply another sale-market discount to reach the judicial
+    # sale/base value. The validator must not force both rows into the
+    # market-to-current step.
+    raw = make_worksheet()
+    raw["money"]["market_value"] = 622970.0
+    raw["money"]["deductions"] = [
+        {"label": "Deprezzamento per stato al grezzo", "amount": 342634.0, "evidence_pages": [2]},
+        {"label": "Deprezzamento rispetto al libero mercato", "amount": 56068.0, "evidence_pages": [2]},
+    ]
+    raw["money"]["regularization_costs"] = None
+    raw["money"]["current_state_value"] = 280336.0
+    raw["money"]["cancellation_costs"] = None
+    raw["money"]["sale_value"] = 224268.0
+    raw["money"]["auction_terms"]["prezzo_base_asta"] = 224268.0
+    ws = _normalized(raw)
+    report = validator.validate_worksheet(ws, GENERIC_PERIZIA_PAGES)
+    assert report["validation_status"] == validator.STATUS_VALIDATED, report["violations"]
+    assert "MONEY_CHAIN_INCONSISTENT" not in _codes(report)
+    assert "market-deduction-subset=current" in report["checks"]["money_chains_checked"]
+    assert "current-remaining-deductions=sale" in report["checks"]["money_chains_checked"]
+
+
+def test_money_chain_excludes_cancellation_rows_from_current_state_step():
+    raw = make_worksheet()
+    raw["money"]["market_value"] = 100000.0
+    raw["money"]["deductions"] = [
+        {"label": "Spese di regolarizzazione", "amount": 5000.0, "evidence_pages": [2]},
+        {"label": "Spese di cancellazione delle trascrizioni ed iscrizioni", "amount": 300.0, "evidence_pages": [2]},
+    ]
+    raw["money"]["regularization_costs"] = 5000.0
+    raw["money"]["current_state_value"] = 95000.0
+    raw["money"]["cancellation_costs"] = 300.0
+    raw["money"]["sale_value"] = 94700.0
+    ws = _normalized(raw)
+    report = validator.validate_worksheet(ws, GENERIC_PERIZIA_PAGES)
+    assert report["validation_status"] == validator.STATUS_VALIDATED, report["violations"]
+    assert "MONEY_CHAIN_INCONSISTENT" not in _codes(report)
+    assert "market-deductions=current" in report["checks"]["money_chains_checked"]
+    assert "current-cancellation=sale" in report["checks"]["money_chains_checked"]
+
+
 def test_money_chain_rejected_when_inconsistent():
     raw = make_worksheet()
     raw["money"]["sale_value"] = 90000.0  # breaks current - cancellation = sale
@@ -157,6 +218,32 @@ def test_conforming_claim_without_conformity_language_rejected():
     report = validator.validate_worksheet(ws, pages)
     assert report["validation_status"] == validator.STATUS_FAILED
     assert "UNSUPPORTED_COMPLIANCE_CLAIM" in _codes(report)
+
+
+def test_absent_declaration_of_conformity_is_not_positive_conformity():
+    pages = GENERIC_PERIZIA_PAGES + [
+        {
+            "page_number": 3,
+            "text": (
+                "Certificazioni energetiche e dichiarazioni di conformità. "
+                "Non esiste il certificato energetico dell'immobile / APE. "
+                "Non esiste la dichiarazione di conformità dell'impianto elettrico."
+            ),
+        }
+    ]
+    raw = make_worksheet()
+    raw["technical_compliance"][1] = {
+        "area": "Certificazioni energetiche e dichiarazioni di conformità impianti",
+        "classification": "non_conforming",
+        "blocks_saleability": False,
+        "cost": None,
+        "timing": None,
+        "notes": "Assenti APE e dichiarazioni di conformità degli impianti.",
+        "evidence_pages": [3],
+    }
+    ws = _normalized(raw)
+    report = validator.validate_worksheet(ws, pages)
+    assert "COMPLIANCE_EVIDENCE_CONTRADICTION" not in _codes(report)
 
 
 def test_regularizable_marked_blocking_rejected():

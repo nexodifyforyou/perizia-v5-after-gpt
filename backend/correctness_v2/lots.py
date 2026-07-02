@@ -66,6 +66,43 @@ def bene_ids_in_text(text: Any) -> List[str]:
     return [m.group(1) for m in _BENE_RE.finditer(n)]
 
 
+# Ordinal words sometimes used instead of digits ("LOTTO PRIMO"). Generic Italian,
+# not tied to any document.
+_ORDINAL_WORDS = {
+    "primo": "1", "secondo": "2", "terzo": "3", "quarto": "4", "quinto": "5",
+    "sesto": "6", "settimo": "7", "ottavo": "8", "nono": "9", "decimo": "10",
+    "unico": "unico", "unica": "unico",
+}
+_ROMAN_RE = re.compile(r"^(?=[ivxlcdm])(m{0,3}(cm|cd|d?c{0,3})(xc|xl|l?x{0,3})(ix|iv|v?i{0,3}))$")
+
+
+def normalize_lot_token(raw: Any) -> Optional[str]:
+    """Normalize an arbitrary lot identifier to a canonical token (wording-agnostic).
+
+    Handles the many ways a perizia can name a lot WITHOUT hardcoding any document:
+    a number ("Lotto 2" -> "2"), an ordinal word ("Lotto Primo" -> "1"), "unico",
+    a single letter label ("Lotto A" -> "a"), or a roman numeral ("Lotto III" ->
+    "iii"). Returns None when nothing identifier-like is present.
+    """
+    n = _norm(raw).strip()
+    if not n:
+        return None
+    digits = re.search(r"\d{1,3}", n)
+    if digits:
+        return digits.group(0)
+    # Pull the token right after a 'lotto'/'lotti' word if present, else use n.
+    m = re.search(r"\blott[oi]\b\s*(?:n[.°ºo]*\s*)?([a-z]+)", n)
+    token = m.group(1) if m else n
+    token = token.strip(" .)-:")
+    if token in _ORDINAL_WORDS:
+        return _ORDINAL_WORDS[token]
+    if _ROMAN_RE.match(token):
+        return token
+    if len(token) == 1 and token.isalpha():
+        return token
+    return None
+
+
 def _distinct(seq: List[str]) -> List[str]:
     seen: Dict[str, None] = {}
     for s in seq:
@@ -169,7 +206,19 @@ def build_lot_report(
             text_counts[lid] = text_counts.get(lid, 0) + 1
     text_ids = {lid for lid, c in text_counts.items() if c >= 2}
 
-    all_ids = sorted(ws_ids | text_ids, key=lambda s: int(s))
+    # Semantic ids from the analyst's structured lots[] array. This is the
+    # WORDING-AGNOSTIC signal: the model reads "Lotto Primo", "Lotto A", a roman
+    # numeral, etc., and emits a lot_id, which we normalize to a canonical token.
+    # It is the primary multi-lot detector for documents whose lot labels are not
+    # plain digits in the flat text; the regex above is the deterministic backstop.
+    semantic_lots: Dict[str, Dict[str, Any]] = {}
+    for item in worksheet.get("lots") or []:
+        tok = normalize_lot_token(item.get("lot_id") or item.get("label") or item.get("id"))
+        if tok:
+            semantic_lots.setdefault(tok, item)
+    semantic_ids = set(semantic_lots.keys())
+
+    all_ids = sorted(ws_ids | text_ids | semantic_ids, key=_lot_sort_key)
 
     lots: List[Dict[str, Any]] = []
     for lid in all_ids:
@@ -179,15 +228,26 @@ def build_lot_report(
             for pg in h["evidence_pages"]:
                 if pg not in ev:
                     ev.append(pg)
+        ws_lot = semantic_lots.get(lid, {})
+        for pg in ws_lot.get("evidence_pages") or []:
+            if pg not in ev:
+                ev.append(pg)
+        identifiers = [
+            h["text"][:160]
+            for h in hits
+            if h["path"].startswith("case_identity") or h["path"].startswith("lots")
+        ]
+        ident_bits = " ".join(
+            str(ws_lot.get(k) or "")
+            for k in ("lot_id", "label", "address", "property_type", "ownership_right")
+        ).strip()
+        if ident_bits and ident_bits not in identifiers:
+            identifiers.append(ident_bits[:160])
         lots.append(
             {
                 "lot_id": lid,
                 "claim_paths": [h["path"] for h in hits],
-                "identifiers": [
-                    h["text"][:160]
-                    for h in hits
-                    if h["path"].startswith("case_identity") or h["path"].startswith("lots")
-                ],
+                "identifiers": identifiers,
                 "money": _money_rows_for_lot(worksheet, lid),
                 "evidence_pages": sorted(ev),
             }
@@ -216,10 +276,17 @@ def build_lot_report(
         "bene_ids": sorted(bene_ids, key=lambda s: int(s)),
         "contaminated_fields": contaminated_fields,
         "detection": {
-            "worksheet_lot_ids": sorted(ws_ids, key=lambda s: int(s)),
-            "page_text_lot_ids": sorted(text_ids, key=lambda s: int(s)),
+            "worksheet_lot_ids": sorted(ws_ids, key=_lot_sort_key),
+            "page_text_lot_ids": sorted(text_ids, key=_lot_sort_key),
+            "semantic_lot_ids": sorted(semantic_ids, key=_lot_sort_key),
         },
     }
+
+
+def _lot_sort_key(lid: str):
+    """Sort numeric lots numerically, non-numeric (roman/letter/'unico') after, by text."""
+    s = str(lid)
+    return (0, int(s)) if s.isdigit() else (1, s)
 
 
 def worksheet_lot_ids(worksheet: Dict[str, Any]) -> List[str]:
@@ -230,6 +297,21 @@ def worksheet_lot_ids(worksheet: Dict[str, Any]) -> List[str]:
     return sorted(_distinct(ids), key=lambda s: int(s))
 
 
+def distinct_lots(worksheet: Dict[str, Any]) -> List[str]:
+    """All distinct lot tokens (wording-agnostic): numbered flat-field ids PLUS the
+    analyst's structured lots[] tokens (which capture ordinal/letter/roman labels).
+
+    This is the count the multi-lot gate should trust regardless of how a specific
+    perizia spells its lots.
+    """
+    ids = set(worksheet_lot_ids(worksheet))
+    for item in worksheet.get("lots") or []:
+        tok = normalize_lot_token(item.get("lot_id") or item.get("label") or item.get("id"))
+        if tok:
+            ids.add(tok)
+    return sorted(ids, key=_lot_sort_key)
+
+
 def contaminated_flat_fields(worksheet: Dict[str, Any]) -> List[Dict[str, Any]]:
     """Flat identity/money fields that mix two or more distinct lot ids."""
     out: List[Dict[str, Any]] = []
@@ -238,4 +320,21 @@ def contaminated_flat_fields(worksheet: Dict[str, Any]) -> List[Dict[str, Any]]:
         ids = _numeric_ids(_distinct(lot_ids_in_text(ci.get(key))))
         if len(ids) >= 2:
             out.append({"path": f"case_identity.{key}", "lot_ids": ids})
+    return out
+
+
+def contaminated_worksheet_fields(worksheet: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """Any worksheet string (identity, occupancy, money, compliance, formalities)
+    that internally mixes two or more distinct lot ids.
+
+    Strictly stronger than :func:`contaminated_flat_fields` (which only scans
+    case_identity): this catches a money label, occupancy status or compliance
+    area that splices two lots together. Generic — keyed only on numbered lots,
+    never on beni or any specific document.
+    """
+    out: List[Dict[str, Any]] = []
+    for entry in _worksheet_strings(worksheet):
+        ids = _numeric_ids(_distinct(lot_ids_in_text(entry["text"])))
+        if len(ids) >= 2:
+            out.append({"path": entry["path"], "lot_ids": ids})
     return out
