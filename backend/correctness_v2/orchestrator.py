@@ -27,6 +27,7 @@ from . import analyst as analyst_mod
 from . import (
     artifacts,
     contract as contract_mod,
+    customer_report as customer_report_mod,
     feature_flags,
     job_status,
     lot_packets as lot_packets_mod,
@@ -51,6 +52,11 @@ STEP2_OK_MESSAGE = (
 STEP3_SELECTED_LOT_MESSAGE = (
     "Single-lot contract built from the selected lot's isolated page context "
     "(no lot blending)."
+)
+
+STEP3B_REPORT_MESSAGE = (
+    "Customer report rendered deterministically from the verified contract "
+    "(no LLM, no PDF access, no new facts)."
 )
 
 PageLoader = Callable[[str], List[Dict[str, Any]]]
@@ -422,8 +428,20 @@ def _build_single_lot_contract(
         job_id, contract
     )
 
+    # Step 3B: deterministic customer report rendered ONLY from the verified
+    # contract (no LLM, no PDF). Render failure fails closed — never a half report.
+    try:
+        customer_report = customer_report_mod.render_success_report(contract)
+    except Exception as exc:
+        return _finish_report_render_failed(
+            job_id, analysis_id, exc, artifacts_saved, created_at, admin_only
+        )
+    artifacts_saved["customer_report"] = artifacts.save_customer_report(
+        job_id, customer_report
+    )
+
     payload_extra = {
-        "message": message,
+        "message": f"{message} {STEP3B_REPORT_MESSAGE}",
         "pdf_quality_status": source_quality,
         "openai_model": model_name,
         "validation_status": validator_report.get("validation_status"),
@@ -431,17 +449,19 @@ def _build_single_lot_contract(
         "compliance_downgrade_count": gate_report.get("downgrade_count", 0),
         "contract_generated": True,
         "contract_schema_version": contract.get("schema_version"),
+        "report_status": customer_report.get("report_status"),
+        "customer_report_schema_version": customer_report.get("schema_version"),
     }
     if extra:
         payload_extra.update(extra)
     payload = job_status.make_status(
         job_id=job_id,
         analysis_id=analysis_id,
-        status=JobStatus.CONTRACT_READY,
-        current_stage=current_stage or _step2_stage("contract_ready"),
+        status=JobStatus.REPORT_READY,
+        current_stage=current_stage or _step3_stage("report_ready"),
         admin_only=admin_only,
-        customer_report_generated=False,  # admin-only / shadow: not customer-facing yet
-        safe_to_show_customer=False,
+        customer_report_generated=True,
+        safe_to_show_customer=True,
         artifacts_saved=artifacts_saved,
         created_at=created_at,
         extra=payload_extra,
@@ -541,7 +561,7 @@ def _run_selected_lot(
         source_quality=source_quality,
         model_name=result.model,
         extra=extra,
-        current_stage=_step3_stage("selected_lot_contract_ready"),
+        current_stage=_step3_stage("selected_lot_report_ready"),
         message=STEP3_SELECTED_LOT_MESSAGE,
         shared_summary_rows=shared_rows,
     )
@@ -655,11 +675,34 @@ def _run_analyze_all(
         path = artifacts.save_lot_subartifact(
             job_id, norm_lot, artifacts.VERIFIED_CONTRACT_FILE, contract
         )
-        entry.update({"status": JobStatus.CONTRACT_READY, "contract_path": path})
+
+        # Step 3B: per-lot customer report, rendered from that lot's contract only.
+        try:
+            lot_customer_report = customer_report_mod.render_success_report(contract)
+        except Exception as exc:  # noqa: BLE001 - recorded per lot, fail closed
+            entry.update(
+                {
+                    "status": JobStatus.FAILED_CONTRACT_BUILD,
+                    "reason": f"customer_report render failed: {exc}",
+                    "contract_path": path,
+                }
+            )
+            per_lot_results.append(entry)
+            continue
+        report_path = artifacts.save_lot_subartifact(
+            job_id, norm_lot, artifacts.CUSTOMER_REPORT_FILE, lot_customer_report
+        )
+        entry.update(
+            {
+                "status": JobStatus.REPORT_READY,
+                "contract_path": path,
+                "customer_report_path": report_path,
+            }
+        )
         per_lot_results.append(entry)
 
     all_ok = bool(per_lot_results) and all(
-        e.get("status") == JobStatus.CONTRACT_READY for e in per_lot_results
+        e.get("status") == JobStatus.REPORT_READY for e in per_lot_results
     )
     aggregate = {
         "analyze_all": True,
@@ -670,9 +713,12 @@ def _run_analyze_all(
     }
     artifacts_saved["analyze_all_result"] = artifacts.save_analyze_all_result(job_id, aggregate)
 
-    status = JobStatus.CONTRACT_READY if all_ok else JobStatus.NEEDS_MANUAL_REVIEW
+    status = JobStatus.REPORT_READY if all_ok else JobStatus.NEEDS_MANUAL_REVIEW
     extra = {
-        "message": "analyze_all: una contratto verificato per ciascun lotto (nessuna fusione).",
+        "message": (
+            "analyze_all: un contratto verificato e un customer report per ciascun "
+            "lotto (nessuna fusione)."
+        ),
         "multi_lot": True,
         "analyze_all": True,
         "lot_count": lot_report.get("lot_count"),
@@ -692,17 +738,29 @@ def _run_analyze_all(
         extra=extra,
     )
     if status == JobStatus.NEEDS_MANUAL_REVIEW:
+        reason_human = (
+            "Alcuni lotti non hanno prodotto un contratto sicuro in modalità analyze_all."
+        )
+        _save_safe_customer_report(
+            job_id,
+            analysis_id,
+            artifacts_saved,
+            report_status=JobStatus.NEEDS_MANUAL_REVIEW,
+            job_status_value=JobStatus.NEEDS_MANUAL_REVIEW,
+            reason_code="ANALYZE_ALL_PARTIAL",
+            reason_human=reason_human,
+        )
         payload = job_status.make_status(
             customer_report_generated=False,
             safe_to_show_customer=False,
             reason_code="ANALYZE_ALL_PARTIAL",
-            reason_human="Alcuni lotti non hanno prodotto un contratto sicuro in modalità analyze_all.",
+            reason_human=reason_human,
             **common,
         )
     else:
         payload = job_status.make_status(
-            customer_report_generated=False,
-            safe_to_show_customer=False,
+            customer_report_generated=True,
+            safe_to_show_customer=True,
             **common,
         )
     artifacts.save_job_status(job_id, payload)
@@ -773,14 +831,23 @@ def _finish_lot_selection_required(
         job_id, selection_payload
     )
 
+    # Step 3B: customer-facing lot-selection report (a selector, never a blended
+    # report). Deterministic render from the selection payload + lot index only.
+    selection_report = customer_report_mod.render_lot_selection_report(
+        selection_payload, lot_index
+    )
+    artifacts_saved["customer_report"] = artifacts.save_customer_report(
+        job_id, selection_report
+    )
+
     payload = job_status.make_status(
         job_id=job_id,
         analysis_id=analysis_id,
         status=JobStatus.LOT_SELECTION_REQUIRED,
         current_stage=_step3_stage("lot_selection_required"),
         admin_only=admin_only,
-        customer_report_generated=False,
-        safe_to_show_customer=False,
+        customer_report_generated=True,
+        safe_to_show_customer=True,
         reason_code="LOT_SELECTION_REQUIRED",
         reason_human=(
             f"La perizia contiene {lot_count} lotti distinti ({', '.join(str(x) for x in lot_ids)}). "
@@ -798,6 +865,8 @@ def _finish_lot_selection_required(
             "selected_lot": None,
             "contract_generated": False,
             "blended_report_prevented": True,
+            "report_status": JobStatus.LOT_SELECTION_REQUIRED,
+            "customer_report_schema_version": selection_report.get("schema_version"),
         },
     )
     artifacts.save_job_status(job_id, payload)
@@ -829,16 +898,26 @@ def _finish_selected_lot_not_found(
         },
     )
     artifacts_saved["error"] = error_path
+    reason_human = (
+        f"Il lotto selezionato '{selected_lot_id}' non esiste nel documento. "
+        f"Lotti disponibili: {', '.join(str(x) for x in lot_ids)}."
+    )
+    _save_safe_customer_report(
+        job_id,
+        analysis_id,
+        artifacts_saved,
+        report_status=JobStatus.CONTRACT_VALIDATION_FAILED,
+        job_status_value=JobStatus.CONTRACT_VALIDATION_FAILED,
+        reason_code="SELECTED_LOT_NOT_FOUND",
+        reason_human=reason_human,
+    )
     payload = job_status.make_failure_status(
         job_id=job_id,
         analysis_id=analysis_id,
         status=JobStatus.CONTRACT_VALIDATION_FAILED,
         current_stage=_step3_stage("selected_lot_not_found"),
         reason_code="SELECTED_LOT_NOT_FOUND",
-        reason_human=(
-            f"Il lotto selezionato '{selected_lot_id}' non esiste nel documento. "
-            f"Lotti disponibili: {', '.join(str(x) for x in lot_ids)}."
-        ),
+        reason_human=reason_human,
         troubleshoot_message=(
             "La selezione del lotto non corrisponde ad alcun lotto rilevato. Nessun "
             "report è stato generato (fail-closed). Controllare lot_index.json per i "
@@ -869,6 +948,15 @@ def _finish_lot_ambiguous(
     detail: str,
 ) -> Dict[str, Any]:
     """Genuine ambiguity (no safe isolated pages for the chosen lot) -> NEEDS_MANUAL_REVIEW."""
+    _save_safe_customer_report(
+        job_id,
+        analysis_id,
+        artifacts_saved,
+        report_status=JobStatus.NEEDS_MANUAL_REVIEW,
+        job_status_value=JobStatus.NEEDS_MANUAL_REVIEW,
+        reason_code="LOT_SEGMENTATION_AMBIGUOUS",
+        reason_human=detail,
+    )
     payload = job_status.make_status(
         job_id=job_id,
         analysis_id=analysis_id,
@@ -901,6 +989,101 @@ def _finish_lot_ambiguous(
     return payload
 
 
+def _save_safe_customer_report(
+    job_id: str,
+    analysis_id: str,
+    artifacts_saved: Dict[str, Any],
+    *,
+    report_status: str,
+    job_status_value: str,
+    reason_code: str,
+    reason_human: str,
+    next_steps: Optional[List[str]] = None,
+    violation_codes: Optional[List[str]] = None,
+) -> None:
+    """Best-effort: persist the fail-closed customer report (uncertainty only).
+
+    Never raises — a failure path must never be masked by its own safe-report
+    rendering. The job status keeps customer_report_generated=False: this artifact
+    is a safe placeholder, not a verified report.
+    """
+    try:
+        report = customer_report_mod.render_safe_report(
+            analysis_id=analysis_id,
+            job_id=job_id,
+            report_status=report_status,
+            job_status_value=job_status_value,
+            reason_code=reason_code,
+            reason_human=reason_human,
+            next_steps=next_steps,
+            violation_codes=violation_codes,
+        )
+        artifacts_saved["customer_report"] = artifacts.save_customer_report(job_id, report)
+    except Exception:
+        pass
+
+
+def _finish_report_render_failed(
+    job_id: str,
+    analysis_id: str,
+    exc: Exception,
+    artifacts_saved: Dict[str, Any],
+    created_at: str,
+    admin_only: bool,
+) -> Dict[str, Any]:
+    """Customer-report render crashed -> FAILED_CONTRACT_BUILD. Fail closed.
+
+    The verified contract exists, but a report that cannot be rendered
+    deterministically is never half-shown to a customer.
+    """
+    detail = f"{type(exc).__name__}: {exc}"
+    error_path = artifacts.save_error(
+        job_id,
+        {
+            "status": JobStatus.FAILED_CONTRACT_BUILD,
+            "stage": "step3b:customer_report",
+            "reason_code": "CUSTOMER_REPORT_RENDER_ERROR",
+            "detail": detail,
+            "traceback": traceback.format_exc(),
+            "no_report": True,
+        },
+    )
+    artifacts_saved["error"] = error_path
+    reason_human = "La generazione del report cliente dal contratto verificato è fallita."
+    _save_safe_customer_report(
+        job_id,
+        analysis_id,
+        artifacts_saved,
+        report_status=JobStatus.NEEDS_MANUAL_REVIEW,
+        job_status_value=JobStatus.FAILED_CONTRACT_BUILD,
+        reason_code="CUSTOMER_REPORT_RENDER_ERROR",
+        reason_human=reason_human,
+    )
+    payload = job_status.make_failure_status(
+        job_id=job_id,
+        analysis_id=analysis_id,
+        status=JobStatus.FAILED_CONTRACT_BUILD,
+        current_stage=_step3_stage("customer_report_failed"),
+        reason_code="CUSTOMER_REPORT_RENDER_ERROR",
+        reason_human=reason_human,
+        troubleshoot_message=(
+            "Il contratto verificato è stato prodotto ma il renderer deterministico "
+            f"del report cliente ha generato un errore: {detail}. Nessun report è "
+            "stato mostrato al cliente (fail-closed)."
+        ),
+        next_steps=[
+            "Controllare error.json per il traceback.",
+            "Verificare la forma di verified_report_contract.json.",
+        ],
+        artifacts_saved=artifacts_saved,
+        created_at=created_at,
+        admin_only=admin_only,
+        extra={"no_report": True},
+    )
+    artifacts.save_job_status(job_id, payload)
+    return payload
+
+
 def _finish_analyst_failed(
     job_id: str,
     analysis_id: str,
@@ -924,13 +1107,23 @@ def _finish_analyst_failed(
         },
     )
     artifacts_saved["error"] = error_path
+    reason_human = "La generazione del foglio di lavoro analista (OpenAI) è fallita."
+    _save_safe_customer_report(
+        job_id,
+        analysis_id,
+        artifacts_saved,
+        report_status=JobStatus.NEEDS_MANUAL_REVIEW,
+        job_status_value=JobStatus.FAILED_ANALYSIS,
+        reason_code=reason_code,
+        reason_human=reason_human,
+    )
     payload = job_status.make_failure_status(
         job_id=job_id,
         analysis_id=analysis_id,
         status=JobStatus.FAILED_ANALYSIS,
         current_stage=_step2_stage("analyst_failed"),
         reason_code=reason_code,
-        reason_human="La generazione del foglio di lavoro analista (OpenAI) è fallita.",
+        reason_human=reason_human,
         troubleshoot_message=(
             "Lo stadio OpenAI della Correctness Mode v2 è fallito in modo controllato "
             f"(fail-closed). Dettaglio: {detail}. Nessun report è stato generato e non "
@@ -973,13 +1166,24 @@ def _finish_validation_failed(
         },
     )
     artifacts_saved["error"] = error_path
+    reason_human = "La validazione deterministica ha rifiutato il foglio di lavoro."
+    _save_safe_customer_report(
+        job_id,
+        analysis_id,
+        artifacts_saved,
+        report_status=JobStatus.CONTRACT_VALIDATION_FAILED,
+        job_status_value=JobStatus.CONTRACT_VALIDATION_FAILED,
+        reason_code="CONTRACT_VALIDATION_FAILED",
+        reason_human=reason_human,
+        violation_codes=codes,
+    )
     payload = job_status.make_failure_status(
         job_id=job_id,
         analysis_id=analysis_id,
         status=JobStatus.CONTRACT_VALIDATION_FAILED,
         current_stage=_step2_stage("validation_failed"),
         reason_code="CONTRACT_VALIDATION_FAILED",
-        reason_human="La validazione deterministica ha rifiutato il foglio di lavoro.",
+        reason_human=reason_human,
         troubleshoot_message=(
             "Il validatore ha rilevato affermazioni non supportate o contraddittorie. "
             f"Codici violazione: {codes}. Nessun report è stato generato (fail-closed)."
@@ -1020,13 +1224,23 @@ def _finish_contract_build_failed(
         },
     )
     artifacts_saved["error"] = error_path
+    reason_human = "La costruzione deterministica del contratto è fallita."
+    _save_safe_customer_report(
+        job_id,
+        analysis_id,
+        artifacts_saved,
+        report_status=JobStatus.NEEDS_MANUAL_REVIEW,
+        job_status_value=JobStatus.FAILED_CONTRACT_BUILD,
+        reason_code="CONTRACT_BUILD_ERROR",
+        reason_human=reason_human,
+    )
     payload = job_status.make_failure_status(
         job_id=job_id,
         analysis_id=analysis_id,
         status=JobStatus.FAILED_CONTRACT_BUILD,
         current_stage=_step2_stage("contract_build_failed"),
         reason_code="CONTRACT_BUILD_ERROR",
-        reason_human="La costruzione deterministica del contratto è fallita.",
+        reason_human=reason_human,
         troubleshoot_message=(
             "Il foglio di lavoro è stato validato ma la costruzione del contratto ha "
             f"generato un errore: {detail}. Nessun report è stato generato."
@@ -1121,6 +1335,15 @@ def _finish_failed_analysis(
     except Exception:
         pass
 
+    _save_safe_customer_report(
+        job_id,
+        analysis_id,
+        artifacts_saved,
+        report_status=JobStatus.NEEDS_MANUAL_REVIEW,
+        job_status_value=JobStatus.FAILED_ANALYSIS,
+        reason_code="CORRECTNESS_V2_UNEXPECTED_ERROR",
+        reason_human="Si è verificato un errore inatteso durante la Correctness Mode.",
+    )
     payload = job_status.make_failure_status(
         job_id=job_id,
         analysis_id=analysis_id,

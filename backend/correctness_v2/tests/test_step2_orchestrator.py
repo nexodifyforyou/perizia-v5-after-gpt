@@ -26,8 +26,10 @@ def test_contract_ready_happy_path(artifacts_root):
     status = orchestrator.start_job(
         "an_ok2", _loader(GENERIC_PERIZIA_PAGES), is_admin=True, openai_caller=caller
     )
-    assert status["status"] == JobStatus.CONTRACT_READY, status
+    assert status["status"] == JobStatus.REPORT_READY, status
     assert status["contract_generated"] is True
+    assert status["customer_report_generated"] is True
+    assert status["safe_to_show_customer"] is True
     # OpenAI was actually invoked.
     assert len(caller.calls) == 1
 
@@ -39,6 +41,7 @@ def test_contract_ready_happy_path(artifacts_root):
         artifacts.OPENAI_REQUEST_FILE,
         artifacts.OPENAI_RESPONSE_FILE,
         artifacts.VALIDATOR_REPORT_FILE,
+        artifacts.CUSTOMER_REPORT_FILE,
     ):
         assert (job_dir / fname).exists(), f"missing artifact {fname}"
 
@@ -114,7 +117,9 @@ def test_multi_lot_no_selection_returns_lot_selection_required(artifacts_root):
     assert status["lot_ids"] == ["1", "2"]
     assert status["selected_lot"] is None
     assert status["contract_generated"] is False
-    assert status["safe_to_show_customer"] is False
+    # Step 3B: the SELECTION report (not a blended report) is customer-renderable.
+    assert status["customer_report_generated"] is True
+    assert status["safe_to_show_customer"] is True
     assert status["reason_code"] == "LOT_SELECTION_REQUIRED"
     assert status["blended_report_prevented"] is True
     assert status["available_lots"]  # per-lot index preserved
