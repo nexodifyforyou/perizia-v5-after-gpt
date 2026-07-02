@@ -46,6 +46,8 @@ SELECTED_LOT_CONTEXT_FILE = "selected_lot_context.json"
 LOT_SELECTION_REQUIRED_FILE = "lot_selection_required.json"
 ANALYZE_ALL_RESULT_FILE = "analyze_all_result.json"
 COMPLIANCE_GATE_FILE = "compliance_gate_report.json"
+# Step 3B artifact: the deterministic customer-facing report.
+CUSTOMER_REPORT_FILE = "customer_report.json"
 
 
 def _now_iso() -> str:
@@ -164,6 +166,10 @@ def save_analyze_all_result(job_id: str, payload: Dict[str, Any]) -> str:
 
 def save_compliance_gate_report(job_id: str, report: Dict[str, Any]) -> str:
     return save_json(job_id, COMPLIANCE_GATE_FILE, report)
+
+
+def save_customer_report(job_id: str, report: Dict[str, Any]) -> str:
+    return save_json(job_id, CUSTOMER_REPORT_FILE, report)
 
 
 def save_lot_subartifact(job_id: str, lot_id: str, filename: str, data: Dict[str, Any]) -> str:

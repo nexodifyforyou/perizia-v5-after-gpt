@@ -555,6 +555,7 @@ def _lot_summary(lot_report: Optional[Dict[str, Any]]) -> Dict[str, Any]:
         "selected_lot": lot_ids[0] if lot_ids else None,
         "bene_count": lot_report.get("bene_count", 0),
         "multi_bene": bool(lot_report.get("multi_bene")),
+        "bene_ids": [str(b) for b in lot_report.get("bene_ids") or []],
         "manual_review_required": False,
     }
 

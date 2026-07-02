@@ -36,7 +36,7 @@ def test_single_lot_proceeds_to_contract(artifacts_root):
     status = orchestrator.start_job(
         "an_single", _loader(GENERIC_PERIZIA_PAGES), is_admin=True, openai_caller=caller
     )
-    assert status["status"] == JobStatus.CONTRACT_READY, status
+    assert status["status"] == JobStatus.REPORT_READY, status
     assert status["contract_generated"] is True
     job_dir = artifacts.job_dir(status["job_id"])
     assert (job_dir / artifacts.VERIFIED_CONTRACT_FILE).exists()
@@ -51,7 +51,7 @@ def test_multi_bene_single_lot_not_blocked(artifacts_root):
         "an_multibene", _loader(GENERIC_PERIZIA_PAGES), is_admin=True, openai_caller=caller
     )
     # Several beni in ONE lot is normal -> a contract is produced, never blocked.
-    assert status["status"] == JobStatus.CONTRACT_READY, status
+    assert status["status"] == JobStatus.REPORT_READY, status
     assert status["status"] != JobStatus.LOT_SELECTION_REQUIRED
     assert status["contract_generated"] is True
     # ONE lot contract carrying both beni — beni are tracked, never split into lots.
@@ -82,7 +82,7 @@ def test_multi_bene_apartment_plus_garage_pages_stay_single_lot(artifacts_root):
     status = orchestrator.start_job(
         "an_multibene_pages", _loader(pages), is_admin=True, openai_caller=caller
     )
-    assert status["status"] == JobStatus.CONTRACT_READY, status
+    assert status["status"] == JobStatus.REPORT_READY, status
     assert status["status"] != JobStatus.LOT_SELECTION_REQUIRED
     assert status.get("multi_lot") is False
 
@@ -116,7 +116,7 @@ def test_selected_lot_analyzes_only_that_lot(artifacts_root):
         openai_caller=caller,
         selected_lot_id="1",
     )
-    assert status["status"] == JobStatus.CONTRACT_READY, status
+    assert status["status"] == JobStatus.REPORT_READY, status
     assert status["selected_lot"] == "1"
     assert status["contract_generated"] is True
 
@@ -156,7 +156,7 @@ def test_selected_lot_unsupported_conforming_downgraded_not_failed(artifacts_roo
         openai_caller=caller,
         selected_lot_id="1",
     )
-    assert status["status"] == JobStatus.CONTRACT_READY, status
+    assert status["status"] == JobStatus.REPORT_READY, status
     assert status["compliance_downgrade_count"] == 1
 
     job_dir = artifacts.job_dir(status["job_id"])
@@ -210,13 +210,13 @@ def test_analyze_all_produces_one_contract_per_lot(artifacts_root):
         openai_caller=caller,
         analyze_all=True,
     )
-    assert status["status"] == JobStatus.CONTRACT_READY, status
+    assert status["status"] == JobStatus.REPORT_READY, status
     assert status["analyze_all"] is True
     assert status["all_lots_ready"] is True
     results = {r["lot_id"]: r for r in status["per_lot_results"]}
     assert set(results) == {"1", "2"}
     for lot_id, res in results.items():
-        assert res["status"] == JobStatus.CONTRACT_READY
+        assert res["status"] == JobStatus.REPORT_READY
 
     job_dir = artifacts.job_dir(status["job_id"])
     assert (job_dir / artifacts.ANALYZE_ALL_RESULT_FILE).exists()

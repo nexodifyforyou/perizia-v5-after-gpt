@@ -203,7 +203,7 @@ def test_selected_lot_contract_preserves_own_summary_row_never_other_lots(artifa
         openai_caller=caller,
         selected_lot_id="1",
     )
-    assert status["status"] == JobStatus.CONTRACT_READY, status
+    assert status["status"] == JobStatus.REPORT_READY, status
 
     # Shared page 6 stays out of the re-analysis input (no contamination).
     assert 6 not in caller.calls[1]["pages_seen"]
