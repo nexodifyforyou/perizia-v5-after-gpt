@@ -48,6 +48,12 @@ ANALYZE_ALL_RESULT_FILE = "analyze_all_result.json"
 COMPLIANCE_GATE_FILE = "compliance_gate_report.json"
 # Step 3B artifact: the deterministic customer-facing report.
 CUSTOMER_REPORT_FILE = "customer_report.json"
+# Quality gate artifacts (no-silent-omissions coverage + quality certificate).
+COVERAGE_AUDIT_FILE = "coverage_audit.json"
+PAGE_AUDIT_FILE = "page_by_page_audit.json"
+QUALITY_REPORT_FILE = "quality_standard_report.json"
+SCORECARD_FILE = "customer_satisfaction_scorecard.json"
+QUALITY_REPORT_MD_FILE = "quality_standard_report.md"
 
 
 def _now_iso() -> str:
@@ -170,6 +176,33 @@ def save_compliance_gate_report(job_id: str, report: Dict[str, Any]) -> str:
 
 def save_customer_report(job_id: str, report: Dict[str, Any]) -> str:
     return save_json(job_id, CUSTOMER_REPORT_FILE, report)
+
+
+def save_coverage_audit(job_id: str, audit: Dict[str, Any]) -> str:
+    return save_json(job_id, COVERAGE_AUDIT_FILE, audit)
+
+
+def save_page_audit(job_id: str, audit: Dict[str, Any]) -> str:
+    return save_json(job_id, PAGE_AUDIT_FILE, audit)
+
+
+def save_quality_report(job_id: str, report: Dict[str, Any]) -> str:
+    return save_json(job_id, QUALITY_REPORT_FILE, report)
+
+
+def save_scorecard(job_id: str, scorecard: Dict[str, Any]) -> str:
+    return save_json(job_id, SCORECARD_FILE, scorecard)
+
+
+def save_quality_markdown(job_id: str, markdown: str) -> str:
+    """Persist the human-review markdown certificate (not JSON)."""
+    ensure_job_dir(job_id)
+    path = job_dir(job_id) / QUALITY_REPORT_MD_FILE
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    with open(tmp, "w", encoding="utf-8") as f:
+        f.write(markdown)
+    os.replace(tmp, path)
+    return str(path)
 
 
 def save_lot_subartifact(job_id: str, lot_id: str, filename: str, data: Dict[str, Any]) -> str:

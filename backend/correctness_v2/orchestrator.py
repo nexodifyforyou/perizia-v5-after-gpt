@@ -28,10 +28,12 @@ from . import (
     artifacts,
     contract as contract_mod,
     customer_report as customer_report_mod,
+    doc_signals as doc_signals_mod,
     feature_flags,
     job_status,
     lot_packets as lot_packets_mod,
     lots as lots_mod,
+    quality_gate as quality_gate_mod,
     validator as validator_mod,
 )
 from .analyst import AnalystError
@@ -352,7 +354,8 @@ def _run_step2(
 
     # No selection, no analyze_all -> ask the caller to choose (expected behavior).
     return _finish_lot_selection_required(
-        job_id, analysis_id, lot_report, lot_index, artifacts_saved, created_at, admin_only
+        job_id, analysis_id, lot_report, lot_index, artifacts_saved, created_at, admin_only,
+        pages=pages, worksheet=result.worksheet,
     )
 
 
@@ -362,6 +365,10 @@ def _step2_stage(name: str) -> str:
 
 def _step3_stage(name: str) -> str:
     return f"step3:{name}"
+
+
+def _step4_stage(name: str) -> str:
+    return f"step4:{name}"
 
 
 # ---------------------------------------------------------------------------
@@ -418,6 +425,9 @@ def _build_single_lot_contract(
             source_pdf_quality_status=source_quality,
             lot_report=lot_report,
             shared_summary_rows=shared_summary_rows,
+            # Deterministic surface/cadastral facts read verbatim from THIS
+            # contract's page context (single lot / isolated selected-lot pages).
+            surface_cadastral=doc_signals_mod.extract_surface_cadastral(pages),
         )
     except Exception as exc:
         return _finish_contract_build_failed(
@@ -440,7 +450,38 @@ def _build_single_lot_contract(
         job_id, customer_report
     )
 
+    # Step 4: no-silent-omissions quality gate. A rendered report is NEVER
+    # exposed as clean REPORT_READY unless the coverage/quality audit passes.
+    # A gate crash fails closed (quality failure), never skips the audit.
+    try:
+        gate = quality_gate_mod.run_quality_gate(
+            job_id=job_id,
+            analysis_id=analysis_id,
+            pages=pages,
+            worksheet=worksheet,
+            contract=contract,
+            customer_report=customer_report,
+            validator_report=validator_report,
+            lot_report=lot_report,
+            artifacts_saved=artifacts_saved,
+        )
+    except Exception as exc:  # noqa: BLE001 — fail closed on the gate itself
+        return _finish_quality_gate_error(
+            job_id, analysis_id, exc, artifacts_saved, created_at, admin_only
+        )
+
+    if gate["gate_status"] == quality_gate_mod.GATE_FAIL:
+        return _finish_quality_gate_failed(
+            job_id, analysis_id, gate, artifacts_saved, created_at, admin_only
+        )
+
     payload_extra = {
+        "quality_gate_status": gate["gate_status"],
+        "coverage_status": gate["coverage_audit"].get("coverage_status"),
+        "quality_status": gate["quality_report"].get("overall_quality_status"),
+        "customer_readiness": gate["quality_report"].get("customer_readiness"),
+        "satisfaction_score": gate["scorecard"].get("overall_score"),
+        "satisfaction_status": gate["scorecard"].get("status"),
         "message": f"{message} {STEP3B_REPORT_MESSAGE}",
         "pdf_quality_status": source_quality,
         "openai_model": model_name,
@@ -666,6 +707,7 @@ def _run_analyze_all(
                 shared_summary_rows=(
                     (context.get("lot_money") or {}).get("shared_summary_rows") or []
                 ),
+                surface_cadastral=doc_signals_mod.extract_surface_cadastral(selected_pages),
             )
         except Exception as exc:  # noqa: BLE001 - recorded per lot, never blended
             entry.update({"status": JobStatus.FAILED_CONTRACT_BUILD, "reason": str(exc)})
@@ -689,12 +731,61 @@ def _run_analyze_all(
             )
             per_lot_results.append(entry)
             continue
-        report_path = artifacts.save_lot_subartifact(
-            job_id, norm_lot, artifacts.CUSTOMER_REPORT_FILE, lot_customer_report
+        # Per-lot quality gate: a lot's report is only READY if its own coverage
+        # audit passes. Gate crash fails closed for that lot.
+        try:
+            lot_gate = quality_gate_mod.run_quality_gate(
+                job_id=job_id,
+                analysis_id=analysis_id,
+                pages=selected_pages,
+                worksheet=lot_worksheet,
+                contract=contract,
+                customer_report=lot_customer_report,
+                validator_report=validator_report,
+                lot_report=sub_lot_report,
+                persist=False,
+            )
+        except Exception as exc:  # noqa: BLE001 — per-lot fail closed
+            entry.update({"status": JobStatus.NEEDS_MANUAL_REVIEW, "reason": f"quality gate error: {exc}"})
+            per_lot_results.append(entry)
+            continue
+        artifacts.save_lot_subartifact(
+            job_id, norm_lot, artifacts.COVERAGE_AUDIT_FILE, lot_gate["coverage_audit"]
         )
+        artifacts.save_lot_subartifact(
+            job_id, norm_lot, artifacts.PAGE_AUDIT_FILE, lot_gate["page_audit"]
+        )
+        artifacts.save_lot_subartifact(
+            job_id, norm_lot, artifacts.QUALITY_REPORT_FILE, lot_gate["quality_report"]
+        )
+        artifacts.save_lot_subartifact(
+            job_id, norm_lot, artifacts.SCORECARD_FILE, lot_gate["scorecard"]
+        )
+        report_path = artifacts.save_lot_subartifact(
+            job_id, norm_lot, artifacts.CUSTOMER_REPORT_FILE, lot_gate["customer_report"]
+        )
+        if lot_gate["gate_status"] == quality_gate_mod.GATE_FAIL:
+            entry.update(
+                {
+                    "status": JobStatus.NEEDS_MANUAL_REVIEW,
+                    "reason": "quality_gate_failed",
+                    "blocking_codes": sorted(
+                        {
+                            b.get("code")
+                            for b in lot_gate["quality_report"].get("blocking_issues", [])
+                            if b.get("code")
+                        }
+                    ),
+                    "contract_path": path,
+                    "customer_report_path": report_path,
+                }
+            )
+            per_lot_results.append(entry)
+            continue
         entry.update(
             {
                 "status": JobStatus.REPORT_READY,
+                "quality_gate_status": lot_gate["gate_status"],
                 "contract_path": path,
                 "customer_report_path": report_path,
             }
@@ -778,6 +869,9 @@ def _finish_lot_selection_required(
     artifacts_saved: Dict[str, Any],
     created_at: str,
     admin_only: bool,
+    *,
+    pages: Optional[List[Dict[str, Any]]] = None,
+    worksheet: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     """Multi-lot document with no chosen lot -> LOT_SELECTION_REQUIRED.
 
@@ -840,6 +934,33 @@ def _finish_lot_selection_required(
         job_id, selection_report
     )
 
+    # Quality gate on the selector too: no lot may be lost, per-lot money must be
+    # preserved. The status stays LOT_SELECTION_REQUIRED (expected behavior), but
+    # a FAIL is surfaced and the selector is not marked safe for customers.
+    gate_extra: Dict[str, Any] = {}
+    selector_safe = True
+    try:
+        gate = quality_gate_mod.run_quality_gate(
+            job_id=job_id,
+            analysis_id=analysis_id,
+            pages=pages or [],
+            worksheet=worksheet,
+            contract=None,
+            customer_report=selection_report,
+            lot_report=lot_report,
+            lot_index=lot_index,
+            artifacts_saved=artifacts_saved,
+        )
+        gate_extra = {
+            "quality_gate_status": gate["gate_status"],
+            "coverage_status": gate["coverage_audit"].get("coverage_status"),
+            "quality_status": gate["quality_report"].get("overall_quality_status"),
+        }
+        selector_safe = gate["gate_status"] != quality_gate_mod.GATE_FAIL
+    except Exception:  # noqa: BLE001 — fail closed: uncertified selector
+        gate_extra = {"quality_gate_status": "ERROR"}
+        selector_safe = False
+
     payload = job_status.make_status(
         job_id=job_id,
         analysis_id=analysis_id,
@@ -847,7 +968,7 @@ def _finish_lot_selection_required(
         current_stage=_step3_stage("lot_selection_required"),
         admin_only=admin_only,
         customer_report_generated=True,
-        safe_to_show_customer=True,
+        safe_to_show_customer=selector_safe,
         reason_code="LOT_SELECTION_REQUIRED",
         reason_human=(
             f"La perizia contiene {lot_count} lotti distinti ({', '.join(str(x) for x in lot_ids)}). "
@@ -867,6 +988,7 @@ def _finish_lot_selection_required(
             "blended_report_prevented": True,
             "report_status": JobStatus.LOT_SELECTION_REQUIRED,
             "customer_report_schema_version": selection_report.get("schema_version"),
+            **gate_extra,
         },
     )
     artifacts.save_job_status(job_id, payload)
@@ -1021,6 +1143,130 @@ def _save_safe_customer_report(
         artifacts_saved["customer_report"] = artifacts.save_customer_report(job_id, report)
     except Exception:
         pass
+
+
+def _finish_quality_gate_failed(
+    job_id: str,
+    analysis_id: str,
+    gate: Dict[str, Any],
+    artifacts_saved: Dict[str, Any],
+    created_at: str,
+    admin_only: bool,
+) -> Dict[str, Any]:
+    """Coverage/quality gate found critical omissions -> NEEDS_MANUAL_REVIEW.
+
+    The rendered report and all quality artifacts stay on disk for admin
+    inspection, but the job never claims a clean REPORT_READY: a report with
+    critical silent omissions is worse than no report.
+    """
+    quality = gate.get("quality_report") or {}
+    audit = gate.get("coverage_audit") or {}
+    blocking = quality.get("blocking_issues") or []
+    codes = sorted({b.get("code") for b in blocking if b.get("code")})
+    reason_human = (
+        "Il controllo qualità ha rilevato omissioni o violazioni critiche: il "
+        "report non può essere esposto come completo."
+    )
+    error_path = artifacts.save_error(
+        job_id,
+        {
+            "status": JobStatus.NEEDS_MANUAL_REVIEW,
+            "stage": "step4:quality_gate",
+            "reason_code": "REPORT_QUALITY_GATE_FAILED",
+            "blocking_codes": codes,
+            "blocking_issues": blocking,
+            "coverage_status": audit.get("coverage_status"),
+            "no_clean_report": True,
+        },
+    )
+    artifacts_saved["error"] = error_path
+    payload = job_status.make_status(
+        job_id=job_id,
+        analysis_id=analysis_id,
+        status=JobStatus.NEEDS_MANUAL_REVIEW,
+        current_stage=_step4_stage("quality_gate_failed"),
+        admin_only=admin_only,
+        customer_report_generated=True,
+        safe_to_show_customer=False,
+        reason_code="REPORT_QUALITY_GATE_FAILED",
+        reason_human=reason_human,
+        troubleshoot_message=(
+            "Il gate di copertura ha bloccato il report. Codici bloccanti: "
+            f"{codes}. Controllare coverage_audit.json e "
+            "quality_standard_report.json per il dettaglio fatto-per-fatto."
+        ),
+        next_steps=[
+            "Aprire quality_standard_report.json per le violazioni bloccanti.",
+            "Aprire coverage_audit.json per le omissioni fatto-per-fatto.",
+            "Correggere l'estrazione/contratto e rieseguire il job.",
+        ],
+        artifacts_saved=artifacts_saved,
+        created_at=created_at,
+        extra={
+            "quality_gate_status": quality_gate_mod.GATE_FAIL,
+            "coverage_status": audit.get("coverage_status"),
+            "quality_status": quality.get("overall_quality_status"),
+            "customer_readiness": quality.get("customer_readiness"),
+            "satisfaction_score": (gate.get("scorecard") or {}).get("overall_score"),
+            "blocking_codes": codes,
+            "report_status": JobStatus.NEEDS_MANUAL_REVIEW,
+            "contract_generated": True,
+        },
+    )
+    artifacts.save_job_status(job_id, payload)
+    return payload
+
+
+def _finish_quality_gate_error(
+    job_id: str,
+    analysis_id: str,
+    exc: Exception,
+    artifacts_saved: Dict[str, Any],
+    created_at: str,
+    admin_only: bool,
+) -> Dict[str, Any]:
+    """The quality gate itself crashed -> fail closed (no unaudited clean report)."""
+    detail = f"{type(exc).__name__}: {exc}"
+    error_path = artifacts.save_error(
+        job_id,
+        {
+            "status": JobStatus.NEEDS_MANUAL_REVIEW,
+            "stage": "step4:quality_gate",
+            "reason_code": "QUALITY_GATE_ERROR",
+            "detail": detail,
+            "traceback": traceback.format_exc(),
+            "no_clean_report": True,
+        },
+    )
+    artifacts_saved["error"] = error_path
+    reason_human = (
+        "Il controllo qualità non è stato completato: il report non può essere "
+        "certificato come completo."
+    )
+    payload = job_status.make_status(
+        job_id=job_id,
+        analysis_id=analysis_id,
+        status=JobStatus.NEEDS_MANUAL_REVIEW,
+        current_stage=_step4_stage("quality_gate_error"),
+        admin_only=admin_only,
+        customer_report_generated=True,
+        safe_to_show_customer=False,
+        reason_code="QUALITY_GATE_ERROR",
+        reason_human=reason_human,
+        troubleshoot_message=(
+            f"Il gate qualità ha generato un errore: {detail}. Il report renderizzato "
+            "resta disponibile per gli admin ma non è certificato (fail-closed)."
+        ),
+        next_steps=[
+            "Controllare error.json per il traceback del gate qualità.",
+            "Rieseguire il job dopo la correzione.",
+        ],
+        artifacts_saved=artifacts_saved,
+        created_at=created_at,
+        extra={"quality_gate_status": "ERROR", "contract_generated": True},
+    )
+    artifacts.save_job_status(job_id, payload)
+    return payload
 
 
 def _finish_report_render_failed(

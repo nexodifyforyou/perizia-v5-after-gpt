@@ -54,12 +54,41 @@ const FAILURE_STATUSES = new Set([
 ]);
 
 const MONEY_SECTION_LABELS = {
-  valuation_chain: 'Valuation chain',
-  auction_terms: 'Auction terms',
-  buyer_side_costs: 'Buyer-side costs',
-  procedure_cancelled_formalities: 'Formalita cancellate dalla procedura',
+  valuation_chain: 'Catena di valore',
+  auction_terms: 'Condizioni di vendita',
+  buyer_side_costs: "Costi a carico dell'acquirente",
+  procedure_cancelled_formalities: 'Formalità cancellate dalla procedura',
   uncertain_money: 'Importi da verificare',
 };
+
+// Italian labels for raw artifact keys shown in customer-facing grids.
+const FIELD_LABELS = {
+  tribunale: 'Tribunale',
+  procedura_rge: 'Procedura / RGE',
+  lotto: 'Lotto',
+  address: 'Indirizzo',
+  property_type: 'Tipologia',
+  ownership_right: 'Diritto',
+  multi_lot: 'Più lotti',
+  lot_count: 'Numero lotti',
+  lot_ids: 'Lotti',
+  selected_lot: 'Lotto selezionato',
+  bene_count: 'Numero beni',
+  multi_bene: 'Più beni nel lotto',
+  bene_ids: 'Beni',
+};
+
+const HIDDEN_GRID_KEYS = new Set(['evidence_pages']);
+
+const QUALITY_ESITO_TONES = {
+  Coperto: 'border-emerald-500/40 bg-emerald-500/10 text-emerald-300',
+  Parziale: 'border-amber-500/40 bg-amber-500/10 text-amber-300',
+  'Da verificare': 'border-amber-500/40 bg-amber-500/10 text-amber-200',
+  Mancante: 'border-red-500/40 bg-red-500/10 text-red-300',
+  'Non materiale': 'border-zinc-700 bg-zinc-800/60 text-zinc-400',
+};
+
+const QUALITY_ROW_RENDER_LIMIT = 200;
 
 const isCanceledError = (error) => (
   error?.code === 'ERR_CANCELED' ||
@@ -158,7 +187,8 @@ const DetailBlock = ({ title, children, defaultOpen = false, testId }) => (
 );
 
 const KeyValueGrid = ({ data }) => {
-  const entries = Object.entries(data || {}).filter(([, value]) => {
+  const entries = Object.entries(data || {}).filter(([key, value]) => {
+    if (HIDDEN_GRID_KEYS.has(key)) return false;
     if (value === null || value === undefined || value === '') return false;
     if (Array.isArray(value)) return value.length > 0;
     return true;
@@ -168,7 +198,7 @@ const KeyValueGrid = ({ data }) => {
     <dl className="grid grid-cols-1 gap-3 md:grid-cols-2">
       {entries.map(([key, value]) => (
         <div key={key} className="min-w-0 rounded-md border border-zinc-800 bg-zinc-950 p-3">
-          <dt className="text-[11px] font-mono uppercase text-zinc-500">{key.replace(/_/g, ' ')}</dt>
+          <dt className="text-[11px] uppercase text-zinc-500">{FIELD_LABELS[key] || key.replace(/_/g, ' ')}</dt>
           <dd className="mt-1 break-words text-sm text-zinc-200">{compactText(value)}</dd>
         </div>
       ))}
@@ -510,6 +540,185 @@ const EvidenceIndex = ({ evidence }) => {
   );
 };
 
+const OccupancySection = ({ section }) => {
+  if (!section || (!section.status && !section.title_info)) return null;
+  return (
+    <section data-testid="cv2-occupancy-section" className="space-y-3">
+      <h3 className="text-lg font-semibold text-zinc-100">Stato di occupazione</h3>
+      <div className="rounded-lg border border-zinc-800 bg-zinc-950 p-4 text-sm text-zinc-200">
+        {section.status_label && (
+          <p><span className="text-zinc-500">Stato: </span>{compactText(section.status_label)}</p>
+        )}
+        {section.title_info && <p className="mt-2">{compactText(section.title_info)}</p>}
+        {section.opponibility && <p className="mt-2 text-zinc-300">{compactText(section.opponibility)}</p>}
+        {Array.isArray(section.registration_dates) && section.registration_dates.length > 0 && (
+          <p className="mt-2 text-zinc-400">Registrazione contratto: {section.registration_dates.join(', ')}</p>
+        )}
+        {Array.isArray(section.expiry_dates) && section.expiry_dates.length > 0 && (
+          <p className="mt-1 text-zinc-400">Scadenza contratto: {section.expiry_dates.join(', ')}</p>
+        )}
+        {Array.isArray(section.risks) && section.risks.length > 0 && (
+          <ul className="mt-3 list-disc space-y-1 pl-5 text-amber-200/90">
+            {section.risks.map((risk, idx) => <li key={`occ-risk-${idx}`}>{compactText(risk)}</li>)}
+          </ul>
+        )}
+        {pagesText(section.evidence_pages) && (
+          <p className="mt-2 font-mono text-xs text-gold">{pagesText(section.evidence_pages)}</p>
+        )}
+      </div>
+    </section>
+  );
+};
+
+const ComplianceSection = ({ items }) => {
+  const list = Array.isArray(items) ? items : [];
+  if (!list.length) return null;
+  return (
+    <section data-testid="cv2-compliance-section" className="space-y-3">
+      <h3 className="text-lg font-semibold text-zinc-100">Conformità e documenti tecnici</h3>
+      <div className="grid grid-cols-1 gap-3 xl:grid-cols-2">
+        {list.map((item, idx) => (
+          <div key={`${item?.area || 'area'}-${idx}`} className="rounded-lg border border-zinc-800 bg-zinc-950 p-4 text-sm">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <p className="font-medium text-zinc-100">{compactText(item?.area, 'Area')}</p>
+              <Badge variant="outline" className="border-zinc-700 text-zinc-300">{compactText(item?.status_label, 'Da verificare')}</Badge>
+            </div>
+            {item?.notes && <p className="mt-2 text-zinc-400">{compactText(item.notes)}</p>}
+            <div className="mt-2 flex flex-wrap gap-3 text-xs text-zinc-400">
+              {item?.cost_display && <span className="font-mono text-gold">{item.cost_display}</span>}
+              {item?.timing && <span>Tempi: {compactText(item.timing)}</span>}
+              {pagesText(item?.evidence_pages) && <span className="font-mono text-gold">{pagesText(item.evidence_pages)}</span>}
+            </div>
+          </div>
+        ))}
+      </div>
+    </section>
+  );
+};
+
+const FormalitiesSection = ({ items }) => {
+  const list = Array.isArray(items) ? items : [];
+  if (!list.length) return null;
+  return (
+    <section data-testid="cv2-formalities-section" className="space-y-3">
+      <h3 className="text-lg font-semibold text-zinc-100">Formalità e cancellazioni</h3>
+      <ul className="space-y-2">
+        {list.map((item, idx) => (
+          <li key={`form-${idx}`} className="rounded-lg border border-zinc-800 bg-zinc-950 p-4 text-sm">
+            <div className="flex flex-wrap items-center gap-2">
+              <Badge variant="outline" className="border-zinc-700 uppercase text-zinc-300">{compactText(item?.type, 'Formalità')}</Badge>
+              <span className="text-zinc-300">{compactText(item?.status_label)}</span>
+            </div>
+            {item?.description && <p className="mt-2 text-zinc-400">{compactText(item.description)}</p>}
+            {item?.amount_display && (
+              <p className="mt-2 font-mono text-gold">{item.amount_display}</p>
+            )}
+            {item?.amount_note && <p className="mt-1 text-xs text-zinc-500">{compactText(item.amount_note)}</p>}
+            {pagesText(item?.evidence_pages) && (
+              <p className="mt-1 font-mono text-xs text-gold">{pagesText(item.evidence_pages)}</p>
+            )}
+          </li>
+        ))}
+      </ul>
+    </section>
+  );
+};
+
+const SurfacesSection = ({ items }) => {
+  const list = Array.isArray(items) ? items : [];
+  if (!list.length) return null;
+  return (
+    <section data-testid="cv2-surfaces-section" className="space-y-3">
+      <h3 className="text-lg font-semibold text-zinc-100">Superfici e dati catastali</h3>
+      <div className="grid grid-cols-1 gap-2 md:grid-cols-2 xl:grid-cols-3">
+        {list.map((item, idx) => (
+          <div key={`surf-${idx}`} className="rounded-md border border-zinc-800 bg-zinc-950 p-3 text-sm">
+            <p className="text-[11px] uppercase text-zinc-500">{compactText(item?.label, 'Dato')}</p>
+            <p className="mt-1 break-words text-zinc-200">{compactText(item?.value)}</p>
+            {item?.note && <p className="mt-1 text-xs text-amber-200/80">{compactText(item.note)}</p>}
+            {pagesText(item?.evidence_pages) && (
+              <p className="mt-1 font-mono text-xs text-gold">{pagesText(item.evidence_pages)}</p>
+            )}
+          </div>
+        ))}
+      </div>
+    </section>
+  );
+};
+
+const QualityControlSection = ({ qualityControl }) => {
+  if (!qualityControl) return null;
+  const rows = Array.isArray(qualityControl.rows) ? qualityControl.rows : [];
+  const visible = rows.slice(0, QUALITY_ROW_RENDER_LIMIT);
+  const failed = qualityControl.coverage_status === 'FAIL';
+  return (
+    <section data-testid="cv2-quality-control" className="space-y-3">
+      <div className="flex flex-wrap items-center gap-3">
+        <h3 className="text-lg font-semibold text-zinc-100">Controllo qualità pagina per pagina</h3>
+        <Badge
+          variant="outline"
+          className={failed
+            ? 'border-red-500/40 bg-red-500/10 text-red-300'
+            : qualityControl.coverage_status === 'WARNING'
+              ? 'border-amber-500/40 bg-amber-500/10 text-amber-300'
+              : 'border-emerald-500/40 bg-emerald-500/10 text-emerald-300'}
+        >
+          Copertura: {compactText(qualityControl.coverage_status, '-')}
+        </Badge>
+        {Number.isFinite(qualityControl.satisfaction_score) && (
+          <span className="text-xs text-zinc-500">
+            Punteggio qualità: <span className="font-mono text-zinc-300">{qualityControl.satisfaction_score}/100</span>
+          </span>
+        )}
+      </div>
+      {failed && (
+        <div data-testid="cv2-quality-blocked" className="rounded-lg border border-red-500/40 bg-red-500/10 p-4 text-sm text-red-100">
+          Il controllo qualità ha rilevato omissioni critiche: il report non è certificato come completo.
+        </div>
+      )}
+      <DetailBlock title={`Tabella di controllo (${rows.length} righe)`} testId="cv2-quality-table" defaultOpen={failed}>
+        {visible.length ? (
+          <div className="overflow-x-auto">
+            <table className="w-full min-w-[640px] text-left text-sm">
+              <thead>
+                <tr className="border-b border-zinc-800 text-xs text-zinc-500">
+                  <th className="pb-2 pr-3 font-medium">Pagina</th>
+                  <th className="pb-2 pr-3 font-medium">Dato rilevante nella perizia</th>
+                  <th className="pb-2 pr-3 font-medium">Presente nel report</th>
+                  <th className="pb-2 pr-3 font-medium">Esito</th>
+                  <th className="pb-2 font-medium">Note</th>
+                </tr>
+              </thead>
+              <tbody>
+                {visible.map((row, idx) => (
+                  <tr key={`qc-${idx}`} className="border-b border-zinc-900 align-top last:border-0">
+                    <td className="py-2 pr-3 font-mono text-gold">{compactText(row?.pagina, '-')}</td>
+                    <td className="py-2 pr-3 text-zinc-200">{compactText(row?.dato, '-')}</td>
+                    <td className="py-2 pr-3 text-zinc-300">{row?.presente ? 'Sì' : 'No'}</td>
+                    <td className="py-2 pr-3">
+                      <Badge variant="outline" className={QUALITY_ESITO_TONES[row?.esito] || 'border-zinc-700 text-zinc-300'}>
+                        {compactText(row?.esito, '-')}
+                      </Badge>
+                    </td>
+                    <td className="py-2 text-xs text-zinc-500">{compactText(row?.note, '')}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        ) : (
+          <p className="text-sm text-zinc-500">Nessuna riga di controllo.</p>
+        )}
+        {rows.length > QUALITY_ROW_RENDER_LIMIT && (
+          <p className="mt-3 text-xs text-zinc-500">
+            Altre {rows.length - QUALITY_ROW_RENDER_LIMIT} righe disponibili in page_by_page_audit.json.
+          </p>
+        )}
+      </DetailBlock>
+    </section>
+  );
+};
+
 const ManualReviewBox = ({ job, report }) => {
   const flags = Array.isArray(report?.manual_review_flags) ? report.manual_review_flags : [];
   const summary = Array.isArray(report?.executive_summary) ? report.executive_summary : [];
@@ -568,39 +777,45 @@ const CorrectnessV2CustomerReport = ({ report }) => {
       </header>
 
       <section className="space-y-3">
-        <h3 className="text-lg font-semibold text-zinc-100">Case identity</h3>
+        <h3 className="text-lg font-semibold text-zinc-100">Dati principali</h3>
         <KeyValueGrid data={report.case_identity} />
       </section>
 
       <section className="space-y-3">
-        <h3 className="text-lg font-semibold text-zinc-100">Lot structure</h3>
+        <h3 className="text-lg font-semibold text-zinc-100">Struttura lotto / beni</h3>
         <KeyValueGrid data={report.lot_structure} />
       </section>
 
       <BeniSections sections={report.beni_sections} />
 
       <section className="space-y-3">
-        <h3 className="text-lg font-semibold text-zinc-100">Executive summary</h3>
+        <h3 className="text-lg font-semibold text-zinc-100">Sintesi esecutiva</h3>
         <TextList items={report.executive_summary} />
       </section>
 
       <section className="space-y-3">
-        <h3 className="text-lg font-semibold text-zinc-100">Key facts</h3>
+        <h3 className="text-lg font-semibold text-zinc-100">Dati chiave</h3>
         <TextList items={(report.key_facts || []).map((fact) => ({ text: `${compactText(fact.label, 'Dato')}: ${compactText(fact.value_display || fact.value, '-')}`, evidence_pages: fact.evidence_pages }))} />
       </section>
 
+      <OccupancySection section={report.occupancy_section} />
       <RiskSections sections={report.risk_sections} />
       <MoneySections sections={report.money_sections} />
+      <ComplianceSection items={report.compliance_section} />
+      <FormalitiesSection items={report.formalities_section} />
+      <SurfacesSection items={report.surfaces_section} />
 
       <section className="space-y-3">
-        <h3 className="text-lg font-semibold text-zinc-100">Buyer checklist</h3>
+        <h3 className="text-lg font-semibold text-zinc-100">Checklist acquirente</h3>
         <TextList items={report.buyer_checklist} />
       </section>
 
-      <section className="space-y-3">
-        <h3 className="text-lg font-semibold text-zinc-100">Manual review flags</h3>
-        <TextList items={(report.manual_review_flags || []).map((flag) => ({ text: `${compactText(flag.kind || flag.code, 'flag')}: ${compactText(flag.detail, '')}`, evidence_pages: flag.evidence_pages }))} />
+      <section data-testid="cv2-manual-review-flags" className="space-y-3">
+        <h3 className="text-lg font-semibold text-zinc-100">Punti da verificare</h3>
+        <TextList items={(report.manual_review_flags || []).map((flag) => ({ text: `${compactText(flag.kind_label, 'Punto da verificare')}: ${compactText(flag.detail, '')}`, evidence_pages: flag.evidence_pages }))} />
       </section>
+
+      <QualityControlSection qualityControl={report.quality_control} />
 
       <EvidenceIndex evidence={report.evidence_index} />
 
@@ -790,7 +1005,10 @@ const CorrectnessV2Panel = ({ analysisId, isAdmin }) => {
   const status = job?.status;
   const activeJob = isRunningStatus(status);
   const showManualReview = status === 'NEEDS_MANUAL_REVIEW' || status === 'CONTRACT_VALIDATION_FAILED' || isFailureStatus(status);
-  const canRenderFullReport = status === 'REPORT_READY' && report?.report_status === 'REPORT_READY';
+  // A report whose own quality control failed is NEVER rendered as clean, even
+  // if a stale/buggy status still claims REPORT_READY (defense in depth).
+  const coverageFailed = report?.quality_control?.coverage_status === 'FAIL';
+  const canRenderFullReport = status === 'REPORT_READY' && report?.report_status === 'REPORT_READY' && !coverageFailed;
 
   return (
     <section className="mb-8 space-y-4 rounded-lg border border-gold/30 bg-zinc-900/80 p-4 sm:p-5">
@@ -837,6 +1055,20 @@ const CorrectnessV2Panel = ({ analysisId, isAdmin }) => {
         <ManualReviewBox job={job} report={report} />
       )}
 
+      {showManualReview && report?.quality_control && (
+        <QualityControlSection qualityControl={report.quality_control} />
+      )}
+
+      {coverageFailed && !showManualReview && (
+        <div data-testid="cv2-coverage-failed" className="rounded-lg border border-red-500/40 bg-red-500/10 p-4 text-sm text-red-100">
+          Controllo qualità non superato: il report non viene mostrato come completo.
+          Consultare coverage_audit.json e quality_standard_report.json.
+        </div>
+      )}
+      {coverageFailed && !showManualReview && report?.quality_control && (
+        <QualityControlSection qualityControl={report.quality_control} />
+      )}
+
       {canRenderFullReport ? (
         <CorrectnessV2CustomerReport report={report} />
       ) : status === 'REPORT_READY' && reportLoading ? (
@@ -870,6 +1102,11 @@ export {
   CorrectnessV2Status,
   MoneySections,
   RiskSections,
+  OccupancySection,
+  ComplianceSection,
+  FormalitiesSection,
+  SurfacesSection,
+  QualityControlSection,
   isRunningStatus,
   isTerminalStatus,
 };
