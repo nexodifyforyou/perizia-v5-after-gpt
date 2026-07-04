@@ -50,9 +50,57 @@ const reportReady = {
     procedure_cancelled_formalities: [{ label: 'Ipoteca cancellata dalla procedura', amount: 800, amount_display: 'EUR 800,00', evidence_pages: [10] }],
     uncertain_money: [{ label: 'Importo senza ruolo certo', amount: 3000, amount_display: 'EUR 3.000,00', status: 'da_verificare', evidence_pages: [11] }],
   },
+  occupancy_section: {
+    title: 'Stato di occupazione',
+    status: 'occupato',
+    status_label: 'Occupato',
+    title_info: 'Contratto di locazione registrato in data certa.',
+    registration_dates: ['01/01/2020'],
+    expiry_dates: ['31/12/2024'],
+    risks: ['La scadenza contrattuale risulta superata.'],
+    evidence_pages: [3],
+  },
+  compliance_section: [
+    { area: 'urbanistica', classification: 'conforming', status_label: 'conforme secondo la perizia', evidence_pages: [8] },
+    { area: 'edilizia', classification: 'regularizable', status_label: 'regolarizzabile secondo la perizia', cost: 2500, cost_display: 'EUR 2.500,00', evidence_pages: [8] },
+  ],
+  formalities_section: [
+    {
+      type: 'ipoteca',
+      description: 'Ipoteca volontaria iscritta.',
+      status_label: 'Formalità rilevata; cancellazione indicata a cura della procedura',
+      cancelled_by_procedure: true,
+      buyer_burden: false,
+      amount: 150000,
+      amount_display: 'EUR 150.000,00',
+      amount_note: 'Importo della formalità iscritta: non è un debito a carico dell\'acquirente salvo diversa indicazione della perizia.',
+      evidence_pages: [5],
+    },
+  ],
+  surfaces_section: [
+    { label: 'Superficie commerciale', value: '46,95', evidence_pages: [2] },
+    { label: 'Rendita catastale', value: '472,56', evidence_pages: [2] },
+  ],
   buyer_checklist: [{ action: 'Verificare amministratore', detail: 'Confermare spese condominiali', evidence_pages: [9] }],
-  manual_review_flags: [{ kind: 'uncertain_money', detail: 'Importo senza ruolo certo', evidence_pages: [11] }],
+  manual_review_flags: [{ kind: 'uncertain_money', kind_label: 'Importo da verificare', detail: 'Importo senza ruolo certo', evidence_pages: [11] }],
   evidence_index: [{ page: 4, referenced_by: ['valuation_chain'] }],
+  quality_control: {
+    title: 'Controllo qualità pagina per pagina',
+    coverage_status: 'PASS',
+    quality_status: 'PASS',
+    customer_readiness: 'READY',
+    satisfaction_score: 97,
+    satisfaction_status: 'CUSTOMER_READY',
+    blocking_issue_count: 0,
+    warning_count: 0,
+    columns: ['Pagina', 'Dato rilevante nella perizia', 'Presente nel report', 'Esito', 'Note'],
+    rows: [
+      { pagina: 2, dato: 'Valore di mercato: € 100.000,00', presente: true, esito: 'Coperto', note: '' },
+      { pagina: 5, dato: 'Ipoteca', presente: true, esito: 'Coperto', note: '' },
+      { pagina: 8, dato: 'Agibilità / abitabilità', presente: true, esito: 'Da verificare', note: 'Reso come punto da verificare.' },
+    ],
+    page_summary: [],
+  },
   disclaimer: 'Disclaimer generico.',
 };
 
@@ -237,6 +285,90 @@ describe('CorrectnessV2Panel', () => {
     expect(container.querySelector('[data-testid="cv2-manual-review"]').textContent).toContain('Report non disponibile');
     expect(text()).not.toContain("Prezzo base d'asta");
     expect(container.querySelector('[data-testid="cv2-report"]')).toBeNull();
+  });
+
+  test('renders the quality section with the page-by-page audit table', async () => {
+    getLatestCorrectnessV2Job.mockResolvedValue({ data: readyJob });
+    getCorrectnessV2CustomerReport.mockResolvedValue({ data: reportReady });
+
+    await renderPanel();
+
+    const quality = container.querySelector('[data-testid="cv2-quality-control"]');
+    expect(quality).not.toBeNull();
+    expect(quality.textContent).toContain('Controllo qualità pagina per pagina');
+    const table = container.querySelector('[data-testid="cv2-quality-table"]');
+    expect(table.textContent).toContain('Dato rilevante nella perizia');
+    expect(table.textContent).toContain('Valore di mercato: € 100.000,00');
+    expect(table.textContent).toContain('Coperto');
+    expect(table.textContent).toContain('Da verificare');
+  });
+
+  test('customer-facing sections use Italian labels and hide raw internal prefixes', async () => {
+    getLatestCorrectnessV2Job.mockResolvedValue({ data: readyJob });
+    getCorrectnessV2CustomerReport.mockResolvedValue({ data: reportReady });
+
+    await renderPanel();
+
+    expect(text()).toContain('Dati principali');
+    expect(text()).toContain('Struttura lotto / beni');
+    expect(text()).toContain('Sintesi esecutiva');
+    expect(text()).toContain('Catena di valore');
+    expect(text()).toContain("Costi a carico dell'acquirente");
+    expect(text()).toContain('Checklist acquirente');
+    expect(text()).toContain('Punti da verificare');
+    // Raw internal machine kinds must not be shown as flag prefixes.
+    const flags = container.querySelector('[data-testid="cv2-manual-review-flags"]');
+    expect(flags.textContent).toContain('Importo da verificare');
+    expect(flags.textContent).not.toContain('uncertain_money');
+    // Grid keys are translated.
+    expect(text()).toContain('Tipologia');
+    expect(text()).not.toContain('property type');
+  });
+
+  test('renders occupancy, compliance, formalities and surfaces sections', async () => {
+    getLatestCorrectnessV2Job.mockResolvedValue({ data: readyJob });
+    getCorrectnessV2CustomerReport.mockResolvedValue({ data: reportReady });
+
+    await renderPanel();
+
+    expect(container.querySelector('[data-testid="cv2-occupancy-section"]').textContent)
+      .toContain('Contratto di locazione registrato');
+    const compliance = container.querySelector('[data-testid="cv2-compliance-section"]');
+    expect(compliance.textContent).toContain('conforme secondo la perizia');
+    expect(compliance.textContent).toContain('regolarizzabile secondo la perizia');
+    const formalities = container.querySelector('[data-testid="cv2-formalities-section"]');
+    expect(formalities.textContent).toContain('cancellazione indicata a cura della procedura');
+    expect(formalities.textContent).toContain('non è un debito a carico');
+    const surfaces = container.querySelector('[data-testid="cv2-surfaces-section"]');
+    expect(surfaces.textContent).toContain('Superficie commerciale');
+    expect(surfaces.textContent).toContain('Rendita catastale');
+  });
+
+  test('failed coverage never renders a clean report', async () => {
+    getLatestCorrectnessV2Job.mockResolvedValue({ data: readyJob });
+    getCorrectnessV2CustomerReport.mockResolvedValue({
+      data: {
+        ...reportReady,
+        quality_control: {
+          ...reportReady.quality_control,
+          coverage_status: 'FAIL',
+          quality_status: 'FAIL',
+          blocking_issue_count: 2,
+          rows: [
+            { pagina: 4, dato: 'Valore di vendita giudiziaria: € 120.000,00', presente: false, esito: 'Mancante', note: 'Omissione critica.' },
+          ],
+        },
+      },
+    });
+
+    await renderPanel();
+
+    // The clean report body must NOT render...
+    expect(container.querySelector('[data-testid="cv2-report"]')).toBeNull();
+    // ...and the failure + audit table must be visible instead.
+    expect(container.querySelector('[data-testid="cv2-coverage-failed"]')).not.toBeNull();
+    const quality = container.querySelector('[data-testid="cv2-quality-control"]');
+    expect(quality.textContent).toContain('Mancante');
   });
 
   test('disables Run Correctness V2 while a latest job is still running', async () => {

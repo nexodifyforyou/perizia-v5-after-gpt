@@ -180,6 +180,38 @@ async def correctness_v2_validator_report(
     return _read_known_job_artifact(analysis_id, job_id, artifacts.VALIDATOR_REPORT_FILE)
 
 
+@router.get("/{analysis_id}/correctness-v2/jobs/{job_id}/coverage-audit")
+async def correctness_v2_coverage_audit(
+    analysis_id: str, job_id: str, request: Request
+) -> Dict[str, Any]:
+    await _resolve_user_and_guard(request)
+    return _read_known_job_artifact(analysis_id, job_id, artifacts.COVERAGE_AUDIT_FILE)
+
+
+@router.get("/{analysis_id}/correctness-v2/jobs/{job_id}/page-audit")
+async def correctness_v2_page_audit(
+    analysis_id: str, job_id: str, request: Request
+) -> Dict[str, Any]:
+    await _resolve_user_and_guard(request)
+    return _read_known_job_artifact(analysis_id, job_id, artifacts.PAGE_AUDIT_FILE)
+
+
+@router.get("/{analysis_id}/correctness-v2/jobs/{job_id}/quality-report")
+async def correctness_v2_quality_report(
+    analysis_id: str, job_id: str, request: Request
+) -> Dict[str, Any]:
+    await _resolve_user_and_guard(request)
+    return _read_known_job_artifact(analysis_id, job_id, artifacts.QUALITY_REPORT_FILE)
+
+
+@router.get("/{analysis_id}/correctness-v2/jobs/{job_id}/satisfaction-scorecard")
+async def correctness_v2_scorecard(
+    analysis_id: str, job_id: str, request: Request
+) -> Dict[str, Any]:
+    await _resolve_user_and_guard(request)
+    return _read_known_job_artifact(analysis_id, job_id, artifacts.SCORECARD_FILE)
+
+
 @router.get("/{analysis_id}/correctness-v2/latest")
 async def correctness_v2_latest(analysis_id: str, request: Request) -> Dict[str, Any]:
     await _resolve_user_and_guard(request)

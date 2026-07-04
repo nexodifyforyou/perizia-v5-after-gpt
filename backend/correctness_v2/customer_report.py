@@ -127,6 +127,10 @@ def _empty_report(
             "uncertain_money": [],
         },
         "beni_sections": [],
+        "occupancy_section": {},
+        "compliance_section": [],
+        "formalities_section": [],
+        "surfaces_section": [],
         "buyer_checklist": [],
         "manual_review_flags": [],
         "evidence_index": [],
@@ -448,38 +452,203 @@ def _buyer_checklist(contract: Dict[str, Any]) -> List[Dict[str, Any]]:
     return out
 
 
+# Italian labels for manual-review flag kinds: raw machine kinds stay in the
+# JSON for admin debug, but the frontend must render kind_label only.
+_FLAG_KIND_LABELS = {
+    "missing_or_uncertain": "Dato mancante o incerto",
+    "analyst_warning": "Segnalazione dell'analisi",
+    "validator_warning": "Verifica automatica",
+    "uncertain_money": "Importo da verificare",
+    "compliance_uncertain": "Conformità da verificare",
+    "status": "Stato dell'analisi",
+    "validation_violation": "Verifica non superata",
+    "next_step": "Passo suggerito",
+}
+
+
+def _flag_view(kind: str, detail: Any, evidence_pages: Any = None, code: Any = None) -> Dict[str, Any]:
+    view: Dict[str, Any] = {
+        "kind": kind,
+        "kind_label": _FLAG_KIND_LABELS.get(kind, "Punto da verificare"),
+        "detail": detail,
+    }
+    if code:
+        view["code"] = code
+    pages = _pages(evidence_pages)
+    if pages:
+        view["evidence_pages"] = pages
+    return view
+
+
+# Customer-safe Italian wording for validator warning codes. The raw English
+# detail stays in debug_detail (admin-only); customers see only these.
+_VALIDATOR_WARNING_LABELS = {
+    "ZERO_AMOUNT_BUYER_COST": (
+        "Una voce di costo a carico dell'acquirente ha importo pari a zero in "
+        "perizia e non è stata considerata un costo effettivo."
+    ),
+    "MONEY_ROW_EVIDENCE_VIA_MERGE": (
+        "Un importo senza pagina di riferimento propria è stato unito alla voce "
+        "equivalente con riferimento di pagina."
+    ),
+    "SAME_AMOUNT_CONFLICTING_KIND": (
+        "Uno stesso importo compare in perizia con ruoli diversi: verificare il "
+        "ruolo corretto sul documento."
+    ),
+}
+
+
+def _validator_warning_detail(code: Any, raw_detail: Any) -> str:
+    label = _VALIDATOR_WARNING_LABELS.get(str(code or ""))
+    if label:
+        return label
+    return (
+        f"Verifica automatica: segnalazione tecnica (codice {code}). "
+        "Dettagli disponibili nel report di validazione."
+    )
+
+
 def _manual_review_flags(contract: Dict[str, Any]) -> List[Dict[str, Any]]:
     flags: List[Dict[str, Any]] = []
     for flag in contract.get("uncertainty_flags") or []:
-        view = {"kind": flag.get("kind"), "detail": flag.get("detail")}
-        if flag.get("code"):
-            view["code"] = flag["code"]
-        if flag.get("evidence_pages"):
-            view["evidence_pages"] = _pages(flag.get("evidence_pages"))
+        kind = flag.get("kind")
+        detail = flag.get("detail")
+        view = _flag_view(kind, detail, flag.get("evidence_pages"), flag.get("code"))
+        if kind == "validator_warning":
+            # Validator details are internal English: keep them for admin debug
+            # but expose only the Italian customer-safe wording.
+            view["debug_detail"] = detail
+            view["detail"] = _validator_warning_detail(flag.get("code"), detail)
         flags.append(view)
     for row in contract.get("uncertain_money") or []:
         flags.append(
-            {
-                "kind": "uncertain_money",
-                "detail": (
+            _flag_view(
+                "uncertain_money",
+                (
                     f"Importo da verificare: {row.get('label')} "
                     f"({format_eur(row.get('amount'))})."
                 ),
-                "evidence_pages": _pages(row.get("evidence_pages")),
-            }
+                row.get("evidence_pages"),
+            )
         )
     for card in contract.get("risk_cards") or []:
         if card.get("classification") == "uncertain":
             flags.append(
-                {
-                    "kind": "compliance_uncertain",
-                    "detail": (
-                        f"Conformità non verificabile automaticamente: {card.get('area')}."
-                    ),
-                    "evidence_pages": _pages(card.get("evidence_pages")),
-                }
+                _flag_view(
+                    "compliance_uncertain",
+                    f"Conformità non verificabile automaticamente: {card.get('area')}.",
+                    card.get("evidence_pages"),
+                )
             )
     return flags
+
+
+_OCCUPANCY_STATUS_LABELS = {
+    "occupato": "Occupato",
+    "libero": "Libero",
+}
+
+
+def _occupancy_section(contract: Dict[str, Any]) -> Dict[str, Any]:
+    """Full occupancy view: status, lease details, opponibility, risks."""
+    oc = contract.get("occupancy") or {}
+    if not any(
+        oc.get(k)
+        for k in ("status", "title_info", "opponibility", "registration_dates",
+                  "expiry_dates", "risks")
+    ):
+        return {}
+    status = oc.get("status")
+    section: Dict[str, Any] = {
+        "title": "Stato di occupazione",
+        "status": status,
+        "status_label": _OCCUPANCY_STATUS_LABELS.get(_norm(status), status),
+        "evidence_pages": _pages(oc.get("evidence_pages")),
+    }
+    if oc.get("title_info"):
+        section["title_info"] = oc["title_info"]
+    if oc.get("opponibility"):
+        section["opponibility"] = oc["opponibility"]
+    if oc.get("registration_dates"):
+        section["registration_dates"] = [str(d) for d in oc["registration_dates"]]
+    if oc.get("expiry_dates"):
+        section["expiry_dates"] = [str(d) for d in oc["expiry_dates"]]
+    if oc.get("risks"):
+        section["risks"] = [str(r) for r in oc["risks"]]
+    return section
+
+
+def _compliance_section(contract: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """Every compliance area including conforming ones — nothing disappears."""
+    out: List[Dict[str, Any]] = []
+    for item in contract.get("compliance_overview") or []:
+        view: Dict[str, Any] = {
+            "area": item.get("area"),
+            "classification": item.get("classification"),
+            "status_label": item.get("classification_label")
+            or _CLASSIFICATION_LABELS.get(item.get("classification"), "Da verificare"),
+            "evidence_pages": _pages(item.get("evidence_pages")),
+        }
+        if item.get("notes"):
+            view["notes"] = item["notes"]
+        if item.get("cost") is not None:
+            view["cost"] = item["cost"]
+            view["cost_display"] = format_eur(item["cost"])
+        if item.get("timing"):
+            view["timing"] = item["timing"]
+        view["blocks_saleability"] = bool(item.get("blocks_saleability"))
+        out.append(view)
+    return out
+
+
+def _formalities_section(contract: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """Formalità e cancellazioni: never rendered as buyer debt unless explicit."""
+    out: List[Dict[str, Any]] = []
+    for item in contract.get("legal_formalities") or []:
+        cancelled = bool(item.get("cancelled_by_procedure"))
+        buyer = bool(item.get("buyer_burden"))
+        if cancelled:
+            status_label = "Formalità rilevata; cancellazione indicata a cura della procedura"
+        elif buyer:
+            status_label = "A carico dell'acquirente secondo la perizia"
+        else:
+            status_label = "Formalità rilevata; verificare le condizioni di cancellazione"
+        view: Dict[str, Any] = {
+            "type": item.get("type"),
+            "description": item.get("description"),
+            "status_label": status_label,
+            "cancelled_by_procedure": cancelled,
+            "buyer_burden": buyer,
+            "evidence_pages": _pages(item.get("evidence_pages")),
+        }
+        if item.get("amount") is not None:
+            view["amount"] = item["amount"]
+            view["amount_display"] = format_eur(item["amount"])
+            if not buyer:
+                view["amount_note"] = (
+                    "Importo della formalità iscritta: non è un debito a carico "
+                    "dell'acquirente salvo diversa indicazione della perizia."
+                )
+        out.append(view)
+    return out
+
+
+def _surfaces_section(contract: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """Superfici e dati catastali (deterministic document facts, verbatim)."""
+    out: List[Dict[str, Any]] = []
+    for fact in contract.get("surface_cadastral") or []:
+        view: Dict[str, Any] = {
+            "label": fact.get("label"),
+            "value": fact.get("value"),
+            "evidence_pages": _pages(fact.get("evidence_pages")),
+        }
+        if fact.get("multiple_values"):
+            view["note"] = (
+                "In perizia compaiono più valori per questo dato: da verificare."
+            )
+            view["status"] = "da_verificare"
+        out.append(view)
+    return out
 
 
 def _evidence_index(contract: Dict[str, Any]) -> List[Dict[str, Any]]:
@@ -546,6 +715,10 @@ def render_success_report(contract: Dict[str, Any]) -> Dict[str, Any]:
     report["risk_sections"] = _risk_sections(contract)
     report["money_sections"] = _money_sections_view(contract)
     report["beni_sections"] = _beni_sections(contract)
+    report["occupancy_section"] = _occupancy_section(contract)
+    report["compliance_section"] = _compliance_section(contract)
+    report["formalities_section"] = _formalities_section(contract)
+    report["surfaces_section"] = _surfaces_section(contract)
     report["buyer_checklist"] = _buyer_checklist(contract)
     report["manual_review_flags"] = _manual_review_flags(contract)
     report["evidence_index"] = _evidence_index(contract)

@@ -251,7 +251,9 @@ def _merge_cost_rows(raw_costs: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
             "evidence_pages": m["evidence_pages"],
         }
         if chain_roles and is_buyer:
-            row["notes"] = "Anche a carico dell'acquirente."
+            row["notes"] = (
+                "Anche a carico dell'acquirente; già considerato nella catena di valore."
+            )
         rows.append(row)
     return rows
 
@@ -446,15 +448,43 @@ def _money_sections(
     }
 
 
+def _format_eur(amount: Any) -> Optional[str]:
+    """Italian euro formatting for fixed label strings ('2500' -> '€ 2.500,00')."""
+    if amount is None:
+        return None
+    try:
+        value = float(amount)
+    except (TypeError, ValueError):
+        return None
+    sign = "-" if value < 0 else ""
+    grouped = f"{abs(value):,.2f}".replace(",", "|").replace(".", ",").replace("|", ".")
+    return f"{sign}€ {grouped}"
+
+
+# Fixed Italian labels for compliance classifications (customer wording rules:
+# never expose raw tokens like "regularizable"/"uncertain").
+CLASSIFICATION_LABELS_IT = {
+    "conforming": "conforme secondo la perizia",
+    "regularizable": "regolarizzabile secondo la perizia",
+    "non_conforming": "non conforme secondo la perizia",
+    "not_regularizable": "non regolarizzabile secondo la perizia",
+    "uncertain": "da verificare",
+}
+
+
+def _classification_it(classification: Any) -> str:
+    return CLASSIFICATION_LABELS_IT.get(str(classification or ""), "da verificare")
+
+
 def _buyer_action_checklist(worksheet: Dict[str, Any]) -> List[Dict[str, Any]]:
     """Actionable items the buyer should consider — only from supported facts."""
     checklist: List[Dict[str, Any]] = []
 
     for item in worksheet["technical_compliance"]:
         if item.get("classification") in {"regularizable", "non_conforming", "not_regularizable", "uncertain"}:
-            parts = [f"{item.get('area')}: {item.get('classification')}"]
+            parts = [f"{item.get('area')}: {_classification_it(item.get('classification'))}"]
             if item.get("cost") is not None:
-                parts.append(f"costo stimato {item.get('cost')}")
+                parts.append(f"costo stimato {_format_eur(item.get('cost'))}")
             if item.get("timing"):
                 parts.append(f"tempistica {item.get('timing')}")
             checklist.append(
@@ -483,12 +513,49 @@ def _buyer_action_checklist(worksheet: Dict[str, Any]) -> List[Dict[str, Any]]:
             continue
         checklist.append(
             {
-                "action": "Considerare costo a carico acquirente",
-                "detail": f"{c.get('label')}: {amount}",
+                "action": "Considerare costo a carico dell'acquirente",
+                "detail": f"{c.get('label')}: {_format_eur(amount)}",
                 "evidence_pages": list(c.get("evidence_pages", [])),
             }
         )
     return checklist
+
+
+def _occupancy_view(worksheet: Dict[str, Any]) -> Dict[str, Any]:
+    """Full occupancy block: status + lease details + risks (nothing dropped)."""
+    oc = worksheet.get("occupancy") or {}
+    return {
+        "status": oc.get("status"),
+        "title_info": oc.get("title_info"),
+        "opponibility": oc.get("opponibility"),
+        "registration_dates": list(oc.get("registration_dates") or []),
+        "expiry_dates": list(oc.get("expiry_dates") or []),
+        "risks": list(oc.get("risks") or []),
+        "evidence_pages": list(oc.get("evidence_pages") or []),
+    }
+
+
+def _compliance_overview(worksheet: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """Every technical-compliance area, INCLUDING conforming ones.
+
+    Risk cards intentionally skip conforming areas; the customer report still
+    must show them ("conformità urbanistica: conforme") so nothing disappears.
+    """
+    out: List[Dict[str, Any]] = []
+    for item in worksheet.get("technical_compliance") or []:
+        out.append(
+            {
+                "area": item.get("area"),
+                "classification": item.get("classification"),
+                "classification_label": _classification_it(item.get("classification")),
+                "blocks_saleability": bool(item.get("blocks_saleability")),
+                "cost": item.get("cost"),
+                "timing": item.get("timing"),
+                "notes": item.get("notes"),
+                "evidence_pages": list(item.get("evidence_pages") or []),
+            }
+        )
+    return out
 
 
 def _evidence_index(worksheet: Dict[str, Any]) -> Dict[str, List[str]]:
@@ -615,8 +682,14 @@ def build_contract(
     source_pdf_quality_status: str,
     lot_report: Optional[Dict[str, Any]] = None,
     shared_summary_rows: Optional[List[Dict[str, Any]]] = None,
+    surface_cadastral: Optional[List[Dict[str, Any]]] = None,
 ) -> Dict[str, Any]:
-    """Build the deterministic, renderer-ready verified report contract."""
+    """Build the deterministic, renderer-ready verified report contract.
+
+    ``surface_cadastral`` are deterministic facts read verbatim from the page
+    text (doc_signals.extract_surface_cadastral) — document truth, not model
+    claims, same precedent as the shared-summary projection.
+    """
     money = _money_sections(worksheet, validator_report)
     _merge_shared_summary_rows(money, shared_summary_rows or [])
     return {
@@ -638,6 +711,9 @@ def build_contract(
         # Raw lot-tagged rows projected from shared multi-lot summary pages
         # (deterministic; this lot only). Kept verbatim for provenance.
         "shared_summary_money": [dict(r) for r in shared_summary_rows or []],
+        "occupancy": _occupancy_view(worksheet),
+        "compliance_overview": _compliance_overview(worksheet),
+        "surface_cadastral": [dict(f) for f in surface_cadastral or []],
         "legal_formalities": _legal_formalities_view(worksheet),
         "buyer_action_checklist": _buyer_action_checklist(worksheet),
         "evidence_index": _evidence_index(worksheet),

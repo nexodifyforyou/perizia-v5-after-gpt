@@ -26,8 +26,10 @@ GENERIC_PERIZIA_PAGES: List[Dict[str, Any]] = [
             "Identificazione dei beni e oggetto della vendita: appartamento ad uso "
             "abitativo con pertinenze. Stato di possesso: l'immobile risulta libero "
             "da persone e cose. Sotto il profilo urbanistico l'immobile risulta "
-            "urbanisticamente conforme agli strumenti vigenti. Prezzo base indicato "
-            "negli atti della procedura esecutiva: EUR 100.000,00. Pagina 1 di 2."
+            "urbanisticamente conforme agli strumenti vigenti. Prezzo base d'asta "
+            "indicato negli atti della procedura esecutiva: EUR 75.000,00; offerta "
+            "minima EUR 56.250,00; rialzo minimo EUR 1.000,00; cauzione EUR 7.500,00. "
+            "Pagina 1 di 2."
         ),
     },
     {
