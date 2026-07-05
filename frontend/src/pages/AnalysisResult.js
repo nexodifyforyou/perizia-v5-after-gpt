@@ -7,7 +7,9 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '../components/ui/tabs'
 import { EvidenceBadge, EvidenceDetail, DataValueWithEvidence } from '../components/EvidenceDisplay';
 import HeadlineVerifyModal from '../components/HeadlineVerifyModal';
 import TechnicalFeedbackModal from '../components/TechnicalFeedbackModal';
-import CorrectnessV2Panel from '../components/correctness-v2/CorrectnessV2Panel';
+import CorrectnessV2Tabs from '../components/correctness-v2/CorrectnessV2Tabs';
+import { useCorrectnessV2CustomerView } from '../components/correctness-v2/useCustomerView';
+import { computeCorrectnessV2Visibility } from '../components/correctness-v2/visibility';
 import { MessageSquarePlus } from 'lucide-react';
 import { 
   FileText, 
@@ -1589,7 +1591,31 @@ const AnalysisResult = () => {
   const [headlineModal, setHeadlineModal] = useState({ open: false, fieldKey: null });
   const [feedbackModalOpen, setFeedbackModalOpen] = useState(false);
   const canGiveTechnicalFeedback = Boolean(user?.is_beta_partner || user?.is_master_admin);
-  const canPreviewCorrectnessV2 = Boolean(user?.is_master_admin);
+
+  // ---------------------------------------------------------------------------
+  // Correctness V2 vs legacy report gating.
+  //
+  //   * Exact-email admin (user.correctness_v2_admin_view) always gets the V2
+  //     surface (so the Vista admin tab with run/quality/debug is reachable).
+  //   * Any customer/tester gets the sanitized "Report cliente" only when a safe
+  //     V2 customer report exists.
+  //   * The legacy report is HIDDEN whenever a safe V2 report exists (the
+  //     customer must see exactly one report); it renders as the fallback only
+  //     when no safe V2 report exists. It never stacks under the V2 tabs.
+  //
+  // The customer view is fetched ONCE via this shared hook and handed to the
+  // tabs, so the page's hide-legacy decision never diverges from what renders.
+  const isExactAdmin = Boolean(user?.correctness_v2_admin_view);
+  const correctnessV2 = useCorrectnessV2CustomerView(analysisId);
+  const hasSafeV2 = correctnessV2.available === true;
+  const v2Resolved = !correctnessV2.loading;
+  const [legacyReveal, setLegacyReveal] = useState(false);
+  const correctnessV2Visibility = computeCorrectnessV2Visibility({
+    isExactAdmin,
+    hasSafeV2,
+    v2Resolved,
+    legacyReveal,
+  });
 
   const fetchAnalysis = async () => {
     const params = new URLSearchParams(location.search);
@@ -3882,16 +3908,53 @@ const AnalysisResult = () => {
           onSaved={fetchAnalysis}
         />
         
-        {/* Multi-Lot Selector - show if multiple lots */}
-        {isMultiLot && (
-          <MultiLotSelector 
-            lots={lots} 
-            selectedLot={selectedLotIndex} 
-            onSelectLot={setSelectedLotIndex} 
+        {/* While the V2 availability probe resolves, show a neutral placeholder
+            for non-admins so the page is never blank and never flashes the wrong
+            report. */}
+        {correctnessV2Visibility.showLoadingPlaceholder && (
+          <div className="mb-8 flex items-center gap-2 rounded-xl border border-zinc-800 bg-zinc-900 p-5 text-sm text-zinc-400">
+            <div className="w-4 h-4 border-2 border-zinc-600 border-t-transparent rounded-full animate-spin" />
+            Caricamento report…
+          </div>
+        )}
+
+        {/* Correctness V2 surface: exact admin always; any customer/tester only
+            when a safe sanitized V2 report exists. */}
+        {correctnessV2Visibility.showV2Surface && (
+          <CorrectnessV2Tabs
+            analysisId={analysisId}
+            canSeeAdminTab={isExactAdmin}
+            customerState={correctnessV2}
           />
         )}
 
-        <CorrectnessV2Panel analysisId={analysisId} isAdmin={canPreviewCorrectnessV2} />
+        {/* Exact admin opt-in: reveal the legacy report for inspection. It is
+            never auto-stacked under the V2 tabs. */}
+        {correctnessV2Visibility.canRevealLegacy && (
+          <div className="mb-6">
+            <button
+              type="button"
+              data-testid="legacy-report-reveal"
+              onClick={() => setLegacyReveal((prev) => !prev)}
+              className="text-xs font-mono uppercase text-zinc-500 underline hover:text-zinc-300"
+            >
+              {legacyReveal ? 'Nascondi report legacy (debug)' : 'Mostra report legacy (debug)'}
+            </button>
+          </div>
+        )}
+
+        {/* Legacy report body: the single-report fallback shown only when no safe
+            V2 report exists (or when the exact admin opts in above). */}
+        {correctnessV2Visibility.showLegacyBody && (
+        <div data-testid="legacy-report-body">
+        {/* Multi-Lot Selector - show if multiple lots */}
+        {isMultiLot && (
+          <MultiLotSelector
+            lots={lots}
+            selectedLot={selectedLotIndex}
+            onSelectLot={setSelectedLotIndex}
+          />
+        )}
 
         {/* Header with Semaforo */}
         <div className="mb-8 rounded-xl border border-zinc-800 bg-zinc-900 p-5 sm:p-6">
@@ -5025,6 +5088,8 @@ const AnalysisResult = () => {
             {safeRender(summary.disclaimer_en, 'Informational document. Not legal advice. Consult a qualified professional.')}
           </p>
         </div>
+        </div>
+        )}
       </main>
     </div>
   );
