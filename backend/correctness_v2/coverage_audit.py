@@ -102,18 +102,9 @@ _ROW_ROLE_TOKENS = {
     "deduction": doc_signals.ROLE_DEPRECIATION,
 }
 
-# Roles whose mismatch is a hard contradiction (critical money concepts). A
-# mismatch on weaker roles (rendita vs canone vs capitale di formalità, where
-# the page context is noisier) degrades to PARTIAL, never silently to covered.
-_STRICT_ROLES = {
-    doc_signals.ROLE_MARKET_VALUE,
-    doc_signals.ROLE_STATE_OF_FACT_VALUE,
-    doc_signals.ROLE_JUDICIAL_SALE_VALUE,
-    doc_signals.ROLE_AUCTION_BASE_PRICE,
-    doc_signals.ROLE_MINIMUM_BID,
-    doc_signals.ROLE_REGULARIZATION_COST,
-    doc_signals.ROLE_BUYER_SIDE_COST,
-}
+# Role-mismatch severity is decided by the SHARED taxonomy in doc_signals
+# (CORE_MONEY_ROLES / BACKGROUND_MONEY_ROLES / roles_compatible /
+# conflict_is_misleading) — never by a local list that could drift.
 
 
 def _approx_equal(a: float, b: float) -> bool:
@@ -147,6 +138,10 @@ class ReportPool:
         self.section_text: Dict[str, List[str]] = {}
         # (amount, section, roles)
         self.amounts: List[Tuple[float, str, frozenset]] = []
+        # cent-keyed index over self.amounts, built lazily on first lookup
+        # (the pool is fully populated before evaluation starts).
+        self._index: Optional[Dict[int, List[Tuple[float, str, frozenset]]]] = None
+        self._indexed_count = 0
 
     def add_text(self, section: str, text: Any) -> None:
         n = norm_text(text)
@@ -159,8 +154,7 @@ class ReportPool:
             # Role from the text preceding the amount (same detector as pages).
             window = doc_signals.classification_window(raw, spans, i)
             kind, _sev, _lab = doc_signals.classify_money_context(norm_text(window))
-            roles = self._roles_for(section, kind)
-            self.amounts.append((amount, section, roles))
+            self.amounts.append((amount, section, _roles_for_kind(section, kind)))
 
     def add_amount(self, section: str, amount: Any, roles: Any = None) -> None:
         if amount is None or isinstance(amount, bool):
@@ -172,38 +166,54 @@ class ReportPool:
         self.amounts.append((value, section, frozenset(roles or ())))
 
     @staticmethod
-    def _roles_for(section: str, kind: str) -> frozenset:
-        roles = set()
-        if kind and kind != "importo_generico":
-            roles.add(doc_signals.role_for_kind(kind))
-        sec_role = _SECTION_ROLES.get(section)
-        if sec_role:
-            roles.add(sec_role)
-        return frozenset(roles)
-
-    @staticmethod
     def _entry_matches_role(entry_roles: frozenset, role: Optional[str]) -> bool:
         if not role or role == doc_signals.ROLE_UNCERTAIN_MONEY:
             return True  # document role unclear -> any placement accounts for it
         if not entry_roles:
             return True  # report role unknown (free text) -> never a conflict
-        if doc_signals.ROLE_UNCERTAIN_MONEY in entry_roles:
-            return True  # rendered as explicit uncertainty covers any role
-        return role in entry_roles
+        return any(doc_signals.roles_compatible(role, r) for r in entry_roles)
+
+    def _candidates(self, amount: float) -> List[Tuple[float, str, frozenset]]:
+        """Amount-equal entries via the cent-keyed index (one linear pass total).
+
+        The absolute tolerance (0.011) spans just over one cent, so checking
+        the neighbouring cent buckets covers every _approx_equal match.
+        """
+        if self._index is None or self._indexed_count != len(self.amounts):
+            index: Dict[int, List[Tuple[float, str, frozenset]]] = {}
+            for entry in self.amounts:
+                index.setdefault(round(entry[0] * 100), []).append(entry)
+            self._index = index
+            self._indexed_count = len(self.amounts)
+        key = round(amount * 100)
+        out: List[Tuple[float, str, frozenset]] = []
+        for k in (key - 1, key, key + 1):
+            for entry in self._index.get(k, ()):  # type: ignore[union-attr]
+                if _approx_equal(entry[0], amount):
+                    out.append(entry)
+        return out
+
+    def lookup_amount(
+        self, amount: float, role: Optional[str] = None
+    ) -> Tuple[List[str], List[str], frozenset]:
+        """(match_sections, conflict_sections, conflict_roles) in ONE pass.
+
+        conflict_* describe entries where the amount exists but only under an
+        incompatible role."""
+        matches: set = set()
+        conflict_secs: set = set()
+        conflict_roles: set = set()
+        for _val, sec, entry_roles in self._candidates(amount):
+            if self._entry_matches_role(entry_roles, role):
+                matches.add(sec)
+            else:
+                conflict_secs.add(sec)
+                conflict_roles.update(entry_roles)
+        conflict_secs -= matches
+        return sorted(matches), sorted(conflict_secs), frozenset(conflict_roles)
 
     def find_amount(self, amount: float, role: Optional[str] = None) -> List[str]:
-        return sorted({
-            sec for val, sec, entry_roles in self.amounts
-            if _approx_equal(val, amount) and self._entry_matches_role(entry_roles, role)
-        })
-
-    def find_amount_role_conflicts(self, amount: float, role: Optional[str]) -> List[str]:
-        """Sections where the amount exists but ONLY under a different role."""
-        matches = set(self.find_amount(amount, role))
-        return sorted({
-            sec for val, sec, entry_roles in self.amounts
-            if _approx_equal(val, amount) and sec not in matches
-        })
+        return self.lookup_amount(amount, role)[0]
 
     def find_text(self, needle: Any) -> List[str]:
         n = norm_text(needle).strip()
@@ -238,23 +248,30 @@ class ReportPool:
         return sorted(out)
 
 
+def _roles_for_kind(section: str, kind: Optional[str]) -> frozenset:
+    """Single role-derivation for a money kind in a report section (used both
+    for free-text amounts and structured rows — never forked)."""
+    roles = set()
+    if kind and kind != "importo_generico":
+        roles.add(doc_signals.role_for_kind(kind))
+    sec_role = _SECTION_ROLES.get(section)
+    if sec_role:
+        roles.add(sec_role)
+    return frozenset(roles)
+
+
 def _row_roles(section: str, node: Dict[str, Any]) -> frozenset:
     """Money roles a report row plays: label semantics + contract roles + section."""
-    roles = set()
     label = node.get("label") or node.get("area")
-    if label:
-        kind, _sev, _lab = doc_signals.classify_money_context(norm_text(label))
-        if kind != "importo_generico":
-            roles.add(doc_signals.role_for_kind(kind))
+    roles = set(
+        _roles_for_kind(section, doc_signals.label_kind(label) if label else None)
+    )
     for tok in node.get("roles") or []:
         mapped = _ROW_ROLE_TOKENS.get(str(tok))
         if mapped:
             roles.add(mapped)
     if node.get("included_in_valuation"):
         roles.add(doc_signals.ROLE_BUYER_SIDE_COST)
-    sec_role = _SECTION_ROLES.get(section)
-    if sec_role:
-        roles.add(sec_role)
     return frozenset(roles)
 
 
@@ -522,22 +539,47 @@ def _worksheet_facts(worksheet: Dict[str, Any]) -> List[Dict[str, Any]]:
 # ---------------------------------------------------------------------------
 # Fact evaluation against the report pool
 # ---------------------------------------------------------------------------
-def _role_conflict_update(out: Dict[str, Any], role: str, conflicts: List[str]) -> Dict[str, Any]:
-    """Amount present in the report but ONLY under a different money role."""
+def _role_conflict_update(
+    out: Dict[str, Any], role: str, conflicts: List[str], conflict_roles: Any
+) -> Dict[str, Any]:
+    """Amount present in the report but ONLY under an incompatible money role.
+
+    Tiers (shared taxonomy in doc_signals):
+      * MISLEADING (a CORE value/cost role on either side): CONTRADICTED —
+        blocks when the document fact is critical, warns otherwise.
+      * Background-vs-background: the same economic fact shown in a different
+        safe context bucket -> PARTIAL, visibly noted, never silently covered.
+    """
     role_label = doc_signals.ROLE_LABELS_IT.get(role, role)
-    strict = role in _STRICT_ROLES and out.get("severity") == SEV_CRITICAL
+    misleading = doc_signals.conflict_is_misleading(role, conflict_roles)
+    if misleading:
+        out.update({
+            "match_status": CONTRADICTED,
+            "report_location": ", ".join(conflicts),
+            "action": "",
+            "role_conflict": True,
+            "software_output": (
+                f"Importo presente nel report ma con un ruolo diverso ({', '.join(conflicts)})"
+            ),
+            "reason": (
+                f"Il documento indica questo importo come '{role_label}', ma il "
+                "report lo espone con un ruolo che può fuorviare sul significato "
+                "economico: importo E ruolo devono coincidere."
+            ),
+        })
+        return out
     out.update({
-        "match_status": CONTRADICTED if strict else PARTIAL,
+        "match_status": PARTIAL,
         "report_location": ", ".join(conflicts),
-        "action": "" if strict else ACTION_BACKGROUND,
+        "action": ACTION_BACKGROUND,
         "role_conflict": True,
         "software_output": (
-            f"Importo presente nel report ma con un ruolo diverso ({', '.join(conflicts)})"
+            f"Importo presente in una sezione di contesto diversa ({', '.join(conflicts)})"
         ),
         "reason": (
-            f"Il documento indica questo importo come '{role_label}', ma il report "
-            "lo espone con un ruolo diverso: la copertura richiede che importo E "
-            "ruolo coincidano."
+            f"Stesso dato economico ('{role_label}') esposto in una sezione di "
+            "contesto diversa: nessun costo o valore viene attribuito in modo "
+            "fuorviante."
         ),
     })
     return out
@@ -548,15 +590,16 @@ def _evaluate_fact(fact: Dict[str, Any], pool: ReportPool) -> Dict[str, Any]:
     value = fact["check_value"]
     role = fact.get("role")
     role_conflicts: List[str] = []
+    conflict_roles: Any = frozenset()
     if kind == "amount":
         try:
             amount = float(value)
         except (TypeError, ValueError):
             sections = []
         else:
-            sections = pool.find_amount(amount, role)
-            if not sections and role:
-                role_conflicts = pool.find_amount_role_conflicts(amount, role)
+            sections, conflicts, conflict_roles = pool.lookup_amount(amount, role)
+            if role:
+                role_conflicts = conflicts
     elif kind == "tokens":
         sections = pool.find_tokens([v for v in (value or []) if v])
     elif kind == "overlap":
@@ -578,7 +621,13 @@ def _evaluate_fact(fact: Dict[str, Any], pool: ReportPool) -> Dict[str, Any]:
     preset_reason = out.pop("preset_reason", None)
     expected = out.pop("expected_action", None)
     if not action and role_conflicts:
-        return _role_conflict_update(out, role, role_conflicts)
+        return _role_conflict_update(out, role, role_conflicts, conflict_roles)
+    # An uncertainty/manual-review match never launders a MISLEADING role
+    # placement in the main report body (see _evaluate_money_signal).
+    if action in (ACTION_UNCERTAINTY, ACTION_MANUAL_REVIEW) and role_conflicts and (
+        doc_signals.conflict_is_misleading(role, conflict_roles)
+    ):
+        return _role_conflict_update(out, role, role_conflicts, conflict_roles)
     if via_fallback and action:
         out.update({
             "match_status": PARTIAL,
@@ -651,7 +700,7 @@ def _evaluate_money_signal(
     sig: Dict[str, Any], pool: ReportPool, role_covered: Dict[str, bool]
 ) -> Dict[str, Any]:
     role = sig.get("role") or doc_signals.role_for_kind(sig.get("kind"))
-    sections = pool.find_amount(sig["amount"], role)
+    sections, role_conflicts, conflict_roles = pool.lookup_amount(sig["amount"], role)
     action, location = _classify_sections(sections)
     fact = {
         "fact_id": sig["signal_id"],
@@ -663,6 +712,13 @@ def _evaluate_money_signal(
         "role": role,
         "snippet": sig.get("snippet"),
     }
+    # A match that lives ONLY in uncertainty/manual-review sections never
+    # launders a MISLEADING role placement in the main report body: the
+    # customer still sees the wrong role prominently, so the conflict wins.
+    if action in (ACTION_UNCERTAINTY, ACTION_MANUAL_REVIEW) and role_conflicts and (
+        doc_signals.conflict_is_misleading(role, conflict_roles)
+    ):
+        return _role_conflict_update(fact, role, role_conflicts, conflict_roles)
     if action:
         fact.update({
             "match_status": MATCH, "action": action, "report_location": location,
@@ -670,11 +726,11 @@ def _evaluate_money_signal(
             "reason": "",
         })
         return fact
-    # Amount present in the report but ONLY under a different role: never
-    # counted as covered. Critical value roles contradict (gate FAIL).
-    role_conflicts = pool.find_amount_role_conflicts(sig["amount"], role)
+    # Amount present in the report but ONLY under an incompatible role: never
+    # counted as covered (misleading conflicts contradict, safe-bucket
+    # differences stay PARTIAL — see _role_conflict_update).
     if role_conflicts:
-        return _role_conflict_update(fact, role, role_conflicts)
+        return _role_conflict_update(fact, role, role_conflicts, conflict_roles)
     # Amount not in report. If the same money concept IS covered with another
     # (the perito's final) amount, this is a detail line, not a silent loss.
     if role_covered.get(role):
@@ -918,7 +974,13 @@ def build_coverage_audit(
             ACTION_BLOCKED, "",
         )
         if fact["match_status"] == CONTRADICTED:
-            critical_omissions.append(_omission_view(fact))
+            # A contradiction blocks when the document fact is critical;
+            # weaker facts (e.g. an important background amount shown under a
+            # misleading role) surface as explicit warnings.
+            if fact["severity"] == SEV_CRITICAL:
+                critical_omissions.append(_omission_view(fact))
+            else:
+                important_warnings.append(_omission_view(fact))
         elif problem and fact["severity"] == SEV_CRITICAL:
             critical_omissions.append(_omission_view(fact))
         elif problem and fact["severity"] == SEV_IMPORTANT:

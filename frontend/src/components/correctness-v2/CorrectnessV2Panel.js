@@ -546,8 +546,43 @@ const BeniSections = ({ sections }) => {
 // Customer-facing evidence: page + human topic + VERBATIM perizia excerpt.
 // Raw internal keys (technical_compliance[4], ...) live ONLY in the collapsed
 // admin debug block below, never in this list.
+const LEGACY_TOPIC_LABELS = {
+  case_identity: 'Dati principali',
+  occupancy: 'Stato di occupazione',
+  money: 'Valori e costi',
+  technical_compliance: 'Conformità e documenti tecnici',
+  legal_formalities: 'Formalità e cancellazioni',
+  risk_classification: 'Rischi e segnalazioni',
+};
+
+// "technical_compliance[2]:conformità urbanistica" -> "conformità urbanistica";
+// bare machine keys map to their section's Italian label. Never shows brackets.
+const humanizeLegacyRef = (ref) => {
+  const s = String(ref || '');
+  const colon = s.indexOf(':');
+  if (colon >= 0 && colon < s.length - 1) return s.slice(colon + 1).trim();
+  const prefix = s.split('[')[0].trim();
+  return LEGACY_TOPIC_LABELS[prefix] || prefix.replace(/_/g, ' ');
+};
+
+// Older reports carry only the raw evidence_index: build a humanized customer
+// view from it so evidence never disappears (raw keys stay admin-only).
+const legacyCustomerFallback = (legacyEvidence) => (
+  (Array.isArray(legacyEvidence) ? legacyEvidence : []).map((entry) => {
+    const topics = [...new Set((entry?.referenced_by || []).map(humanizeLegacyRef).filter(Boolean))];
+    return {
+      page: entry?.page,
+      topic: topics.join(', ') || 'Riferimento in perizia',
+      perizia_excerpt: null,
+      note: `Estratto non disponibile per questo report; verificare pagina ${compactText(entry?.page, '?')}.`,
+      coverage_status: 'excerpt_missing',
+    };
+  })
+);
+
 const EvidenceIndex = ({ customerEvidence, adminEvidence, legacyEvidence }) => {
-  const items = Array.isArray(customerEvidence) ? customerEvidence : [];
+  const customerItems = Array.isArray(customerEvidence) ? customerEvidence : [];
+  const items = customerItems.length ? customerItems : legacyCustomerFallback(legacyEvidence);
   const visible = items.slice(0, EVIDENCE_RENDER_LIMIT);
   const adminItems = Array.isArray(adminEvidence) && adminEvidence.length
     ? adminEvidence

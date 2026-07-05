@@ -329,10 +329,17 @@ def _check_warnings(
                 )
 
     for omission in coverage_audit.get("important_warnings") or []:
-        warn(
-            "IMPORTANT_FACT_NOT_RENDERED",
-            f"{omission.get('document_fact')} (pagine {omission.get('evidence_pages')})",
-        )
+        if omission.get("role_conflict"):
+            warn(
+                "MONEY_ROLE_CONFLICT",
+                f"{omission.get('document_fact')} (pagine {omission.get('evidence_pages')}) "
+                f"— {omission.get('reason')}",
+            )
+        else:
+            warn(
+                "IMPORTANT_FACT_NOT_RENDERED",
+                f"{omission.get('document_fact')} (pagine {omission.get('evidence_pages')})",
+            )
 
     # Customer evidence entries without a safe verbatim excerpt: explicit
     # coverage warning (the entry already says "Estratto non disponibile...").
@@ -404,6 +411,7 @@ _BLOCK_DIMENSION = {
 }
 
 _WARN_DIMENSION = {
+    "MONEY_ROLE_CONFLICT": "money_integrity",
     "EVIDENCE_EXCERPT_MISSING": "evidence_traceability",
     "DERIVED_AMOUNT": "evidence_traceability",
     "IMPORTANT_FACT_NOT_RENDERED": "coverage_completeness",
@@ -591,9 +599,16 @@ def build_customer_satisfaction_scorecard(
         )
         if not has_costs:
             actionability -= 20
-        if not customer_report.get("manual_review_flags") and (
-            coverage_audit.get("important_warnings") or money_sections.get("uncertain_money")
-        ):
+        # Review-worthy content must be surfaced SOMEWHERE actionable, not
+        # necessarily in manual_review_flags: comparatives/context values are
+        # surfaced by their own background sections, and coverage warnings are
+        # surfaced by the attached page-by-page quality table. Only uncertain
+        # money that carries NO review flag is genuinely unsurfaced.
+        unsurfaced_uncertain = bool(money_sections.get("uncertain_money")) and not any(
+            f.get("kind") in ("uncertain_money", "coverage_money")
+            for f in customer_report.get("manual_review_flags") or []
+        )
+        if unsurfaced_uncertain:
             actionability -= 15
 
     trust = int(q_scores.get("evidence_traceability", 100))

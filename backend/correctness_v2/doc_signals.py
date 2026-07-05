@@ -288,6 +288,63 @@ CONTEXT_LABEL_KINDS = frozenset({
     "rendita", "canone", "spese_condominiali", "formalita_capitale",
 })
 
+# ---------------------------------------------------------------------------
+# Role compatibility (single source of truth for the whole pipeline).
+#
+# CORE roles state what the buyer pays or what the property is worth: showing
+# an amount under the wrong core role (or presenting a core value as mere
+# background, or background data as a confirmed value) MISLEADS the buyer.
+# BACKGROUND roles are informational context: two background roles disagreeing
+# about the same amount is a same-economic-fact/different-safe-bucket case.
+# ---------------------------------------------------------------------------
+CORE_MONEY_ROLES = frozenset({
+    ROLE_MARKET_VALUE, ROLE_STATE_OF_FACT_VALUE, ROLE_JUDICIAL_SALE_VALUE,
+    ROLE_AUCTION_BASE_PRICE, ROLE_MINIMUM_BID, ROLE_AUCTION_INCREMENT,
+    ROLE_AUCTION_DEPOSIT, ROLE_REGULARIZATION_COST, ROLE_BUYER_SIDE_COST,
+    ROLE_DEPRECIATION, ROLE_GENERIC_CHARGE,
+})
+BACKGROUND_MONEY_ROLES = frozenset({
+    ROLE_COMPARABLE_MARKET_VALUE, ROLE_CADASTRAL_INCOME, ROLE_RENT,
+    ROLE_CONDOMINIUM_EXPENSE, ROLE_PROCEDURE_CANCELLED_FORMALITY,
+    ROLE_UNCERTAIN_MONEY,
+})
+
+# Roles that are different names for the SAME economic fact: all four are
+# "a cost the perito deducted/charged" (a merged chain row may carry any of
+# them, and generic 'oneri e spese' wording covers each). Swaps INSIDE this
+# family never mislead about value-vs-cost-vs-background; swaps across
+# families (value roles, background roles) stay strict.
+_COMPATIBLE_ROLE_GROUPS = (
+    frozenset({
+        ROLE_REGULARIZATION_COST, ROLE_DEPRECIATION, ROLE_BUYER_SIDE_COST,
+        ROLE_GENERIC_CHARGE,
+    }),
+)
+
+
+def roles_compatible(role_a: str, role_b: str) -> bool:
+    """True when two roles describe the same economic fact."""
+    if role_a == role_b:
+        return True
+    if ROLE_UNCERTAIN_MONEY in (role_a, role_b):
+        return True  # explicit uncertainty accounts for any role
+    return any(
+        role_a in group and role_b in group for group in _COMPATIBLE_ROLE_GROUPS
+    )
+
+
+def conflict_is_misleading(doc_role: str, entry_roles: Any) -> bool:
+    """Is showing this amount under ``entry_roles`` misleading for ``doc_role``?
+
+    Misleading whenever a CORE role is involved on either side (a value/cost
+    presented under the wrong role, a core value demoted to background, or
+    background data promoted to a confirmed value). Background-vs-background
+    disagreements are safe-bucket differences, not deception.
+    """
+    if doc_role in CORE_MONEY_ROLES:
+        return True
+    return any(r in CORE_MONEY_ROLES for r in entry_roles or ())
+
 
 def role_for_kind(kind: Any) -> str:
     return ROLE_BY_KIND.get(str(kind or ""), ROLE_UNCERTAIN_MONEY)

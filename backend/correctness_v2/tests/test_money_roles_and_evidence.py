@@ -22,10 +22,12 @@ import re
 from correctness_v2 import (
     analyst,
     contract as contract_mod,
+    coverage_audit,
     doc_signals,
     lots as lots_mod,
     customer_report,
     quality_gate,
+    quality_report as quality_report_mod,
     validator as validator_mod,
 )
 
@@ -384,6 +386,263 @@ def test_missing_excerpt_marked_and_warned():
     assert "EVIDENCE_EXCERPT_MISSING" in warn_codes
 
 
+# ---------------------------------------------------------------------------
+# Review finding 1: role-compatibility tiers (covered / partial / misleading)
+# ---------------------------------------------------------------------------
+def _pool_with(section_rows):
+    """ReportPool from a minimal synthetic customer report."""
+    report = {"money_sections": section_rows}
+    return coverage_audit.build_report_pool(report)
+
+
+def _money_sig(kind, amount, severity, page=5):
+    return {
+        "signal_type": "money", "signal_id": f"p{page}:{kind}:0", "page": page,
+        "category": "money", "kind": kind, "severity": severity,
+        "label": kind, "amount": amount, "role": doc_signals.role_for_kind(kind),
+        "snippet": "",
+    }
+
+
+def test_background_amount_shown_as_core_value_contradicts():
+    # Doc says 472,56 is the RENDITA; the report shows it ONLY as a confirmed
+    # market value -> misleading -> contradiction (warning-level severity).
+    pool = _pool_with({"valuation_chain": [
+        {"label": "Valore di mercato", "amount": 472.56, "kind": "value"},
+    ]})
+    fact = coverage_audit._evaluate_money_signal(
+        _money_sig("rendita", 472.56, "important"), pool, {}
+    )
+    assert fact["match_status"] == coverage_audit.CONTRADICTED
+    assert fact["role_conflict"] is True
+
+
+def test_formality_capital_shown_as_buyer_cost_contradicts():
+    pool = _pool_with({"buyer_side_costs": [
+        {"label": "Costo a carico acquirente", "amount": 150000.0},
+    ]})
+    fact = coverage_audit._evaluate_money_signal(
+        _money_sig("formalita_capitale", 150000.0, "background"), pool, {}
+    )
+    assert fact["match_status"] == coverage_audit.CONTRADICTED
+
+
+def test_comparable_shown_as_confirmed_market_value_contradicts():
+    pool = _pool_with({"valuation_chain": [
+        {"label": "Valore di mercato", "amount": 49000.0, "kind": "value"},
+    ]})
+    fact = coverage_audit._evaluate_money_signal(
+        _money_sig("comparativo", 49000.0, "background"), pool, {}
+    )
+    assert fact["match_status"] == coverage_audit.CONTRADICTED
+
+
+def test_background_vs_background_conflict_is_partial_not_blocking():
+    # Doc classifies 3720 near mortgage words (formalita_capitale); the report
+    # shows it as rent context -> same economic background fact, safe bucket.
+    pool = _pool_with({"context_values": [
+        {"label": "Canone di locazione dichiarato", "amount": 3720.0},
+    ]})
+    fact = coverage_audit._evaluate_money_signal(
+        _money_sig("formalita_capitale", 3720.0, "background"), pool, {}
+    )
+    assert fact["match_status"] == coverage_audit.PARTIAL
+    assert fact["action"] == coverage_audit.ACTION_BACKGROUND
+    assert fact["role_conflict"] is True
+
+
+def test_matching_role_is_covered():
+    pool = _pool_with({"context_values": [
+        {"label": "Rendita catastale", "amount": 472.56},
+    ]})
+    fact = coverage_audit._evaluate_money_signal(
+        _money_sig("rendita", 472.56, "important"), pool, {}
+    )
+    assert fact["match_status"] == coverage_audit.MATCH
+
+
+def test_noncritical_contradiction_warns_not_blocks():
+    raw = make_worksheet()
+    ws, vr, lr, contract, report = _build(
+        GENERIC_PERIZIA_PAGES, raw, validator_report=VALIDATED_REPORT
+    )
+    # Tamper: present the cadastral income as a confirmed extra market value.
+    report["money_sections"]["valuation_chain"].append(
+        {"label": "Valore di mercato aggiuntivo", "amount": 999.77,
+         "amount_display": "€ 999,77", "kind": "value", "evidence_pages": [2]}
+    )
+    pages = copy.deepcopy(GENERIC_PERIZIA_PAGES)
+    pages[1]["text"] += " Rendita catastale: Euro 999,77."
+    gate = _gate(pages, ws, contract, report, vr, lr)
+    warn_codes = {w["code"] for w in gate["quality_report"]["warnings"]}
+    assert "MONEY_ROLE_CONFLICT" in warn_codes
+    # Important-severity conflict warns; it never silently counts as covered.
+    assert gate["gate_status"] != quality_gate.GATE_PASS
+
+
+# ---------------------------------------------------------------------------
+# Review finding 2: cancellation costs never suppress formality references
+# ---------------------------------------------------------------------------
+def test_cancellation_cost_rows_and_formality_references_both_render():
+    raw = make_worksheet()  # has procedure_cancelled_costs row + 2 formalities
+    ws, vr, lr, contract, report = _build(
+        GENERIC_PERIZIA_PAGES, raw, validator_report=VALIDATED_REPORT
+    )
+    rows = report["money_sections"]["procedure_cancelled_formalities"]
+    cost_rows = [r for r in rows if r.get("amount") is not None]
+    ref_rows = [r for r in rows if r.get("kind") == "procedure_cancelled_reference"]
+    assert cost_rows, "the real cancellation cost row must stay visible"
+    ref_labels = " ".join(r["label"] for r in ref_rows).lower()
+    assert "ipoteca" in ref_labels and "pignoramento" in ref_labels
+    # Buyer-side and procedure-cancelled stay separate sections.
+    buyer_labels = " ".join(
+        str(r.get("label")) for r in report["money_sections"]["buyer_side_costs"]
+    ).lower()
+    assert "ipoteca" not in buyer_labels and "pignoramento" not in buyer_labels
+    gate = _gate(GENERIC_PERIZIA_PAGES, ws, contract, report, vr, lr)
+    codes = {b["code"] for b in gate["quality_report"]["blocking_issues"]}
+    assert "PROCEDURE_FORMALITY_AS_BUYER_DEBT" not in codes
+
+
+# ---------------------------------------------------------------------------
+# Review finding 3: excerpts are topic-aware — wrong-topic verbatim rejected
+# ---------------------------------------------------------------------------
+def test_wrong_topic_sentence_rejected_even_if_verbatim():
+    text = customer_report._normalize_ws(
+        "La conformità dell'impianto idraulico è stata verificata con esito "
+        "positivo durante il sopralluogo."
+    )
+    excerpt = customer_report._find_verbatim_excerpt(
+        text, needles=["impianto elettrico conformità"]
+    )
+    assert excerpt is None  # 2/3 topic words is not topical coverage
+
+
+def test_ambiguous_amount_resolved_by_topic_words():
+    text = customer_report._normalize_ws(
+        "Cauzione richiesta per l'offerta: Euro 500,00. Il canone mensile "
+        "dichiarato nel contratto: Euro 500,00."
+    )
+    excerpt = customer_report._find_verbatim_excerpt(
+        text, amount=500.0, needles=["Canone di locazione dichiarato"],
+        role=doc_signals.ROLE_RENT,
+    )
+    assert excerpt is not None
+    assert "canone" in excerpt.lower()
+    assert "cauzione" not in excerpt.lower()
+
+
+def test_ambiguous_amount_without_topic_anchor_is_not_quoted():
+    text = customer_report._normalize_ws(
+        "Prima voce elencata: Euro 500,00. Seconda voce elencata: Euro 500,00."
+    )
+    excerpt = customer_report._find_verbatim_excerpt(
+        text, amount=500.0, needles=["Dato senza riscontro"],
+    )
+    assert excerpt is None
+
+
+def test_unique_amount_is_its_own_anchor():
+    text = customer_report._normalize_ws(
+        "Spese di cancellazione a carico dell'acquirente: Euro 294,00."
+    )
+    excerpt = customer_report._find_verbatim_excerpt(
+        text, amount=294.0, needles=["Voce con parole non presenti"],
+    )
+    assert excerpt is not None and "294,00" in excerpt
+
+
+# ---------------------------------------------------------------------------
+# Review finding 5: actionability not over-penalized for grouped background
+# ---------------------------------------------------------------------------
+def _scorecard_for(report, coverage):
+    quality = {
+        "analysis_id": "a", "job_id": "j", "blocking_issues": [], "warnings": [],
+        "scores": {"coverage_completeness": 100, "evidence_traceability": 100},
+        "customer_satisfaction_risks": [],
+    }
+    return quality_report_mod.build_customer_satisfaction_scorecard(
+        quality_report=quality, coverage_audit=coverage, customer_report=report,
+    )
+
+
+def test_actionability_not_penalized_for_comparatives_only():
+    report = {
+        "report_status": "REPORT_READY",
+        "buyer_checklist": [{"action": "x", "detail": "y"}],
+        "manual_review_flags": [],
+        "evidence_index": [],
+        "money_sections": {
+            "valuation_chain": [{"label": "Valore di mercato", "amount": 1.0}],
+            "buyer_side_costs": [],
+            "market_comparatives": [{"label": "Comparativo 1", "amount": 2.0}],
+            "context_values": [],
+            "uncertain_money": [],
+        },
+    }
+    coverage = {"important_warnings": [{"fact_id": "x"}], "coverage_status": "WARNING"}
+    scorecard = _scorecard_for(report, coverage)
+    assert scorecard["scores"]["actionability"] == 100
+
+
+def test_actionability_penalized_for_unflagged_uncertain_money():
+    report = {
+        "report_status": "REPORT_READY",
+        "buyer_checklist": [{"action": "x", "detail": "y"}],
+        "manual_review_flags": [],
+        "evidence_index": [],
+        "money_sections": {
+            "valuation_chain": [{"label": "Valore di mercato", "amount": 1.0}],
+            "buyer_side_costs": [],
+            "market_comparatives": [],
+            "context_values": [],
+            "uncertain_money": [{"label": "Importo ignoto", "amount": 3.0}],
+        },
+    }
+    scorecard = _scorecard_for(report, {"important_warnings": [], "coverage_status": "PASS"})
+    assert scorecard["scores"]["actionability"] == 85
+
+
+# ---------------------------------------------------------------------------
+# Review finding 6: indexed amount lookup equals the linear definition
+# ---------------------------------------------------------------------------
+def test_pool_index_matches_linear_scan_with_tolerance_edges():
+    pool = coverage_audit.ReportPool()
+    values = [100.0, 100.005, 100.02, 99.995, 43654.20, 294.0, 0.5]
+    for i, v in enumerate(values):
+        pool.add_amount(f"sec{i}", v)
+    for probe in values + [100.01, 100.011, 100.03, 293.99, 43654.21]:
+        expected = sorted({
+            sec for val, sec, _r in pool.amounts
+            if coverage_audit._approx_equal(val, probe)
+        })
+        assert pool.find_amount(probe) == expected, probe
+    # Entries added after a lookup are picked up (index rebuild).
+    pool.add_amount("late", 100.0)
+    assert "late" in pool.find_amount(100.0)
+
+
+# ---------------------------------------------------------------------------
+# Review finding 7: one shared role taxonomy, no drift possible
+# ---------------------------------------------------------------------------
+def test_role_taxonomy_is_shared_and_complete():
+    assert customer_report._COMPARATIVE_KINDS is doc_signals.COMPARATIVE_LABEL_KINDS
+    assert customer_report._CONTEXT_KINDS is doc_signals.CONTEXT_LABEL_KINDS
+    kinds = {k for k, _s, _l, _p in doc_signals._MONEY_KINDS} | {"importo_generico"}
+    for kind in kinds:
+        assert kind in doc_signals.ROLE_BY_KIND, kind
+    all_roles = set(doc_signals.ROLE_BY_KIND.values())
+    assert all_roles <= doc_signals.CORE_MONEY_ROLES | doc_signals.BACKGROUND_MONEY_ROLES
+    assert not (doc_signals.CORE_MONEY_ROLES & doc_signals.BACKGROUND_MONEY_ROLES)
+    for role in all_roles:
+        assert role in doc_signals.ROLE_LABELS_IT, role
+    # Compatibility is symmetric and reflexive.
+    for a in all_roles:
+        assert doc_signals.roles_compatible(a, a)
+        for b in all_roles:
+            assert doc_signals.roles_compatible(a, b) == doc_signals.roles_compatible(b, a)
+
+
 def test_invented_excerpt_blocks_the_gate():
     ws, vr, lr, contract, report = _build(GENERIC_PERIZIA_PAGES, make_worksheet())
     victim = next(
@@ -394,3 +653,294 @@ def test_invented_excerpt_blocks_the_gate():
     codes = {b["code"] for b in gate["quality_report"]["blocking_issues"]}
     assert "EXCERPT_NOT_VERBATIM" in codes
     assert gate["gate_status"] == quality_gate.GATE_FAIL
+
+
+# ---------------------------------------------------------------------------
+# Review finding 1: role compatibility tiers (covered / partial / warn / fail)
+# ---------------------------------------------------------------------------
+def _minimal_report(**money_sections):
+    """A minimal customer_report carrying only the given money rows."""
+    sections = {
+        "valuation_chain": [], "auction_terms": [], "buyer_side_costs": [],
+        "procedure_cancelled_formalities": [], "market_comparatives": [],
+        "context_values": [], "uncertain_money": [],
+    }
+    sections.update(money_sections)
+    return {
+        "report_status": "REPORT_READY",
+        "money_sections": sections,
+        "manual_review_flags": [],
+    }
+
+
+def _audit(pages, report):
+    audit, _page = coverage_audit.build_coverage_audit(
+        analysis_id="a", job_id="j", pages=pages, worksheet={},
+        contract={}, customer_report=report,
+    )
+    return audit
+
+
+def test_core_value_shown_only_as_comparable_fails():
+    # Document: explicit market value. Report: same amount ONLY as comparable.
+    pages = [{"page_number": 1, "text": "Valore di mercato stimato: €. 100.000,00"}]
+    report = _minimal_report(market_comparatives=[
+        {"label": "Comparativo di zona", "amount": 100000.0, "evidence_pages": [1]},
+    ])
+    audit = _audit(pages, report)
+    assert audit["coverage_status"] == "FAIL"
+    conflict = [o for o in audit["critical_omissions"] if o.get("role_conflict")]
+    assert conflict, "core value demoted to comparable must contradict"
+
+
+def test_background_amount_promoted_to_core_role_warns():
+    # Document: rendita catastale (background, important). Report: the same
+    # amount ONLY as a confirmed market value -> misleading -> warning tier.
+    pages = [{"page_number": 1, "text": "rendita catastale: 999,99 euro"}]
+    report = _minimal_report(valuation_chain=[
+        {"label": "Valore di mercato", "amount": 999.99, "evidence_pages": [1]},
+    ])
+    audit = _audit(pages, report)
+    conflict = [o for o in audit["important_warnings"] if o.get("role_conflict")]
+    assert conflict, "rendita rendered as confirmed value must at least warn"
+    assert audit["coverage_status"] in ("WARNING", "FAIL")
+
+
+def test_background_bucket_difference_stays_partial():
+    # Document: capitale di formalità (background). Report: the amount sits in
+    # a DIFFERENT background bucket (context row classified as rent). Same
+    # economic fact, safe bucket -> PARTIAL, never a blocker or warning.
+    pages = [{"page_number": 1, "text": "capitale iscrizione ipotecaria: 3.720,00"}]
+    report = _minimal_report(context_values=[
+        {"label": "Canone di locazione dichiarato", "amount": 3720.0,
+         "evidence_pages": [1]},
+    ])
+    audit = _audit(pages, report)
+    partial = [
+        f for f in audit["fact_coverage"]
+        if f.get("role_conflict") and f["match_status"] == "partial"
+    ]
+    assert partial, "background-vs-background must stay a visible PARTIAL"
+    # The safe-bucket difference itself never blocks or warns (the synthetic
+    # page may trip unrelated TOPIC warnings; role conflicts must not).
+    assert audit["coverage_status"] != "FAIL"
+    assert not any(
+        o.get("role_conflict")
+        for o in audit["critical_omissions"] + audit["important_warnings"]
+    )
+
+
+def test_formality_capital_as_buyer_cost_warns():
+    # Document: capitale di ipoteca (background). Report: same amount as a
+    # BUYER cost -> core role involved -> misleading -> contradiction tier.
+    # The buyer row's label must not itself name the formality (that case is
+    # already blocked as PROCEDURE_FORMALITY_AS_BUYER_DEBT): a generic label
+    # gets its buyer_side_cost role from the SECTION alone.
+    pages = [{"page_number": 1, "text": "capitale ipoteca iscritta: 150.000,00"}]
+    report = _minimal_report(buyer_side_costs=[
+        {"label": "Spesa a carico dell'acquirente", "amount": 150000.0,
+         "evidence_pages": [1]},
+    ])
+    audit = _audit(pages, report)
+    conflicts = [
+        f for f in audit["fact_coverage"]
+        if f.get("role_conflict") and f["match_status"] == "contradicted"
+    ]
+    assert conflicts, "formality capital shown as buyer cost must contradict"
+    assert audit["coverage_status"] in ("WARNING", "FAIL")
+
+
+def test_rent_amount_in_rent_bucket_is_covered():
+    pages = [{"page_number": 1, "text": "canone di locazione mensile: 3.720,00"}]
+    report = _minimal_report(context_values=[
+        {"label": "Canone di locazione dichiarato", "amount": 3720.0,
+         "evidence_pages": [1]},
+    ])
+    audit = _audit(pages, report)
+    assert audit["coverage_status"] == "PASS"
+    match = [
+        f for f in audit["fact_coverage"]
+        if f.get("source") == "page_money" and f["match_status"] == "match"
+    ]
+    assert match, "same amount + same role must be covered"
+
+
+# ---------------------------------------------------------------------------
+# Review finding 2: cancellation cost never suppresses formality references
+# ---------------------------------------------------------------------------
+def test_cancellation_cost_and_formalities_render_together():
+    # make_worksheet carries BOTH a procedure-cancelled COST row (300) and
+    # cancelled ipoteca+pignoramento formalities: all must render.
+    ws, vr, lr, contract, report = _build(GENERIC_PERIZIA_PAGES, make_worksheet())
+    rows = report["money_sections"]["procedure_cancelled_formalities"]
+    labels = " | ".join(_normalize_ws(r["label"]).lower() for r in rows)
+    amounts = [r.get("amount") for r in rows]
+    assert 300.0 in amounts, "the real cancellation cost row must stay"
+    assert "ipoteca: cancellazione a cura della procedura" in labels
+    assert "pignoramento: cancellazione a cura della procedura" in labels
+    # Reference rows carry no invented amounts.
+    refs = [r for r in rows if r.get("kind") == "procedure_cancelled_reference"]
+    assert refs and all(r["amount"] is None for r in refs)
+    # Buyer-side stays separate and the gate raises no confusion blockers.
+    gate = _gate(GENERIC_PERIZIA_PAGES, ws, contract, report, vr, lr)
+    codes = {b["code"] for b in gate["quality_report"]["blocking_issues"]}
+    assert "PROCEDURE_FORMALITY_AS_BUYER_DEBT" not in codes
+    assert gate["gate_status"] != quality_gate.GATE_FAIL
+
+
+# ---------------------------------------------------------------------------
+# Review finding 3: excerpts are topic/role-aware, wrong-topic quotes rejected
+# ---------------------------------------------------------------------------
+def test_wrong_topic_verbatim_sentence_rejected():
+    text = customer_report._normalize_ws(
+        "L'impianto idraulico risulta conforme alla normativa vigente. "
+        "Il giardino condominiale risulta ben curato e recintato."
+    )
+    excerpt = customer_report._find_verbatim_excerpt(
+        text, needles=["impianto elettrico senza certificazione"],
+    )
+    assert excerpt is None, "a verbatim but wrong-topic sentence must be rejected"
+
+
+def test_ambiguous_amount_needs_topic_anchor():
+    text = customer_report._normalize_ws(
+        "Cauzione da versare: €. 5.000,00. "
+        "Costi di regolarizzazione delle difformità: €. 5.000,00."
+    )
+    reg = customer_report._find_verbatim_excerpt(
+        text, amount=5000.0, needles=["Costi di regolarizzazione"],
+        role=doc_signals.ROLE_REGULARIZATION_COST,
+    )
+    assert reg and "regolarizzazione" in reg.lower()
+    cau = customer_report._find_verbatim_excerpt(
+        text, amount=5000.0, needles=["Cauzione"],
+        role=doc_signals.ROLE_AUCTION_DEPOSIT,
+    )
+    assert cau and "cauzione" in cau.lower()
+
+
+def test_unique_amount_is_its_own_anchor():
+    text = customer_report._normalize_ws(
+        "Spese di cancellazione a carico dell'acquirente: €. 294,00."
+    )
+    excerpt = customer_report._find_verbatim_excerpt(
+        text, amount=294.0, needles=["Costi di cancellazione formalità"],
+        role=doc_signals.ROLE_BUYER_SIDE_COST,
+    )
+    assert excerpt and "294,00" in excerpt
+
+
+# ---------------------------------------------------------------------------
+# Review finding 5: actionability not over-penalized for comparatives-only
+# ---------------------------------------------------------------------------
+def test_actionability_not_penalized_for_comparatives_only():
+    raw = make_worksheet()
+    raw["money"]["uncertain_money"] = [
+        {"label": "Comparativo 1 - prezzo annuncio PORTALE", "amount": 49000.0,
+         "reason": "confronto", "evidence_pages": [2]},
+        {"label": "Valore medio OMI di zona", "amount": 870.0,
+         "reason": "confronto", "evidence_pages": [2]},
+        {"label": "Rendita catastale", "amount": 472.56,
+         "reason": "contesto", "evidence_pages": [1]},
+    ]
+    ws, vr, lr, contract, report = _build(
+        GENERIC_PERIZIA_PAGES, raw, validator_report=VALIDATED_REPORT
+    )
+    assert report["money_sections"]["uncertain_money"] == []
+    gate = _gate(GENERIC_PERIZIA_PAGES, ws, contract, report, vr, lr)
+    scores = gate["scorecard"]["scores"]
+    # checklist + costs present, uncertain section empty -> no -15 penalty.
+    assert scores["actionability"] == 100, scores
+
+
+def test_actionability_still_penalizes_unsurfaced_uncertain_money():
+    report = {
+        "report_status": "REPORT_READY",
+        "money_sections": {
+            "valuation_chain": [{"label": "Valore", "amount": 1.0}],
+            "uncertain_money": [{"label": "Importo ignoto", "amount": 2.0}],
+        },
+        "buyer_checklist": [{"action": "x"}],
+        "manual_review_flags": [],  # nothing surfaces the uncertain amount
+    }
+    scorecard = quality_report_mod.build_customer_satisfaction_scorecard(
+        quality_report={"scores": {}, "blocking_issues": [], "warnings": []},
+        coverage_audit={"coverage_status": "PASS"},
+        customer_report=report,
+    )
+    assert scorecard["scores"]["actionability"] <= 85
+
+
+# ---------------------------------------------------------------------------
+# Review finding 6: indexed amount lookup === linear scan semantics
+# ---------------------------------------------------------------------------
+def test_report_pool_indexed_lookup_matches_linear_scan():
+    pool = coverage_audit.ReportPool()
+    entries = [
+        (100.0, "money_sections.valuation_chain", {doc_signals.ROLE_MARKET_VALUE}),
+        (100.005, "key_facts", {doc_signals.ROLE_MARKET_VALUE}),
+        (100.02, "surfaces_section", {doc_signals.ROLE_CADASTRAL_INCOME}),
+        (250000.0, "money_sections.context_values", {doc_signals.ROLE_RENT}),
+        (0.5, "money_sections.uncertain_money", {doc_signals.ROLE_UNCERTAIN_MONEY}),
+    ]
+    for amount, section, roles in entries:
+        pool.add_amount(section, amount, roles)
+
+    def linear(amount, role):
+        out = set()
+        for val, sec, entry_roles in pool.amounts:
+            if coverage_audit._approx_equal(val, amount) and pool._entry_matches_role(
+                entry_roles, role
+            ):
+                out.add(sec)
+        return sorted(out)
+
+    probes = [
+        (100.0, doc_signals.ROLE_MARKET_VALUE),
+        (100.0, doc_signals.ROLE_CADASTRAL_INCOME),
+        (100.005, None),
+        (100.02, doc_signals.ROLE_CADASTRAL_INCOME),
+        (100.03, doc_signals.ROLE_CADASTRAL_INCOME),
+        (250000.0, doc_signals.ROLE_RENT),
+        (250000.0, doc_signals.ROLE_MARKET_VALUE),
+        (0.5, doc_signals.ROLE_JUDICIAL_SALE_VALUE),
+        (99.98, doc_signals.ROLE_MARKET_VALUE),
+    ]
+    for amount, role in probes:
+        assert pool.find_amount(amount, role) == linear(amount, role), (amount, role)
+    # The tolerance edge (0.011) is honored across cent buckets.
+    assert pool.find_amount(100.01, doc_signals.ROLE_MARKET_VALUE)
+    # Adding after a lookup transparently rebuilds the index.
+    pool.add_amount("auction_terms", 777.0, {doc_signals.ROLE_AUCTION_BASE_PRICE})
+    assert pool.find_amount(777.0, doc_signals.ROLE_AUCTION_BASE_PRICE) == ["auction_terms"]
+
+
+# ---------------------------------------------------------------------------
+# Review finding 7: one shared role taxonomy, no drift between modules
+# ---------------------------------------------------------------------------
+def test_role_taxonomy_is_shared_and_consistent():
+    # The renderer's bucketing sets ARE the doc_signals sets (same objects).
+    assert customer_report._COMPARATIVE_KINDS is doc_signals.COMPARATIVE_LABEL_KINDS
+    assert customer_report._CONTEXT_KINDS is doc_signals.CONTEXT_LABEL_KINDS
+    # Every detector kind has a role; every role has a label and a tier.
+    kinds = {k for k, _s, _l, _p in doc_signals._MONEY_KINDS} | {"importo_generico"}
+    assert kinds <= set(doc_signals.ROLE_BY_KIND)
+    roles = set(doc_signals.ROLE_BY_KIND.values())
+    assert roles <= set(doc_signals.ROLE_LABELS_IT)
+    assert roles <= (doc_signals.CORE_MONEY_ROLES | doc_signals.BACKGROUND_MONEY_ROLES)
+    assert not (doc_signals.CORE_MONEY_ROLES & doc_signals.BACKGROUND_MONEY_ROLES)
+    # Compatibility rules behave as documented.
+    assert doc_signals.roles_compatible(
+        doc_signals.ROLE_REGULARIZATION_COST, doc_signals.ROLE_DEPRECIATION
+    )
+    assert not doc_signals.roles_compatible(
+        doc_signals.ROLE_MARKET_VALUE, doc_signals.ROLE_STATE_OF_FACT_VALUE
+    )
+    assert doc_signals.conflict_is_misleading(
+        doc_signals.ROLE_MARKET_VALUE, {doc_signals.ROLE_COMPARABLE_MARKET_VALUE}
+    )
+    assert not doc_signals.conflict_is_misleading(
+        doc_signals.ROLE_RENT, {doc_signals.ROLE_CADASTRAL_INCOME}
+    )
+    # coverage_audit derives roles through the same shared mapping.
+    assert set(coverage_audit._ROW_ROLE_TOKENS.values()) <= roles

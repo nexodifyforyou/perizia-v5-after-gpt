@@ -526,6 +526,38 @@ describe('CorrectnessV2Panel', () => {
     expect(accessories.textContent).toContain('p. 2');
   });
 
+  test('legacy reports without customer_evidence_index render a humanized fallback', async () => {
+    const legacyReport = { ...reportReady };
+    delete legacyReport.customer_evidence_index;
+    delete legacyReport.admin_evidence_index;
+    legacyReport.evidence_index = [
+      { page: 4, referenced_by: ['technical_compliance[0]:conformità urbanistica', 'money'] },
+      { page: 9, referenced_by: ['legal_formalities[1]:ipoteca'] },
+    ];
+    getLatestCorrectnessV2Job.mockResolvedValue({ data: readyJob });
+    getCorrectnessV2CustomerReport.mockResolvedValue({ data: legacyReport });
+
+    await renderPanel();
+
+    const evidence = container.querySelector('[data-testid="cv2-evidence-index"]');
+    expect(evidence).not.toBeNull();
+    // Evidence is NOT empty: legacy entries are humanized.
+    expect(evidence.textContent).not.toContain('Nessuna evidenza indicizzata');
+    expect(evidence.textContent).toContain('p. 4');
+    expect(evidence.textContent).toContain('conformità urbanistica');
+    expect(evidence.textContent).toContain('Valori e costi');
+    expect(evidence.textContent).toContain('ipoteca');
+    expect(evidence.textContent).toContain('Estratto non disponibile per questo report');
+    // Raw machine keys never render in the customer list...
+    expect(evidence.textContent).not.toContain('technical_compliance[');
+    expect(evidence.textContent).not.toContain('legal_formalities[');
+    // ...they stay in the collapsed admin debug block.
+    const adminDebug = container.querySelector('[data-testid="cv2-evidence-admin-debug"]');
+    expect(adminDebug).not.toBeNull();
+    expect(adminDebug.hasAttribute('open')).toBe(false);
+    expect(adminDebug.textContent).toContain('technical_compliance[0]');
+  });
+
   test('disables Run Correctness V2 while a latest job is still running', async () => {
     getLatestCorrectnessV2Job.mockResolvedValue({
       data: {

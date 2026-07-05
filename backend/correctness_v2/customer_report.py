@@ -294,31 +294,32 @@ def _money_sections_view(contract: Dict[str, Any]) -> Dict[str, List[Dict[str, A
 
     # Comparables / context values: shown with their role stated, outside the
     # uncertainty bucket, and NEVER as confirmed costs (dedup guard still on).
-    for row in comparatives_src:
-        key = _dedup_key(row)
-        if key is not None:
-            if key in seen:
-                continue
-            seen.add(key)
-        view = _money_row_view(row)
-        view["status"] = "comparativo"
-        view["status_label"] = "Comparativo di mercato (dato di contesto)"
-        view["notes"] = _COMPARATIVE_NOTE
-        sections["market_comparatives"].append(view)
-    for row in context_src:
-        key = _dedup_key(row)
-        if key is not None:
-            if key in seen:
-                continue
-            seen.add(key)
-        kind = doc_signals.label_kind(row.get("label"))
-        view = _money_row_view(row)
-        view["status"] = "contesto"
-        view["status_label"] = "Dato economico di contesto (non è un costo)"
-        note = _CONTEXT_NOTES.get(kind)
-        if note:
-            view["notes"] = note
-        sections["context_values"].append(view)
+    def render_background(rows: List[Dict[str, Any]], status: str,
+                          status_label: str, note_for) -> List[Dict[str, Any]]:
+        out: List[Dict[str, Any]] = []
+        for row in rows:
+            key = _dedup_key(row)
+            if key is not None:
+                if key in seen:
+                    continue
+                seen.add(key)
+            view = _money_row_view(row)
+            view["status"] = status
+            view["status_label"] = status_label
+            note = note_for(row)
+            if note:
+                view["notes"] = note
+            out.append(view)
+        return out
+
+    sections["market_comparatives"] = render_background(
+        comparatives_src, "comparativo", "Comparativo di mercato (dato di contesto)",
+        lambda _row: _COMPARATIVE_NOTE,
+    )
+    sections["context_values"] = render_background(
+        context_src, "contesto", "Dato economico di contesto (non è un costo)",
+        lambda row: _CONTEXT_NOTES.get(doc_signals.label_kind(row.get("label"))),
+    )
 
     # Buyer-side costs already counted in the valuation chain: echoed once with
     # an explicit included_in_valuation marker, never as an extra cost.
@@ -340,33 +341,35 @@ def _money_sections_view(contract: Dict[str, Any]) -> Dict[str, List[Dict[str, A
         if key is not None:
             buyer_keys.add(key)
 
-    # Cancelled-by-procedure formalities visible where the customer expects
-    # them: reference rows without amounts (a formality is not a buyer cost).
-    # One row per formality TYPE — the detail lives in formalities_section.
-    if not sections["procedure_cancelled_formalities"]:
-        seen_forms: set = set()
-        for item in contract.get("legal_formalities") or []:
-            if not item.get("cancelled_by_procedure"):
-                continue
-            form_key = _norm(item.get("type"))
-            if form_key in seen_forms:
-                continue
-            seen_forms.add(form_key)
-            type_label = _formality_type_label(item.get("type"))
-            sections["procedure_cancelled_formalities"].append(
-                {
-                    "label": f"{type_label}: cancellazione a cura della procedura",
-                    "amount": None,
-                    "amount_display": None,
-                    "kind": "procedure_cancelled_reference",
-                    "informational": True,
-                    "notes": (
-                        "Nessun costo per l'acquirente indicato: i dettagli sono "
-                        "nella sezione 'Formalità e cancellazioni'."
-                    ),
-                    "evidence_pages": _pages(item.get("evidence_pages")),
-                }
-            )
+    # Cancelled-by-procedure formalities ALWAYS visible where the customer
+    # expects them: one amount-free reference row per formality TYPE (a
+    # formality is a fact, not a buyer cost), regardless of whether the
+    # section already carries cancellation COST rows — a €294 cancellation
+    # cost must never suppress the ipoteca/pignoramento references.
+    seen_forms: set = set()
+    for item in contract.get("legal_formalities") or []:
+        if not item.get("cancelled_by_procedure"):
+            continue
+        form_key = _norm(item.get("type"))
+        if form_key in seen_forms:
+            continue
+        seen_forms.add(form_key)
+        type_label = _formality_type_label(item.get("type"))
+        sections["procedure_cancelled_formalities"].append(
+            {
+                "label": f"{type_label}: cancellazione a cura della procedura",
+                "amount": None,
+                "amount_display": None,
+                "kind": "procedure_cancelled_reference",
+                "informational": True,
+                "notes": (
+                    "Formalità cancellata dalla procedura, non è un costo per "
+                    "l'acquirente: i dettagli sono nella sezione 'Formalità e "
+                    "cancellazioni'."
+                ),
+                "evidence_pages": _pages(item.get("evidence_pages")),
+            }
+        )
 
     return sections
 
@@ -1035,24 +1038,58 @@ def _excerpt_for_needle(text: str, s: int, e: int, max_after: int = 180) -> str:
     return text[s:hi].strip()
 
 
+def _topic_words(needles: Optional[List[str]], role: Optional[str]) -> set:
+    """Content words that anchor an excerpt to ITS topic (label + role label)."""
+    words: set = set()
+    for needle in needles or []:
+        words |= set(re.findall(r"[a-zà-ù]{5,}", _norm(needle)))
+    if role:
+        words |= set(
+            re.findall(r"[a-zà-ù]{5,}", _norm(doc_signals.ROLE_LABELS_IT.get(role, "")))
+        )
+    return words
+
+
 def _find_verbatim_excerpt(
-    text: str, *, amount: Any = None, needles: Optional[List[str]] = None
+    text: str, *, amount: Any = None, needles: Optional[List[str]] = None,
+    role: Optional[str] = None
 ) -> Optional[str]:
     """A short VERBATIM excerpt (whitespace-normalized only) or None.
 
     ``text`` must already be whitespace-normalized (the caller normalizes each
     page exactly once). Never rewrites, never paraphrases: the returned string
-    is a substring of that normalized page text."""
+    is a substring of that normalized page text.
+
+    Topic-aware: an excerpt is only returned when it is anchored to ITS claim —
+    for amounts, the excerpt must contain a topic/role word (or be the page's
+    only occurrence of that amount); the sentence fallback requires (near-)full
+    coverage of the topic words, so a verbatim-but-wrong-topic sentence is
+    rejected and the entry honestly reports "estratto non disponibile"."""
     if not text:
         return None
     lower = text.lower()
+    topic = _topic_words(needles, role)
 
+    occurrences: List[Tuple[int, int]] = []
     for variant in _amount_variants(amount):
-        # Digit-boundary search: '294' must not match inside '1294'/'294,50'.
-        spans = _find_amount_spans(lower, variant)
-        if spans:
-            idx = spans[0]
-            return _excerpt_for_amount(text, idx, idx + len(variant))
+        for idx in _find_amount_spans(lower, variant):
+            occurrences.append((idx, idx + len(variant)))
+        if occurrences:
+            break  # variants are ordered most-specific first
+    if occurrences:
+        best: Optional[Tuple[int, str]] = None
+        for s, e in occurrences:
+            excerpt = _excerpt_for_amount(text, s, e)
+            hits = sum(1 for w in topic if w in _norm(excerpt))
+            if hits and (best is None or hits > best[0]):
+                best = (hits, excerpt)
+        if best:
+            return best[1]
+        if len(occurrences) == 1:
+            # Unique amount on the page: the amount itself is the anchor.
+            s, e = occurrences[0]
+            return _excerpt_for_amount(text, s, e)
+        # Several occurrences, none near the topic: too ambiguous to quote.
 
     for needle in needles or []:
         clean = _normalize_ws(needle)
@@ -1062,17 +1099,16 @@ def _find_verbatim_excerpt(
         if idx >= 0:
             return _excerpt_for_needle(text, idx, idx + len(clean))
 
-    # Token-overlap fallback: best document sentence covering the needle words.
-    # Two-word needles ("impianto gas domestico") need FULL coverage; longer
-    # needles need at least half of their content words in one sentence.
-    best: Optional[str] = None
+    # Sentence fallback: the sentence must cover the topic words (ALL of them
+    # for short topics, >= 3/4 for long ones) — never a half-matching sentence.
+    best_sentence: Optional[str] = None
     best_score = 0.0
     sentences = re.split(r"(?<=[.!?;])\s+", text)
     for needle in needles or []:
-        words = {w for w in re.findall(r"[a-zà-ù]{5,}", _norm(needle))}
+        words = set(re.findall(r"[a-zà-ù]{5,}", _norm(needle)))
         if len(words) < 2:
             continue
-        threshold = 1.0 if len(words) == 2 else 0.5
+        threshold = 1.0 if len(words) <= 3 else 0.75
         for sentence in sentences:
             if len(sentence) < 25:
                 continue
@@ -1080,9 +1116,9 @@ def _find_verbatim_excerpt(
             hits = sum(1 for w in words if w in sent_norm)
             score = hits / len(words)
             if score >= threshold and score > best_score:
-                best, best_score = sentence, score
-    if best:
-        return best[:240].strip()
+                best_sentence, best_score = sentence, score
+    if best_sentence:
+        return best_sentence[:240].strip()
     return None
 
 
@@ -1099,17 +1135,24 @@ def _evidence_sources(contract: Dict[str, Any]) -> List[Dict[str, Any]]:
     """(topic, report_section, evidence_pages, needles, amount) per report item."""
     sources: List[Dict[str, Any]] = []
 
-    def add(topic: Any, section: str, pages: Any, needles: List[Any], amount: Any = None) -> None:
+    def add(topic: Any, section: str, pages: Any, needles: List[Any],
+            amount: Any = None) -> None:
         pages_list = _pages(pages)
         topic_text = _normalize_ws(topic)
         if not topic_text or not pages_list:
             return
+        role = None
+        if amount is not None:
+            kind = doc_signals.label_kind(topic_text)
+            if kind != "importo_generico":
+                role = doc_signals.role_for_kind(kind)
         sources.append({
             "topic": topic_text,
             "report_section": section,
             "evidence_pages": pages_list,
             "needles": [str(n) for n in needles if n],
             "amount": amount,
+            "role": role,
         })
 
     ci = contract.get("case_identity") or {}
@@ -1185,7 +1228,8 @@ def _build_evidence_views(
             if not text:
                 continue
             excerpt = _find_verbatim_excerpt(
-                text, amount=source["amount"], needles=source["needles"]
+                text, amount=source["amount"], needles=source["needles"],
+                role=source.get("role"),
             )
             if excerpt:
                 excerpt_page = pnum
