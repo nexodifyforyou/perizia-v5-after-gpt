@@ -103,6 +103,13 @@ def _parse_email_allowlist(raw: Optional[str]) -> frozenset:
 ADMIN_EMAILS = _parse_email_allowlist(
     os.environ.get('ADMIN_EMAILS', 'nexodifyforyou@gmail.com')
 )
+
+# Exact email allowed to see the Correctness v2 Admin View (technical/debug tab).
+# This is intentionally narrower than the general admin allowlist so the debug
+# preview is gated to one operator, per product requirement.
+CORRECTNESS_V2_ADMIN_VIEW_EMAIL = os.environ.get(
+    'CORRECTNESS_V2_ADMIN_VIEW_EMAIL', 'nexodifyforyou@gmail.com'
+).strip().lower()
 BETA_UNLIMITED_EMAILS = _parse_email_allowlist(
     os.environ.get('BETA_UNLIMITED_EMAILS', 'geomazzantiriccardo@gmail.com')
 )
@@ -631,6 +638,11 @@ def _user_is_admin(user: Optional["User"]) -> bool:
     return bool(user and _is_admin_email(user.email))
 
 
+def _is_correctness_v2_admin_view_email(email: Optional[str]) -> bool:
+    """Exact-email gate for the Correctness v2 Admin View / debug tab."""
+    return bool(email and email.strip().lower() == CORRECTNESS_V2_ADMIN_VIEW_EMAIL)
+
+
 def _is_beta_unlimited_email(email: Optional[str]) -> bool:
     """True only for explicitly allowlisted beta partner emails."""
     return bool(email and email.strip().lower() in BETA_UNLIMITED_EMAILS)
@@ -1120,6 +1132,9 @@ def _build_user_response(user: User) -> Dict[str, Any]:
     user_response["subscription_state"] = normalized["subscription_state"]
     user_response["feature_access"] = normalized["feature_access"].copy()
     user_response["account"] = normalized["account"]
+    user_response["correctness_v2_admin_view"] = _is_correctness_v2_admin_view_email(
+        user_response.get("email")
+    )
     return user_response
 
 async def get_current_user(request: Request) -> Optional[User]:

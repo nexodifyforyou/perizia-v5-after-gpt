@@ -47,3 +47,15 @@ export const getCorrectnessV2LotSelectionReport = (analysisId, jobId, requestCon
     ...requestConfig
   });
 };
+
+// Sanitized customer-safe report (no admin/debug/quality/artifact data). Gated
+// server-side by the feature flag + ownership; admins may read any analysis.
+export const getCorrectnessV2CustomerView = (analysisId, options = {}, requestConfig = {}) => {
+  const params = {};
+  if (options.selected_lot_id) params.selected_lot_id = String(options.selected_lot_id);
+  return axios.get(`${correctnessV2Base(analysisId)}/customer-view/latest`, {
+    withCredentials: true,
+    params,
+    ...requestConfig
+  });
+};

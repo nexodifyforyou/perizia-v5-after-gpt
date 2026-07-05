@@ -11,6 +11,22 @@ jest.mock('react-router-dom', () => ({
   useNavigate: () => jest.fn(),
 }), { virtual: true });
 
+// Correctness V2 unavailable in these legacy-fallback render tests, so the
+// single-report page shows the legacy report (the no-safe-V2 scenario).
+jest.mock('../components/correctness-v2/useCustomerView', () => ({
+  useCorrectnessV2CustomerView: () => ({
+    loading: false,
+    error: '',
+    payload: { available: false },
+    report: null,
+    available: false,
+    isLotSelection: false,
+    selectedLotId: null,
+    selectLot: jest.fn(),
+    backToLots: jest.fn(),
+  }),
+}));
+
 jest.mock('../context/AuthContext', () => ({
   useAuth: () => ({
     user: { name: 'Fresh Pipeline Test User' },
