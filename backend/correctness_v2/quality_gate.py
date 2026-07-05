@@ -226,15 +226,16 @@ def attach_quality_section(
     report = dict(customer_report)
     rows = []
     for row in page_audit.get("rows") or []:
-        rows.append(
-            {
-                "pagina": row.get("page"),
-                "dato": row.get("dato_perizia"),
-                "presente": bool(row.get("presente_nel_report")),
-                "esito": row.get("esito"),
-                "note": row.get("note") or "",
-            }
-        )
+        view = {
+            "pagina": row.get("page"),
+            "dato": row.get("dato_perizia"),
+            "presente": bool(row.get("presente_nel_report")),
+            "esito": row.get("esito"),
+            "note": row.get("note") or "",
+        }
+        if row.get("ruolo_label"):
+            view["ruolo"] = row["ruolo_label"]
+        rows.append(view)
     report["quality_control"] = {
         "title": "Controllo qualità pagina per pagina",
         "coverage_status": audit.get("coverage_status"),

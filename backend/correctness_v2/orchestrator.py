@@ -441,7 +441,7 @@ def _build_single_lot_contract(
     # Step 3B: deterministic customer report rendered ONLY from the verified
     # contract (no LLM, no PDF). Render failure fails closed — never a half report.
     try:
-        customer_report = customer_report_mod.render_success_report(contract)
+        customer_report = customer_report_mod.render_success_report(contract, pages)
     except Exception as exc:
         return _finish_report_render_failed(
             job_id, analysis_id, exc, artifacts_saved, created_at, admin_only
@@ -720,7 +720,9 @@ def _run_analyze_all(
 
         # Step 3B: per-lot customer report, rendered from that lot's contract only.
         try:
-            lot_customer_report = customer_report_mod.render_success_report(contract)
+            lot_customer_report = customer_report_mod.render_success_report(
+                contract, selected_pages
+            )
         except Exception as exc:  # noqa: BLE001 - recorded per lot, fail closed
             entry.update(
                 {

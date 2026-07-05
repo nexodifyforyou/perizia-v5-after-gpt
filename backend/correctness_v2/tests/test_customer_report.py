@@ -58,6 +58,8 @@ MONEY_SECTION_KEYS = {
     "auction_terms",
     "buyer_side_costs",
     "procedure_cancelled_formalities",
+    "market_comparatives",
+    "context_values",
     "uncertain_money",
 }
 
@@ -86,7 +88,9 @@ def _all_money_rows(report):
     rows = []
     for key in MONEY_SECTION_KEYS:
         rows.extend(report["money_sections"][key])
-    return rows
+    # Amount-free reference rows (e.g. cancelled-formality cross-references)
+    # carry no money to check.
+    return [r for r in rows if r.get("amount") is not None]
 
 
 def _contract_amounts(con):

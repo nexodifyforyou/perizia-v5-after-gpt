@@ -105,7 +105,7 @@ def main() -> int:
         shared_summary_rows=shared_summary_rows,
         surface_cadastral=doc_signals.extract_surface_cadastral(pages),
     )
-    report = customer_report_mod.render_success_report(contract)
+    report = customer_report_mod.render_success_report(contract, pages)
     gate = quality_gate.run_quality_gate(
         job_id=job_id, analysis_id=analysis_id, pages=pages,
         worksheet=worksheet, contract=contract, customer_report=report,

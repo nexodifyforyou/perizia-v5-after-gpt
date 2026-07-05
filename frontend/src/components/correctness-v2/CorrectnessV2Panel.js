@@ -58,6 +58,8 @@ const MONEY_SECTION_LABELS = {
   auction_terms: 'Condizioni di vendita',
   buyer_side_costs: "Costi a carico dell'acquirente",
   procedure_cancelled_formalities: 'Formalità cancellate dalla procedura',
+  market_comparatives: 'Comparativi di mercato',
+  context_values: 'Dati economici di contesto',
   uncertain_money: 'Importi da verificare',
 };
 
@@ -78,7 +80,7 @@ const FIELD_LABELS = {
   bene_ids: 'Beni',
 };
 
-const HIDDEN_GRID_KEYS = new Set(['evidence_pages']);
+const HIDDEN_GRID_KEYS = new Set(['evidence_pages', 'detected_bene_count', 'bene_count_source']);
 
 const QUALITY_ESITO_TONES = {
   Coperto: 'border-emerald-500/40 bg-emerald-500/10 text-emerald-300',
@@ -430,7 +432,18 @@ const MoneySections = ({ sections }) => {
                     <tbody>
                       {rows.map((row, idx) => (
                         <tr key={`${row?.label || key}-${idx}`} className="border-b border-zinc-900 last:border-0">
-                          <td className="py-2 pr-3 align-top text-zinc-200">{compactText(row?.label || row?.kind, 'Importo')}</td>
+                          <td className="py-2 pr-3 align-top text-zinc-200">
+                            <span className="break-words">{compactText(row?.label || row?.kind, 'Importo')}</span>
+                            {row?.included_in_valuation && (
+                              <span className="ml-2 inline-block rounded border border-sky-500/40 bg-sky-500/10 px-1.5 py-0.5 text-[10px] uppercase text-sky-300">
+                                Già nella catena di valore
+                              </span>
+                            )}
+                            {row?.status_label && !row?.included_in_valuation && (
+                              <p className="mt-1 text-xs text-zinc-500">{compactText(row.status_label)}</p>
+                            )}
+                            {row?.notes && <p className="mt-1 text-xs text-zinc-500">{compactText(row.notes)}</p>}
+                          </td>
                           <td className="py-2 pr-3 align-top font-mono text-gold">{compactText(row?.amount_display || row?.amount, '-')}</td>
                           <td className="py-2 align-top font-mono text-xs text-zinc-500">{pagesText(row?.evidence_pages)}</td>
                         </tr>
@@ -494,7 +507,23 @@ const BeniSections = ({ sections }) => {
         {beni.map((bene, idx) => (
           <div key={`${bene?.bene_id || idx}`} className="rounded-lg border border-zinc-800 bg-zinc-950 p-4">
             <h4 className="font-semibold text-zinc-100">{compactText(bene?.title, `Bene ${idx + 1}`)}</h4>
+            {bene?.address && <p className="mt-1 text-sm text-zinc-400">{compactText(bene.address)}</p>}
             {bene?.note && <p className="mt-2 text-sm text-zinc-500">{compactText(bene.note)}</p>}
+            {Array.isArray(bene?.accessories) && bene.accessories.length > 0 && (
+              <div className="mt-3" data-testid={`cv2-bene-accessories-${bene?.bene_id || idx}`}>
+                <p className="text-[11px] font-mono uppercase text-zinc-500">Accessori / pertinenze</p>
+                <ul className="mt-2 space-y-1 text-sm text-zinc-300">
+                  {bene.accessories.map((acc, accIdx) => (
+                    <li key={`${acc?.label || 'acc'}-${accIdx}`} className="flex flex-wrap items-baseline gap-2">
+                      <span className="capitalize">{compactText(acc?.label, 'Accessorio')}</span>
+                      {pagesText(acc?.evidence_pages) && (
+                        <span className="font-mono text-xs text-gold">{pagesText(acc.evidence_pages)}</span>
+                      )}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
             {Array.isArray(bene?.risks) && bene.risks.length > 0 && (
               <div className="mt-3">
                 <p className="text-[11px] font-mono uppercase text-zinc-500">Rischi</p>
@@ -514,29 +543,69 @@ const BeniSections = ({ sections }) => {
   );
 };
 
-const EvidenceIndex = ({ evidence }) => {
-  const items = Array.isArray(evidence) ? evidence : [];
+// Customer-facing evidence: page + human topic + VERBATIM perizia excerpt.
+// Raw internal keys (technical_compliance[4], ...) live ONLY in the collapsed
+// admin debug block below, never in this list.
+const EvidenceIndex = ({ customerEvidence, adminEvidence, legacyEvidence }) => {
+  const items = Array.isArray(customerEvidence) ? customerEvidence : [];
   const visible = items.slice(0, EVIDENCE_RENDER_LIMIT);
+  const adminItems = Array.isArray(adminEvidence) && adminEvidence.length
+    ? adminEvidence
+    : (Array.isArray(legacyEvidence) ? legacyEvidence : []);
   return (
-    <DetailBlock title={`Evidence index (${items.length})`} testId="cv2-evidence-index">
-      {visible.length ? (
-        <div className="grid grid-cols-1 gap-2 md:grid-cols-2">
-          {visible.map((entry, idx) => (
-            <div key={`${entry?.page || idx}`} className="rounded-md border border-zinc-800 bg-zinc-900/70 p-3 text-sm">
-              <p className="font-mono text-gold">p. {compactText(entry?.page, '?')}</p>
-              <p className="mt-1 break-words text-zinc-400">{compactText(entry?.referenced_by, '')}</p>
-            </div>
-          ))}
-        </div>
-      ) : (
-        <p className="text-sm text-zinc-500">Nessuna evidenza indicizzata.</p>
+    <section className="space-y-3">
+      <DetailBlock title={`Indice delle evidenze (${items.length})`} testId="cv2-evidence-index" defaultOpen>
+        {visible.length ? (
+          <ul className="space-y-2">
+            {visible.map((entry, idx) => (
+              <li key={`${entry?.page || '?'}-${entry?.topic || idx}`} className="rounded-md border border-zinc-800 bg-zinc-900/70 p-3 text-sm">
+                <p className="text-zinc-100">
+                  <span className="font-mono text-gold">p. {compactText(entry?.page, '?')}</span>
+                  <span className="mx-2 text-zinc-600">—</span>
+                  <span className="font-medium">{compactText(entry?.topic, 'Tema')}</span>
+                </p>
+                {entry?.perizia_excerpt ? (
+                  <p className="mt-2 border-l-2 border-zinc-700 pl-3 italic text-zinc-300">
+                    Estratto perizia: “{compactText(entry.perizia_excerpt)}{entry?.excerpt_truncated ? '…' : ''}”
+                  </p>
+                ) : (
+                  <p className="mt-2 text-amber-200/80">
+                    {compactText(entry?.note, 'Estratto non disponibile automaticamente; verificare la pagina indicata.')}
+                  </p>
+                )}
+                {entry?.report_section && (
+                  <p className="mt-1 text-xs text-zinc-500">Sezione: {compactText(entry.report_section)}</p>
+                )}
+              </li>
+            ))}
+          </ul>
+        ) : (
+          <p className="text-sm text-zinc-500">Nessuna evidenza indicizzata.</p>
+        )}
+        {items.length > EVIDENCE_RENDER_LIMIT && (
+          <p className="mt-3 text-xs text-zinc-500">
+            Altre {items.length - EVIDENCE_RENDER_LIMIT} righe non mostrate nella preview.
+          </p>
+        )}
+      </DetailBlock>
+      {adminItems.length > 0 && (
+        <DetailBlock title={`Debug evidenze (admin) (${adminItems.length})`} testId="cv2-evidence-admin-debug">
+          <div className="grid grid-cols-1 gap-2 md:grid-cols-2">
+            {adminItems.slice(0, EVIDENCE_RENDER_LIMIT).map((entry, idx) => (
+              <div key={`admin-${entry?.page || idx}`} className="rounded-md border border-zinc-800 bg-zinc-900/70 p-3 text-sm">
+                <p className="font-mono text-gold">p. {compactText(entry?.page, '?')}</p>
+                <p className="mt-1 break-words font-mono text-xs text-zinc-500">
+                  {compactText(entry?.raw_keys || entry?.referenced_by, '')}
+                </p>
+                {entry?.artifact_source && (
+                  <p className="mt-1 font-mono text-[10px] text-zinc-600">{compactText(entry.artifact_source)}</p>
+                )}
+              </div>
+            ))}
+          </div>
+        </DetailBlock>
       )}
-      {items.length > EVIDENCE_RENDER_LIMIT && (
-        <p className="mt-3 text-xs text-zinc-500">
-          Altre {items.length - EVIDENCE_RENDER_LIMIT} righe non mostrate nella preview.
-        </p>
-      )}
-    </DetailBlock>
+    </section>
   );
 };
 
@@ -606,7 +675,7 @@ const FormalitiesSection = ({ items }) => {
         {list.map((item, idx) => (
           <li key={`form-${idx}`} className="rounded-lg border border-zinc-800 bg-zinc-950 p-4 text-sm">
             <div className="flex flex-wrap items-center gap-2">
-              <Badge variant="outline" className="border-zinc-700 uppercase text-zinc-300">{compactText(item?.type, 'Formalità')}</Badge>
+              <Badge variant="outline" className="border-zinc-700 uppercase text-zinc-300">{compactText(item?.type_label || item?.type, 'Formalità')}</Badge>
               <span className="text-zinc-300">{compactText(item?.status_label)}</span>
             </div>
             {item?.description && <p className="mt-2 text-zinc-400">{compactText(item.description)}</p>}
@@ -693,7 +762,10 @@ const QualityControlSection = ({ qualityControl }) => {
                 {visible.map((row, idx) => (
                   <tr key={`qc-${idx}`} className="border-b border-zinc-900 align-top last:border-0">
                     <td className="py-2 pr-3 font-mono text-gold">{compactText(row?.pagina, '-')}</td>
-                    <td className="py-2 pr-3 text-zinc-200">{compactText(row?.dato, '-')}</td>
+                    <td className="py-2 pr-3 text-zinc-200">
+                      <span>{compactText(row?.dato, '-')}</span>
+                      {row?.ruolo && <p className="mt-0.5 text-[11px] text-zinc-500">Ruolo: {compactText(row.ruolo)}</p>}
+                    </td>
                     <td className="py-2 pr-3 text-zinc-300">{row?.presente ? 'Sì' : 'No'}</td>
                     <td className="py-2 pr-3">
                       <Badge variant="outline" className={QUALITY_ESITO_TONES[row?.esito] || 'border-zinc-700 text-zinc-300'}>
@@ -817,7 +889,11 @@ const CorrectnessV2CustomerReport = ({ report }) => {
 
       <QualityControlSection qualityControl={report.quality_control} />
 
-      <EvidenceIndex evidence={report.evidence_index} />
+      <EvidenceIndex
+        customerEvidence={report.customer_evidence_index}
+        adminEvidence={report.admin_evidence_index}
+        legacyEvidence={report.evidence_index}
+      />
 
       {report.disclaimer && (
         <footer className="rounded-lg border border-zinc-800 bg-zinc-950 p-4 text-xs leading-5 text-zinc-500">

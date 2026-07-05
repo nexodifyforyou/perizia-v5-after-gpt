@@ -46,8 +46,38 @@ const reportReady = {
   money_sections: {
     valuation_chain: [{ label: 'Valore di vendita giudiziaria', amount: 120000, amount_display: 'EUR 120.000,00', evidence_pages: [4] }],
     auction_terms: [],
-    buyer_side_costs: [{ label: 'Spese condominiali buyer-side', amount: 2500, amount_display: 'EUR 2.500,00', evidence_pages: [9] }],
+    buyer_side_costs: [
+      { label: 'Spese condominiali buyer-side', amount: 2500, amount_display: 'EUR 2.500,00', evidence_pages: [9] },
+      {
+        label: 'Costi di cancellazione formalità',
+        amount: 294,
+        amount_display: 'EUR 294,00',
+        included_in_valuation: true,
+        notes: 'Già considerato nella catena di valore.',
+        evidence_pages: [19],
+      },
+    ],
     procedure_cancelled_formalities: [{ label: 'Ipoteca cancellata dalla procedura', amount: 800, amount_display: 'EUR 800,00', evidence_pages: [10] }],
+    market_comparatives: [
+      {
+        label: 'Comparativo 1 - valore OMI medio',
+        amount: 870,
+        amount_display: 'EUR 870,00',
+        status: 'comparativo',
+        status_label: 'Comparativo di mercato (dato di contesto)',
+        evidence_pages: [16],
+      },
+    ],
+    context_values: [
+      {
+        label: 'Rendita catastale',
+        amount: 472.56,
+        amount_display: 'EUR 472,56',
+        status: 'contesto',
+        status_label: 'Dato economico di contesto (non è un costo)',
+        evidence_pages: [2],
+      },
+    ],
     uncertain_money: [{ label: 'Importo senza ruolo certo', amount: 3000, amount_display: 'EUR 3.000,00', status: 'da_verificare', evidence_pages: [11] }],
   },
   occupancy_section: {
@@ -84,6 +114,39 @@ const reportReady = {
   buyer_checklist: [{ action: 'Verificare amministratore', detail: 'Confermare spese condominiali', evidence_pages: [9] }],
   manual_review_flags: [{ kind: 'uncertain_money', kind_label: 'Importo da verificare', detail: 'Importo senza ruolo certo', evidence_pages: [11] }],
   evidence_index: [{ page: 4, referenced_by: ['valuation_chain'] }],
+  customer_evidence_index: [
+    {
+      page: 8,
+      topic: 'Conformità urbanistica',
+      report_section: 'Conformità e documenti tecnici',
+      perizia_excerpt: 'L\'immobile risulta conforme.',
+      excerpt_truncated: false,
+      coverage_status: 'covered',
+    },
+    {
+      page: 19,
+      topic: 'Costi di cancellazione formalità',
+      report_section: 'Valori e costi',
+      perizia_excerpt: 'Spese di cancellazione delle trascrizioni ed iscrizioni a carico dell\'acquirente: €. 294,00',
+      excerpt_truncated: false,
+      coverage_status: 'covered',
+    },
+    {
+      page: 13,
+      topic: 'APE / prestazione energetica',
+      report_section: 'Conformità e documenti tecnici',
+      perizia_excerpt: null,
+      note: 'Estratto non disponibile automaticamente; verificare pagina 13.',
+      coverage_status: 'excerpt_missing',
+    },
+  ],
+  admin_evidence_index: [
+    {
+      page: 8,
+      raw_keys: ['technical_compliance[2]:urbanistica', 'risk_classification[5]:edilizia'],
+      artifact_source: 'verified_report_contract.json',
+    },
+  ],
   quality_control: {
     title: 'Controllo qualità pagina per pagina',
     coverage_status: 'PASS',
@@ -369,6 +432,98 @@ describe('CorrectnessV2Panel', () => {
     expect(container.querySelector('[data-testid="cv2-coverage-failed"]')).not.toBeNull();
     const quality = container.querySelector('[data-testid="cv2-quality-control"]');
     expect(quality.textContent).toContain('Mancante');
+  });
+
+  test('renders comparatives and context values separately from importi da verificare', async () => {
+    getLatestCorrectnessV2Job.mockResolvedValue({ data: readyJob });
+    getCorrectnessV2CustomerReport.mockResolvedValue({ data: reportReady });
+
+    await renderPanel();
+
+    const comparatives = container.querySelector('[data-testid="cv2-money-section-market_comparatives"]');
+    expect(comparatives).not.toBeNull();
+    expect(comparatives.textContent).toContain('Comparativi di mercato');
+    expect(comparatives.textContent).toContain('Comparativo 1 - valore OMI medio');
+    const context = container.querySelector('[data-testid="cv2-money-section-context_values"]');
+    expect(context.textContent).toContain('Dati economici di contesto');
+    expect(context.textContent).toContain('Rendita catastale');
+    const uncertain = container.querySelector('[data-testid="cv2-money-section-uncertain_money"]');
+    expect(uncertain.textContent).toContain('Importo senza ruolo certo');
+    expect(uncertain.textContent).not.toContain('Comparativo 1');
+    expect(uncertain.textContent).not.toContain('Rendita catastale');
+  });
+
+  test('buyer-side cost already in the valuation chain shows the inclusion badge', async () => {
+    getLatestCorrectnessV2Job.mockResolvedValue({ data: readyJob });
+    getCorrectnessV2CustomerReport.mockResolvedValue({ data: reportReady });
+
+    await renderPanel();
+
+    const buyer = container.querySelector('[data-testid="cv2-money-section-buyer_side_costs"]');
+    expect(buyer.textContent).toContain('Costi di cancellazione formalità');
+    expect(buyer.textContent).toContain('EUR 294,00');
+    expect(buyer.textContent).toContain('Già nella catena di valore');
+    expect(buyer.textContent).toContain('Già considerato nella catena di valore.');
+  });
+
+  test('customer evidence index shows page, topic and verbatim excerpt without raw keys', async () => {
+    getLatestCorrectnessV2Job.mockResolvedValue({ data: readyJob });
+    getCorrectnessV2CustomerReport.mockResolvedValue({ data: reportReady });
+
+    await renderPanel();
+
+    const evidence = container.querySelector('[data-testid="cv2-evidence-index"]');
+    expect(evidence).not.toBeNull();
+    expect(evidence.textContent).toContain('p. 8');
+    expect(evidence.textContent).toContain('Conformità urbanistica');
+    expect(evidence.textContent).toContain('Estratto perizia');
+    expect(evidence.textContent).toContain('L\'immobile risulta conforme.');
+    expect(evidence.textContent).toContain('294,00');
+    // Missing excerpt entries say so explicitly instead of inventing text.
+    expect(evidence.textContent).toContain('Estratto non disponibile automaticamente; verificare pagina 13.');
+    // Raw internal keys never render in the customer evidence list.
+    expect(evidence.textContent).not.toContain('technical_compliance[');
+    expect(evidence.textContent).not.toContain('risk_classification[');
+    // ...they stay in the collapsed admin debug block only.
+    const adminDebug = container.querySelector('[data-testid="cv2-evidence-admin-debug"]');
+    expect(adminDebug).not.toBeNull();
+    expect(adminDebug.hasAttribute('open')).toBe(false);
+    expect(adminDebug.textContent).toContain('technical_compliance[2]');
+  });
+
+  test('renders bene principale with accessories when no explicit beni exist', async () => {
+    getLatestCorrectnessV2Job.mockResolvedValue({ data: readyJob });
+    getCorrectnessV2CustomerReport.mockResolvedValue({
+      data: {
+        ...reportReady,
+        lot_structure: { multi_lot: false, selected_lot: '1', bene_count: 1, detected_bene_count: 0 },
+        beni_sections: [
+          {
+            bene_id: 'principale',
+            title: 'Bene principale: appartamento',
+            is_main_property: true,
+            property_type: 'appartamento',
+            address: 'Via di esempio 1',
+            accessories: [
+              { label: 'soffitta', evidence_pages: [2], note: 'Accessorio/pertinenza del bene principale secondo la perizia.' },
+            ],
+            risks: [],
+            checklist: [],
+            note: null,
+          },
+        ],
+      },
+    });
+
+    await renderPanel();
+
+    expect(text()).toContain('Bene principale: appartamento');
+    expect(text()).toContain('Numero beni');
+    expect(text()).not.toContain('Nessuna sezione beni separata');
+    const accessories = container.querySelector('[data-testid="cv2-bene-accessories-principale"]');
+    expect(accessories).not.toBeNull();
+    expect(accessories.textContent).toContain('soffitta');
+    expect(accessories.textContent).toContain('p. 2');
   });
 
   test('disables Run Correctness V2 while a latest job is still running', async () => {

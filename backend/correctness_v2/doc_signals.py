@@ -41,6 +41,15 @@ def norm_text(text: Any) -> str:
     return _strip_accents(str(text or "")).lower()
 
 
+def normalize_ws(text: Any) -> str:
+    """Collapse all whitespace runs to single spaces (verbatim otherwise).
+
+    The ONLY normalization allowed on customer evidence excerpts: the excerpt
+    builder (customer_report) and the verbatim gate (quality_report) MUST use
+    this same function so the substring check can never drift."""
+    return re.sub(r"\s+", " ", str(text or "")).strip()
+
+
 def _clean_snippet(text: str, limit: int = 160) -> str:
     snippet = re.sub(r"\s+", " ", str(text or "")).strip()
     return snippet[:limit]
@@ -144,14 +153,24 @@ def amounts_in_text(text: Any) -> List[Tuple[float, int, int]]:
 # Money kind classification (by nearby context, generic Italian)
 # ---------------------------------------------------------------------------
 # Ordered: first match wins. (kind, severity, label_it, context regex)
+#
+# Ordering is semantic, not cosmetic:
+#   * auction terms first (most specific wording);
+#   * market COMPARABLES (OMI/borsino/annunci/listini) before the value kinds,
+#     so a listing price near "valore di mercato" wording stays a comparable;
+#   * judicial sale BEFORE state-of-fact BEFORE market: Italian perizie chain
+#     the labels ("Valore di vendita giudiziaria ... nello stato di fatto...",
+#     "Valore di mercato ... nello stato di fatto in cui si trova"), and the
+#     more specific role always wins over the generic "valore di mercato".
 _MONEY_KINDS: List[Tuple[str, str, str, re.Pattern]] = [
     ("prezzo_base", SEV_CRITICAL, "Prezzo base d'asta", re.compile(r"prezzo\s+base|base\s+d'?asta")),
     ("offerta_minima", SEV_CRITICAL, "Offerta minima", re.compile(r"offerta\s+minima")),
     ("rialzo_minimo", SEV_IMPORTANT, "Rialzo minimo", re.compile(r"rialzo\s+minimo|aumento\s+minimo")),
     ("cauzione", SEV_IMPORTANT, "Cauzione", re.compile(r"cauzione")),
-    ("valore_mercato", SEV_CRITICAL, "Valore di mercato", re.compile(r"valore\s+di\s+mercato|piu\s+probabile\s+valore|valore\s+commerciale")),
-    ("valore_stato", SEV_CRITICAL, "Valore nello stato di fatto", re.compile(r"stato\s+di\s+fatto")),
+    ("comparativo", SEV_BACKGROUND, "Comparativo di mercato", re.compile(r"\bomi\b|borsin|annunc|comparabil|comparativ|listino|quotazion")),
     ("valore_vendita", SEV_CRITICAL, "Valore di vendita giudiziaria", re.compile(r"vendita\s+giudiziari|valore\s+di\s+vendita|prezzo\s+di\s+vendita|valore\s+giudiziario|valore\s+di\s+realizzo")),
+    ("valore_stato", SEV_CRITICAL, "Valore nello stato di fatto", re.compile(r"stato\s+di\s+fatto")),
+    ("valore_mercato", SEV_CRITICAL, "Valore di mercato", re.compile(r"valore\s+di\s+mercato|piu\s+probabile\s+valore|valore\s+commerciale")),
     ("rendita", SEV_IMPORTANT, "Rendita catastale", re.compile(r"rendita")),
     ("canone", SEV_IMPORTANT, "Canone / importo di locazione", re.compile(r"canone|affitto|locazion")),
     ("spese_condominiali", SEV_IMPORTANT, "Spese condominiali", re.compile(r"condomini|millesim|arretrat|insolut")),
@@ -163,11 +182,26 @@ _MONEY_KINDS: List[Tuple[str, str, str, re.Pattern]] = [
 ]
 
 
+_VALUE_KIND_NAMES = ("valore_vendita", "valore_stato", "valore_mercato")
+
+
 def classify_money_context(context_norm: str) -> Tuple[str, str, str]:
-    """Return (kind, severity, label_it) for the text around an amount."""
+    """Return (kind, severity, label_it) for the text around an amount.
+
+    An explicit value-role phrase beats comparable/methodology wording: 'valore
+    di mercato determinato con procedimento comparativo / dalle quotazioni OMI'
+    names the ROLE (market value) — the comparable words only describe how the
+    perito derived it. Listing rows (annunci/borsino) don't carry the explicit
+    value phrases, so they still classify as comparables.
+    """
     for kind, severity, label, pattern in _MONEY_KINDS:
-        if pattern.search(context_norm):
-            return kind, severity, label
+        if not pattern.search(context_norm):
+            continue
+        if kind == "comparativo":
+            for v_kind, v_sev, v_label, v_pattern in _MONEY_KINDS:
+                if v_kind in _VALUE_KIND_NAMES and v_pattern.search(context_norm):
+                    return v_kind, v_sev, v_label
+        return kind, severity, label
     return "importo_generico", SEV_USEFUL, "Importo indicato in perizia"
 
 
@@ -177,6 +211,92 @@ VALUE_KINDS = {
     "valore_mercato", "valore_stato", "valore_vendita",
     "costo_regolarizzazione", "cancellazione",
 }
+
+# ---------------------------------------------------------------------------
+# Money ROLE taxonomy: the semantic role a money fact plays. The page audit is
+# role-aware — an amount only covers a document fact when BOTH the amount and
+# the role match (never amount-only matching).
+# ---------------------------------------------------------------------------
+ROLE_MARKET_VALUE = "market_value"
+ROLE_REGULARIZATION_COST = "regularization_cost"
+ROLE_STATE_OF_FACT_VALUE = "state_of_fact_value"
+ROLE_JUDICIAL_SALE_VALUE = "judicial_sale_value"
+ROLE_AUCTION_BASE_PRICE = "auction_base_price"
+ROLE_MINIMUM_BID = "minimum_bid"
+ROLE_BUYER_SIDE_COST = "buyer_side_cost"
+ROLE_PROCEDURE_CANCELLED_FORMALITY = "procedure_cancelled_formality"
+ROLE_COMPARABLE_MARKET_VALUE = "comparable_market_value"
+ROLE_CADASTRAL_INCOME = "cadastral_income"
+ROLE_RENT = "rent"
+ROLE_CONDOMINIUM_EXPENSE = "condominium_expense"
+ROLE_UNCERTAIN_MONEY = "uncertain_money"
+# Extra internal roles (still generic; not in the customer-facing taxonomy).
+ROLE_AUCTION_INCREMENT = "auction_increment"
+ROLE_AUCTION_DEPOSIT = "auction_deposit"
+ROLE_DEPRECIATION = "depreciation"
+ROLE_GENERIC_CHARGE = "generic_charge"
+
+ROLE_BY_KIND = {
+    "prezzo_base": ROLE_AUCTION_BASE_PRICE,
+    "offerta_minima": ROLE_MINIMUM_BID,
+    "rialzo_minimo": ROLE_AUCTION_INCREMENT,
+    "cauzione": ROLE_AUCTION_DEPOSIT,
+    "comparativo": ROLE_COMPARABLE_MARKET_VALUE,
+    "valore_vendita": ROLE_JUDICIAL_SALE_VALUE,
+    "valore_stato": ROLE_STATE_OF_FACT_VALUE,
+    "valore_mercato": ROLE_MARKET_VALUE,
+    "rendita": ROLE_CADASTRAL_INCOME,
+    "canone": ROLE_RENT,
+    "spese_condominiali": ROLE_CONDOMINIUM_EXPENSE,
+    "costo_regolarizzazione": ROLE_REGULARIZATION_COST,
+    "cancellazione": ROLE_BUYER_SIDE_COST,
+    "formalita_capitale": ROLE_PROCEDURE_CANCELLED_FORMALITY,
+    "deprezzamento": ROLE_DEPRECIATION,
+    "oneri": ROLE_GENERIC_CHARGE,
+    "importo_generico": ROLE_UNCERTAIN_MONEY,
+}
+
+# Italian display names for roles (page audit / quality tables).
+ROLE_LABELS_IT = {
+    ROLE_MARKET_VALUE: "valore di mercato",
+    ROLE_REGULARIZATION_COST: "costo di regolarizzazione",
+    ROLE_STATE_OF_FACT_VALUE: "valore nello stato di fatto",
+    ROLE_JUDICIAL_SALE_VALUE: "valore di vendita giudiziaria",
+    ROLE_AUCTION_BASE_PRICE: "prezzo base d'asta",
+    ROLE_MINIMUM_BID: "offerta minima",
+    ROLE_BUYER_SIDE_COST: "costo a carico dell'acquirente",
+    ROLE_PROCEDURE_CANCELLED_FORMALITY: "formalità cancellata dalla procedura",
+    ROLE_COMPARABLE_MARKET_VALUE: "comparativo di mercato",
+    ROLE_CADASTRAL_INCOME: "rendita catastale",
+    ROLE_RENT: "canone di locazione",
+    ROLE_CONDOMINIUM_EXPENSE: "spesa condominiale",
+    ROLE_UNCERTAIN_MONEY: "importo da verificare",
+    ROLE_AUCTION_INCREMENT: "rialzo minimo",
+    ROLE_AUCTION_DEPOSIT: "cauzione",
+    ROLE_DEPRECIATION: "deprezzamento/riduzione",
+    ROLE_GENERIC_CHARGE: "oneri/spese",
+}
+
+
+# Label-kinds whose role is CLEAR background context even when the analyst
+# filed the amount as "uncertain": comparables get their own section, context
+# kinds (rendita/canone/condominio/capitale di formalità) are informational.
+# Shared by the renderer (bucketing) and the coverage audit (expectations) so
+# the two can never drift apart.
+COMPARATIVE_LABEL_KINDS = frozenset({"comparativo"})
+CONTEXT_LABEL_KINDS = frozenset({
+    "rendita", "canone", "spese_condominiali", "formalita_capitale",
+})
+
+
+def role_for_kind(kind: Any) -> str:
+    return ROLE_BY_KIND.get(str(kind or ""), ROLE_UNCERTAIN_MONEY)
+
+
+def label_kind(label: Any) -> str:
+    """Classify a report row label into a money kind (same detector as pages)."""
+    kind, _sev, _lab = classify_money_context(norm_text(label))
+    return kind
 
 
 # ---------------------------------------------------------------------------
@@ -312,6 +432,51 @@ def _context_window(text: str, start: int, end: int, before: int = 90, after: in
     return text[lo:hi]
 
 
+def classification_window(text: str, spans: List[Tuple[float, int, int]], idx: int,
+                          max_before: int = 120) -> str:
+    """The text used to classify the role of amount ``idx``.
+
+    Italian perizia labels PRECEDE their amount ("Valore di ...: €. 43.654,20"),
+    so only the text BEFORE the amount is used, truncated at the end of the
+    previous amount: without truncation, chained value lines ("Valore di
+    mercato: € A ... Valore nello stato di fatto: € B") bleed the previous
+    label into the next amount's window and swap money roles.
+    """
+    _amount, s, _e = spans[idx]
+    lo = max(0, s - max_before)
+    if idx > 0:
+        prev_end = spans[idx - 1][2]
+        lo = max(lo, prev_end)
+    return text[lo:s]
+
+
+def classify_after_fallback(text: str, spans: List[Tuple[float, int, int]], idx: int,
+                            max_after: int = 80) -> Tuple[str, str, str]:
+    """Fallback classification from the text AFTER the amount.
+
+    Used ONLY when the before-window is inconclusive (importo_generico), for
+    layouts where the label follows the amount ("EUR 75.000,00 prezzo base").
+    The window stops at the next amount. Fail-safe: if a ':' follows the
+    matched phrase anywhere in the window, the phrase is the heading of the
+    NEXT line ("€ 43.654,20 € VALORE DI VENDITA GIUDIZIARIA (FJV): ...") — the
+    amount stays generic rather than risking a swapped money role.
+    """
+    _amount, _s, e = spans[idx]
+    hi = min(len(text), e + max_after)
+    if idx + 1 < len(spans):
+        hi = min(hi, spans[idx + 1][1])
+    window = text[e:hi]
+    n = norm_text(window)
+    for kind, severity, label, pattern in _MONEY_KINDS:
+        m = pattern.search(n)
+        if not m:
+            continue
+        if ":" in n[m.start():]:
+            continue  # heading of the NEXT value, not this amount's label
+        return kind, severity, label
+    return "importo_generico", SEV_USEFUL, "Importo indicato in perizia"
+
+
 def extract_money_signals(pages: List[Dict[str, Any]], *, min_amount: float = 50.0) -> List[Dict[str, Any]]:
     """Per-page money signals, deduplicated by (page, kind, amount)."""
     signals: List[Dict[str, Any]] = []
@@ -321,11 +486,15 @@ def extract_money_signals(pages: List[Dict[str, Any]], *, min_amount: float = 50
         text = str(page.get("text") or "")
         if pnum is None or not text.strip():
             continue
-        for amount, s, e in amounts_in_text(text):
+        spans = sorted(amounts_in_text(text), key=lambda t: t[1])
+        for i, (amount, s, e) in enumerate(spans):
             if amount < min_amount:
                 continue
-            context = _context_window(text, s, e)
-            kind, severity, label = classify_money_context(norm_text(context))
+            kind, severity, label = classify_money_context(
+                norm_text(classification_window(text, spans, i))
+            )
+            if kind == "importo_generico":
+                kind, severity, label = classify_after_fallback(text, spans, i)
             key = (pnum, kind, round(amount, 2))
             if key in seen:
                 continue
@@ -339,7 +508,8 @@ def extract_money_signals(pages: List[Dict[str, Any]], *, min_amount: float = 50
                     "severity": severity,
                     "label": label,
                     "amount": round(amount, 2),
-                    "snippet": _clean_snippet(context),
+                    "role": role_for_kind(kind),
+                    "snippet": _clean_snippet(_context_window(text, s, e)),
                 }
             )
     return signals
@@ -356,6 +526,8 @@ def _money_category(kind: str) -> str:
         return "expenses"
     if kind == "formalita_capitale":
         return "formalities"
+    if kind == "comparativo":
+        return "comparables"
     return "money"
 
 

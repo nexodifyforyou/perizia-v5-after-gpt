@@ -21,10 +21,11 @@ HARD RULES:
 
 from __future__ import annotations
 
+import re
 import unicodedata
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
-from . import lots as lots_mod
+from . import doc_signals, lots as lots_mod
 
 CUSTOMER_REPORT_SCHEMA_VERSION = "cv2.customer_report.v1"
 
@@ -43,6 +44,80 @@ DISCLAIMER = (
 )
 
 UNCERTAIN_MONEY_TITLE = "Importi da verificare"
+MARKET_COMPARATIVES_TITLE = "Comparativi di mercato"
+CONTEXT_VALUES_TITLE = "Dati economici di contesto"
+
+# Uncertain-money rows whose LABEL clearly states a background/context role are
+# rendered in dedicated sections instead of the scary "Importi da verificare":
+# market comparables (OMI/borsino/annunci) and context values (rendita, canone,
+# spese condominiali, capitale di formalità). Rows whose role stays unclear
+# remain uncertain — never promoted to confirmed costs. The kind sets live in
+# doc_signals so the renderer and the coverage audit can never drift.
+_COMPARATIVE_KINDS = doc_signals.COMPARATIVE_LABEL_KINDS
+_CONTEXT_KINDS = doc_signals.CONTEXT_LABEL_KINDS
+
+_CONTEXT_NOTES = {
+    "rendita": "Rendita catastale: dato di contesto, non è un costo a carico dell'acquirente.",
+    "canone": "Canone/locazione dichiarato in perizia: dato di contesto, non è un costo di acquisto.",
+    "spese_condominiali": "Spese condominiali indicate in perizia: verificare l'eventuale quota a carico dell'acquirente.",
+    "formalita_capitale": (
+        "Importo della formalità iscritta (es. capitale di ipoteca/mutuo): non è un "
+        "debito a carico dell'acquirente salvo diversa indicazione della perizia."
+    ),
+}
+
+_COMPARATIVE_NOTE = (
+    "Valore comparativo usato dal perito come riferimento di mercato: dato di "
+    "contesto della valutazione, non un costo né un valore di vendita."
+)
+
+
+# Fixed Italian labels for formality types (raw machine tokens like "other"
+# must never reach the customer view).
+_FORMALITY_TYPE_LABELS = {
+    "ipoteca": "Ipoteca",
+    "pignoramento": "Pignoramento",
+    "sequestro": "Sequestro",
+    "domanda_giudiziale": "Domanda giudiziale",
+    "trascrizione": "Trascrizione",
+    "iscrizione": "Iscrizione",
+    "other": "Altra formalità",
+}
+
+
+def _formality_type_label(raw_type: Any) -> str:
+    key = _norm(raw_type).replace(" ", "_")
+    if key in _FORMALITY_TYPE_LABELS:
+        return _FORMALITY_TYPE_LABELS[key]
+    text = str(raw_type or "Formalità").strip()
+    return text[:1].upper() + text[1:] if text else "Formalità"
+
+
+def _uncertain_row_bucket(row: Dict[str, Any]) -> str:
+    """'comparatives' | 'context' | 'uncertain' from the row's own label."""
+    kind = doc_signals.label_kind(row.get("label"))
+    if kind in _COMPARATIVE_KINDS:
+        return "comparatives"
+    if kind in _CONTEXT_KINDS:
+        return "context"
+    return "uncertain"
+
+
+def _split_uncertain_rows(
+    contract: Dict[str, Any],
+) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]], List[Dict[str, Any]]]:
+    comparatives: List[Dict[str, Any]] = []
+    context: List[Dict[str, Any]] = []
+    uncertain: List[Dict[str, Any]] = []
+    for row in contract.get("uncertain_money") or []:
+        bucket = _uncertain_row_bucket(row)
+        if bucket == "comparatives":
+            comparatives.append(row)
+        elif bucket == "context":
+            context.append(row)
+        else:
+            uncertain.append(row)
+    return comparatives, context, uncertain
 
 _SEVERITY_LABELS = {
     "grave": "Critico",
@@ -124,6 +199,8 @@ def _empty_report(
             "auction_terms": [],
             "buyer_side_costs": [],
             "procedure_cancelled_formalities": [],
+            "market_comparatives": [],
+            "context_values": [],
             "uncertain_money": [],
         },
         "beni_sections": [],
@@ -134,6 +211,8 @@ def _empty_report(
         "buyer_checklist": [],
         "manual_review_flags": [],
         "evidence_index": [],
+        "customer_evidence_index": [],
+        "admin_evidence_index": [],
         "disclaimer": DISCLAIMER,
     }
 
@@ -170,11 +249,21 @@ def _dedup_key(row: Dict[str, Any]) -> Optional[tuple]:
 
 
 def _money_sections_view(contract: Dict[str, Any]) -> Dict[str, List[Dict[str, Any]]]:
-    """Render the five money sections with a global (label, amount) dedup guard.
+    """Render the money sections with a global (label, amount) dedup guard.
 
     Rows only ever come from the contract's own sections. Dedup drops a row only
     when the SAME normalized label + amount was already rendered, so distinct
     amounts (and distinct concepts sharing an amount) are never hidden.
+
+    Consistency rules (generic, no document-specific branching):
+      * A valuation-chain cost that is ALSO explicitly buyer-side is echoed once
+        in ``buyer_side_costs`` with ``included_in_valuation=True`` — the buyer
+        section is never empty while a buyer-relevant cost sits in the chain.
+      * If no cancellation COSTS exist but the perizia lists formalities
+        cancelled by the procedure, ``procedure_cancelled_formalities`` carries
+        amount-free reference rows (the formality is a fact, not a buyer cost).
+      * Uncertain rows with a clear background role move to ``market_comparatives``
+        / ``context_values``; only genuinely unclear amounts stay uncertain.
     """
     seen: set = set()
 
@@ -189,15 +278,97 @@ def _money_sections_view(contract: Dict[str, Any]) -> Dict[str, List[Dict[str, A
             out.append(_money_row_view(row, uncertain=uncertain))
         return out
 
-    return {
+    comparatives_src, context_src, uncertain_src = _split_uncertain_rows(contract)
+
+    sections = {
         "valuation_chain": render(contract.get("valuation_chain")),
         "auction_terms": render(contract.get("auction_terms")),
         "buyer_side_costs": render(contract.get("buyer_side_costs")),
         "procedure_cancelled_formalities": render(
             contract.get("procedure_cancelled_formalities")
         ),
-        "uncertain_money": render(contract.get("uncertain_money"), uncertain=True),
+        "market_comparatives": [],
+        "context_values": [],
+        "uncertain_money": render(uncertain_src, uncertain=True),
     }
+
+    # Comparables / context values: shown with their role stated, outside the
+    # uncertainty bucket, and NEVER as confirmed costs (dedup guard still on).
+    for row in comparatives_src:
+        key = _dedup_key(row)
+        if key is not None:
+            if key in seen:
+                continue
+            seen.add(key)
+        view = _money_row_view(row)
+        view["status"] = "comparativo"
+        view["status_label"] = "Comparativo di mercato (dato di contesto)"
+        view["notes"] = _COMPARATIVE_NOTE
+        sections["market_comparatives"].append(view)
+    for row in context_src:
+        key = _dedup_key(row)
+        if key is not None:
+            if key in seen:
+                continue
+            seen.add(key)
+        kind = doc_signals.label_kind(row.get("label"))
+        view = _money_row_view(row)
+        view["status"] = "contesto"
+        view["status_label"] = "Dato economico di contesto (non è un costo)"
+        note = _CONTEXT_NOTES.get(kind)
+        if note:
+            view["notes"] = note
+        sections["context_values"].append(view)
+
+    # Buyer-side costs already counted in the valuation chain: echoed once with
+    # an explicit included_in_valuation marker, never as an extra cost.
+    buyer_keys = {
+        _dedup_key(r) for r in sections["buyer_side_costs"] if _dedup_key(r) is not None
+    }
+    for row in contract.get("valuation_chain") or []:
+        roles = set(row.get("roles") or [])
+        if "buyer_side" not in roles:
+            continue
+        key = _dedup_key(row)
+        if key is not None and key in buyer_keys:
+            continue
+        view = _money_row_view(row)
+        view["included_in_valuation"] = True
+        view["notes"] = "Già considerato nella catena di valore."
+        view["status_label"] = "Costo a carico dell'acquirente già incluso nei valori"
+        sections["buyer_side_costs"].append(view)
+        if key is not None:
+            buyer_keys.add(key)
+
+    # Cancelled-by-procedure formalities visible where the customer expects
+    # them: reference rows without amounts (a formality is not a buyer cost).
+    # One row per formality TYPE — the detail lives in formalities_section.
+    if not sections["procedure_cancelled_formalities"]:
+        seen_forms: set = set()
+        for item in contract.get("legal_formalities") or []:
+            if not item.get("cancelled_by_procedure"):
+                continue
+            form_key = _norm(item.get("type"))
+            if form_key in seen_forms:
+                continue
+            seen_forms.add(form_key)
+            type_label = _formality_type_label(item.get("type"))
+            sections["procedure_cancelled_formalities"].append(
+                {
+                    "label": f"{type_label}: cancellazione a cura della procedura",
+                    "amount": None,
+                    "amount_display": None,
+                    "kind": "procedure_cancelled_reference",
+                    "informational": True,
+                    "notes": (
+                        "Nessun costo per l'acquirente indicato: i dettagli sono "
+                        "nella sezione 'Formalità e cancellazioni'."
+                    ),
+                    "evidence_pages": _pages(item.get("evidence_pages")),
+                }
+            )
+
+    return sections
 
 
 def _risk_item_view(card: Dict[str, Any]) -> Dict[str, Any]:
@@ -354,7 +525,9 @@ def _executive_summary(contract: Dict[str, Any]) -> List[Dict[str, Any]]:
             text += f", di cui {graves} classificati come critici"
         out.append({"text": text + ".", "evidence_pages": []})
 
-    uncertain_money = contract.get("uncertain_money") or []
+    # Only genuinely unclear amounts count as "da verificare": comparables and
+    # context values (rendita, canone, ...) have a clear background role.
+    _comp, _ctx, uncertain_money = _split_uncertain_rows(contract)
     if uncertain_money:
         out.append(
             {
@@ -380,26 +553,143 @@ def _executive_summary(contract: Dict[str, Any]) -> List[Dict[str, Any]]:
     return out
 
 
+def _has_real_property(ci: Dict[str, Any]) -> bool:
+    return bool(ci.get("property_type") or ci.get("address"))
+
+
 def _lot_structure(contract: Dict[str, Any]) -> Dict[str, Any]:
     lot = contract.get("lot_summary") or {}
-    return {
+    ci = contract.get("case_identity") or {}
+    detected = int(lot.get("bene_count") or 0)
+    bene_count = detected
+    # A real property (property_type/address present) is never "zero beni":
+    # when explicit beni were not extracted, the lot still contains its main
+    # property. No extra beni are ever faked — the count only floors at 1.
+    if bene_count == 0 and _has_real_property(ci):
+        bene_count = 1
+    view = {
         "multi_lot": bool(lot.get("multi_lot")),
         "lot_count": lot.get("lot_count"),
         "selected_lot": lot.get("selected_lot"),
-        "bene_count": lot.get("bene_count", 0),
+        "bene_count": bene_count,
         "multi_bene": bool(lot.get("multi_bene")),
         "bene_ids": [str(b) for b in lot.get("bene_ids") or []],
     }
+    if bene_count != detected:
+        view["detected_bene_count"] = detected
+        view["bene_count_source"] = "bene_principale_da_tipologia"
+    return view
 
 
-def _beni_sections(contract: Dict[str, Any]) -> List[Dict[str, Any]]:
+# Accessory/pertinenza terms (generic Italian): rendered as accessories of the
+# main bene, never as extra fake beni.
+_ACCESSORY_RE = re.compile(
+    r"\b(soffitt\w*|cantin\w*|garage|box\s+auto|autorimess\w*|posto\s+auto|"
+    r"solai\w*|magazzin\w*|tettoi\w*|pertinenz\w*|accessori\w*)\b",
+    re.IGNORECASE,
+)
+
+# Canonical display form per accessory stem (matched term is normalized so
+# "SOFFITTA"/"soffitte" collapse into one entry).
+def _accessory_canonical(term: str) -> str:
+    n = _norm(term)
+    for stem, label in (
+        ("soffitt", "soffitta"), ("cantin", "cantina"), ("garage", "garage"),
+        ("box", "box auto"), ("autorimess", "autorimessa"),
+        ("posto", "posto auto"), ("solai", "solaio"), ("magazzin", "magazzino"),
+        ("tettoi", "tettoia"),
+    ):
+        if n.startswith(stem):
+            return label
+    return n
+
+
+_GENERIC_ACCESSORY_STEMS = ("pertinenz", "accessori")
+
+
+def _detect_accessories(
+    contract: Dict[str, Any], pages: Optional[List[Dict[str, Any]]]
+) -> List[Dict[str, Any]]:
+    """Accessory/pertinenza units named by the document (soffitta, cantina...).
+
+    Sources, in order: the contract's own text fields, then the page text of
+    THIS analysis (document truth, same precedent as surfaces). Only concrete
+    accessory nouns are reported; bare 'pertinenza/accessorio' wording alone is
+    not an accessory name and is ignored.
+    """
+    found: Dict[str, Dict[str, Any]] = {}
+
+    def scan(text: Any, pages_ev: Any) -> None:
+        for m in _ACCESSORY_RE.finditer(str(text or "")):
+            canonical = _accessory_canonical(m.group(1))
+            if any(canonical.startswith(s) for s in _GENERIC_ACCESSORY_STEMS):
+                continue
+            entry = found.setdefault(
+                canonical, {"label": canonical, "evidence_pages": []}
+            )
+            for p in _pages(pages_ev):
+                if p not in entry["evidence_pages"]:
+                    entry["evidence_pages"].append(p)
+
+    ci = contract.get("case_identity") or {}
+    ci_pages = ci.get("evidence_pages")
+    scan(ci.get("property_type"), ci_pages)
+    scan(ci.get("address"), ci_pages)
+    for card in contract.get("risk_cards") or []:
+        scan(f"{card.get('area') or ''} {card.get('summary') or ''}", card.get("evidence_pages"))
+    for item in contract.get("compliance_overview") or []:
+        scan(f"{item.get('area') or ''} {item.get('notes') or ''}", item.get("evidence_pages"))
+    for item in contract.get("buyer_action_checklist") or []:
+        scan(f"{item.get('action') or ''} {item.get('detail') or ''}", item.get("evidence_pages"))
+
+    for page in pages or []:
+        pnum = doc_signals.page_number(page)
+        if pnum is None:
+            continue
+        scan(page.get("text"), [pnum])
+
+    out = [found[k] for k in sorted(found)]
+    for entry in out:
+        entry["evidence_pages"] = sorted(entry["evidence_pages"])
+        entry["note"] = "Accessorio/pertinenza del bene principale secondo la perizia."
+    return out
+
+
+def _beni_sections(
+    contract: Dict[str, Any], pages: Optional[List[Dict[str, Any]]] = None
+) -> List[Dict[str, Any]]:
     """One section per bene of the (single) lot, populated by generic bene-token
     matching over the contract's own risk cards and checklist. Never invents
-    per-bene detail: a bene with no explicitly tagged content gets empty lists."""
+    per-bene detail: a bene with no explicitly tagged content gets empty lists.
+
+    When NO explicit beni were extracted but the perizia clearly describes one
+    property, a single "Bene principale" section is rendered from case_identity
+    (with document-named accessories such as soffitta/cantina/garage). Multiple
+    beni are never faked."""
     lot = contract.get("lot_summary") or {}
     bene_ids = [str(b) for b in lot.get("bene_ids") or []]
     if len(bene_ids) < 2:
-        return []
+        ci = contract.get("case_identity") or {}
+        if not _has_real_property(ci):
+            return []
+        title = f"Bene principale: {ci.get('property_type')}" if ci.get(
+            "property_type"
+        ) else "Bene principale"
+        section: Dict[str, Any] = {
+            "bene_id": bene_ids[0] if bene_ids else "principale",
+            "title": title,
+            "is_main_property": True,
+            "property_type": ci.get("property_type"),
+            "address": ci.get("address"),
+            "evidence_pages": _pages(ci.get("evidence_pages")),
+            "risks": [],
+            "checklist": [],
+            "note": None,
+        }
+        accessories = _detect_accessories(contract, pages)
+        if accessories:
+            section["accessories"] = accessories
+        return [section]
 
     sections: Dict[str, Dict[str, Any]] = {
         b: {
@@ -520,7 +810,10 @@ def _manual_review_flags(contract: Dict[str, Any]) -> List[Dict[str, Any]]:
             view["debug_detail"] = detail
             view["detail"] = _validator_warning_detail(flag.get("code"), detail)
         flags.append(view)
-    for row in contract.get("uncertain_money") or []:
+    # Comparables/context rows are NOT flagged: their role is clear from the
+    # document and they render in their own background sections.
+    _comp, _ctx, true_uncertain = _split_uncertain_rows(contract)
+    for row in true_uncertain:
         flags.append(
             _flag_view(
                 "uncertain_money",
@@ -602,9 +895,22 @@ def _compliance_section(contract: Dict[str, Any]) -> List[Dict[str, Any]]:
 
 
 def _formalities_section(contract: Dict[str, Any]) -> List[Dict[str, Any]]:
-    """Formalità e cancellazioni: never rendered as buyer debt unless explicit."""
+    """Formalità e cancellazioni: never rendered as buyer debt unless explicit.
+
+    Identical rows (same type, description, amount and flags) are shown once."""
     out: List[Dict[str, Any]] = []
+    seen: set = set()
     for item in contract.get("legal_formalities") or []:
+        row_key = (
+            _norm(item.get("type")),
+            _norm(item.get("description")),
+            item.get("amount"),
+            bool(item.get("cancelled_by_procedure")),
+            bool(item.get("buyer_burden")),
+        )
+        if row_key in seen:
+            continue
+        seen.add(row_key)
         cancelled = bool(item.get("cancelled_by_procedure"))
         buyer = bool(item.get("buyer_burden"))
         if cancelled:
@@ -615,6 +921,7 @@ def _formalities_section(contract: Dict[str, Any]) -> List[Dict[str, Any]]:
             status_label = "Formalità rilevata; verificare le condizioni di cancellazione"
         view: Dict[str, Any] = {
             "type": item.get("type"),
+            "type_label": _formality_type_label(item.get("type")),
             "description": item.get("description"),
             "status_label": status_label,
             "cancelled_by_procedure": cancelled,
@@ -649,6 +956,275 @@ def _surfaces_section(contract: Dict[str, Any]) -> List[Dict[str, Any]]:
             view["status"] = "da_verificare"
         out.append(view)
     return out
+
+
+# ---------------------------------------------------------------------------
+# Evidence index: customer view (page + human topic + VERBATIM excerpt) vs
+# admin/debug view (raw claim keys). Customers never see raw internal keys.
+# ---------------------------------------------------------------------------
+EXCERPT_MISSING_NOTE = "Estratto non disponibile automaticamente; verificare pagina {page}."
+
+_BREAK_RE = re.compile(r"[.;!?]\s")
+
+
+# Single sanctioned excerpt normalization (shared with the verbatim gate).
+_normalize_ws = doc_signals.normalize_ws
+
+
+def _amount_variants(amount: Any) -> List[str]:
+    """Italian textual forms of an amount, most specific first.
+
+    Zero amounts return no variants: '0,00' occurs all over a perizia and any
+    match would quote an unrelated sentence."""
+    try:
+        value = float(amount)
+    except (TypeError, ValueError):
+        return []
+    if value == 0:
+        return []
+    grouped = f"{abs(value):,.2f}".replace(",", "|").replace(".", ",").replace("|", ".")
+    ungrouped = f"{abs(value):.2f}".replace(".", ",")
+    variants = [grouped]
+    if ungrouped != grouped:
+        variants.append(ungrouped)
+    # Documents often omit the cents ("€ 100.000", "€ 294").
+    if value == int(abs(value)) or abs(value) == int(abs(value)):
+        int_part = grouped.rsplit(",", 1)[0]
+        variants.append(int_part)
+        bare = str(int(abs(value)))
+        if bare != int_part:
+            variants.append(bare)
+    return variants
+
+
+def _find_amount_spans(text_lower: str, variant: str) -> List[int]:
+    """Occurrences of an amount variant with digit boundaries: '294' must not
+    match inside '1294', '294,50' or '1.294', but a sentence period right
+    after the amount ("Importo ipoteca: 150.000.") is a legitimate boundary."""
+    pattern = re.compile(
+        r"(?<!\d)(?<!\d[.,])" + re.escape(variant.lower()) + r"(?!\d)(?![.,]\d)"
+    )
+    return [m.start() for m in pattern.finditer(text_lower)]
+
+
+def _last_break_before(text: str, pos: int, min_gap: int, max_span: int) -> int:
+    """Start of the sentence containing ``pos``: last break at least ``min_gap``
+    chars before pos (label separators like ': €. ' right before an amount are
+    not sentence ends), bounded to ``max_span`` chars."""
+    lo = max(0, pos - max_span)
+    best = lo
+    for m in _BREAK_RE.finditer(text, lo, pos):
+        if pos - m.end() >= min_gap:
+            best = m.end()
+    # Never start mid-word: skip forward to the next word boundary.
+    if best > 0 and best < len(text) and text[best - 1] not in " \t":
+        space = text.find(" ", best)
+        if 0 <= space < pos:
+            best = space + 1
+    return best
+
+
+def _excerpt_for_amount(text: str, s: int, e: int) -> str:
+    lo = _last_break_before(text, s, min_gap=20, max_span=160)
+    return text[lo:e].strip()
+
+
+def _excerpt_for_needle(text: str, s: int, e: int, max_after: int = 180) -> str:
+    m = _BREAK_RE.search(text, e, min(len(text), e + max_after))
+    hi = (m.start() + 1) if m else min(len(text), e + max_after)
+    return text[s:hi].strip()
+
+
+def _find_verbatim_excerpt(
+    text: str, *, amount: Any = None, needles: Optional[List[str]] = None
+) -> Optional[str]:
+    """A short VERBATIM excerpt (whitespace-normalized only) or None.
+
+    ``text`` must already be whitespace-normalized (the caller normalizes each
+    page exactly once). Never rewrites, never paraphrases: the returned string
+    is a substring of that normalized page text."""
+    if not text:
+        return None
+    lower = text.lower()
+
+    for variant in _amount_variants(amount):
+        # Digit-boundary search: '294' must not match inside '1294'/'294,50'.
+        spans = _find_amount_spans(lower, variant)
+        if spans:
+            idx = spans[0]
+            return _excerpt_for_amount(text, idx, idx + len(variant))
+
+    for needle in needles or []:
+        clean = _normalize_ws(needle)
+        if len(clean) < 10:
+            continue
+        idx = lower.find(clean.lower())
+        if idx >= 0:
+            return _excerpt_for_needle(text, idx, idx + len(clean))
+
+    # Token-overlap fallback: best document sentence covering the needle words.
+    # Two-word needles ("impianto gas domestico") need FULL coverage; longer
+    # needles need at least half of their content words in one sentence.
+    best: Optional[str] = None
+    best_score = 0.0
+    sentences = re.split(r"(?<=[.!?;])\s+", text)
+    for needle in needles or []:
+        words = {w for w in re.findall(r"[a-zà-ù]{5,}", _norm(needle))}
+        if len(words) < 2:
+            continue
+        threshold = 1.0 if len(words) == 2 else 0.5
+        for sentence in sentences:
+            if len(sentence) < 25:
+                continue
+            sent_norm = _norm(sentence)
+            hits = sum(1 for w in words if w in sent_norm)
+            score = hits / len(words)
+            if score >= threshold and score > best_score:
+                best, best_score = sentence, score
+    if best:
+        return best[:240].strip()
+    return None
+
+
+def _shorten_excerpt(excerpt: str, limit: int = 240) -> Tuple[str, bool]:
+    if len(excerpt) <= limit:
+        return excerpt, False
+    cut = excerpt[:limit]
+    if " " in cut:
+        cut = cut.rsplit(" ", 1)[0]
+    return cut.strip(), True
+
+
+def _evidence_sources(contract: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """(topic, report_section, evidence_pages, needles, amount) per report item."""
+    sources: List[Dict[str, Any]] = []
+
+    def add(topic: Any, section: str, pages: Any, needles: List[Any], amount: Any = None) -> None:
+        pages_list = _pages(pages)
+        topic_text = _normalize_ws(topic)
+        if not topic_text or not pages_list:
+            return
+        sources.append({
+            "topic": topic_text,
+            "report_section": section,
+            "evidence_pages": pages_list,
+            "needles": [str(n) for n in needles if n],
+            "amount": amount,
+        })
+
+    ci = contract.get("case_identity") or {}
+    add(
+        "Identificazione dell'immobile", "Dati principali", ci.get("evidence_pages"),
+        [ci.get("address"), ci.get("property_type")],
+    )
+    oc = contract.get("occupancy") or {}
+    if oc.get("status"):
+        add(
+            "Stato di occupazione", "Stato di occupazione", oc.get("evidence_pages"),
+            [oc.get("title_info"), oc.get("status")],
+        )
+    for item in contract.get("compliance_overview") or []:
+        add(
+            item.get("area"), "Conformità e documenti tecnici",
+            item.get("evidence_pages"), [item.get("area"), item.get("notes")],
+        )
+    for row in (contract.get("valuation_chain") or []) + (contract.get("auction_terms") or []):
+        add(row.get("label"), "Valori e costi", row.get("evidence_pages"),
+            [row.get("label")], row.get("amount"))
+    for row in contract.get("buyer_side_costs") or []:
+        add(row.get("label"), "Costi a carico dell'acquirente", row.get("evidence_pages"),
+            [row.get("label")], row.get("amount"))
+    for row in contract.get("procedure_cancelled_formalities") or []:
+        add(row.get("label"), "Formalità e cancellazioni", row.get("evidence_pages"),
+            [row.get("label")], row.get("amount"))
+    for row in contract.get("uncertain_money") or []:
+        add(row.get("label"), "Importi e valori di contesto", row.get("evidence_pages"),
+            [row.get("label")], row.get("amount"))
+    for item in contract.get("legal_formalities") or []:
+        add(_formality_type_label(item.get("type")), "Formalità e cancellazioni",
+            item.get("evidence_pages"),
+            [item.get("description"), item.get("type")], item.get("amount"))
+    for fact in contract.get("surface_cadastral") or []:
+        label = str(fact.get("label") or "")
+        value = str(fact.get("value") or "")
+        # "Categoria catastale A/3" is written "categoria A/3" in the document:
+        # try label-word + value combinations; numeric values also go through
+        # the amount path ("46,95" formats) which recovers the preceding label.
+        needles = [f"{label} {value}"]
+        for word in re.split(r"[\s/()]+", label):
+            if len(word) >= 4:
+                needles.append(f"{word} {value}")
+        add(label, "Superfici e dati catastali", fact.get("evidence_pages"),
+            needles, doc_signals.parse_amount(value))
+    return sources
+
+
+def _build_evidence_views(
+    contract: Dict[str, Any], pages: Optional[List[Dict[str, Any]]]
+) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
+    """(customer_evidence_index, admin_evidence_index).
+
+    Customer entries carry page + human topic + verbatim perizia excerpt (from
+    the extracted page text, whitespace-normalized only). When no safe excerpt
+    exists the entry says so explicitly and is flagged as a coverage warning by
+    the quality gate. Raw claim keys live ONLY in the admin view."""
+    # Each page is whitespace-normalized exactly once, up front.
+    page_texts: Dict[int, str] = {}
+    for page in pages or []:
+        pnum = doc_signals.page_number(page)
+        if pnum is not None:
+            page_texts[pnum] = _normalize_ws(page.get("text"))
+
+    customer: List[Dict[str, Any]] = []
+    seen: set = set()
+    for source in _evidence_sources(contract):
+        excerpt: Optional[str] = None
+        excerpt_page: Optional[int] = None
+        for pnum in source["evidence_pages"]:
+            text = page_texts.get(pnum)
+            if not text:
+                continue
+            excerpt = _find_verbatim_excerpt(
+                text, amount=source["amount"], needles=source["needles"]
+            )
+            if excerpt:
+                excerpt_page = pnum
+                break
+        page = excerpt_page if excerpt_page is not None else source["evidence_pages"][0]
+        key = (page, _norm(source["topic"]))
+        if key in seen:
+            continue
+        seen.add(key)
+        entry: Dict[str, Any] = {
+            "page": page,
+            "topic": source["topic"],
+            "report_section": source["report_section"],
+        }
+        if excerpt:
+            short, truncated = _shorten_excerpt(excerpt)
+            entry["perizia_excerpt"] = short
+            entry["excerpt_truncated"] = truncated
+            entry["coverage_status"] = "covered"
+        else:
+            entry["perizia_excerpt"] = None
+            entry["note"] = EXCERPT_MISSING_NOTE.format(page=page)
+            entry["coverage_status"] = "excerpt_missing"
+        customer.append(entry)
+    customer.sort(key=lambda e: (e["page"], _norm(e["topic"])))
+
+    admin: List[Dict[str, Any]] = []
+    for page_key, refs in (contract.get("evidence_index") or {}).items():
+        try:
+            page = int(page_key)
+        except (TypeError, ValueError):
+            continue
+        admin.append({
+            "page": page,
+            "raw_keys": list(refs or []),
+            "artifact_source": "verified_report_contract.json",
+        })
+    admin.sort(key=lambda e: e["page"])
+    return customer, admin
 
 
 def _evidence_index(contract: Dict[str, Any]) -> List[Dict[str, Any]]:
@@ -697,8 +1273,14 @@ def _subtitle_from_identity(ci: Dict[str, Any], selected_lot: Any) -> str:
 # ---------------------------------------------------------------------------
 # Public renderers
 # ---------------------------------------------------------------------------
-def render_success_report(contract: Dict[str, Any]) -> Dict[str, Any]:
-    """Render the customer report for a validated single-lot contract."""
+def render_success_report(
+    contract: Dict[str, Any], pages: Optional[List[Dict[str, Any]]] = None
+) -> Dict[str, Any]:
+    """Render the customer report for a validated single-lot contract.
+
+    ``pages`` (input_pages of THIS analysis) is optional and used only for
+    document-truth lookups: verbatim customer evidence excerpts and accessory
+    detection. No fact is ever invented from it."""
     ci = dict(contract.get("case_identity") or {})
     lot_structure = _lot_structure(contract)
     report = _empty_report(
@@ -714,7 +1296,7 @@ def render_success_report(contract: Dict[str, Any]) -> Dict[str, Any]:
     report["key_facts"] = _key_facts(contract)
     report["risk_sections"] = _risk_sections(contract)
     report["money_sections"] = _money_sections_view(contract)
-    report["beni_sections"] = _beni_sections(contract)
+    report["beni_sections"] = _beni_sections(contract, pages)
     report["occupancy_section"] = _occupancy_section(contract)
     report["compliance_section"] = _compliance_section(contract)
     report["formalities_section"] = _formalities_section(contract)
@@ -722,8 +1304,13 @@ def render_success_report(contract: Dict[str, Any]) -> Dict[str, Any]:
     report["buyer_checklist"] = _buyer_checklist(contract)
     report["manual_review_flags"] = _manual_review_flags(contract)
     report["evidence_index"] = _evidence_index(contract)
+    customer_evidence, admin_evidence = _build_evidence_views(contract, pages)
+    report["customer_evidence_index"] = customer_evidence
+    report["admin_evidence_index"] = admin_evidence
     report["sections_meta"] = {
         "uncertain_money_title": UNCERTAIN_MONEY_TITLE,
+        "market_comparatives_title": MARKET_COMPARATIVES_TITLE,
+        "context_values_title": CONTEXT_VALUES_TITLE,
         "source_contract_schema": contract.get("schema_version"),
         "source_pdf_quality_status": contract.get("source_pdf_quality_status"),
         "validation_status": contract.get("validation_status"),

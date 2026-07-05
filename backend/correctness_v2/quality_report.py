@@ -74,13 +74,16 @@ def _check_blocking(
     def block(code: str, detail: str, **extra: Any) -> None:
         blocking.append({"code": code, "detail": detail, **extra})
 
-    # 1) Critical silent omissions (incl. important money missing).
+    # 1) Critical silent omissions (incl. important money missing). An amount
+    # present in the report under the WRONG money role is its own violation:
+    # role-swapped money must fail the gate, never pass as "amount found".
     for omission in coverage_audit.get("critical_omissions") or []:
-        code = (
-            "MISSING_IMPORTANT_MONEY"
-            if omission.get("category") in ("money", "sale_terms")
-            else "CRITICAL_FACT_MISSING"
-        )
+        if omission.get("role_conflict"):
+            code = "MONEY_ROLE_MISMATCH"
+        elif omission.get("category") in ("money", "sale_terms"):
+            code = "MISSING_IMPORTANT_MONEY"
+        else:
+            code = "CRITICAL_FACT_MISSING"
         block(
             code,
             f"{omission.get('document_fact')} (pagine {omission.get('evidence_pages')})",
@@ -219,7 +222,29 @@ def _check_blocking(
                 f"La voce '{label}' compare con importi diversi nel report: {distinct}.",
             )
 
-    # 8) Unsupported confirmed money (grounding): confirmed ANCHOR VALUES must
+    # 8) Customer evidence excerpts must be VERBATIM document text (whitespace-
+    # normalized only). A non-verbatim "Estratto perizia" is an invented quote.
+    page_texts_norm: Dict[int, str] = {}
+    for page in pages or []:
+        pnum = doc_signals.page_number(page)
+        if pnum is not None:
+            page_texts_norm[pnum] = doc_signals.normalize_ws(page.get("text")).lower()
+    for entry in customer_report.get("customer_evidence_index") or []:
+        excerpt = entry.get("perizia_excerpt")
+        if not excerpt or entry.get("coverage_status") != "covered":
+            continue
+        page_text = page_texts_norm.get(entry.get("page"))
+        if page_text is None:
+            continue
+        excerpt_norm = doc_signals.normalize_ws(excerpt).lower()
+        if excerpt_norm and excerpt_norm not in page_text:
+            block(
+                "EXCERPT_NOT_VERBATIM",
+                f"L'estratto per '{entry.get('topic')}' (pag. {entry.get('page')}) "
+                "non è testo letterale della pagina indicata.",
+            )
+
+    # 9) Unsupported confirmed money (grounding): confirmed ANCHOR VALUES must
     # exist verbatim in the document text. Deduction rows may legitimately be
     # the perito's implied arithmetic (e.g. "55% di € 622.970"), already tied
     # together by the validator's chain check — those become warnings, not
@@ -254,10 +279,11 @@ _FORBIDDEN_DISPLAY_TOKENS = (
     "non_conforming", "compliance_uncertain",
 )
 # Fields the frontend renders as visible text for customers.
+# ("perizia_excerpt" is deliberately excluded: it is verbatim document text.)
 _DISPLAY_FIELDS = {
     "label", "title", "subtitle", "text", "detail", "action", "status_label",
     "severity_label", "kind_label", "summary", "notes", "value", "note",
-    "reason", "message", "area",
+    "reason", "message", "area", "topic", "report_section",
 }
 
 
@@ -308,6 +334,16 @@ def _check_warnings(
             f"{omission.get('document_fact')} (pagine {omission.get('evidence_pages')})",
         )
 
+    # Customer evidence entries without a safe verbatim excerpt: explicit
+    # coverage warning (the entry already says "Estratto non disponibile...").
+    for entry in customer_report.get("customer_evidence_index") or []:
+        if entry.get("coverage_status") == "excerpt_missing":
+            warn(
+                "EVIDENCE_EXCERPT_MISSING",
+                f"Nessun estratto verbatim trovato per '{entry.get('topic')}' "
+                f"(pag. {entry.get('page')}): verificare manualmente la pagina.",
+            )
+
     uncertain_rows = (customer_report.get("money_sections") or {}).get("uncertain_money") or []
     if len(uncertain_rows) > 6:
         warn(
@@ -353,6 +389,8 @@ def _check_warnings(
 # Scoring
 # ---------------------------------------------------------------------------
 _BLOCK_DIMENSION = {
+    "MONEY_ROLE_MISMATCH": "money_integrity",
+    "EXCERPT_NOT_VERBATIM": "evidence_traceability",
     "MISSING_IMPORTANT_MONEY": "money_integrity",
     "CRITICAL_FACT_MISSING": "coverage_completeness",
     "INVENTED_BUYER_COST": "money_integrity",
@@ -366,6 +404,7 @@ _BLOCK_DIMENSION = {
 }
 
 _WARN_DIMENSION = {
+    "EVIDENCE_EXCERPT_MISSING": "evidence_traceability",
     "DERIVED_AMOUNT": "evidence_traceability",
     "IMPORTANT_FACT_NOT_RENDERED": "coverage_completeness",
     "LARGE_UNCERTAINTY_SECTION": "uncertainty_handling",
@@ -565,7 +604,7 @@ def build_customer_satisfaction_scorecard(
     unsafe_codes = {
         "FAKE_PREZZO_BASE", "PROCEDURE_FORMALITY_AS_BUYER_DEBT",
         "CONFORMING_WITHOUT_EVIDENCE", "INVENTED_BUYER_COST",
-        "SECTION_CONTRADICTION",
+        "SECTION_CONTRADICTION", "MONEY_ROLE_MISMATCH",
     }
     safety -= 40 * sum(1 for b in blocking if b.get("code") in unsafe_codes)
     if any(b.get("code") in ("CRITICAL_FACT_MISSING", "MISSING_IMPORTANT_MONEY") for b in blocking):

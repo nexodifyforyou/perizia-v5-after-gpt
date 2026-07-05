@@ -69,6 +69,7 @@ _MAIN_SECTIONS = (
     "case_identity", "lot_structure", "executive_summary", "key_facts",
     "risk_sections", "money_sections.valuation_chain", "money_sections.auction_terms",
     "money_sections.buyer_side_costs", "money_sections.procedure_cancelled_formalities",
+    "money_sections.market_comparatives", "money_sections.context_values",
     "beni_sections", "buyer_checklist", "occupancy_section", "compliance_section",
     "formalities_section", "surfaces_section", "lot_selection", "title", "subtitle",
 )
@@ -78,7 +79,40 @@ _MANUAL_SECTIONS = ("manual_review_flags",)
 _SKIP_KEYS = {
     "schema_version", "analysis_id", "job_id", "_saved_at", "disclaimer",
     "sections_meta", "report_status", "evidence_pages", "kind", "signal_id",
-    "quality_control",
+    "quality_control", "customer_evidence_index", "admin_evidence_index",
+    # Pure formatting duplicates of structured amounts: indexing them would
+    # create role-less wildcard entries that defeat role-aware matching.
+    "amount_display", "value_display", "cost_display",
+}
+
+# Section-implied money roles for the report pool (role-aware matching).
+_SECTION_ROLES = {
+    "money_sections.buyer_side_costs": doc_signals.ROLE_BUYER_SIDE_COST,
+    "money_sections.procedure_cancelled_formalities": doc_signals.ROLE_PROCEDURE_CANCELLED_FORMALITY,
+    "money_sections.market_comparatives": doc_signals.ROLE_COMPARABLE_MARKET_VALUE,
+    "money_sections.uncertain_money": doc_signals.ROLE_UNCERTAIN_MONEY,
+    "formalities_section": doc_signals.ROLE_PROCEDURE_CANCELLED_FORMALITY,
+}
+
+# Contract row "roles" tokens -> money roles.
+_ROW_ROLE_TOKENS = {
+    "buyer_side": doc_signals.ROLE_BUYER_SIDE_COST,
+    "cancellation": doc_signals.ROLE_BUYER_SIDE_COST,
+    "regularization": doc_signals.ROLE_REGULARIZATION_COST,
+    "deduction": doc_signals.ROLE_DEPRECIATION,
+}
+
+# Roles whose mismatch is a hard contradiction (critical money concepts). A
+# mismatch on weaker roles (rendita vs canone vs capitale di formalità, where
+# the page context is noisier) degrades to PARTIAL, never silently to covered.
+_STRICT_ROLES = {
+    doc_signals.ROLE_MARKET_VALUE,
+    doc_signals.ROLE_STATE_OF_FACT_VALUE,
+    doc_signals.ROLE_JUDICIAL_SALE_VALUE,
+    doc_signals.ROLE_AUCTION_BASE_PRICE,
+    doc_signals.ROLE_MINIMUM_BID,
+    doc_signals.ROLE_REGULARIZATION_COST,
+    doc_signals.ROLE_BUYER_SIDE_COST,
 }
 
 
@@ -101,31 +135,75 @@ def _pages_list(value: Any) -> List[int]:
 # Report pool: where every text/amount of the software output lives
 # ---------------------------------------------------------------------------
 class ReportPool:
-    """Searchable index of the customer report (text + amounts per section)."""
+    """Searchable index of the customer report (text + amounts per section).
+
+    Every amount carries the set of money ROLES it plays in the report, so the
+    audit can require BOTH amount and role to match. An empty role set means
+    "role unknown" (free text) and matches any role — unknown must never create
+    false contradictions, only explicit conflicting roles do.
+    """
 
     def __init__(self) -> None:
         self.section_text: Dict[str, List[str]] = {}
-        # amount -> set of section names
-        self.amounts: List[Tuple[float, str]] = []
+        # (amount, section, roles)
+        self.amounts: List[Tuple[float, str, frozenset]] = []
 
     def add_text(self, section: str, text: Any) -> None:
         n = norm_text(text)
         if not n.strip():
             return
         self.section_text.setdefault(section, []).append(n)
-        for amount, _s, _e in doc_signals.amounts_in_text(str(text)):
-            self.amounts.append((amount, section))
+        raw = str(text)
+        spans = sorted(doc_signals.amounts_in_text(raw), key=lambda t: t[1])
+        for i, (amount, _s, _e) in enumerate(spans):
+            # Role from the text preceding the amount (same detector as pages).
+            window = doc_signals.classification_window(raw, spans, i)
+            kind, _sev, _lab = doc_signals.classify_money_context(norm_text(window))
+            roles = self._roles_for(section, kind)
+            self.amounts.append((amount, section, roles))
 
-    def add_amount(self, section: str, amount: Any) -> None:
+    def add_amount(self, section: str, amount: Any, roles: Any = None) -> None:
         if amount is None or isinstance(amount, bool):
             return
         try:
-            self.amounts.append((float(amount), section))
+            value = float(amount)
         except (TypeError, ValueError):
-            pass
+            return
+        self.amounts.append((value, section, frozenset(roles or ())))
 
-    def find_amount(self, amount: float) -> List[str]:
-        return sorted({sec for val, sec in self.amounts if _approx_equal(val, amount)})
+    @staticmethod
+    def _roles_for(section: str, kind: str) -> frozenset:
+        roles = set()
+        if kind and kind != "importo_generico":
+            roles.add(doc_signals.role_for_kind(kind))
+        sec_role = _SECTION_ROLES.get(section)
+        if sec_role:
+            roles.add(sec_role)
+        return frozenset(roles)
+
+    @staticmethod
+    def _entry_matches_role(entry_roles: frozenset, role: Optional[str]) -> bool:
+        if not role or role == doc_signals.ROLE_UNCERTAIN_MONEY:
+            return True  # document role unclear -> any placement accounts for it
+        if not entry_roles:
+            return True  # report role unknown (free text) -> never a conflict
+        if doc_signals.ROLE_UNCERTAIN_MONEY in entry_roles:
+            return True  # rendered as explicit uncertainty covers any role
+        return role in entry_roles
+
+    def find_amount(self, amount: float, role: Optional[str] = None) -> List[str]:
+        return sorted({
+            sec for val, sec, entry_roles in self.amounts
+            if _approx_equal(val, amount) and self._entry_matches_role(entry_roles, role)
+        })
+
+    def find_amount_role_conflicts(self, amount: float, role: Optional[str]) -> List[str]:
+        """Sections where the amount exists but ONLY under a different role."""
+        matches = set(self.find_amount(amount, role))
+        return sorted({
+            sec for val, sec, entry_roles in self.amounts
+            if _approx_equal(val, amount) and sec not in matches
+        })
 
     def find_text(self, needle: Any) -> List[str]:
         n = norm_text(needle).strip()
@@ -160,6 +238,26 @@ class ReportPool:
         return sorted(out)
 
 
+def _row_roles(section: str, node: Dict[str, Any]) -> frozenset:
+    """Money roles a report row plays: label semantics + contract roles + section."""
+    roles = set()
+    label = node.get("label") or node.get("area")
+    if label:
+        kind, _sev, _lab = doc_signals.classify_money_context(norm_text(label))
+        if kind != "importo_generico":
+            roles.add(doc_signals.role_for_kind(kind))
+    for tok in node.get("roles") or []:
+        mapped = _ROW_ROLE_TOKENS.get(str(tok))
+        if mapped:
+            roles.add(mapped)
+    if node.get("included_in_valuation"):
+        roles.add(doc_signals.ROLE_BUYER_SIDE_COST)
+    sec_role = _SECTION_ROLES.get(section)
+    if sec_role:
+        roles.add(sec_role)
+    return frozenset(roles)
+
+
 def _walk(pool: ReportPool, node: Any, path: str) -> None:
     if isinstance(node, dict):
         section_id = node.get("section_id")
@@ -172,7 +270,13 @@ def _walk(pool: ReportPool, node: Any, path: str) -> None:
             if path.startswith("risk_sections") and section_id:
                 child = f"risk_sections.{section_id}"
             if key in ("amount", "value", "cost") and isinstance(value, (int, float)):
-                pool.add_amount(_top_section(child), value)
+                section = _top_section(child)
+                if key == "cost":
+                    # Compliance/risk card costs are regularization estimates.
+                    roles = frozenset({doc_signals.ROLE_REGULARIZATION_COST})
+                else:
+                    roles = _row_roles(section, node)
+                pool.add_amount(section, value, roles)
                 continue
             _walk(pool, value, child)
     elif isinstance(node, list):
@@ -230,7 +334,8 @@ def _worksheet_facts(worksheet: Dict[str, Any]) -> List[Dict[str, Any]]:
     def add(fact_id: str, category: str, document_fact: str, ev: Any, severity: str,
             check_kind: str, check_value: Any, expect: Optional[str] = None,
             fallback_tokens: Optional[List[str]] = None,
-            preset_reason: Optional[str] = None) -> None:
+            preset_reason: Optional[str] = None,
+            role: Optional[str] = None) -> None:
         if document_fact is None or str(document_fact).strip() == "":
             return
         facts.append({
@@ -245,6 +350,7 @@ def _worksheet_facts(worksheet: Dict[str, Any]) -> List[Dict[str, Any]]:
             "expected_action": expect,  # e.g. uncertainty for uncertain_money rows
             "fallback_tokens": fallback_tokens,
             "preset_reason": preset_reason,
+            "role": role,               # money role for role-aware amount checks
         })
 
     ci = ws.get("case_identity") or {}
@@ -271,9 +377,14 @@ def _worksheet_facts(worksheet: Dict[str, Any]) -> List[Dict[str, Any]]:
     for i, lot in enumerate(ws.get("lots") or []):
         lid = lot.get("lot_id")
         if lid is not None:
+            # Lot ids may arrive already prefixed ("Lotto Unico"): normalize
+            # first so the search token is never "lotto lotto unico".
+            from . import lots as _lots_mod
+            norm_lid = _lots_mod.normalize_lot_token(lid) or str(lid).strip()
             add(f"lots[{i}].lot_id", "lot_bene", f"Lotto {lid}",
                 lot.get("evidence_pages"), SEV_CRITICAL, "tokens",
-                [f"lotto {lid}", f"lotto {str(lid).upper()}", str(lot.get('label') or '')])
+                [f"lotto {norm_lid}", f"lotto {str(lid).strip()}",
+                 str(lot.get('label') or '')])
 
     oc = ws.get("occupancy") or {}
     oev = oc.get("evidence_pages")
@@ -306,38 +417,45 @@ def _worksheet_facts(worksheet: Dict[str, Any]) -> List[Dict[str, Any]]:
         if item.get("cost"):
             add(f"technical_compliance[{i}].cost", "money",
                 f"Costo {area}: {item.get('cost')}", item.get("evidence_pages"),
-                SEV_IMPORTANT, "amount", item.get("cost"))
+                SEV_IMPORTANT, "amount", item.get("cost"),
+                role=doc_signals.ROLE_REGULARIZATION_COST)
 
     money = ws.get("money") or {}
     mev = money.get("evidence_pages")
-    for field, label in (
-        ("market_value", "Valore di mercato"),
-        ("current_state_value", "Valore nello stato di fatto"),
-        ("sale_value", "Valore di vendita giudiziaria"),
-        ("regularization_costs", "Costi di regolarizzazione"),
-        ("cancellation_costs", "Costi di cancellazione formalità"),
+    for field, label, role in (
+        ("market_value", "Valore di mercato", doc_signals.ROLE_MARKET_VALUE),
+        ("current_state_value", "Valore nello stato di fatto", doc_signals.ROLE_STATE_OF_FACT_VALUE),
+        ("sale_value", "Valore di vendita giudiziaria", doc_signals.ROLE_JUDICIAL_SALE_VALUE),
+        ("regularization_costs", "Costi di regolarizzazione", doc_signals.ROLE_REGULARIZATION_COST),
+        ("cancellation_costs", "Costi di cancellazione formalità", doc_signals.ROLE_BUYER_SIDE_COST),
     ):
         if money.get(field) is not None and money.get(field) != 0:
             add(f"money.{field}", "money", f"{label}: {money[field]}", mev,
-                SEV_CRITICAL, "amount", money[field])
+                SEV_CRITICAL, "amount", money[field], role=role)
     at = money.get("auction_terms") or {}
-    for field, label in (
-        ("prezzo_base_asta", "Prezzo base d'asta"), ("offerta_minima", "Offerta minima"),
-        ("rialzo_minimo", "Rialzo minimo"), ("cauzione", "Cauzione"),
+    for field, label, role in (
+        ("prezzo_base_asta", "Prezzo base d'asta", doc_signals.ROLE_AUCTION_BASE_PRICE),
+        ("offerta_minima", "Offerta minima", doc_signals.ROLE_MINIMUM_BID),
+        ("rialzo_minimo", "Rialzo minimo", doc_signals.ROLE_AUCTION_INCREMENT),
+        ("cauzione", "Cauzione", doc_signals.ROLE_AUCTION_DEPOSIT),
     ):
         if at.get(field):
             add(f"money.auction_terms.{field}", "sale_terms", f"{label}: {at[field]}",
-                at.get("evidence_pages") or mev, SEV_CRITICAL, "amount", at[field])
-    for coll, label, sev in (
-        ("deductions", "Deprezzamento/deduzione", SEV_IMPORTANT),
-        ("buyer_side_costs", "Costo a carico acquirente", SEV_CRITICAL),
-        ("procedure_cancelled_costs", "Formalità cancellata dalla procedura", SEV_IMPORTANT),
+                at.get("evidence_pages") or mev, SEV_CRITICAL, "amount", at[field],
+                role=role)
+    for coll, label, sev, role in (
+        ("deductions", "Deprezzamento/deduzione", SEV_IMPORTANT,
+         doc_signals.ROLE_DEPRECIATION),
+        ("buyer_side_costs", "Costo a carico acquirente", SEV_CRITICAL,
+         doc_signals.ROLE_BUYER_SIDE_COST),
+        ("procedure_cancelled_costs", "Formalità cancellata dalla procedura", SEV_IMPORTANT,
+         doc_signals.ROLE_PROCEDURE_CANCELLED_FORMALITY),
     ):
         for i, row in enumerate(money.get(coll) or []):
             amt = row.get("amount")
             if amt:
                 add(f"money.{coll}[{i}]", "money", f"{label}: {row.get('label')} = {amt}",
-                    row.get("evidence_pages"), sev, "amount", amt)
+                    row.get("evidence_pages"), sev, "amount", amt, role=role)
             elif row.get("label"):
                 zero_reason = None
                 if amt == 0:
@@ -351,10 +469,20 @@ def _worksheet_facts(worksheet: Dict[str, Any]) -> List[Dict[str, Any]]:
     for i, row in enumerate(money.get("uncertain_money") or []):
         amt = row.get("amount")
         if amt:
+            # A row the analyst could not role-classify may still have a CLEAR
+            # role from its own label (comparables, rendita, canone, spese
+            # condominiali, capitale di formalità): those render as background/
+            # context sections, not as scary "importi da verificare". The kind
+            # sets are shared with the renderer (doc_signals) by construction.
+            label_kind = doc_signals.label_kind(row.get("label"))
+            contextual = label_kind in (
+                doc_signals.COMPARATIVE_LABEL_KINDS | doc_signals.CONTEXT_LABEL_KINDS
+            )
             add(f"money.uncertain_money[{i}]", "money",
                 f"Importo incerto: {row.get('label')} = {amt}",
                 row.get("evidence_pages"), SEV_CRITICAL, "amount", amt,
-                expect=ACTION_UNCERTAINTY)
+                expect=None if contextual else ACTION_UNCERTAINTY,
+                role=doc_signals.role_for_kind(label_kind) if contextual else None)
 
     for i, item in enumerate(ws.get("legal_formalities") or []):
         add(f"legal_formalities[{i}]", "formalities",
@@ -364,7 +492,8 @@ def _worksheet_facts(worksheet: Dict[str, Any]) -> List[Dict[str, Any]]:
         if item.get("amount"):
             add(f"legal_formalities[{i}].amount", "formalities",
                 f"Importo formalità {item.get('type')}: {item.get('amount')}",
-                item.get("evidence_pages"), SEV_USEFUL, "amount", item.get("amount"))
+                item.get("evidence_pages"), SEV_USEFUL, "amount", item.get("amount"),
+                role=doc_signals.ROLE_PROCEDURE_CANCELLED_FORMALITY)
 
     for i, item in enumerate(ws.get("risk_classification") or []):
         # A generic risk card deduped into the same-area detailed compliance
@@ -393,14 +522,41 @@ def _worksheet_facts(worksheet: Dict[str, Any]) -> List[Dict[str, Any]]:
 # ---------------------------------------------------------------------------
 # Fact evaluation against the report pool
 # ---------------------------------------------------------------------------
+def _role_conflict_update(out: Dict[str, Any], role: str, conflicts: List[str]) -> Dict[str, Any]:
+    """Amount present in the report but ONLY under a different money role."""
+    role_label = doc_signals.ROLE_LABELS_IT.get(role, role)
+    strict = role in _STRICT_ROLES and out.get("severity") == SEV_CRITICAL
+    out.update({
+        "match_status": CONTRADICTED if strict else PARTIAL,
+        "report_location": ", ".join(conflicts),
+        "action": "" if strict else ACTION_BACKGROUND,
+        "role_conflict": True,
+        "software_output": (
+            f"Importo presente nel report ma con un ruolo diverso ({', '.join(conflicts)})"
+        ),
+        "reason": (
+            f"Il documento indica questo importo come '{role_label}', ma il report "
+            "lo espone con un ruolo diverso: la copertura richiede che importo E "
+            "ruolo coincidano."
+        ),
+    })
+    return out
+
+
 def _evaluate_fact(fact: Dict[str, Any], pool: ReportPool) -> Dict[str, Any]:
     kind = fact["check_kind"]
     value = fact["check_value"]
+    role = fact.get("role")
+    role_conflicts: List[str] = []
     if kind == "amount":
         try:
-            sections = pool.find_amount(float(value))
+            amount = float(value)
         except (TypeError, ValueError):
             sections = []
+        else:
+            sections = pool.find_amount(amount, role)
+            if not sections and role:
+                role_conflicts = pool.find_amount_role_conflicts(amount, role)
     elif kind == "tokens":
         sections = pool.find_tokens([v for v in (value or []) if v])
     elif kind == "overlap":
@@ -421,6 +577,8 @@ def _evaluate_fact(fact: Dict[str, Any], pool: ReportPool) -> Dict[str, Any]:
     out.pop("fallback_tokens", None)
     preset_reason = out.pop("preset_reason", None)
     expected = out.pop("expected_action", None)
+    if not action and role_conflicts:
+        return _role_conflict_update(out, role, role_conflicts)
     if via_fallback and action:
         out.update({
             "match_status": PARTIAL,
@@ -490,9 +648,10 @@ def _finalize_missing(fact: Dict[str, Any]) -> Dict[str, Any]:
 # Page signals evaluation (document -> report)
 # ---------------------------------------------------------------------------
 def _evaluate_money_signal(
-    sig: Dict[str, Any], pool: ReportPool, kind_covered: Dict[str, bool]
+    sig: Dict[str, Any], pool: ReportPool, role_covered: Dict[str, bool]
 ) -> Dict[str, Any]:
-    sections = pool.find_amount(sig["amount"])
+    role = sig.get("role") or doc_signals.role_for_kind(sig.get("kind"))
+    sections = pool.find_amount(sig["amount"], role)
     action, location = _classify_sections(sections)
     fact = {
         "fact_id": sig["signal_id"],
@@ -501,6 +660,7 @@ def _evaluate_money_signal(
         "evidence_pages": [sig["page"]],
         "severity": sig["severity"],
         "source": "page_money",
+        "role": role,
         "snippet": sig.get("snippet"),
     }
     if action:
@@ -510,9 +670,14 @@ def _evaluate_money_signal(
             "reason": "",
         })
         return fact
+    # Amount present in the report but ONLY under a different role: never
+    # counted as covered. Critical value roles contradict (gate FAIL).
+    role_conflicts = pool.find_amount_role_conflicts(sig["amount"], role)
+    if role_conflicts:
+        return _role_conflict_update(fact, role, role_conflicts)
     # Amount not in report. If the same money concept IS covered with another
     # (the perito's final) amount, this is a detail line, not a silent loss.
-    if kind_covered.get(sig["kind"]):
+    if role_covered.get(role):
         fact.update({
             "match_status": PARTIAL, "action": ACTION_BACKGROUND, "report_location": "",
             "software_output": "Il report riporta il valore finale del perito per questa grandezza",
@@ -571,18 +736,20 @@ def _evaluate_topic_signal(sig: Dict[str, Any], pool: ReportPool) -> Dict[str, A
     return _finalize_missing(fact)
 
 
-def _money_kind_coverage(signals: List[Dict[str, Any]], pool: ReportPool) -> Dict[str, bool]:
+def _money_role_coverage(signals: List[Dict[str, Any]], pool: ReportPool) -> Dict[str, bool]:
+    """role -> True if at least one document amount of that role is in the report
+    UNDER that same role (role-aware, never amount-only)."""
     covered: Dict[str, bool] = {}
     for sig in signals:
         if sig["signal_type"] != "money":
             continue
-        kind = sig["kind"]
-        if covered.get(kind):
+        role = sig.get("role") or doc_signals.role_for_kind(sig.get("kind"))
+        if covered.get(role):
             continue
-        if pool.find_amount(sig["amount"]):
-            covered[kind] = True
+        if pool.find_amount(sig["amount"], role):
+            covered[role] = True
         else:
-            covered.setdefault(kind, False)
+            covered.setdefault(role, False)
     return covered
 
 
@@ -628,13 +795,13 @@ def _selection_facts(
     for lot in (lot_index or {}).get("lots") or []:
         lid = lot.get("lot_id")
         money = lot.get("money") or {}
-        for field, label in (
-            ("market_value", "Valore di mercato"),
-            ("current_state_value", "Valore nello stato di fatto"),
-            ("sale_value", "Valore di vendita giudiziaria"),
-            ("prezzo_base_asta", "Prezzo base d'asta"),
-            ("offerta_minima", "Offerta minima"),
-            ("cauzione", "Cauzione"),
+        for field, label, role in (
+            ("market_value", "Valore di mercato", doc_signals.ROLE_MARKET_VALUE),
+            ("current_state_value", "Valore nello stato di fatto", doc_signals.ROLE_STATE_OF_FACT_VALUE),
+            ("sale_value", "Valore di vendita giudiziaria", doc_signals.ROLE_JUDICIAL_SALE_VALUE),
+            ("prezzo_base_asta", "Prezzo base d'asta", doc_signals.ROLE_AUCTION_BASE_PRICE),
+            ("offerta_minima", "Offerta minima", doc_signals.ROLE_MINIMUM_BID),
+            ("cauzione", "Cauzione", doc_signals.ROLE_AUCTION_DEPOSIT),
         ):
             value = money.get(field)
             amount = value.get("amount") if isinstance(value, dict) else value
@@ -651,6 +818,7 @@ def _selection_facts(
                     "check_kind": "amount",
                     "check_value": amount,
                     "expected_action": None,
+                    "role": role,
                 })
     return facts
 
@@ -679,7 +847,7 @@ def build_coverage_audit(
     selection_mode = (customer_report or {}).get("report_status") == "LOT_SELECTION_REQUIRED"
 
     signals = doc_signals.extract_page_signals(pages or [])
-    kind_covered = _money_kind_coverage(signals, pool)
+    role_covered = _money_role_coverage(signals, pool)
 
     fact_coverage: List[Dict[str, Any]] = []
 
@@ -690,12 +858,29 @@ def build_coverage_audit(
             else:
                 fact_coverage.append(_maybe_finalize(_evaluate_fact(fact, pool)))
         # In selection mode only VALUE money signals are audited page-side: the
-        # detailed analysis happens after a lot is chosen (never blended).
+        # detailed analysis happens after a lot is chosen (never blended). A
+        # page value that is absent from the SELECTOR is not a loss — it is
+        # analyzed in the per-lot report after selection (whose own gate then
+        # requires it) — so it defers visibly instead of blocking. Lot-index
+        # money preservation (selection facts above) stays CRITICAL.
         for sig in signals:
             if sig["signal_type"] == "money" and sig["kind"] in doc_signals.VALUE_KINDS:
-                fact = _evaluate_money_signal(sig, pool, kind_covered)
-                if fact["match_status"] == MISSING and not fact.get("action"):
-                    fact = _finalize_missing(fact)
+                fact = _evaluate_money_signal(sig, pool, role_covered)
+                if fact["match_status"] in (MISSING, CONTRADICTED) and fact.get(
+                    "action"
+                ) in ("", ACTION_BLOCKED):
+                    fact.update({
+                        "match_status": PARTIAL,
+                        "action": ACTION_BACKGROUND,
+                        "software_output": (
+                            "Valore analizzato in dettaglio dopo la selezione del lotto"
+                        ),
+                        "reason": (
+                            "Valore di dettaglio presente nel documento: l'analisi "
+                            "completa avviene dopo la selezione del lotto (nessun "
+                            "dato viene fuso tra lotti)."
+                        ),
+                    })
                 fact_coverage.append(fact)
             else:
                 fact_coverage.append({
@@ -719,7 +904,7 @@ def build_coverage_audit(
             fact_coverage.append(_maybe_finalize(_evaluate_fact(fact, pool)))
         for sig in signals:
             if sig["signal_type"] == "money":
-                fact_coverage.append(_evaluate_money_signal(sig, pool, kind_covered))
+                fact_coverage.append(_evaluate_money_signal(sig, pool, role_covered))
             else:
                 fact_coverage.append(_evaluate_topic_signal(sig, pool))
 
@@ -796,7 +981,7 @@ def _maybe_finalize(fact: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def _omission_view(fact: Dict[str, Any]) -> Dict[str, Any]:
-    return {
+    view = {
         "fact_id": fact["fact_id"],
         "category": fact["category"],
         "document_fact": fact["document_fact"],
@@ -805,6 +990,11 @@ def _omission_view(fact: Dict[str, Any]) -> Dict[str, Any]:
         "match_status": fact["match_status"],
         "reason": fact.get("reason") or "",
     }
+    if fact.get("role"):
+        view["role"] = fact["role"]
+    if fact.get("role_conflict"):
+        view["role_conflict"] = True
+    return view
 
 
 # ---------------------------------------------------------------------------
@@ -860,7 +1050,7 @@ def _build_page_audit(
         if sig.get("amount") is not None:
             dato = f"{sig['label']}: € {sig['amount']:,.2f}".replace(
                 ",", "|").replace(".", ",").replace("|", ".")
-        rows.append({
+        row = {
             "page": page,
             "dato_perizia": dato,
             "snippet": sig.get("snippet") or "",
@@ -869,7 +1059,11 @@ def _build_page_audit(
             "esito": esito,
             "severity": fact["severity"],
             "note": fact.get("reason") or "",
-        })
+        }
+        if fact.get("role"):
+            row["ruolo"] = fact["role"]
+            row["ruolo_label"] = doc_signals.ROLE_LABELS_IT.get(fact["role"], fact["role"])
+        rows.append(row)
 
     page_summary = []
     known_pages = sorted(per_page)
