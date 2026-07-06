@@ -172,4 +172,157 @@ describe('CustomerReportView', () => {
     await render();
     expect(container.querySelector('[data-testid="cv2-customer-unavailable"]')).toBeTruthy();
   });
+
+  test('shows a preparing state (not unavailable) while the backend generates the report', async () => {
+    getCorrectnessV2CustomerView.mockResolvedValue({
+      data: { available: false, preparing: true, reason_code: 'NO_CUSTOMER_REPORT' },
+    });
+    await render();
+    expect(container.querySelector('[data-testid="cv2-customer-preparing"]')).toBeTruthy();
+    expect(container.querySelector('[data-testid="cv2-customer-unavailable"]')).toBeNull();
+    expect(text()).toContain('in preparazione');
+  });
+
+  test('selecting a lot with no report keeps the customer flow (pending box + back to lots)', async () => {
+    getCorrectnessV2CustomerView
+      .mockResolvedValueOnce({ data: { available: true, report: lotSelectionReport } })
+      .mockResolvedValueOnce({ data: { available: false, preparing: true, reason_code: 'NO_CUSTOMER_REPORT' } })
+      .mockResolvedValueOnce({ data: { available: true, report: lotSelectionReport } });
+
+    await render();
+    await click('[data-testid="cv2-customer-lot-view-2"]');
+
+    expect(container.querySelector('[data-testid="cv2-customer-lot-pending"]')).toBeTruthy();
+    expect(text()).toContain('in preparazione');
+
+    await click('[data-testid="cv2-customer-back-to-lots"]');
+    expect(container.querySelector('[data-testid="cv2-customer-lot-selector"]')).toBeTruthy();
+  });
+
+  test('evidence: curated preview by default, full list behind an explicit toggle', async () => {
+    const manyEvidence = Array.from({ length: 20 }, (_, i) => ({
+      page: i + 1,
+      topic: `Tema ${i + 1}`,
+      report_section: `Sezione ${i % 4}`,
+      perizia_excerpt: `Estratto numero ${i + 1}.`,
+    }));
+    getCorrectnessV2CustomerView.mockResolvedValue({
+      data: { available: true, report: { ...sanitizedReport, customer_evidence_index: manyEvidence } },
+    });
+    await render();
+
+    const evidenceSection = container.querySelector('[data-testid="cv2-customer-evidence"]');
+    expect(evidenceSection).toBeTruthy();
+    // Preview is curated: far fewer items than the full index.
+    expect(evidenceSection.textContent).not.toContain('Estratto numero 20');
+    const toggle = container.querySelector('[data-testid="cv2-customer-evidence-toggle"]');
+    expect(toggle.textContent).toContain('Mostra tutte le evidenze (20)');
+
+    await click('[data-testid="cv2-customer-evidence-toggle"]');
+    expect(container.querySelector('[data-testid="cv2-customer-evidence"]').textContent).toContain('Estratto numero 20');
+  });
+
+  test('evidence without an excerpt shows a graceful fallback line', async () => {
+    getCorrectnessV2CustomerView.mockResolvedValue({
+      data: {
+        available: true,
+        report: {
+          ...sanitizedReport,
+          customer_evidence_index: [{ page: 7, topic: 'Documentazione', perizia_excerpt: null }],
+        },
+      },
+    });
+    await render();
+    expect(container.querySelector('[data-testid="cv2-customer-evidence"]').textContent)
+      .toContain('Estratto non disponibile automaticamente');
+  });
+
+  test('identity facts render once: duplicated key facts are suppressed', async () => {
+    getCorrectnessV2CustomerView.mockResolvedValue({
+      data: {
+        available: true,
+        report: {
+          ...sanitizedReport,
+          key_facts: [
+            { label: 'Tribunale', value: 'Tribunale di Torino' },
+            { label: 'Valore di vendita giudiziaria', value_display: 'EUR 38.110,20' },
+            { label: 'Superficie commerciale', value_display: '95 mq' },
+          ],
+        },
+      },
+    });
+    await render();
+    const body = text();
+    // The duplicated identity fact appears exactly once (identity grid only).
+    expect(body.split('Tribunale di Torino').length - 1).toBe(1);
+    // The money amount renders in the money section, not duplicated as a key fact card.
+    const summary = container.querySelector('[data-testid="cv2-customer-summary"]');
+    expect(summary.textContent).not.toContain('EUR 38.110,20');
+    // A genuinely new fact is kept.
+    expect(summary.textContent).toContain('95 mq');
+  });
+
+  test('compliance cards show a normalized status badge and support excerpt when available', async () => {
+    getCorrectnessV2CustomerView.mockResolvedValue({
+      data: {
+        available: true,
+        report: {
+          ...sanitizedReport,
+          compliance_section: [
+            { area: 'Conformità urbanistica', classification: 'conforming', status_label: 'conforme secondo la perizia', evidence_pages: [8] },
+            { area: 'Regolarità edilizia', classification: 'regularizable', cost_display: '€ 20.000,00', evidence_pages: [34] },
+          ],
+          customer_evidence_index: [
+            { page: 8, topic: 'conformità urbanistica', report_section: 'Conformità e documenti tecnici', perizia_excerpt: 'immobile conforme al PRGC' },
+          ],
+        },
+      },
+    });
+    await render();
+    const compliance = container.querySelector('[data-testid="cv2-customer-compliance"]');
+    expect(compliance.textContent).toContain('conforme secondo la perizia');
+    expect(compliance.textContent).toContain('Regolarizzabile');
+    expect(compliance.textContent).toContain('€ 20.000,00');
+    // Verbatim support line pulled from the evidence index by page+topic match.
+    expect(compliance.textContent).toContain('immobile conforme al PRGC');
+  });
+
+  test('checklist is capped with the rest behind a collapse', async () => {
+    const checklist = Array.from({ length: 12 }, (_, i) => ({
+      action: 'Verificare',
+      detail: `punto numero ${i + 1}`,
+    }));
+    getCorrectnessV2CustomerView.mockResolvedValue({
+      data: { available: true, report: { ...sanitizedReport, buyer_checklist: checklist } },
+    });
+    await render();
+    const section = container.querySelector('[data-testid="cv2-customer-checklist"]');
+    expect(section.textContent).toContain('punto numero 8');
+    expect(section.textContent).toContain('Altre verifiche (4)');
+  });
+
+  test('sections with no data are omitted instead of rendering empty clutter', async () => {
+    getCorrectnessV2CustomerView.mockResolvedValue({
+      data: {
+        available: true,
+        report: {
+          ...sanitizedReport,
+          occupancy_section: {},
+          formalities_section: [],
+          money_sections: { valuation_chain: [], auction_terms: [], buyer_side_costs: [], procedure_cancelled_formalities: [], uncertain_money: [] },
+          compliance_section: [],
+          buyer_checklist: [],
+          customer_evidence_index: [],
+        },
+      },
+    });
+    await render();
+    expect(container.querySelector('[data-testid="cv2-customer-occupancy"]')).toBeNull();
+    expect(container.querySelector('[data-testid="cv2-customer-money"]')).toBeNull();
+    expect(container.querySelector('[data-testid="cv2-customer-costs"]')).toBeNull();
+    expect(container.querySelector('[data-testid="cv2-customer-formalities"]')).toBeNull();
+    expect(container.querySelector('[data-testid="cv2-customer-compliance"]')).toBeNull();
+    expect(container.querySelector('[data-testid="cv2-customer-checklist"]')).toBeNull();
+    expect(container.querySelector('[data-testid="cv2-customer-evidence"]')).toBeNull();
+  });
 });

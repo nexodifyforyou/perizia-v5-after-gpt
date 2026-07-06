@@ -1607,13 +1607,18 @@ const AnalysisResult = () => {
   // tabs, so the page's hide-legacy decision never diverges from what renders.
   const isExactAdmin = Boolean(user?.correctness_v2_admin_view);
   const correctnessV2 = useCorrectnessV2CustomerView(analysisId);
-  const hasSafeV2 = correctnessV2.available === true;
+  // `lotUnavailable` keeps the surface mounted while a customer navigates the
+  // lot flow (selected lot report missing / being prepared): the customer must
+  // stay inside the V2 surface (pending box + back to lots), never bounced to
+  // the legacy report mid-flow.
+  const hasSafeV2 = correctnessV2.available === true || correctnessV2.lotUnavailable === true;
   const v2Resolved = !correctnessV2.loading;
   const [legacyReveal, setLegacyReveal] = useState(false);
   const correctnessV2Visibility = computeCorrectnessV2Visibility({
     isExactAdmin,
     hasSafeV2,
     v2Resolved,
+    v2Preparing: correctnessV2.preparing === true,
     legacyReveal,
   });
 
@@ -3915,6 +3920,25 @@ const AnalysisResult = () => {
           <div className="mb-8 flex items-center gap-2 rounded-xl border border-zinc-800 bg-zinc-900 p-5 text-sm text-zinc-400">
             <div className="w-4 h-4 border-2 border-zinc-600 border-t-transparent rounded-full animate-spin" />
             Caricamento report…
+          </div>
+        )}
+
+        {/* While a V2 job runs for this analysis (auto-started on upload or by
+            a lot selection), tell the user the final customer report is being
+            prepared so the legacy fallback below is never mistaken for it. */}
+        {correctnessV2Visibility.showPreparingBanner && (
+          <div
+            data-testid="cv2-preparing-banner"
+            className="mb-6 flex items-start gap-3 rounded-xl border border-gold/30 bg-gradient-to-r from-gold/10 to-transparent p-4"
+          >
+            <div className="mt-0.5 h-4 w-4 shrink-0 animate-spin rounded-full border-2 border-gold border-t-transparent" />
+            <div>
+              <p className="text-sm font-semibold text-zinc-100">Report cliente in preparazione</p>
+              <p className="mt-0.5 text-sm text-zinc-400">
+                Stiamo generando il report definitivo per questa analisi: comparirà qui automaticamente
+                appena pronto. Nel frattempo puoi consultare l'anteprima qui sotto.
+              </p>
+            </div>
           </div>
         )}
 

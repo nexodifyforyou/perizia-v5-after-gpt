@@ -13,11 +13,13 @@
 //   isExactAdmin  exact-email operator (user.correctness_v2_admin_view)
 //   hasSafeV2     a safe sanitized V2 customer report is available
 //   v2Resolved    the availability probe has finished (avoids legacy flash)
+//   v2Preparing   a V2 job is running for this analysis (report on its way)
 //   legacyReveal  exact admin toggled the opt-in legacy inspection panel
 export const computeCorrectnessV2Visibility = ({
   isExactAdmin = false,
   hasSafeV2 = false,
   v2Resolved = false,
+  v2Preparing = false,
   legacyReveal = false,
 } = {}) => {
   // The V2 surface (tabs) renders for the exact admin always, and for anyone
@@ -39,12 +41,19 @@ export const computeCorrectnessV2Visibility = ({
   // the page is never blank and never briefly shows the wrong report.
   const showLoadingPlaceholder = Boolean(!v2Resolved && !isExactAdmin);
 
+  // While a V2 job is running and no safe report exists yet, the legacy
+  // fallback stays readable but a prominent banner tells the user the final
+  // customer report is being prepared, so legacy is never mistaken for the
+  // final product.
+  const showPreparingBanner = Boolean(v2Resolved && !hasSafeV2 && v2Preparing);
+
   return {
     showV2Surface,
     showLegacyBody,
     canRevealLegacy,
     legacyFallback,
     showLoadingPlaceholder,
+    showPreparingBanner,
   };
 };
 

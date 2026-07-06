@@ -616,9 +616,14 @@ def _detect_accessories(
     """Accessory/pertinenza units named by the document (soffitta, cantina...).
 
     Sources, in order: the contract's own text fields, then the page text of
-    THIS analysis (document truth, same precedent as surfaces). Only concrete
-    accessory nouns are reported; bare 'pertinenza/accessorio' wording alone is
-    not an accessory name and is ignored.
+    THIS analysis — but ONLY the pages the contract already ties to the
+    property identity (case_identity / lot evidence pages). Scanning the whole
+    document would inflate the property with accessory nouns mentioned in
+    unrelated contexts (market comparables, neighbouring units, formality
+    descriptions), so pages outside the identity evidence are never trusted as
+    proof that an accessory belongs to this property. Only concrete accessory
+    nouns are reported; bare 'pertinenza/accessorio' wording alone is not an
+    accessory name and is ignored.
     """
     found: Dict[str, Dict[str, Any]] = {}
 
@@ -645,9 +650,12 @@ def _detect_accessories(
     for item in contract.get("buyer_action_checklist") or []:
         scan(f"{item.get('action') or ''} {item.get('detail') or ''}", item.get("evidence_pages"))
 
+    identity_pages = set(_pages(ci_pages))
+    lot = contract.get("lot_summary") or {}
+    identity_pages.update(_pages(lot.get("evidence_pages")))
     for page in pages or []:
         pnum = doc_signals.page_number(page)
-        if pnum is None:
+        if pnum is None or pnum not in identity_pages:
             continue
         scan(page.get("text"), [pnum])
 
