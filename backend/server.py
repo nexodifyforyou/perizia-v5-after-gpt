@@ -16653,6 +16653,25 @@ async def analyze_perizia(request: Request, file: UploadFile = File(...)):
         await db.perizia_analyses.insert_one(analysis_dict)
         logger.info(f"[{request_id}] persist_done analysis_id={analysis_id}")
 
+        # Correctness V2 product path: when auto-start is enabled, every new
+        # analysis also gets a V2 job in the background so the customer lands
+        # on the V2 customer report (legacy stays the fallback only). Never
+        # blocks or fails the upload response.
+        if analysis_dict.get("status") == "COMPLETED":
+            try:
+                from correctness_v2 import api as correctness_v2_api
+
+                spawned = correctness_v2_api.autostart_job(
+                    analysis_id, uploaded_pages_count, reason="upload"
+                )
+                logger.info(
+                    f"[{request_id}] correctness_v2_autostart analysis_id={analysis_id} spawned={spawned}"
+                )
+            except Exception as autostart_err:
+                logger.warning(
+                    f"[{request_id}] correctness_v2_autostart_failed analysis_id={analysis_id} err={autostart_err}"
+                )
+
         # Decrement exact perizia credits band only after successful persistence.
         await _apply_perizia_credit_debit_with_ledger(
             user,

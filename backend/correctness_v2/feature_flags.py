@@ -21,6 +21,7 @@ from typing import Optional
 # Canonical flag names -------------------------------------------------------
 FLAG_ENABLED = "CORRECTNESS_V2_ENABLED"
 FLAG_ADMIN_ONLY = "CORRECTNESS_V2_ADMIN_ONLY"
+FLAG_AUTO_START = "CORRECTNESS_V2_AUTO_START"
 FLAG_SHADOW_MODE = "CORRECTNESS_V2_SHADOW_MODE"
 FLAG_NO_OLD_FALLBACK = "CORRECTNESS_V2_NO_OLD_FALLBACK"
 FLAG_JOB_MODE = "CORRECTNESS_JOB_MODE"
@@ -70,6 +71,19 @@ def is_admin_only() -> bool:
     return _env_bool(FLAG_ADMIN_ONLY, True)
 
 
+def auto_start_enabled() -> bool:
+    """Whether new perizia analyses automatically start a Correctness v2 job.
+
+    Auto-start is a product-level (server-initiated) behavior: it makes the V2
+    customer report the primary product path for new uploads. It requires the
+    feature itself to be enabled and is OFF by default (safe rollout).
+    ``CORRECTNESS_V2_ADMIN_ONLY`` does NOT gate it: that flag only restricts the
+    *manual* start/inspection endpoints, while auto-start runs as the system on
+    behalf of the product.
+    """
+    return is_enabled() and _env_bool(FLAG_AUTO_START, False)
+
+
 def is_shadow_mode() -> bool:
     return _env_bool(FLAG_SHADOW_MODE, True)
 
@@ -94,6 +108,7 @@ def snapshot() -> dict:
     return {
         FLAG_ENABLED: is_enabled(),
         FLAG_ADMIN_ONLY: is_admin_only(),
+        FLAG_AUTO_START: auto_start_enabled(),
         FLAG_SHADOW_MODE: is_shadow_mode(),
         FLAG_NO_OLD_FALLBACK: no_old_fallback(),
         FLAG_JOB_MODE: job_mode(),

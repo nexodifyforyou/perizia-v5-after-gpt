@@ -30,10 +30,13 @@ const CorrectnessV2Tabs = ({ analysisId, canSeeAdminTab = false, customerState }
   const visibleTabs = showAdminTab ? ['customer', 'admin'] : ['customer'];
 
   return (
-    <section className="mb-8 space-y-4 rounded-lg border border-gold/30 bg-zinc-900/80 p-4 sm:p-5">
+    <section className="mb-8 space-y-4 rounded-xl border border-gold/25 bg-gradient-to-b from-zinc-900/90 to-zinc-950/80 p-4 sm:p-5">
       <div className="flex flex-wrap items-center gap-2">
-        <p className="mr-2 text-[11px] font-mono uppercase text-gold">Correctness Mode V2</p>
-        <div role="tablist" aria-label="Correctness V2" className="flex gap-1 rounded-lg border border-zinc-800 bg-zinc-950 p-1">
+        {/* Internal mode name is admin-facing only; customers just see the report. */}
+        {showAdminTab && (
+          <p className="mr-2 text-[11px] font-mono uppercase text-gold">Correctness Mode V2</p>
+        )}
+        <div role="tablist" aria-label="Report" className="flex gap-1 rounded-lg border border-zinc-800 bg-zinc-950 p-1">
           {visibleTabs.map((key) => {
             const tab = TABS[key];
             const Icon = tab.icon;

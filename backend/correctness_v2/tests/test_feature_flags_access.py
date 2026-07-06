@@ -10,6 +10,7 @@ def clear_flags(monkeypatch):
     for name in [
         feature_flags.FLAG_ENABLED,
         feature_flags.FLAG_ADMIN_ONLY,
+        feature_flags.FLAG_AUTO_START,
         feature_flags.FLAG_SHADOW_MODE,
         feature_flags.FLAG_NO_OLD_FALLBACK,
         feature_flags.FLAG_JOB_MODE,
@@ -26,6 +27,26 @@ def test_safe_defaults():
     assert feature_flags.no_old_fallback() is True
     assert feature_flags.job_mode() == "async"
     assert feature_flags.max_runtime_seconds() == 0
+
+
+def test_auto_start_default_off():
+    assert feature_flags.auto_start_enabled() is False
+
+
+def test_auto_start_requires_feature_enabled(monkeypatch):
+    monkeypatch.setenv(feature_flags.FLAG_AUTO_START, "true")
+    # Feature itself disabled -> auto-start never fires.
+    assert feature_flags.auto_start_enabled() is False
+    monkeypatch.setenv(feature_flags.FLAG_ENABLED, "true")
+    assert feature_flags.auto_start_enabled() is True
+
+
+def test_auto_start_not_gated_by_admin_only(monkeypatch):
+    # ADMIN_ONLY restricts the manual endpoints, not the product auto-start.
+    monkeypatch.setenv(feature_flags.FLAG_ENABLED, "true")
+    monkeypatch.setenv(feature_flags.FLAG_ADMIN_ONLY, "true")
+    monkeypatch.setenv(feature_flags.FLAG_AUTO_START, "true")
+    assert feature_flags.auto_start_enabled() is True
 
 
 def test_disabled_blocks_access_even_for_admin():

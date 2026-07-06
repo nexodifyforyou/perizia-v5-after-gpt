@@ -212,6 +212,30 @@ def test_accessory_renders_under_main_bene():
     assert report["lot_structure"]["bene_count"] == 1
 
 
+def test_accessory_mentions_outside_identity_pages_are_ignored():
+    """Anti-inflation: accessory nouns on pages the contract does NOT tie to
+    the property identity (comparables, neighbouring units, formality text)
+    must never become accessories of the main bene."""
+    pages = copy.deepcopy(GENERIC_PERIZIA_PAGES)
+    # Identity evidence is page 1 only; put accessory nouns on other pages.
+    pages[1]["text"] += (
+        " Nella zona i box auto e le cantine di immobili comparabili si vendono "
+        "a prezzi medi; l'unità adiacente dispone di autorimessa e magazzino."
+    )
+    pages.append(
+        {
+            "page_number": 3,
+            "text": "Analisi di mercato: garage e posti auto in vendita nel quartiere.",
+        }
+    )
+    ws, vr, lr, contract, report = _build(pages, make_worksheet())
+    beni = report["beni_sections"]
+    assert len(beni) == 1
+    labels = {a["label"] for a in beni[0].get("accessories") or []}
+    for inflated in ("box auto", "cantina", "autorimessa", "magazzino", "garage", "posto auto"):
+        assert inflated not in labels
+
+
 def test_explicit_multi_bene_structure_untouched():
     from .sample_perizia import make_multibene_single_lot_worksheet
 

@@ -18,14 +18,100 @@ subsystem isolated. This file never references the old analyzer.
 
 from __future__ import annotations
 
+import logging
+import threading
 from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, HTTPException, Request
 
 from . import artifacts, customer_view, feature_flags, job_status, openai_client
 from .orchestrator import start_job
+from .schemas import JobStatus
 
 router = APIRouter(prefix="/analysis/perizia", tags=["correctness_v2"])
+
+logger = logging.getLogger(__name__)
+
+# Statuses of a job that is still working towards a report. Everything else is
+# terminal (a report, a controlled stop, or a diagnosed failure).
+_IN_PROGRESS_STATUSES = frozenset(
+    {
+        JobStatus.QUEUED,
+        JobStatus.RUNNING,
+        JobStatus.PDF_QUALITY_OK,
+        JobStatus.PDF_QUALITY_WARNING,
+    }
+)
+
+
+def _is_in_progress_status(status: Any) -> bool:
+    return str(status or "") in _IN_PROGRESS_STATUSES
+
+
+def _has_in_progress_job(analysis_id: str) -> bool:
+    latest = artifacts.latest_job_for_analysis(analysis_id)
+    return bool(latest) and _is_in_progress_status(latest.get("status"))
+
+
+# ---------------------------------------------------------------------------
+# System auto-start (product path): run a V2 job in the background for a new
+# analysis, or for a customer-selected lot that has no report yet. Never blocks
+# the caller, never raises, and refuses to stack jobs on a running analysis.
+# ---------------------------------------------------------------------------
+def autostart_job(
+    analysis_id: str,
+    pages_count: int,
+    *,
+    selected_lot_id: Optional[str] = None,
+    reason: str = "upload",
+) -> bool:
+    """Spawn a background Correctness v2 job for ``analysis_id``.
+
+    Returns True when a job was actually spawned (or one is already running),
+    False when auto-start is disabled or spawning failed. Safe to call from any
+    request handler: all failures are logged and swallowed.
+    """
+    if not feature_flags.auto_start_enabled():
+        return False
+    try:
+        if _has_in_progress_job(analysis_id):
+            return True
+
+        def _run() -> None:
+            try:
+                import server  # type: ignore  # lazy: avoid circular import
+
+                def _page_loader(aid: str) -> List[Dict[str, Any]]:
+                    return server._load_pages_for_analysis(aid, pages_count)
+
+                start_job(
+                    analysis_id,
+                    _page_loader,
+                    is_admin=False,
+                    openai_caller=openai_client.call_openai_json,
+                    selected_lot_id=selected_lot_id,
+                )
+            except Exception:
+                logger.exception(
+                    "correctness_v2 autostart job failed analysis_id=%s", analysis_id
+                )
+
+        thread = threading.Thread(
+            target=_run,
+            name=f"cv2-autostart-{analysis_id}",
+            daemon=True,
+        )
+        thread.start()
+        logger.info(
+            "correctness_v2 autostart spawned analysis_id=%s lot=%s reason=%s",
+            analysis_id,
+            selected_lot_id,
+            reason,
+        )
+        return True
+    except Exception:
+        logger.exception("correctness_v2 autostart spawn failed analysis_id=%s", analysis_id)
+        return False
 
 
 async def _resolve_user_and_guard(request: Request):
@@ -246,6 +332,19 @@ async def _resolve_customer_access(request: Request, analysis_id: str):
     return user, is_admin
 
 
+async def _analysis_pages_count(analysis_id: str) -> int:
+    """pages_count for an analysis, or 0 when unknown. Never raises."""
+    try:
+        import server  # type: ignore
+
+        record = await server.db.perizia_analyses.find_one(
+            {"analysis_id": analysis_id}, {"_id": 0, "pages_count": 1}
+        )
+        return int((record or {}).get("pages_count") or 0)
+    except Exception:
+        return 0
+
+
 def _find_customer_job(analysis_id: str, selected_lot_id: Optional[str] = None):
     """Latest customer-safe (job_status, customer_report) for an analysis.
 
@@ -286,14 +385,32 @@ async def correctness_v2_customer_view(analysis_id: str, request: Request) -> Di
 
     status, report = _find_customer_job(analysis_id, selected_lot_id)
     if not report:
+        # No safe report (yet). Tell the client whether one is being prepared,
+        # so the UI can show a "report in preparazione" state instead of
+        # silently presenting the legacy report as the final product.
+        preparing = _has_in_progress_job(analysis_id)
+        if not preparing and selected_lot_id is not None:
+            # A customer picked a lot that was never analyzed: when auto-start
+            # is enabled, the product generates that lot's report on demand
+            # (same pipeline the admin would run; no admin controls needed).
+            pages_count = await _analysis_pages_count(analysis_id)
+            if pages_count > 0:
+                preparing = autostart_job(
+                    analysis_id,
+                    pages_count,
+                    selected_lot_id=selected_lot_id,
+                    reason="customer_lot_selection",
+                )
         return {
             "available": False,
             "selected_lot_id": selected_lot_id,
+            "preparing": bool(preparing),
             "reason_code": "NO_CUSTOMER_REPORT",
         }
     return {
         "available": True,
         "selected_lot_id": selected_lot_id,
+        "preparing": False,
         "report": customer_view.sanitize_customer_report(report, status),
     }
 

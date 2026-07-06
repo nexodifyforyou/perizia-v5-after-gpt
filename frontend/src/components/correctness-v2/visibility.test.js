@@ -82,6 +82,39 @@ describe('computeCorrectnessV2Visibility', () => {
     expect(v.showLegacyBody).toBe(false);
   });
 
+  test('V2 job preparing, no safe report yet: banner + legacy fallback stays readable', () => {
+    const v = computeCorrectnessV2Visibility({
+      isExactAdmin: false,
+      hasSafeV2: false,
+      v2Resolved: true,
+      v2Preparing: true,
+    });
+    expect(v.showPreparingBanner).toBe(true);
+    expect(v.showLegacyBody).toBe(true);
+    expect(v.showV2Surface).toBe(false);
+  });
+
+  test('safe V2 available: no preparing banner even if a rerun is in flight', () => {
+    const v = computeCorrectnessV2Visibility({
+      isExactAdmin: false,
+      hasSafeV2: true,
+      v2Resolved: true,
+      v2Preparing: true,
+    });
+    expect(v.showPreparingBanner).toBe(false);
+    expect(v.showLegacyBody).toBe(false);
+  });
+
+  test('probe unresolved: no preparing banner (placeholder covers it)', () => {
+    const v = computeCorrectnessV2Visibility({
+      isExactAdmin: false,
+      hasSafeV2: false,
+      v2Resolved: false,
+      v2Preparing: true,
+    });
+    expect(v.showPreparingBanner).toBe(false);
+  });
+
   test('lot selection (LOT_SELECTION_REQUIRED is safe): customer surface, no legacy underneath', () => {
     // The hook reports available=true for LOT_SELECTION_REQUIRED, so hasSafeV2
     // is true and the legacy report stays hidden while the lot selector shows.
