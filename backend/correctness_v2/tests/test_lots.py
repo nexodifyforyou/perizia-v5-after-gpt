@@ -51,6 +51,25 @@ def test_lot_enumeration_parsed():
     assert lots.lot_ids_in_text("lotto unico") == ["unico"]
 
 
+def test_zero_lot_id_is_footer_noise_not_a_lot():
+    # Lots are 1-indexed: "Lotto 00" is an authoring-tool footer artifact
+    # ("Relazione Lotto 00 2 creata in data ..."), never a real lot.
+    assert lots._numeric_ids(lots.lot_ids_in_text("Relazione Lotto 00 2 creata in data")) == []
+    assert lots.normalize_lot_token("Lotto 00") is None
+    assert lots.normalize_lot_token("Lotto 0") is None
+    # Real lots are unaffected.
+    assert lots.normalize_lot_token("Lotto 2") == "2"
+    assert lots._numeric_ids(["1", "2"]) == ["1", "2"]
+    ws = _n(make_multilot_worksheet())
+    footer_pages = [
+        {**p, "text": p["text"] + "\nRelazione Lotto 00 2 creata in data 03/10/2025"}
+        for p in GENERIC_PERIZIA_PAGES
+    ]
+    rep = lots.build_lot_report(ws, footer_pages)
+    assert "00" not in rep["lot_ids"]
+    assert rep["lot_ids"] == ["1", "2"]
+
+
 def test_bene_is_not_a_lot():
     assert lots.bene_ids_in_text("Bene 2 - box auto") == ["2"]
     # The bare word 'bene' without a number is not counted.

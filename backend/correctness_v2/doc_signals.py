@@ -66,12 +66,17 @@ def page_number(page: Dict[str, Any]) -> Optional[int]:
 # Money amount parsing (Italian formats)
 # ---------------------------------------------------------------------------
 # "€ 43.654,20", "Euro 150.000,00", "38.110,20", "3720,00", "€150000".
+# PDF text extraction sometimes inserts a single space-like char after the
+# thousands-separator dot ("452. 494,00" instead of "452.494,00"). Tolerate one
+# optional horizontal space (incl. nbsp / narrow-nbsp / thin space) inside a
+# thousands group so grouped amounts are read whole, not split into fragments.
+_THOU = r"\.[ \u00a0\u202f\u2009]?\d{3}"
 _AMOUNT_WITH_CURRENCY_RE = re.compile(
-    r"(?:€|\beuro\b|\beur\b)\s*:?\s*(\d{1,3}(?:\.\d{3})+(?:,\d{1,2})?|\d+(?:,\d{1,2})?)",
+    r"(?:€|\beuro\b|\beur\b)\s*:?\s*(\d{1,3}(?:" + _THOU + r")+(?:,\d{1,2})?|\d+(?:,\d{1,2})?)",
     re.IGNORECASE,
 )
 # Decimal-comma or dot-grouped numbers even without a currency marker.
-_AMOUNT_BARE_RE = re.compile(r"\b(\d{1,3}(?:\.\d{3})+(?:,\d{1,2})?|\d{2,9},\d{2})\b")
+_AMOUNT_BARE_RE = re.compile(r"\b(\d{1,3}(?:" + _THOU + r")+(?:,\d{1,2})?|\d{2,9},\d{2})\b")
 _DATE_RE = re.compile(r"\d{1,2}/\d{1,2}/\d{2,4}")
 _LAW_REF_RE = re.compile(r"\b(?:n\.?|nn\.?|legge|l\.|d\.?p\.?r\.?|art\.?)\s*\d", re.IGNORECASE)
 
@@ -88,7 +93,9 @@ def parse_amount(raw: str) -> Optional[float]:
     """Parse an Italian-formatted number string to float ('43.654,20' -> 43654.2)."""
     if not raw:
         return None
-    cleaned = raw.strip().replace(".", "").replace(",", ".")
+    # Drop any whitespace (incl. nbsp/thin space PDFs insert between digit groups)
+    # before stripping the Italian thousands dot and normalizing the decimal comma.
+    cleaned = re.sub(r"\s", "", raw).replace(".", "").replace(",", ".")
     try:
         return float(cleaned)
     except ValueError:
@@ -158,19 +165,24 @@ def amounts_in_text(text: Any) -> List[Tuple[float, int, int]]:
 #   * auction terms first (most specific wording);
 #   * market COMPARABLES (OMI/borsino/annunci/listini) before the value kinds,
 #     so a listing price near "valore di mercato" wording stays a comparable;
-#   * judicial sale BEFORE state-of-fact BEFORE market: Italian perizie chain
-#     the labels ("Valore di vendita giudiziaria ... nello stato di fatto...",
-#     "Valore di mercato ... nello stato di fatto in cui si trova"), and the
-#     more specific role always wins over the generic "valore di mercato".
+#   * among the value kinds: judicial sale BEFORE market BEFORE state-of-fact.
+#     Italian perizie append the boilerplate qualifier "nello stato di fatto e
+#     di diritto in cui si trova" to essentially EVERY value line, so an
+#     explicit head value phrase must win over that trailing qualifier:
+#     "Valore di vendita giudiziaria ... nello stato di fatto" is the judicial
+#     sale value, "Valore di Mercato ... nello stato di fatto" is the market
+#     value. "Stato di fatto"/"valore di realizzo" (net realizable value in
+#     the current state, NOT the judicial sale) is the current/state value and
+#     is matched last among the value kinds.
 _MONEY_KINDS: List[Tuple[str, str, str, re.Pattern]] = [
     ("prezzo_base", SEV_CRITICAL, "Prezzo base d'asta", re.compile(r"prezzo\s+base|base\s+d'?asta")),
     ("offerta_minima", SEV_CRITICAL, "Offerta minima", re.compile(r"offerta\s+minima")),
     ("rialzo_minimo", SEV_IMPORTANT, "Rialzo minimo", re.compile(r"rialzo\s+minimo|aumento\s+minimo")),
     ("cauzione", SEV_IMPORTANT, "Cauzione", re.compile(r"cauzione")),
     ("comparativo", SEV_BACKGROUND, "Comparativo di mercato", re.compile(r"\bomi\b|borsin|annunc|comparabil|comparativ|listino|quotazion")),
-    ("valore_vendita", SEV_CRITICAL, "Valore di vendita giudiziaria", re.compile(r"vendita\s+giudiziari|valore\s+di\s+vendita|prezzo\s+di\s+vendita|valore\s+giudiziario|valore\s+di\s+realizzo")),
-    ("valore_stato", SEV_CRITICAL, "Valore nello stato di fatto", re.compile(r"stato\s+di\s+fatto")),
+    ("valore_vendita", SEV_CRITICAL, "Valore di vendita giudiziaria", re.compile(r"vendita\s+giudiziari|valore\s+di\s+vendita|prezzo\s+di\s+vendita|valore\s+giudiziario")),
     ("valore_mercato", SEV_CRITICAL, "Valore di mercato", re.compile(r"valore\s+di\s+mercato|piu\s+probabile\s+valore|valore\s+commerciale")),
+    ("valore_stato", SEV_CRITICAL, "Valore nello stato di fatto", re.compile(r"stato\s+di\s+fatto|valore\s+di\s+realizzo")),
     ("rendita", SEV_IMPORTANT, "Rendita catastale", re.compile(r"rendita")),
     ("canone", SEV_IMPORTANT, "Canone / importo di locazione", re.compile(r"canone|affitto|locazion")),
     ("spese_condominiali", SEV_IMPORTANT, "Spese condominiali", re.compile(r"condomini|millesim|arretrat|insolut")),

@@ -320,6 +320,13 @@ def _check_money_chains(worksheet: Dict[str, Any], report: _Report) -> None:
         if item.get("amount") is not None and not _is_cancellation_money_label(item.get("label"))
     ]
 
+    # Deductions split across two steps: some bridge market_value -> current_state
+    # (e.g. deprezzamento/regularization), the rest bridge current_state -> sale
+    # (e.g. the judicial-sale reduction "-15% per vendita giudiziaria"). Track how
+    # much of the deductions table applies to the sale step so the sale can fall
+    # below current even with zero cancellation costs.
+    remaining_deductions = 0.0
+
     # current_state_value == market_value - explicit deductions, when the
     # worksheet has a deprezzamenti/deductions table. If no explicit deductions
     # exist, fall back to the older regularization-only chain.
@@ -336,21 +343,12 @@ def _check_money_chains(worksheet: Dict[str, Any], report: _Report) -> None:
                     f"deductions ({total_deductions}) = {market - total_deductions}",
                 )
             else:
-                remaining = sum(
+                remaining_deductions = sum(
                     amount
                     for i, amount in enumerate(deduction_amounts)
                     if i not in set(current_step)
                 )
                 chains_checked[-1] = "market-deduction-subset=current"
-                if sale is not None and remaining:
-                    chains_checked.append("current-remaining-deductions=sale")
-                    if not _approx_equal(sale, current - remaining):
-                        report.error(
-                            "MONEY_CHAIN_INCONSISTENT",
-                            "money",
-                            f"sale_value ({sale}) != current_state_value ({current}) - "
-                            f"remaining deductions ({remaining}) = {current - remaining}",
-                        )
     elif market is not None and regularization is not None and current is not None:
         chains_checked.append("market-regularization=current")
         if not _approx_equal(current, market - regularization):
@@ -361,15 +359,20 @@ def _check_money_chains(worksheet: Dict[str, Any], report: _Report) -> None:
                 f"regularization_costs ({regularization}) = {market - regularization}",
             )
 
-    # sale_value == current_state_value - cancellation_costs
-    if current is not None and cancellation is not None and sale is not None:
-        chains_checked.append("current-cancellation=sale")
-        if not _approx_equal(sale, current - cancellation):
+    # sale_value == current_state_value - (sale-step deductions) - cancellation_costs.
+    # Accounting for the sale-step deductions is what lets a legitimate judicial-sale
+    # reduction lower the sale below current without tripping the chain.
+    if current is not None and sale is not None and (cancellation is not None or remaining_deductions):
+        cancellation_val = cancellation or 0.0
+        expected_sale = current - remaining_deductions - cancellation_val
+        chains_checked.append("current-deductions-cancellation=sale")
+        if not _approx_equal(sale, expected_sale):
             report.error(
                 "MONEY_CHAIN_INCONSISTENT",
                 "money",
                 f"sale_value ({sale}) != current_state_value ({current}) - "
-                f"cancellation_costs ({cancellation}) = {current - cancellation}",
+                f"remaining deductions ({remaining_deductions}) - "
+                f"cancellation_costs ({cancellation_val}) = {expected_sale}",
             )
 
     # Non-negativity sanity.

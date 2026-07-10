@@ -304,21 +304,50 @@ def fake_caller_raising(reason_code: str = "OPENAI_CALL_FAILED"):
 
 
 def fake_sequence_caller(worksheets_raw: List[Dict[str, Any]]):
-    """A caller that returns each given raw worksheet in order across calls.
+    """A caller that serves each given raw worksheet exactly once.
 
-    Records the pages it was asked to analyze so a test can assert that a selected
-    lot re-analysis only saw that lot's isolated page subset.
+    Thread-safe and lot-aware: analyze_all issues its independent per-lot analyst
+    calls concurrently, so arrival order is not guaranteed. A call targeting a
+    specific lot ("STAI ANALIZZANDO ESCLUSIVAMENTE IL LOTTO n" in the prompt)
+    receives the not-yet-served worksheet whose ``case_identity.lotto`` matches
+    that lot; calls without a target lot (full-document detection) and unmatched
+    targets fall back to sequence order — identical to the historical behavior
+    for serial flows. Records pages seen and the target lot per call so a test
+    can assert a lot's re-analysis only saw that lot's isolated page subset.
     """
     calls: List[Dict[str, Any]] = []
     seq = list(worksheets_raw)
+    remaining = list(range(len(seq)))
+    lock = threading.Lock()
 
     def _caller(messages, *, model=None, timeout=None):
-        idx = len(calls)
-        ws = seq[idx] if idx < len(seq) else seq[-1]
         # The user message embeds the page blocks ("=== PAGINA n ===").
         user = next((m.get("content", "") for m in messages if m.get("role") == "user"), "")
         pages_seen = [int(n) for n in re.findall(r"=== PAGINA (\d+) ===", user)]
-        calls.append({"model": model, "pages_seen": pages_seen, "user_text": user})
+        lot_match = re.search(r"STAI ANALIZZANDO ESCLUSIVAMENTE IL LOTTO (\S+)\.", user)
+        target_lot = lot_match.group(1) if lot_match else None
+        with lock:
+            pick = None
+            if target_lot is not None:
+                for i in remaining:
+                    lotto = str((seq[i].get("case_identity") or {}).get("lotto") or "")
+                    if lotto == target_lot:
+                        pick = i
+                        break
+            if pick is None:
+                pick = remaining[0] if remaining else len(seq) - 1
+            if pick in remaining:
+                remaining.remove(pick)
+            idx = len(calls)
+            calls.append(
+                {
+                    "model": model,
+                    "pages_seen": pages_seen,
+                    "user_text": user,
+                    "target_lot": target_lot,
+                }
+            )
+        ws = seq[pick]
         return {
             "content": json.dumps(ws, ensure_ascii=False),
             "model": model or "fake-model",

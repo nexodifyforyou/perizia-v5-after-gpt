@@ -39,8 +39,12 @@ def test_start_job_blocked_writes_error_and_fails_closed(artifacts_root):
     status = orchestrator.start_job("an_blocked", _loader(EMPTY_PAGES), is_admin=True)
     assert status["status"] == JobStatus.PDF_QUALITY_BLOCKED
     assert status["reason_code"] == PdfBlockReason.DOCUMENT_TEXT_EMPTY
-    assert status["customer_report_generated"] is False
-    assert status["safe_to_show_customer"] is False
+    # An unreadable/empty-text PDF is a "document not readable" block: it now
+    # renders a customer-safe "upload a readable PDF" message (no perizia facts),
+    # so the customer is told what happened instead of getting nothing.
+    assert status["customer_report_generated"] is True
+    assert status["safe_to_show_customer"] is True
+    assert status["report_status"] == "DOCUMENT_NOT_READABLE"
     assert status["next_steps"]
 
     job_id = status["job_id"]

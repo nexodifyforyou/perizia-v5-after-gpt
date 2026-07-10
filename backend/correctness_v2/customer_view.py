@@ -27,7 +27,9 @@ from typing import Any, Dict, List, Optional
 
 # Report statuses a customer may see. Manual-review / validation-failed / any
 # pipeline-failure status is never surfaced to a customer.
-CUSTOMER_SAFE_STATUSES = frozenset({"REPORT_READY", "LOT_SELECTION_REQUIRED"})
+CUSTOMER_SAFE_STATUSES = frozenset(
+    {"REPORT_READY", "LOT_SELECTION_REQUIRED", "DOCUMENT_NOT_READABLE"}
+)
 
 # Money buckets a customer sees. market_comparatives / context_values are
 # background/context values that read like buyer costs and are dropped here.
@@ -56,16 +58,19 @@ _ADMIN_ONLY_KEYS = frozenset(
 _STATUS_LABELS = {
     "REPORT_READY": "Report pronto",
     "LOT_SELECTION_REQUIRED": "Selezione del lotto richiesta",
+    "DOCUMENT_NOT_READABLE": "Perizia non leggibile",
 }
 
 _DECISION_ATTENZIONE = "attenzione"
 _DECISION_DA_VERIFICARE = "da_verificare"
 _DECISION_PRONTO = "pronto_con_avvertenze"
+_DECISION_NON_LEGGIBILE = "non_leggibile"
 
 _DECISION_LABELS = {
     _DECISION_ATTENZIONE: "Attenzione",
     _DECISION_DA_VERIFICARE: "Da verificare",
     _DECISION_PRONTO: "Pronto con avvertenze",
+    _DECISION_NON_LEGGIBILE: "Non leggibile",
 }
 
 
@@ -202,6 +207,27 @@ def derive_decision(report: Dict[str, Any]) -> Dict[str, Any]:
     Returns {level, label, headline, reason, drivers}. Never exposes internal
     codes; the reason is a single customer-language sentence.
     """
+    # Non-analyzable document (images / not text-extractable): the decision box is
+    # the whole customer message — what happened + upload a readable PDF.
+    if str(report.get("report_status") or "") == "DOCUMENT_NOT_READABLE":
+        steps = [str(s) for s in (report.get("next_steps") or []) if str(s).strip()]
+        headline = str(
+            report.get("reason_human")
+            or "Non è stato possibile leggere la perizia caricata."
+        )
+        reason = str(
+            report.get("troubleshoot_message")
+            or (steps[0] if steps else
+                "Caricare un PDF leggibile con testo selezionabile e riprovare.")
+        )
+        return {
+            "level": _DECISION_NON_LEGGIBILE,
+            "label": _DECISION_LABELS[_DECISION_NON_LEGGIBILE],
+            "headline": headline,
+            "reason": reason,
+            "drivers": steps[:5],
+        }
+
     level = _decision_level(report)
     drivers = _decision_drivers(report)
     label = _DECISION_LABELS[level]

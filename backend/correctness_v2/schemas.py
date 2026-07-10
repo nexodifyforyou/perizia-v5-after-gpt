@@ -120,6 +120,10 @@ class PdfQualityStatus:
 # Reason codes that BLOCK (fail closed).
 class PdfBlockReason:
     DOCUMENT_TEXT_EMPTY = "DOCUMENT_TEXT_EMPTY"
+    # PDF has "text" but it is not real language: images without OCR, scanned
+    # pages, or a non-extractable/CID font that decodes to control-char / symbol
+    # garbage. The customer must upload a readable (text-based) PDF.
+    DOCUMENT_NOT_TEXT_EXTRACTABLE = "DOCUMENT_NOT_TEXT_EXTRACTABLE"
     TOO_MANY_UNREADABLE_PAGES = "TOO_MANY_UNREADABLE_PAGES"
     KEY_SECTIONS_UNREADABLE = "KEY_SECTIONS_UNREADABLE"
     PAGE_ORDER_BROKEN = "PAGE_ORDER_BROKEN"
@@ -130,6 +134,7 @@ class PdfBlockReason:
 
 BLOCK_REASON_CODES: List[str] = [
     PdfBlockReason.DOCUMENT_TEXT_EMPTY,
+    PdfBlockReason.DOCUMENT_NOT_TEXT_EXTRACTABLE,
     PdfBlockReason.TOO_MANY_UNREADABLE_PAGES,
     PdfBlockReason.KEY_SECTIONS_UNREADABLE,
     PdfBlockReason.PAGE_ORDER_BROKEN,

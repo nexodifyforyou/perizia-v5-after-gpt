@@ -89,6 +89,10 @@ def normalize_lot_token(raw: Any) -> Optional[str]:
         return None
     digits = re.search(r"\d{1,3}", n)
     if digits:
+        # Lots are 1-indexed: a zero-valued token ("Lotto 00") is a footer or
+        # template artifact (e.g. an authoring tool's report id), never a lot.
+        if int(digits.group(0)) == 0:
+            return None
         return digits.group(0)
     # Pull the token right after a 'lotto'/'lotti' word if present, else use n.
     m = re.search(r"\blott[oi]\b\s*(?:n[.°ºo]*\s*)?([a-z]+)", n)
@@ -111,7 +115,10 @@ def _distinct(seq: List[str]) -> List[str]:
 
 
 def _numeric_ids(ids: List[str]) -> List[str]:
-    return [i for i in ids if i.isdigit()]
+    # Italian perizia lots are 1-indexed: a zero-valued id ("0", "00", ...) is
+    # never a real lot. It comes from footer/template artifacts such as the
+    # authoring tool's report id ("Relazione Lotto 00 2 creata in data ...").
+    return [i for i in ids if i.isdigit() and int(i) != 0]
 
 
 # ---------------------------------------------------------------------------

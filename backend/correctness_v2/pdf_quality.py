@@ -42,6 +42,17 @@ WARN_UNREADABLE_RATIO = 0.15     # > this fraction unreadable -> WARNING
 SCANNED_AVG_CHARS = 25           # avg chars/page below this == effectively scanned
 LOW_TEXT_PAGE_CHARS = 120        # a "low text" (but present) page
 
+# Non-extractable / garbage detection. Real perizia extraction is letter-dominated
+# with essentially no control characters (measured across the live corpus:
+# letter_ratio 0.77-0.91, ctrl_ratio 0.00). A PDF made of images without OCR, or
+# with a non-extractable CID font, decodes to control-char / symbol noise
+# (letter_ratio ~0.11, ctrl_ratio ~0.63). Thresholds sit with a wide margin so a
+# legitimate document is never blocked as "not extractable".
+DOC_GARBAGE_CTRL_RATIO = 0.15    # > this fraction control chars doc-wide -> garbage
+DOC_GARBAGE_MIN_LETTER_RATIO = 0.45  # letters/non-space below this doc-wide -> garbage
+PAGE_GARBAGE_CTRL_RATIO = 0.25   # a single page this noisy is not readable
+PAGE_GARBAGE_MIN_LETTER_RATIO = 0.40
+
 # Sections that, if unreadable, are most damaging to a correctness analysis.
 CRITICAL_SECTIONS = ["valutazione", "costi_money", "conformita"]
 
@@ -109,13 +120,38 @@ def _alpha_count(text: str) -> int:
     return sum(1 for c in text if c.isalpha())
 
 
+def _control_ratio(text: str) -> float:
+    """Fraction of characters that are control/non-printable (excluding normal
+    whitespace). High values mean the 'text' is extraction garbage, not language."""
+    raw = str(text or "")
+    if not raw:
+        return 0.0
+    ctrl = sum(1 for c in raw if (ord(c) < 32 and c not in "\n\t\r\f") or c == "�")
+    return ctrl / len(raw)
+
+
+def _letter_ratio(text: str) -> float:
+    """Fraction of NON-whitespace characters that are letters. Real Italian prose
+    is letter-dominated; symbol/CID garbage is not."""
+    nonspace = [c for c in str(text or "") if not c.isspace()]
+    if not nonspace:
+        return 0.0
+    return sum(1 for c in nonspace if c.isalpha()) / len(nonspace)
+
+
 def _page_readable(text: str) -> Tuple[bool, int, float]:
     """Return (is_readable, char_count, density_score) for one page."""
     raw = str(text or "")
     char_count = len(raw.strip())
     alpha = _alpha_count(raw)
     words = len(_WORD_RE.findall(raw))
-    readable = (alpha >= MIN_READABLE_CHARS) and (words >= MIN_READABLE_WORDS)
+    # A page dominated by control chars or starved of letters is NOT readable even
+    # if it happens to carry enough alpha runs to clear the raw count thresholds.
+    not_garbage = (
+        _control_ratio(raw) <= PAGE_GARBAGE_CTRL_RATIO
+        and _letter_ratio(raw) >= PAGE_GARBAGE_MIN_LETTER_RATIO
+    )
+    readable = (alpha >= MIN_READABLE_CHARS) and (words >= MIN_READABLE_WORDS) and not_garbage
     density = min(1.0, char_count / float(DENSITY_TARGET_CHARS)) if char_count else 0.0
     return readable, char_count, round(density, 3)
 
@@ -247,12 +283,26 @@ def assess_pdf_quality(
         key_sections_detected.get("valutazione") or key_sections_detected.get("costi_money")
     )
 
+    # Non-extractable / garbage signal: measured over the whole document so a
+    # single noisy page cannot trip it, and a genuinely non-extractable PDF
+    # (images without OCR, CID-font garbage) always does.
+    full_text = "\n".join(str(e.get("text", "") or "") for e in (pages or [])
+                          if isinstance(e, dict))
+    doc_control_ratio = round(_control_ratio(full_text), 3)
+    doc_letter_ratio = round(_letter_ratio(full_text), 3)
+
     # ---------------- BLOCK rules (fail closed) -----------------------------
     if total_pages == 0 or total_chars == 0:
         block_reasons.append(PdfBlockReason.DOCUMENT_TEXT_EMPTY)
 
     if ocr_failed and total_chars == 0:
         block_reasons.append(PdfBlockReason.OCR_EXTRACTION_FAILED)
+
+    if total_chars > 0 and (
+        doc_control_ratio > DOC_GARBAGE_CTRL_RATIO
+        or doc_letter_ratio < DOC_GARBAGE_MIN_LETTER_RATIO
+    ):
+        block_reasons.append(PdfBlockReason.DOCUMENT_NOT_TEXT_EXTRACTABLE)
 
     if total_pages > 0 and total_chars > 0:
         # Effectively scanned: pages exist but almost no usable text.
@@ -334,6 +384,8 @@ def assess_pdf_quality(
             "analysis_id": analysis_id,
             "avg_chars_per_page": round(avg_chars, 1),
             "total_chars": total_chars,
+            "doc_control_ratio": doc_control_ratio,
+            "doc_letter_ratio": doc_letter_ratio,
             "unreadable_ratio": round(unreadable_ratio, 3),
             "missing_sections": missing_sections,
             "missing_critical_sections": missing_critical,
@@ -362,6 +414,7 @@ def assess_pdf_quality(
 # ---------------------------------------------------------------------------
 _BLOCK_PRIORITY = [
     PdfBlockReason.DOCUMENT_TEXT_EMPTY,
+    PdfBlockReason.DOCUMENT_NOT_TEXT_EXTRACTABLE,
     PdfBlockReason.OCR_EXTRACTION_FAILED,
     PdfBlockReason.SCANNED_PDF_WITHOUT_USABLE_TEXT,
     PdfBlockReason.TOO_MANY_UNREADABLE_PAGES,
@@ -403,6 +456,19 @@ def _block_explanation(
             [
                 "Verificare che il PDF caricato sia il file corretto e non vuoto.",
                 "Rieseguire l'estrazione con OCR abilitato.",
+            ],
+        ),
+        PdfBlockReason.DOCUMENT_NOT_TEXT_EXTRACTABLE: (
+            "La perizia non è leggibile automaticamente: sembra composta da "
+            "immagini o non contiene testo estraibile.",
+            "Il documento caricato è composto da pagine immagine/scansionate o usa "
+            "un font non estraibile, quindi non è stato possibile leggerne il testo. "
+            "Per analizzare la perizia serve un PDF con testo selezionabile.",
+            [
+                "Caricare un PDF leggibile con testo selezionabile (non una scansione "
+                "o una foto delle pagine).",
+                "Se si dispone solo di una copia cartacea/immagine, eseguire prima un "
+                "OCR di buona qualità e ricaricare il documento.",
             ],
         ),
         PdfBlockReason.OCR_EXTRACTION_FAILED: (

@@ -101,11 +101,33 @@ def test_chained_value_labels_classified_by_role_not_by_bleed():
     by_amount = {s["amount"]: s for s in signals}
     assert by_amount[43654.2]["role"] == doc_signals.ROLE_MARKET_VALUE
     assert by_amount[5250.0]["role"] == doc_signals.ROLE_REGULARIZATION_COST
-    # "Valore di Mercato ... nello stato di fatto" is the state-of-fact value.
-    assert by_amount[38404.2]["role"] == doc_signals.ROLE_STATE_OF_FACT_VALUE
+    # "Valore di Mercato ... nello stato di fatto e di diritto in cui si
+    # trova" is the MARKET value: the trailing "stato di fatto" wording is
+    # boilerplate appended to essentially every value line, and the head noun
+    # ("Mercato") names the role.
+    assert by_amount[38404.2]["role"] == doc_signals.ROLE_MARKET_VALUE
     assert by_amount[294.0]["role"] == doc_signals.ROLE_BUYER_SIDE_COST
     # "Valore di vendita giudiziaria ... nello stato di fatto" is judicial sale.
     assert by_amount[38110.2]["role"] == doc_signals.ROLE_JUDICIAL_SALE_VALUE
+
+
+def test_spaced_thousands_group_parsed_whole():
+    # PDF extraction sometimes inserts a space after the thousands-separator dot
+    # ("370. 619,90"). The amount must be read whole, never split into a garbage
+    # fragment (619.9) that then fails money grounding / triggers false omissions.
+    for text, expected in (
+        ("€ 452. 494,00", 452494.0),
+        ("valore nello stato di fatto € 370. 619,90", 370619.9),
+        ("a carico della procedura: € 384. 619,90", 384619.9),
+        ("€ 271.110,00", 271110.0),  # un-spaced still works
+    ):
+        amounts = [round(a, 2) for a, _s, _e in doc_signals.amounts_in_text(text)]
+        assert expected in amounts, (text, amounts)
+        assert 619.9 not in amounts or expected == 619.9, (text, amounts)
+    # Non-money numerals must stay filtered despite the looser thousands rule.
+    assert doc_signals.amounts_in_text("n. 494 del 2019") == []
+    assert doc_signals.amounts_in_text("elenco 3. 494 righe") == []
+    assert doc_signals.parse_amount("370. 619,90") == 370619.9
 
 
 def test_label_after_amount_classified_via_fallback():

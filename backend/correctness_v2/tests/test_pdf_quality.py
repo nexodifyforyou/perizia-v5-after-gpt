@@ -58,6 +58,41 @@ def test_ocr_failed_with_empty_text_blocked():
     assert PdfBlockReason.OCR_EXTRACTION_FAILED in report["details"]["block_reasons_all"]
 
 
+def test_control_char_garbage_blocked_not_extractable():
+    # A non-extractable / CID-font PDF decodes to control-char noise. It carries
+    # plenty of "characters" per page (so it clears the scanned/empty guards) but
+    # is not real text. It must block with the dedicated, customer-clear reason.
+    garbage = ("\x01\x02\x03\x04\x05\x06\x07\x08 " * 60).strip()
+    pages = [{"page_number": i, "text": garbage} for i in range(1, 9)]
+    report = assess_pdf_quality(pages)
+    assert report["quality_status"] == PdfQualityStatus.BLOCKED
+    assert report["reason_code"] == PdfBlockReason.DOCUMENT_NOT_TEXT_EXTRACTABLE
+    assert report["details"]["doc_control_ratio"] > 0.15
+    # Customer-facing message must tell them to upload a readable PDF.
+    assert report["reason_human"]
+    assert "leggibile" in " ".join(report["next_steps"]).lower()
+
+
+def test_symbol_garbage_low_letter_ratio_blocked():
+    # CID garbage that decodes to punctuation instead of control chars: almost no
+    # letters. The letter-ratio floor catches it as not text-extractable.
+    garbage = ('!"#$%#&"$\'!())!*+%,-./:;<=>?@ ' * 40).strip()
+    pages = [{"page_number": i, "text": garbage} for i in range(1, 9)]
+    report = assess_pdf_quality(pages)
+    assert report["quality_status"] == PdfQualityStatus.BLOCKED
+    assert report["reason_code"] == PdfBlockReason.DOCUMENT_NOT_TEXT_EXTRACTABLE
+    assert report["details"]["doc_letter_ratio"] < 0.45
+
+
+def test_good_document_not_flagged_as_garbage():
+    # Guardrail: a legitimate letter-dominated document must never trip the
+    # non-extractable detector.
+    report = assess_pdf_quality(GOOD_PAGES)
+    assert report["reason_code"] != PdfBlockReason.DOCUMENT_NOT_TEXT_EXTRACTABLE
+    assert report["details"]["doc_control_ratio"] == 0.0
+    assert report["details"]["doc_letter_ratio"] >= 0.45
+
+
 def test_missing_key_sections_blocked():
     report = assess_pdf_quality(MISSING_KEY_SECTIONS_PAGES)
     assert report["quality_status"] == PdfQualityStatus.BLOCKED

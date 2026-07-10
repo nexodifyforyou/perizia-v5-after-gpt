@@ -33,6 +33,10 @@ REPORT_READY = "REPORT_READY"
 LOT_SELECTION_REQUIRED = "LOT_SELECTION_REQUIRED"
 NEEDS_MANUAL_REVIEW = "NEEDS_MANUAL_REVIEW"
 CONTRACT_VALIDATION_FAILED = "CONTRACT_VALIDATION_FAILED"
+# Customer-safe terminal status: the uploaded PDF could not be read at all
+# (images/scanned/non-extractable font). Carries only a "upload a readable PDF"
+# message, never perizia facts.
+DOCUMENT_NOT_READABLE = "DOCUMENT_NOT_READABLE"
 
 DISCLAIMER = (
     "Questo report è generato automaticamente a partire dalla perizia depositata. "
@@ -1547,6 +1551,7 @@ def render_lot_selection_report(
 _SAFE_TITLES = {
     NEEDS_MANUAL_REVIEW: "Revisione manuale necessaria",
     CONTRACT_VALIDATION_FAILED: "Report non disponibile: verifica non superata",
+    DOCUMENT_NOT_READABLE: "Perizia non leggibile",
 }
 
 _SAFE_SUMMARY = (
@@ -1607,4 +1612,48 @@ def render_safe_report(
     for step in next_steps or []:
         flags.append({"kind": "next_step", "detail": str(step)})
     report["manual_review_flags"] = flags
+    return report
+
+
+def render_not_readable_report(
+    *,
+    analysis_id: str,
+    job_id: str,
+    reason_code: Optional[str] = None,
+    reason_human: Optional[str] = None,
+    troubleshoot_message: Optional[str] = None,
+    next_steps: Optional[List[str]] = None,
+) -> Dict[str, Any]:
+    """Customer-safe message for a PDF that cannot be analyzed because it is not
+    text-extractable (only images/scanned pages, or a non-extractable font).
+
+    Carries ZERO perizia facts — just what happened and what the customer must do
+    (upload a readable PDF with selectable text). This is shown to the customer,
+    unlike the manual-review fail-closed report which stays admin-only.
+    """
+    headline = reason_human or "Non è stato possibile leggere la perizia caricata."
+    steps = [str(s) for s in (next_steps or []) if str(s).strip()] or [
+        "Caricare un PDF leggibile con testo selezionabile (non una scansione o una "
+        "foto delle pagine).",
+    ]
+    report = _empty_report(
+        str(analysis_id),
+        str(job_id),
+        DOCUMENT_NOT_READABLE,
+        _SAFE_TITLES[DOCUMENT_NOT_READABLE],
+        headline,
+    )
+    # Fields the customer view's decision box reads to render the message.
+    report["reason_code"] = reason_code or DOCUMENT_NOT_READABLE
+    report["reason_human"] = headline
+    report["next_steps"] = steps
+    if troubleshoot_message:
+        report["troubleshoot_message"] = str(troubleshoot_message)
+
+    summary = [{"text": headline, "evidence_pages": []}]
+    if troubleshoot_message:
+        summary.append({"text": str(troubleshoot_message), "evidence_pages": []})
+    for step in steps:
+        summary.append({"text": str(step), "evidence_pages": []})
+    report["executive_summary"] = summary
     return report

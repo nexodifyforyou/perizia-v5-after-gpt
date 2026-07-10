@@ -25,7 +25,7 @@ def test_money_chain_accepted_when_consistent():
     report = validator.validate_worksheet(ws, GENERIC_PERIZIA_PAGES)
     assert "MONEY_CHAIN_INCONSISTENT" not in _codes(report)
     assert "market-regularization=current" in report["checks"]["money_chains_checked"]
-    assert "current-cancellation=sale" in report["checks"]["money_chains_checked"]
+    assert "current-deductions-cancellation=sale" in report["checks"]["money_chains_checked"]
 
 
 def test_money_chain_uses_explicit_deductions_when_present():
@@ -67,7 +67,7 @@ def test_money_chain_accepts_staged_deductions_to_sale_value():
     assert report["validation_status"] == validator.STATUS_VALIDATED, report["violations"]
     assert "MONEY_CHAIN_INCONSISTENT" not in _codes(report)
     assert "market-deduction-subset=current" in report["checks"]["money_chains_checked"]
-    assert "current-remaining-deductions=sale" in report["checks"]["money_chains_checked"]
+    assert "current-deductions-cancellation=sale" in report["checks"]["money_chains_checked"]
 
 
 def test_money_chain_excludes_cancellation_rows_from_current_state_step():
@@ -86,7 +86,32 @@ def test_money_chain_excludes_cancellation_rows_from_current_state_step():
     assert report["validation_status"] == validator.STATUS_VALIDATED, report["violations"]
     assert "MONEY_CHAIN_INCONSISTENT" not in _codes(report)
     assert "market-deductions=current" in report["checks"]["money_chains_checked"]
-    assert "current-cancellation=sale" in report["checks"]["money_chains_checked"]
+    assert "current-deductions-cancellation=sale" in report["checks"]["money_chains_checked"]
+
+
+def test_money_chain_accepts_judicial_sale_reduction_with_zero_cancellation():
+    # Real-world case (Orecchiazzi): market == current, and a single judicial-sale
+    # reduction bridges current_state -> sale while cancellation_costs is 0. The
+    # sale step must accept sale = current - deduction, not demand sale == current.
+    raw = make_worksheet()
+    raw["money"]["market_value"] = 68000.0
+    raw["money"]["deductions"] = [
+        {
+            "label": "Riduzione del valore del 15% per vendita giudiziaria",
+            "amount": 10200.0,
+            "evidence_pages": [2],
+        },
+    ]
+    raw["money"]["regularization_costs"] = None
+    raw["money"]["current_state_value"] = 68000.0
+    raw["money"]["cancellation_costs"] = 0.0
+    raw["money"]["sale_value"] = 57800.0
+    raw["money"]["auction_terms"]["prezzo_base_asta"] = 57800.0
+    ws = _normalized(raw)
+    report = validator.validate_worksheet(ws, GENERIC_PERIZIA_PAGES)
+    assert report["validation_status"] == validator.STATUS_VALIDATED, report["violations"]
+    assert "MONEY_CHAIN_INCONSISTENT" not in _codes(report)
+    assert "current-deductions-cancellation=sale" in report["checks"]["money_chains_checked"]
 
 
 def test_money_chain_rejected_when_inconsistent():

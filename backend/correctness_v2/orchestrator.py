@@ -20,6 +20,8 @@ OpenAI analysis and Gemini narration are intentionally NOT implemented here.
 
 from __future__ import annotations
 
+import concurrent.futures
+import os
 import traceback
 from typing import Any, Callable, Dict, List, Optional
 
@@ -38,7 +40,18 @@ from . import (
 )
 from .analyst import AnalystError
 from .pdf_quality import assess_pdf_quality
-from .schemas import JobStatus, PdfQualityStatus
+from .schemas import JobStatus, PdfBlockReason, PdfQualityStatus
+
+# Block reasons that mean "we could not read your document at all" — these are
+# surfaced to the customer as a plain "upload a readable PDF" message. Other
+# block reasons (missing sections, money tables, page order) stay admin-only.
+_CUSTOMER_NOT_READABLE_BLOCKS = frozenset({
+    PdfBlockReason.DOCUMENT_NOT_TEXT_EXTRACTABLE,
+    PdfBlockReason.DOCUMENT_TEXT_EMPTY,
+    PdfBlockReason.SCANNED_PDF_WITHOUT_USABLE_TEXT,
+    PdfBlockReason.OCR_EXTRACTION_FAILED,
+    PdfBlockReason.TOO_MANY_UNREADABLE_PAGES,
+})
 
 # Sentinel string asserting intent; referenced by the no-old-fallback guard test.
 NO_OLD_ANALYZER_FALLBACK = True
@@ -611,6 +624,20 @@ def _run_selected_lot(
 # ---------------------------------------------------------------------------
 # Multi-lot: analyze_all -> a separate contract per lot (never blended)
 # ---------------------------------------------------------------------------
+def _lot_concurrency() -> int:
+    """Max number of per-lot analyst OpenAI calls run concurrently in analyze_all.
+
+    Read from CORRECTNESS_V2_LOT_CONCURRENCY (default 4, clamped to >= 1). This
+    only bounds the network-call scheduling; every deterministic step stays
+    sequential and ordered.
+    """
+    try:
+        value = int(os.environ.get("CORRECTNESS_V2_LOT_CONCURRENCY", "4"))
+    except (TypeError, ValueError):
+        value = 4
+    return max(1, value)
+
+
 def _run_analyze_all(
     *,
     job_id: str,
@@ -634,13 +661,71 @@ def _run_analyze_all(
     CONTRACT_READY only if every lot produced a contract; otherwise it is
     NEEDS_MANUAL_REVIEW listing which lots could not be safely produced.
     """
-    per_lot_results: List[Dict[str, Any]] = []
-    for lot_id in lot_report.get("lot_ids", []):
+    lot_ids = list(lot_report.get("lot_ids", []))
+
+    # Precompute each lot's isolated inputs (pure, deterministic, no I/O) so the
+    # independent per-lot analyst OpenAI calls can be issued concurrently below.
+    prepared: Dict[str, Dict[str, Any]] = {}
+    for lot_id in lot_ids:
         norm_lot = lots_mod.normalize_lot_token(lot_id) or lot_id
         selected_pages = lot_packets_mod.select_lot_pages(pages, segmentation, norm_lot)
         context = lot_packets_mod.build_selected_lot_context(
             pages, segmentation, norm_lot, lot_index, worksheet=worksheet
         )
+        document_map = (
+            lot_packets_mod.build_document_map(
+                lot_report, segmentation, lot_index, str(norm_lot)
+            )
+            if selected_pages
+            else None
+        )
+        prepared[str(lot_id)] = {
+            "norm_lot": norm_lot,
+            "selected_pages": selected_pages,
+            "context": context,
+            "document_map": document_map,
+        }
+
+    # Concurrency is confined to the network calls: run_analyst builds its own
+    # OpenAI client per call and shares no mutable state, so the per-lot calls
+    # (the dominant wall-clock cost) can overlap. Workers only return a result
+    # or an exception into this dict; every artifact write, validation and
+    # per_lot_results.append happens in the ordered sequential loop below, so
+    # outputs are byte-for-byte identical to the serial schedule.
+    lots_to_analyze = [
+        lot_id for lot_id in lot_ids if prepared[str(lot_id)]["selected_pages"]
+    ]
+    analyst_outcomes: Dict[str, Any] = {}
+    if lots_to_analyze:
+
+        def _call_analyst(key: str) -> Any:
+            prep = prepared[key]
+            return analyst_mod.run_analyst(
+                prep["selected_pages"],
+                openai_caller=openai_caller,
+                model=model,
+                target_lot=str(prep["norm_lot"]),
+                document_map=prep["document_map"],
+            )
+
+        max_workers = min(len(lots_to_analyze), _lot_concurrency())
+        with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as pool:
+            futures = {
+                str(lot_id): pool.submit(_call_analyst, str(lot_id))
+                for lot_id in lots_to_analyze
+            }
+            for key, future in futures.items():
+                try:
+                    analyst_outcomes[key] = future.result()
+                except Exception as exc:  # noqa: BLE001 — handled per lot in the loop
+                    analyst_outcomes[key] = exc
+
+    per_lot_results: List[Dict[str, Any]] = []
+    for lot_id in lot_ids:
+        prep = prepared[str(lot_id)]
+        norm_lot = prep["norm_lot"]
+        selected_pages = prep["selected_pages"]
+        context = prep["context"]
         artifacts.save_lot_subartifact(
             job_id, norm_lot, artifacts.SELECTED_LOT_CONTEXT_FILE, context
         )
@@ -654,17 +739,10 @@ def _run_analyze_all(
             per_lot_results.append(entry)
             continue
 
-        document_map = lot_packets_mod.build_document_map(
-            lot_report, segmentation, lot_index, str(norm_lot)
-        )
         try:
-            result = analyst_mod.run_analyst(
-                selected_pages,
-                openai_caller=openai_caller,
-                model=model,
-                target_lot=str(norm_lot),
-                document_map=document_map,
-            )
+            result = analyst_outcomes[str(lot_id)]
+            if isinstance(result, BaseException):
+                raise result
         except AnalystError as exc:
             entry.update({"status": JobStatus.FAILED_ANALYSIS, "reason": str(exc)})
             per_lot_results.append(entry)
@@ -1553,6 +1631,26 @@ def _finish_blocked(
         },
     )
     payload["artifacts_saved"]["error"] = error_path
+
+    # For "document unreadable" blocks, also render a customer-safe message so the
+    # customer is told the perizia is images/not extractable and to upload a
+    # readable PDF — instead of silently getting no report at all.
+    if reason_code in _CUSTOMER_NOT_READABLE_BLOCKS:
+        not_readable = customer_report_mod.render_not_readable_report(
+            analysis_id=analysis_id,
+            job_id=job_id,
+            reason_code=reason_code,
+            reason_human=reason_human,
+            troubleshoot_message=troubleshoot,
+            next_steps=next_steps,
+        )
+        payload["artifacts_saved"]["customer_report"] = artifacts.save_customer_report(
+            job_id, not_readable
+        )
+        payload["customer_report_generated"] = True
+        payload["safe_to_show_customer"] = True
+        payload["report_status"] = not_readable.get("report_status")
+
     artifacts.save_job_status(job_id, payload)
     return payload
 
