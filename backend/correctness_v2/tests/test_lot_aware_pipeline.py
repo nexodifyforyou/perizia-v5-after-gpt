@@ -379,11 +379,18 @@ def test_lot_concurrency_env_default_and_clamp(monkeypatch):
     # Default is 1 (serial) — the validated behavior; parallel is opt-in via env.
     monkeypatch.delenv("CORRECTNESS_V2_LOT_CONCURRENCY", raising=False)
     assert orchestrator._lot_concurrency() == 1
+    # Values above the hard ceiling are clamped DOWN to MAX_CONCURRENCY, never
+    # honored blindly (protects the OpenAI account from a runaway env value).
     monkeypatch.setenv("CORRECTNESS_V2_LOT_CONCURRENCY", "4")
-    assert orchestrator._lot_concurrency() == 4
+    assert orchestrator._lot_concurrency() == 3
+    monkeypatch.setenv("CORRECTNESS_V2_LOT_CONCURRENCY", "3")
+    assert orchestrator._lot_concurrency() == 3
     monkeypatch.setenv("CORRECTNESS_V2_LOT_CONCURRENCY", "2")
     assert orchestrator._lot_concurrency() == 2
+    # Invalid / sub-1 values fall back to serial (1).
     monkeypatch.setenv("CORRECTNESS_V2_LOT_CONCURRENCY", "0")
+    assert orchestrator._lot_concurrency() == 1
+    monkeypatch.setenv("CORRECTNESS_V2_LOT_CONCURRENCY", "-5")
     assert orchestrator._lot_concurrency() == 1
     monkeypatch.setenv("CORRECTNESS_V2_LOT_CONCURRENCY", "garbage")
     assert orchestrator._lot_concurrency() == 1

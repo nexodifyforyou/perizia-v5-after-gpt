@@ -46,6 +46,57 @@ class OpenAIClientError(RuntimeError):
         self.reason_code = reason_code
 
 
+# Reason codes for API failures that are transient and MAY be safely retried
+# (idempotent read-shaped analyst call). Everything else — bad request, malformed
+# response, missing key, empty content — is deterministic and must NOT be retried.
+REASON_RATE_LIMITED = "OPENAI_RATE_LIMITED"
+REASON_TIMEOUT = "OPENAI_TIMEOUT"
+REASON_SERVER_ERROR = "OPENAI_SERVER_ERROR"
+
+# The subset of reason codes that indicate a transient, retryable failure.
+TRANSIENT_REASON_CODES = frozenset(
+    {REASON_RATE_LIMITED, REASON_TIMEOUT, REASON_SERVER_ERROR}
+)
+
+
+def is_transient_reason(reason_code: Any) -> bool:
+    """True when ``reason_code`` denotes a transient (retryable) API failure."""
+    return str(reason_code or "") in TRANSIENT_REASON_CODES
+
+
+def is_rate_limit_reason(reason_code: Any) -> bool:
+    """True when ``reason_code`` denotes an API rate-limit (429) failure."""
+    return str(reason_code or "") == REASON_RATE_LIMITED
+
+
+def classify_openai_exception(exc: BaseException) -> str:
+    """Map a raw OpenAI SDK / transport exception to a stable reason code.
+
+    Purely structural (type name + optional ``status_code``) so it never imports
+    the openai package and never inspects message text. Transient failures (429,
+    timeout, 5xx, connection reset) get a retryable code; anything else stays the
+    deterministic ``OPENAI_CALL_FAILED`` and is never retried.
+    """
+    name = type(exc).__name__
+    status = getattr(exc, "status_code", None)
+    try:
+        status_int = int(status) if status is not None else None
+    except (TypeError, ValueError):
+        status_int = None
+
+    if status_int == 429 or "RateLimit" in name:
+        return REASON_RATE_LIMITED
+    if "Timeout" in name:
+        return REASON_TIMEOUT
+    if (status_int is not None and status_int >= 500) or name in {
+        "InternalServerError",
+        "APIConnectionError",
+        "APIConnectionResetError",
+    }:
+        return REASON_SERVER_ERROR
+    return "OPENAI_CALL_FAILED"
+
+
 # ---------------------------------------------------------------------------
 # Config resolution
 # ---------------------------------------------------------------------------
@@ -211,9 +262,12 @@ def call_openai_json(
         response = client.chat.completions.create(**body)
     except Exception as exc:
         # Includes APITimeoutError, RateLimitError, APIError, BadRequestError, etc.
+        # Classify transient failures (429/timeout/5xx) with a retryable reason
+        # code so the per-lot runner can back off and, on rate limiting, degrade
+        # to serial. Deterministic failures keep OPENAI_CALL_FAILED (no retry).
         raise OpenAIClientError(
             f"OpenAI call failed: {type(exc).__name__}: {exc}",
-            reason_code="OPENAI_CALL_FAILED",
+            reason_code=classify_openai_exception(exc),
         )
 
     try:

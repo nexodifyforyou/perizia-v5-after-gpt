@@ -20,9 +20,9 @@ OpenAI analysis and Gemini narration are intentionally NOT implemented here.
 
 from __future__ import annotations
 
-import concurrent.futures
 import os
 import traceback
+from datetime import datetime, timezone
 from typing import Any, Callable, Dict, List, Optional
 
 from . import analyst as analyst_mod
@@ -34,6 +34,7 @@ from . import (
     feature_flags,
     job_status,
     lot_packets as lot_packets_mod,
+    lot_runner as lot_runner_mod,
     lots as lots_mod,
     money_confirmation as money_confirmation_mod,
     quality_gate as quality_gate_mod,
@@ -202,6 +203,127 @@ def start_job(
         return _finish_failed_analysis(
             job_id, analysis_id, exc, saved_status_path, created_at, admin_only
         )
+
+
+# ---------------------------------------------------------------------------
+# Restart / stale-job recovery
+# ---------------------------------------------------------------------------
+# A job that is still QUEUED/RUNNING owns no terminal artifact: if the process
+# that was running it died (deploy, crash, OOM), its status would otherwise stay
+# RUNNING forever. These are the only "in-flight, not yet terminal" statuses; a
+# PDF_QUALITY_OK/WARNING or any REPORT/FAILED/SELECTION status is terminal and is
+# never touched by recovery — its atomic artifacts remain fully reusable.
+_STALEABLE_STATUSES = frozenset({JobStatus.QUEUED, JobStatus.RUNNING})
+
+STALE_JOB_SECONDS_ENV = "CORRECTNESS_V2_STALE_JOB_SECONDS"
+DEFAULT_STALE_JOB_SECONDS = 1800  # 30 minutes
+
+
+def _stale_job_seconds() -> int:
+    raw = os.environ.get(STALE_JOB_SECONDS_ENV)
+    if raw is None or not str(raw).strip():
+        return DEFAULT_STALE_JOB_SECONDS
+    try:
+        value = int(str(raw).strip())
+    except (TypeError, ValueError):
+        return DEFAULT_STALE_JOB_SECONDS
+    return value if value >= 0 else DEFAULT_STALE_JOB_SECONDS
+
+
+def _parse_iso(ts: Any) -> Optional[datetime]:
+    try:
+        dt = datetime.fromisoformat(str(ts))
+    except (TypeError, ValueError):
+        return None
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt
+
+
+def recover_stale_jobs(
+    *,
+    force: bool = False,
+    max_age_seconds: Optional[int] = None,
+    now: Optional[datetime] = None,
+) -> List[str]:
+    """Mark abandoned QUEUED/RUNNING jobs as JOB_STALLED so none stays RUNNING forever.
+
+    Call on startup (``force=True`` — the process that owned any RUNNING job is
+    gone) or opportunistically (age-based). A job is recovered only when it is
+    still in a non-terminal status AND (``force`` or its ``updated_at`` is older
+    than ``max_age_seconds``). Recovery only rewrites job_status.json to a
+    fail-closed JOB_STALLED status; it never deletes or alters the atomic
+    per-lot/contract artifacts, so any completed work remains reusable. Returns
+    the list of recovered job ids. Never raises.
+    """
+    threshold = _stale_job_seconds() if max_age_seconds is None else max_age_seconds
+    now = now or datetime.now(timezone.utc)
+    recovered: List[str] = []
+    try:
+        job_ids = artifacts.list_jobs()
+    except Exception:  # noqa: BLE001 — recovery must never crash startup
+        return recovered
+
+    for jid in job_ids:
+        try:
+            status = artifacts.read_job_status(jid)
+            if not isinstance(status, dict):
+                continue
+            if str(status.get("status")) not in _STALEABLE_STATUSES:
+                continue
+            if not force:
+                updated = _parse_iso(status.get("updated_at") or status.get("created_at"))
+                if updated is not None and (now - updated).total_seconds() < threshold:
+                    continue
+            recovered.append(_mark_job_stalled(jid, status))
+        except Exception:  # noqa: BLE001 — one bad job never blocks the rest
+            continue
+    if recovered:
+        # Structured, PII-free recovery record.
+        import logging as _logging
+
+        _logging.getLogger(__name__).warning(
+            "cv2.recover_stale_jobs recovered=%d force=%s threshold=%ss ids=%s",
+            len(recovered),
+            force,
+            threshold,
+            ",".join(recovered),
+        )
+    return recovered
+
+
+def _mark_job_stalled(job_id: str, prev_status: Dict[str, Any]) -> str:
+    """Rewrite a stuck job's status to a fail-closed JOB_STALLED. Returns job_id."""
+    analysis_id = str(prev_status.get("analysis_id") or "")
+    created_at = str(prev_status.get("created_at") or "")
+    artifacts_saved = dict(prev_status.get("artifacts_saved") or {})
+    reason_human = (
+        "Il job è stato interrotto (riavvio o crash del backend) prima di "
+        "completare: nessun report parziale viene esposto."
+    )
+    payload = job_status.make_failure_status(
+        job_id=job_id,
+        analysis_id=analysis_id,
+        status=JobStatus.JOB_STALLED,
+        current_stage=_stage("stalled_recovered"),
+        reason_code="JOB_STALLED_RECOVERED",
+        reason_human=reason_human,
+        troubleshoot_message=(
+            "Il processo che eseguiva questo job non è più attivo. Lo stato è stato "
+            "recuperato a JOB_STALLED (fail-closed). Gli artefatti già completati "
+            "restano su disco e riutilizzabili; rieseguire l'analisi per un report."
+        ),
+        next_steps=[
+            "Rieseguire l'analisi Correctness v2 per questo documento/lotto.",
+            "I lotti già completati in un job precedente possono essere riutilizzati.",
+        ],
+        artifacts_saved=artifacts_saved,
+        created_at=created_at,
+        admin_only=bool(prev_status.get("admin_only", True)),
+        extra={"recovered_from_status": prev_status.get("status")},
+    )
+    artifacts.save_job_status(job_id, payload)
+    return job_id
 
 
 def _finish_quality(
@@ -653,18 +775,92 @@ def _run_selected_lot(
 def _lot_concurrency() -> int:
     """Max number of per-lot analyst OpenAI calls run concurrently in analyze_all.
 
-    Read from CORRECTNESS_V2_LOT_CONCURRENCY (default 1 = serial, clamped to
-    >= 1). Serial is the default because that is the behavior validated end-to-end
-    by the real-perizia stability smoke; parallel per-lot analyst calls remain
-    available by setting the env var > 1 once that path is separately validated.
-    This only bounds the network-call scheduling; every deterministic step stays
+    Read from CORRECTNESS_V2_LOT_CONCURRENCY (default 1 = serial). Serial is the
+    default because that is the behavior validated end-to-end by the real-perizia
+    stability smoke; parallel per-lot analyst calls are opt-in by setting the env
+    var > 1 once that path is separately validated. The value is CLAMPED to
+    [1, lot_runner.MAX_CONCURRENCY]: invalid / sub-1 values fall back to 1, and a
+    value above the hard ceiling is clamped down (never honored blindly). This
+    only bounds the network-call scheduling; every deterministic step stays
     sequential and ordered.
     """
-    try:
-        value = int(os.environ.get("CORRECTNESS_V2_LOT_CONCURRENCY", "1"))
-    except (TypeError, ValueError):
-        value = 1
-    return max(1, value)
+    return lot_runner_mod.resolve_concurrency()
+
+
+def _lot_reuse_enabled() -> bool:
+    """Whether analyze_all may reuse an already-completed lot's analyst worksheet.
+
+    OFF by default: the validated path always re-derives every lot. When enabled
+    (``CORRECTNESS_V2_LOT_REUSE`` truthy) a lot that a PRIOR job already produced
+    cleanly (REPORT_READY) for the SAME analysis is reused verbatim — skipping its
+    OpenAI call. Reuse is correctness-safe because the pages for a given analysis
+    are deterministic, so re-deriving downstream from the saved worksheet is
+    identical to that prior lot's output.
+    """
+    raw = os.environ.get("CORRECTNESS_V2_LOT_REUSE")
+    if raw is None:
+        return False
+    return str(raw).strip().lower() in {"1", "true", "yes", "on", "y", "t"}
+
+
+def _find_completed_lot_worksheet(
+    analysis_id: str, norm_lot: str
+) -> Optional[Dict[str, Any]]:
+    """Most recent prior job's saved worksheet for a cleanly-completed lot.
+
+    Returns the analyst worksheet dict for ``norm_lot`` from the most recently
+    updated REPORT_READY analyze_all job of this analysis whose lot folder holds
+    BOTH a verified contract and an analyst worksheet (i.e. that lot completed
+    without error). Returns ``None`` when nothing safe exists. Never raises.
+    """
+    safe_lot = str(norm_lot).replace("/", "_").replace("..", "_")
+    ws_rel = os.path.join("lots", safe_lot, artifacts.ANALYST_WORKSHEET_FILE)
+    contract_rel = os.path.join("lots", safe_lot, artifacts.VERIFIED_CONTRACT_FILE)
+    best: Optional[tuple] = None
+    for jid in artifacts.list_jobs():
+        status = artifacts.read_job_status(jid)
+        if not isinstance(status, dict):
+            continue
+        if str(status.get("analysis_id")) != str(analysis_id):
+            continue
+        # Only reuse a lot that this prior job reported READY (never a failed one).
+        per_lot = status.get("per_lot_results") or []
+        lot_ready = any(
+            str(r.get("lot_id")) == str(norm_lot)
+            and r.get("status") == JobStatus.REPORT_READY
+            for r in per_lot
+        )
+        if not lot_ready:
+            continue
+        worksheet = artifacts.read_json(jid, ws_rel)
+        contract = artifacts.read_json(jid, contract_rel)
+        if not isinstance(worksheet, dict) or not isinstance(contract, dict):
+            continue
+        sort_key = str(status.get("updated_at") or status.get("created_at") or "")
+        if best is None or sort_key > best[0]:
+            best = (sort_key, jid, worksheet)
+    return best[2] if best else None
+
+
+def _build_lot_reuse_fn(
+    analysis_id: str, prepared: Dict[str, Dict[str, Any]]
+) -> Callable[[str], Optional[Any]]:
+    """Build a reuse_fn(lot_key) for the runner: a completed lot -> no OpenAI call."""
+
+    def _reuse(key: str) -> Optional[Any]:
+        prep = prepared.get(key) or {}
+        norm_lot = str(prep.get("norm_lot") or key)
+        worksheet = _find_completed_lot_worksheet(analysis_id, norm_lot)
+        if not isinstance(worksheet, dict):
+            return None
+        return analyst_mod.AnalystResult(
+            worksheet=worksheet,
+            redacted_request={"reused": True, "source_analysis": analysis_id},
+            response_artifact={"reused": True, "lot_id": norm_lot},
+            model=str(worksheet.get("_reused_model") or "reused"),
+        )
+
+    return _reuse
 
 
 def _run_analyze_all(
@@ -717,37 +913,41 @@ def _run_analyze_all(
 
     # Concurrency is confined to the network calls: run_analyst builds its own
     # OpenAI client per call and shares no mutable state, so the per-lot calls
-    # (the dominant wall-clock cost) can overlap. Workers only return a result
-    # or an exception into this dict; every artifact write, validation and
-    # per_lot_results.append happens in the ordered sequential loop below, so
-    # outputs are byte-for-byte identical to the serial schedule.
+    # (the dominant wall-clock cost) can overlap. The lot_runner returns, per lot,
+    # either an AnalystResult or the exception it hit; EVERY artifact write,
+    # validation and per_lot_results.append happens in the ordered sequential loop
+    # below, so outputs are byte-for-byte identical to the serial schedule. The
+    # runner also owns bounded retries, safe rate-limit degradation to serial, and
+    # optional reuse of already-completed lots (no duplicate OpenAI call).
     lots_to_analyze = [
-        lot_id for lot_id in lot_ids if prepared[str(lot_id)]["selected_pages"]
+        str(lot_id) for lot_id in lot_ids if prepared[str(lot_id)]["selected_pages"]
     ]
-    analyst_outcomes: Dict[str, Any] = {}
-    if lots_to_analyze:
 
-        def _call_analyst(key: str) -> Any:
-            prep = prepared[key]
-            return analyst_mod.run_analyst(
-                prep["selected_pages"],
-                openai_caller=openai_caller,
-                model=model,
-                target_lot=str(prep["norm_lot"]),
-                document_map=prep["document_map"],
-            )
+    def _call_analyst(key: str) -> Any:
+        prep = prepared[key]
+        return analyst_mod.run_analyst(
+            prep["selected_pages"],
+            openai_caller=openai_caller,
+            model=model,
+            target_lot=str(prep["norm_lot"]),
+            document_map=prep["document_map"],
+        )
 
-        max_workers = min(len(lots_to_analyze), _lot_concurrency())
-        with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as pool:
-            futures = {
-                str(lot_id): pool.submit(_call_analyst, str(lot_id))
-                for lot_id in lots_to_analyze
-            }
-            for key, future in futures.items():
-                try:
-                    analyst_outcomes[key] = future.result()
-                except Exception as exc:  # noqa: BLE001 — handled per lot in the loop
-                    analyst_outcomes[key] = exc
+    reuse_fn = _build_lot_reuse_fn(analysis_id, prepared) if _lot_reuse_enabled() else None
+
+    batch_report = lot_runner_mod.run_lot_batch(
+        lots_to_analyze,
+        _call_analyst,
+        analysis_id=analysis_id,
+        reuse_fn=reuse_fn,
+    )
+    analyst_outcomes: Dict[str, Any] = {
+        key: batch_report.result_or_exc(key) for key in lots_to_analyze
+    }
+    batch_summary = batch_report.summary()
+    artifacts_saved["lot_batch_report"] = artifacts.save_json(
+        job_id, "lot_batch_report.json", batch_summary
+    )
 
     per_lot_results: List[Dict[str, Any]] = []
     for lot_id in lot_ids:
@@ -904,12 +1104,25 @@ def _run_analyze_all(
     all_ok = bool(per_lot_results) and all(
         e.get("status") == JobStatus.REPORT_READY for e in per_lot_results
     )
+    # Concurrency telemetry (admin-only diagnostics; never customer-facing). The
+    # numbers describe HOW the batch of network calls was scheduled, never WHAT
+    # was produced — the deterministic per-lot results above are independent of it.
+    concurrency_meta = {
+        "configured_concurrency": batch_summary.get("concurrency"),
+        "max_active_concurrency": batch_summary.get("max_active_concurrency"),
+        "degraded_to_serial": batch_summary.get("degraded_to_serial", False),
+        "total_retries": batch_summary.get("total_retries", 0),
+        "reused_lot_count": sum(
+            1 for v in batch_summary.get("per_lot", {}).values() if v.get("reused")
+        ),
+    }
     aggregate = {
         "analyze_all": True,
         "lot_count": lot_report.get("lot_count"),
         "lot_ids": lot_report.get("lot_ids", []),
         "all_lots_ready": all_ok,
         "per_lot_results": per_lot_results,
+        "concurrency": concurrency_meta,
     }
     artifacts_saved["analyze_all_result"] = artifacts.save_analyze_all_result(job_id, aggregate)
 
@@ -926,6 +1139,8 @@ def _run_analyze_all(
         "per_lot_results": per_lot_results,
         "all_lots_ready": all_ok,
         "contract_generated": all_ok,
+        "concurrency": concurrency_meta,
+        "degraded_to_serial": concurrency_meta["degraded_to_serial"],
     }
     common = dict(
         job_id=job_id,
