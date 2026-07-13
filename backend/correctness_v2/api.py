@@ -25,7 +25,7 @@ from typing import Any, Dict, List, Optional
 from fastapi import APIRouter, HTTPException, Request
 
 from . import artifacts, customer_view, feature_flags, job_status, openai_client
-from .orchestrator import start_job
+from .orchestrator import resolve_money_confirmation, start_job
 from .schemas import JobStatus
 
 router = APIRouter(prefix="/analysis/perizia", tags=["correctness_v2"])
@@ -258,6 +258,16 @@ async def correctness_v2_lot_selection_report(
     return _read_known_job_artifact(analysis_id, job_id, artifacts.LOT_SELECTION_REQUIRED_FILE)
 
 
+@router.get("/{analysis_id}/correctness-v2/jobs/{job_id}/money-confirmation-required")
+async def correctness_v2_money_confirmation_required(
+    analysis_id: str, job_id: str, request: Request
+) -> Dict[str, Any]:
+    await _resolve_user_and_guard(request)
+    return _read_known_job_artifact(
+        analysis_id, job_id, artifacts.MONEY_CONFIRMATION_REQUIRED_FILE
+    )
+
+
 @router.get("/{analysis_id}/correctness-v2/jobs/{job_id}/validator-report")
 async def correctness_v2_validator_report(
     analysis_id: str, job_id: str, request: Request
@@ -412,6 +422,56 @@ async def correctness_v2_customer_view(analysis_id: str, request: Request) -> Di
         "selected_lot_id": selected_lot_id,
         "preparing": False,
         "report": customer_view.sanitize_customer_report(report, status),
+    }
+
+
+@router.post("/{analysis_id}/correctness-v2/customer-view/confirm-money")
+async def correctness_v2_confirm_money(
+    analysis_id: str, request: Request
+) -> Dict[str, Any]:
+    """Customer submits money-confirmation answers; re-gate and return the report.
+
+    Body: {"job_id": "...", "answers": {ambiguity_id: option_id, ...}}. Ownership
+    is enforced (any authenticated owner or an admin). Deterministic: no OpenAI.
+    """
+    await _resolve_customer_access(request, analysis_id)
+
+    try:
+        body = await request.json()
+    except Exception:
+        body = None
+    if not isinstance(body, dict):
+        raise HTTPException(
+            status_code=400,
+            detail={"reason_code": "INVALID_BODY", "reason_human": "Richiesta non valida."},
+        )
+    job_id = str(body.get("job_id") or "").strip()
+    answers = body.get("answers")
+    if not job_id:
+        raise HTTPException(
+            status_code=400,
+            detail={"reason_code": "MISSING_JOB_ID", "reason_human": "job_id mancante."},
+        )
+
+    status = artifacts.read_job_status(job_id)
+    if not isinstance(status, dict) or str(status.get("analysis_id")) != str(analysis_id):
+        raise HTTPException(status_code=404, detail="Job not found")
+
+    try:
+        result = resolve_money_confirmation(job_id, answers)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=400,
+            detail={"reason_code": "INVALID_CONFIRMATION", "reason_human": str(exc)},
+        )
+
+    report = artifacts.read_json(job_id, artifacts.CUSTOMER_REPORT_FILE)
+    safe = customer_view.is_customer_safe(report, result)
+    return {
+        "available": bool(safe and report),
+        "job_id": job_id,
+        "report_status": result.get("status"),
+        "report": customer_view.sanitize_customer_report(report, result) if safe and report else None,
     }
 
 

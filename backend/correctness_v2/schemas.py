@@ -37,6 +37,13 @@ class JobStatus:
     # Multi-lot document with no safe single-lot selection. NOT a failure: it is
     # expected controlled behavior asking the caller to pick a lot (or analyze_all).
     LOT_SELECTION_REQUIRED = "LOT_SELECTION_REQUIRED"
+    # A rendered report would otherwise HARD-BLOCK on a small number of GENUINE,
+    # RESOLVABLE money-role ambiguities (an amount the document supports under two
+    # readings, e.g. market value vs regularization cost). NOT a failure: like
+    # LOT_SELECTION_REQUIRED it is controlled human-in-the-loop behavior asking the
+    # customer to confirm which interpretation is correct; the confirmed answer is
+    # then used as ground truth to produce the final clean report.
+    MONEY_CONFIRMATION_REQUIRED = "MONEY_CONFIRMATION_REQUIRED"
     CONTRACT_READY = "CONTRACT_READY"
     # Customer-facing report rendered from the verified contract (step 3 renderer).
     REPORT_READY = "REPORT_READY"
@@ -58,6 +65,7 @@ ALL_STATUSES: List[str] = [
     JobStatus.CONTRACT_VALIDATION_FAILED,
     JobStatus.NEEDS_MANUAL_REVIEW,
     JobStatus.LOT_SELECTION_REQUIRED,
+    JobStatus.MONEY_CONFIRMATION_REQUIRED,
     JobStatus.CONTRACT_READY,
     JobStatus.REPORT_READY,
     JobStatus.FAILED_NARRATION_USED_DETERMINISTIC_TEXT,
@@ -99,6 +107,7 @@ TERMINAL_STATUSES: List[str] = [
     JobStatus.CONTRACT_VALIDATION_FAILED,
     JobStatus.NEEDS_MANUAL_REVIEW,
     JobStatus.LOT_SELECTION_REQUIRED,
+    JobStatus.MONEY_CONFIRMATION_REQUIRED,
     JobStatus.CONTRACT_READY,
     JobStatus.REPORT_READY,
     JobStatus.FAILED_NARRATION_USED_DETERMINISTIC_TEXT,

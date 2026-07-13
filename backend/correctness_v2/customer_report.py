@@ -31,6 +31,7 @@ CUSTOMER_REPORT_SCHEMA_VERSION = "cv2.customer_report.v1"
 
 REPORT_READY = "REPORT_READY"
 LOT_SELECTION_REQUIRED = "LOT_SELECTION_REQUIRED"
+MONEY_CONFIRMATION_REQUIRED = "MONEY_CONFIRMATION_REQUIRED"
 NEEDS_MANUAL_REVIEW = "NEEDS_MANUAL_REVIEW"
 CONTRACT_VALIDATION_FAILED = "CONTRACT_VALIDATION_FAILED"
 # Customer-safe terminal status: the uploaded PDF could not be read at all
@@ -1439,6 +1440,31 @@ def _lot_money_summary(
     for row in selection_lot.get("key_money") or []:
         add(row.get("label"), row.get("amount"), row.get("evidence_pages"), "lot_summary_value")
     return rows
+
+
+def render_money_confirmation_report(
+    base_report: Dict[str, Any], money_confirmation: Dict[str, Any]
+) -> Dict[str, Any]:
+    """Overlay the money-confirmation prompt on the closest-guess report.
+
+    The owner directive: "the system shows the value of what it thinks is the
+    closest, but ... highlights it for the customer to check". So the fully
+    rendered success report (its valuation chain carries the closest reading)
+    is kept intact, its status is switched to MONEY_CONFIRMATION_REQUIRED, and
+    the ``money_confirmation`` block is attached. Never mutates the input.
+    """
+    report = dict(base_report or {})
+    report["report_status"] = MONEY_CONFIRMATION_REQUIRED
+    report["title"] = "Conferma richiesta su alcuni importi"
+    report["subtitle"] = (
+        "Il report è pronto: prima di finalizzarlo confermi come interpretare "
+        "gli importi segnalati."
+    )
+    report["money_confirmation"] = {
+        "message": money_confirmation.get("message"),
+        "ambiguities": [dict(a) for a in money_confirmation.get("ambiguities") or []],
+    }
+    return report
 
 
 def render_lot_selection_report(

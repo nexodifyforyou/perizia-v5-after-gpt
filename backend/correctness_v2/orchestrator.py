@@ -35,6 +35,7 @@ from . import (
     job_status,
     lot_packets as lot_packets_mod,
     lots as lots_mod,
+    money_confirmation as money_confirmation_mod,
     quality_gate as quality_gate_mod,
     validator as validator_mod,
 )
@@ -410,6 +411,14 @@ def _build_single_lot_contract(
     only runs when exactly one safe lot context exists (single-lot doc, or a chosen
     lot's isolated re-analysis). Fails closed on validation / build errors.
     """
+    # Deterministic valuation-chain completion: make grounded doc_signals the
+    # authority for the SELECTED lot's terminal net values (state-of-fact /
+    # judicial sale) — correcting an analyst mislabel and injecting a missing
+    # terminal — plus label-promotion from uncertain_money, BEFORE validation, so
+    # the validator chain check, the contract chain and the coverage audit all
+    # see the same values. Grounded + additive: already-correct perizie untouched.
+    worksheet = contract_mod.complete_valuation_terminals(worksheet, pages)
+
     # Deterministic compliance evidence gate: unsupported 'conforming' claims (and
     # claims with no evidence at all) are downgraded to 'uncertain' + manual review
     # BEFORE validation, so the contract never overclaims and never defaults to
@@ -484,6 +493,23 @@ def _build_single_lot_contract(
         )
 
     if gate["gate_status"] == quality_gate_mod.GATE_FAIL:
+        # Human-in-the-loop money confirmation: when the ONLY thing blocking the
+        # report is a small, resolvable set of money-role ambiguities (an amount
+        # the document supports under >=2 readings, e.g. market value vs
+        # regularization cost), PAUSE and ask the customer to confirm instead of
+        # a NEEDS_MANUAL_REVIEW dead end. Anything else (missing critical facts,
+        # unresolvable omissions, too many ambiguities) stays manual review.
+        mc_payload = money_confirmation_mod.build_money_confirmation(
+            analysis_id=analysis_id,
+            job_id=job_id,
+            coverage_audit=gate.get("coverage_audit") or {},
+            blocking_issues=(gate.get("quality_report") or {}).get("blocking_issues") or [],
+        )
+        if mc_payload:
+            return _finish_money_confirmation_required(
+                job_id, analysis_id, gate, mc_payload, customer_report,
+                artifacts_saved, created_at, admin_only,
+            )
         return _finish_quality_gate_failed(
             job_id, analysis_id, gate, artifacts_saved, created_at, admin_only
         )
@@ -627,14 +653,17 @@ def _run_selected_lot(
 def _lot_concurrency() -> int:
     """Max number of per-lot analyst OpenAI calls run concurrently in analyze_all.
 
-    Read from CORRECTNESS_V2_LOT_CONCURRENCY (default 4, clamped to >= 1). This
-    only bounds the network-call scheduling; every deterministic step stays
+    Read from CORRECTNESS_V2_LOT_CONCURRENCY (default 1 = serial, clamped to
+    >= 1). Serial is the default because that is the behavior validated end-to-end
+    by the real-perizia stability smoke; parallel per-lot analyst calls remain
+    available by setting the env var > 1 once that path is separately validated.
+    This only bounds the network-call scheduling; every deterministic step stays
     sequential and ordered.
     """
     try:
-        value = int(os.environ.get("CORRECTNESS_V2_LOT_CONCURRENCY", "4"))
+        value = int(os.environ.get("CORRECTNESS_V2_LOT_CONCURRENCY", "1"))
     except (TypeError, ValueError):
-        value = 4
+        value = 1
     return max(1, value)
 
 
@@ -1291,6 +1320,150 @@ def _finish_quality_gate_failed(
             "blocking_codes": codes,
             "report_status": JobStatus.NEEDS_MANUAL_REVIEW,
             "contract_generated": True,
+        },
+    )
+    artifacts.save_job_status(job_id, payload)
+    return payload
+
+
+def _finish_money_confirmation_required(
+    job_id: str,
+    analysis_id: str,
+    gate: Dict[str, Any],
+    mc_payload: Dict[str, Any],
+    customer_report: Dict[str, Any],
+    artifacts_saved: Dict[str, Any],
+    created_at: str,
+    admin_only: bool,
+) -> Dict[str, Any]:
+    """Resolvable money ambiguities -> pause for customer confirmation.
+
+    Mirrors _finish_lot_selection_required: a controlled, customer-safe pause
+    (NOT a failure). The closest-guess report is kept and the money-confirmation
+    prompt overlaid; the customer's answer is later applied as ground truth
+    (resolve_money_confirmation) to produce the final clean report.
+    """
+    ambiguities = mc_payload.get("ambiguities") or []
+    artifacts_saved["money_confirmation_required"] = (
+        artifacts.save_money_confirmation_required(job_id, mc_payload)
+    )
+    overlay = customer_report_mod.render_money_confirmation_report(
+        customer_report, mc_payload
+    )
+    artifacts_saved["customer_report"] = artifacts.save_customer_report(job_id, overlay)
+
+    payload = job_status.make_status(
+        job_id=job_id,
+        analysis_id=analysis_id,
+        status=JobStatus.MONEY_CONFIRMATION_REQUIRED,
+        current_stage=_step4_stage("money_confirmation_required"),
+        admin_only=admin_only,
+        customer_report_generated=True,
+        safe_to_show_customer=True,
+        reason_code="MONEY_CONFIRMATION_REQUIRED",
+        reason_human=(
+            f"Il report è pronto ma {len(ambiguities)} importo/i richiede/richiedono "
+            "una conferma del cliente sull'interpretazione corretta (il documento "
+            "supporta più letture). Nessun dato viene inventato."
+        ),
+        artifacts_saved=artifacts_saved,
+        created_at=created_at,
+        extra={
+            "money_confirmation_required": True,
+            "ambiguity_count": len(ambiguities),
+            "ambiguity_ids": [a.get("ambiguity_id") for a in ambiguities],
+            "report_status": JobStatus.MONEY_CONFIRMATION_REQUIRED,
+            "customer_report_schema_version": overlay.get("schema_version"),
+            "contract_generated": True,
+        },
+    )
+    artifacts.save_job_status(job_id, payload)
+    return payload
+
+
+def resolve_money_confirmation(
+    job_id: str,
+    answers: Dict[str, Any],
+    *,
+    admin_only: bool = False,
+) -> Dict[str, Any]:
+    """Apply the customer's money-confirmation answers and finalize the report.
+
+    Deterministic (NO OpenAI, NO PDF): re-renders the report from the already
+    verified contract, re-runs the quality gate with the confirmed roles as
+    ground truth, and finishes REPORT_READY when the gate now passes. If the
+    answers do not clear the block the job stays NEEDS_MANUAL_REVIEW
+    (fail-closed). The contract/analysis is never re-run.
+    """
+    status = artifacts.read_job_status(job_id)
+    if not isinstance(status, dict):
+        raise ValueError("Job non trovato.")
+    if str(status.get("status")) != JobStatus.MONEY_CONFIRMATION_REQUIRED:
+        raise ValueError("Il job non è in attesa di conferma importi.")
+
+    analysis_id = str(status.get("analysis_id"))
+    created_at = str(status.get("created_at") or "")
+    mc_payload = artifacts.read_json(job_id, artifacts.MONEY_CONFIRMATION_REQUIRED_FILE)
+    if not isinstance(mc_payload, dict):
+        raise ValueError("Richiesta di conferma non disponibile.")
+
+    # Strict validation: only offered options are ever accepted.
+    confirmations = money_confirmation_mod.validate_answers(mc_payload, answers)
+
+    contract = artifacts.read_json(job_id, artifacts.VERIFIED_CONTRACT_FILE)
+    pages_payload = artifacts.read_json(job_id, artifacts.INPUT_PAGES_FILE) or {}
+    pages = pages_payload.get("pages") or []
+    worksheet = artifacts.read_json(job_id, artifacts.ANALYST_WORKSHEET_FILE)
+    validator_report = artifacts.read_json(job_id, artifacts.VALIDATOR_REPORT_FILE)
+    lot_report = artifacts.read_json(job_id, artifacts.LOT_REPORT_FILE)
+    if not isinstance(contract, dict):
+        raise ValueError("Contratto verificato non disponibile.")
+
+    # Deterministic re-render of the closest-guess report from the SAME contract.
+    customer_report = customer_report_mod.render_success_report(contract, pages)
+    artifacts_saved = dict(status.get("artifacts_saved") or {})
+
+    gate = quality_gate_mod.run_quality_gate(
+        job_id=job_id,
+        analysis_id=analysis_id,
+        pages=pages,
+        worksheet=worksheet,
+        contract=contract,
+        customer_report=customer_report,
+        validator_report=validator_report,
+        lot_report=lot_report,
+        artifacts_saved=artifacts_saved,
+        money_confirmations=confirmations,
+    )
+
+    if gate["gate_status"] == quality_gate_mod.GATE_FAIL:
+        # The answers did not clear the block: still not customer-safe.
+        return _finish_quality_gate_failed(
+            job_id, analysis_id, gate, artifacts_saved, created_at, admin_only
+        )
+
+    quality = gate.get("quality_report") or {}
+    audit = gate.get("coverage_audit") or {}
+    payload = job_status.make_status(
+        job_id=job_id,
+        analysis_id=analysis_id,
+        status=JobStatus.REPORT_READY,
+        current_stage=_step4_stage("report_ready"),
+        admin_only=admin_only,
+        customer_report_generated=True,
+        safe_to_show_customer=True,
+        artifacts_saved=artifacts_saved,
+        created_at=created_at,
+        extra={
+            "quality_gate_status": gate["gate_status"],
+            "coverage_status": audit.get("coverage_status"),
+            "quality_status": quality.get("overall_quality_status"),
+            "customer_readiness": quality.get("customer_readiness"),
+            "report_status": JobStatus.REPORT_READY,
+            "contract_generated": True,
+            # Traceable record of the human-in-the-loop resolution.
+            "money_confirmation_resolved": True,
+            "money_confirmations": confirmations,
         },
     )
     artifacts.save_job_status(job_id, payload)

@@ -15,6 +15,8 @@ from __future__ import annotations
 import unicodedata
 from typing import Any, Dict, List, Optional
 
+from . import doc_signals
+
 CONTRACT_SCHEMA_VERSION = "cv2.contract.v1"
 
 # Money equality tolerance (kept in lockstep with the validator).
@@ -267,6 +269,128 @@ def _uncertain_row(label: str, amount: Optional[float], evidence_pages: List[int
         "reason": reason,
         "evidence_pages": list(evidence_pages or []),
     }
+
+
+def _grounded_terminal_authority(
+    pages: Optional[List[Dict[str, Any]]]
+) -> Dict[str, Optional[float]]:
+    """Unique, grounded terminal roles from doc_signals on the selected lot's pages.
+
+    Returns ``{"state": amount|None, "sale": amount|None}``. A role is
+    authoritative ONLY when doc_signals confidently classifies EXACTLY ONE
+    on-page amount for it (state_of_fact / judicial_sale). Multiple candidates
+    (per-corpo values, mis-parses) mean "not confident" -> the document is left
+    to the analyst's slotting and the money-confirmation fallback."""
+    if not pages:
+        return {"state": None, "sale": None}
+    state: set = set()
+    sale: set = set()
+    for sig in doc_signals.extract_money_signals(pages):
+        if sig.get("role") == doc_signals.ROLE_STATE_OF_FACT_VALUE:
+            state.add(sig["amount"])
+        elif sig.get("role") == doc_signals.ROLE_JUDICIAL_SALE_VALUE:
+            sale.add(sig["amount"])
+    return {
+        "state": next(iter(state)) if len(state) == 1 else None,
+        "sale": next(iter(sale)) if len(sale) == 1 else None,
+    }
+
+
+def complete_valuation_terminals(
+    worksheet: Dict[str, Any],
+    pages: Optional[List[Dict[str, Any]]] = None,
+) -> Dict[str, Any]:
+    """Return a worksheet whose money block reaches the TERMINAL net values.
+
+    Two deterministic, grounded completions (applied ONCE, before validation +
+    contract + gate, so the validator chain check, the contract chain and the
+    coverage audit all agree):
+
+      1. GROUNDED DOC AUTHORITY (when ``pages`` given). Italian perizie name the
+         two 8.4-net values unambiguously ("valore ... nello stato di fatto ...
+         a carico della procedura" = state-of-fact; "... a carico dell'acquirente"
+         = judicial sale). When doc_signals confidently (uniquely) classifies an
+         on-page amount for a terminal role, the DOCUMENT is the authority over
+         the analyst's slotting: a money field carrying the OTHER role's grounded
+         amount (a mislabel — e.g. the sale value dropped into
+         ``current_state_value``) is corrected, and a grounded terminal missing
+         from the fields is injected. A populated field the document does not
+         reclassify is left untouched, so already-correct lots never change.
+
+      2. LABEL PROMOTION (fallback). A terminal net value the analyst mis-slotted
+         into ``uncertain_money`` with its canonical label fills a still-empty
+         ``current_state_value`` / ``sale_value``.
+
+    Everything is grounded and additive: injected/corrected amounts are ones
+    doc_signals read verbatim from the lot's pages (the gate's
+    UNSUPPORTED_MONEY_CLAIM check still guards against any non-present value), and
+    genuinely ambiguous documents fall through to the money-confirmation feature.
+    """
+    if not isinstance(worksheet, dict) or not isinstance(worksheet.get("money"), dict):
+        return worksheet
+    money = dict(worksheet["money"])
+    changed = False
+
+    def _eq(a: Any, b: Any) -> bool:
+        return a is not None and b is not None and _approx_equal(float(a), float(b))
+
+    # 1) Grounded doc authority for the terminal roles.
+    auth = _grounded_terminal_authority(pages)
+    state, sale = auth["state"], auth["sale"]
+    cur = money.get("current_state_value")
+    sal = money.get("sale_value")
+    # Correct mislabels: a field carrying the OTHER role's grounded amount.
+    if sale is not None and _eq(cur, sale):
+        cur = None
+    if state is not None and _eq(sal, state):
+        sal = None
+    # Inject / set from the authority into empty (or just-cleared) fields.
+    if state is not None and cur is None:
+        cur = state
+    if sale is not None and sal is None:
+        sal = sale
+    if cur != money.get("current_state_value"):
+        money["current_state_value"] = cur
+        changed = True
+    if sal != money.get("sale_value"):
+        money["sale_value"] = sal
+        changed = True
+
+    # 2) Label-based promotion from uncertain_money (fallback).
+    remaining: List[Dict[str, Any]] = []
+    for u in money.get("uncertain_money") or []:
+        amt = u.get("amount")
+        role = (
+            doc_signals.classify_net_terminal(doc_signals.norm_text(u.get("label")))
+            if amt is not None else None
+        )
+        kind = role[0] if role else None
+        if kind == "valore_stato" and money.get("current_state_value") is None:
+            money["current_state_value"] = amt
+            changed = True
+            continue
+        if kind == "valore_vendita" and money.get("sale_value") is None:
+            money["sale_value"] = amt
+            changed = True
+            continue
+        remaining.append(u)
+
+    # 3) Drop any uncertain row whose amount is now a placed terminal value (so
+    #    the same amount is never shown both as a confirmed value and "uncertain").
+    placed = [
+        v for v in (money.get("current_state_value"), money.get("sale_value"))
+        if v is not None
+    ]
+    kept = [u for u in remaining if not any(_eq(u.get("amount"), p) for p in placed)]
+    if len(kept) != len(money.get("uncertain_money") or []):
+        changed = True
+    money["uncertain_money"] = kept
+
+    if not changed:
+        return worksheet
+    out = dict(worksheet)
+    out["money"] = money
+    return out
 
 
 def _money_sections(

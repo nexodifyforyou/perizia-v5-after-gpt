@@ -2,10 +2,14 @@ import React from 'react';
 import { createRoot } from 'react-dom/client';
 import { act } from 'react';
 import CustomerReportView from './CustomerReportView';
-import { getCorrectnessV2CustomerView } from '../../lib/api/perizia';
+import {
+  getCorrectnessV2CustomerView,
+  submitCorrectnessV2MoneyConfirmation,
+} from '../../lib/api/perizia';
 
 jest.mock('../../lib/api/perizia', () => ({
   getCorrectnessV2CustomerView: jest.fn(),
+  submitCorrectnessV2MoneyConfirmation: jest.fn(),
 }));
 
 const sanitizedReport = {
@@ -64,6 +68,71 @@ const lotSelectionReport = {
       { lot_id: '2', label: 'Lotto 2 - Bene N° 2', address: 'Pieve a Nievole', property_type: 'Magazzino', money_summary: [] },
     ],
   },
+};
+
+const moneyConfirmationReport = {
+  schema_version: 'cv2.customer_report.v1',
+  analysis_id: 'analysis_generic',
+  job_id: 'cv2_money',
+  report_status: 'MONEY_CONFIRMATION_REQUIRED',
+  report_status_label: 'Conferma importi richiesta',
+  title: 'Conferma richiesta su alcuni importi',
+  decision: { level: 'da_verificare', label: 'Da verificare', headline: 'Da verificare', reason: '', drivers: [] },
+  money_sections: { valuation_chain: [{ label: 'Valore di mercato', amount_display: 'EUR 452.494,00', evidence_pages: [12] }], auction_terms: [], buyer_side_costs: [], procedure_cancelled_formalities: [], uncertain_money: [] },
+  money_confirmation: {
+    message: 'Servono alcune conferme sugli importi.',
+    ambiguities: [
+      {
+        ambiguity_id: 'p12:valore_vendita:3',
+        amount_display: 'EUR 452.494,00',
+        page: 12,
+        evidence_pages: [12],
+        excerpt: 'Valore di vendita giudiziaria: EUR 452.494,00',
+        question: 'Per l\'importo EUR 452.494,00 (pag. 12) abbiamo trovato due possibili interpretazioni. Quale è corretta?',
+        options: [
+          { option_id: 'judicial_sale_value', label: 'valore di vendita giudiziaria' },
+          { option_id: 'market_value', label: 'valore di mercato' },
+        ],
+      },
+    ],
+  },
+};
+
+const notReadableReport = {
+  schema_version: 'cv2.customer_report.v1',
+  analysis_id: 'analysis_generic',
+  job_id: 'cv2_unreadable',
+  report_status: 'DOCUMENT_NOT_READABLE',
+  report_status_label: 'Documento non leggibile',
+  title: 'Perizia non leggibile',
+  decision: {
+    level: 'non_leggibile',
+    label: 'Documento non leggibile',
+    headline: 'Non riusciamo a leggere il contenuto della perizia.',
+    reason: '',
+    drivers: [],
+  },
+  // Deliberately carries normal-body fields too, to prove the not-readable
+  // branch takes precedence and never renders the standard report.
+  money_sections: { valuation_chain: [{ label: 'Valore di mercato', amount_display: 'EUR 999.999,00', evidence_pages: [1] }], auction_terms: [], buyer_side_costs: [], procedure_cancelled_formalities: [], uncertain_money: [] },
+};
+
+const documentNotReadableReport = {
+  schema_version: 'cv2.customer_report.v1',
+  analysis_id: 'analysis_generic',
+  job_id: 'cv2_unreadable',
+  report_status: 'DOCUMENT_NOT_READABLE',
+  report_status_label: 'Perizia non leggibile',
+  title: 'Perizia non leggibile',
+  decision: {
+    level: 'non_leggibile',
+    label: 'Non leggibile',
+    headline: 'Non è stato possibile leggere la perizia caricata.',
+    reason: 'Caricare un PDF leggibile con testo selezionabile e riprovare.',
+    drivers: [],
+  },
+  // A DOCUMENT_NOT_READABLE report intentionally carries no perizia facts.
+  money_sections: { valuation_chain: [], auction_terms: [], buyer_side_costs: [], procedure_cancelled_formalities: [], uncertain_money: [] },
 };
 
 let container;
@@ -181,6 +250,9 @@ describe('CustomerReportView', () => {
     expect(container.querySelector('[data-testid="cv2-customer-preparing"]')).toBeTruthy();
     expect(container.querySelector('[data-testid="cv2-customer-unavailable"]')).toBeNull();
     expect(text()).toContain('in preparazione');
+    // Reassuring processing-time expectation so waiting feels normal.
+    expect(text()).toContain('Di solito bastano 1–2 minuti');
+    expect(text()).toContain('Puoi lasciare questa pagina aperta');
   });
 
   test('selecting a lot with no report keeps the customer flow (pending box + back to lots)', async () => {
@@ -194,6 +266,7 @@ describe('CustomerReportView', () => {
 
     expect(container.querySelector('[data-testid="cv2-customer-lot-pending"]')).toBeTruthy();
     expect(text()).toContain('in preparazione');
+    expect(text()).toContain('Di solito bastano 1–2 minuti');
 
     await click('[data-testid="cv2-customer-back-to-lots"]');
     expect(container.querySelector('[data-testid="cv2-customer-lot-selector"]')).toBeTruthy();
@@ -324,5 +397,80 @@ describe('CustomerReportView', () => {
     expect(container.querySelector('[data-testid="cv2-customer-compliance"]')).toBeNull();
     expect(container.querySelector('[data-testid="cv2-customer-checklist"]')).toBeNull();
     expect(container.querySelector('[data-testid="cv2-customer-evidence"]')).toBeNull();
+  });
+
+  test('money confirmation: shows the amount, excerpt + page and candidate options', async () => {
+    getCorrectnessV2CustomerView.mockResolvedValue({ data: { available: true, report: moneyConfirmationReport } });
+    await render();
+    const card = container.querySelector('[data-testid="cv2-customer-money-confirmation"]');
+    expect(card).not.toBeNull();
+    expect(card.textContent).toContain('EUR 452.494,00');
+    expect(card.textContent).toContain('pag. 12');
+    expect(card.textContent).toContain('Valore di vendita giudiziaria: EUR 452.494,00');
+    expect(container.querySelector('[data-testid="cv2-customer-money-option-market_value"]')).not.toBeNull();
+    expect(container.querySelector('[data-testid="cv2-customer-money-option-judicial_sale_value"]')).not.toBeNull();
+    // Submit is disabled until an option is chosen.
+    expect(container.querySelector('[data-testid="cv2-customer-money-submit"]').disabled).toBe(true);
+    // The closest-guess report body is still shown beneath the prompt.
+    expect(container.querySelector('[data-testid="cv2-customer-report"]')).not.toBeNull();
+  });
+
+  test('DOCUMENT_NOT_READABLE renders the "PDF leggibile" guidance, not the normal report body', async () => {
+    getCorrectnessV2CustomerView.mockResolvedValue({ data: { available: true, report: documentNotReadableReport } });
+    await render();
+    const card = container.querySelector('[data-testid="cv2-customer-not-readable"]');
+    expect(card).not.toBeNull();
+    expect(card.textContent).toContain("Per completare l'analisi ci serve un PDF leggibile");
+    expect(card.textContent).toContain('Come ottenere un PDF leggibile');
+    // Obvious re-upload call-to-action.
+    expect(container.querySelector('[data-testid="cv2-customer-not-readable-cta"]')).not.toBeNull();
+    // The dedicated branch takes precedence: the normal report body and the
+    // lot/money branches never render for a non-readable document.
+    expect(container.querySelector('[data-testid="cv2-customer-report"]')).toBeNull();
+    expect(container.querySelector('[data-testid="cv2-customer-lot-selector"]')).toBeNull();
+    // Informational sky tone, NOT the amber "da verificare" tone.
+    const decision = container.querySelector('[data-testid="cv2-customer-decision"]');
+    expect(decision.className).toContain('sky');
+    expect(decision.className).not.toContain('amber');
+  });
+
+  test('money confirmation: choosing an option and submitting finalizes the report', async () => {
+    getCorrectnessV2CustomerView.mockResolvedValue({ data: { available: true, report: moneyConfirmationReport } });
+    submitCorrectnessV2MoneyConfirmation.mockResolvedValue({ data: { available: true, report: sanitizedReport } });
+    await render();
+    await click('[data-testid="cv2-customer-money-option-market_value"] input');
+    expect(container.querySelector('[data-testid="cv2-customer-money-submit"]').disabled).toBe(false);
+    await click('[data-testid="cv2-customer-money-submit"]');
+    expect(submitCorrectnessV2MoneyConfirmation).toHaveBeenCalledWith(
+      'analysis_generic', 'cv2_money', { 'p12:valore_vendita:3': 'market_value' },
+    );
+    // The finalized report replaces the confirmation prompt.
+    expect(container.querySelector('[data-testid="cv2-customer-money-confirmation"]')).toBeNull();
+    expect(text()).toContain('Appartamento in Torino');
+  });
+
+  test('DOCUMENT_NOT_READABLE: shows the "PDF leggibile" guidance and not the normal report body', async () => {
+    getCorrectnessV2CustomerView.mockResolvedValue({ data: { available: true, report: notReadableReport } });
+    await render();
+
+    const notReadable = container.querySelector('[data-testid="cv2-customer-not-readable"]');
+    expect(notReadable).not.toBeNull();
+    expect(notReadable.textContent).toContain('Per completare l\'analisi ci serve un PDF leggibile');
+    expect(container.querySelector('[data-testid="cv2-customer-not-readable-cta"]').textContent)
+      .toContain('Carica di nuovo la perizia');
+    // Precedence: the standard report body and any money amount must not leak through.
+    expect(container.querySelector('[data-testid="cv2-customer-report"]')).toBeNull();
+    expect(text()).not.toContain('EUR 999.999,00');
+    // Informational tone, not the amber "da verificare" fallback.
+    expect(text()).not.toContain('Da verificare');
+  });
+
+  test('preparing state sets a reassuring processing-time expectation', async () => {
+    getCorrectnessV2CustomerView.mockResolvedValue({
+      data: { available: false, preparing: true, reason_code: 'NO_CUSTOMER_REPORT' },
+    });
+    await render();
+    expect(container.querySelector('[data-testid="cv2-customer-preparing"]')).toBeTruthy();
+    expect(text()).toContain('1–2 minuti');
   });
 });

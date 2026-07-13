@@ -57,7 +57,20 @@ def _page_text(entry: Any) -> str:
 
 def _numeric_lot_ids(text: Any) -> List[str]:
     ids = lots_mod.lot_ids_in_text(text)
-    return [i for i in ids if i.isdigit()]
+    return [i for i in ids if i.isdigit() and _positive_lot(i)]
+
+
+def _positive_lot(lot_id: str) -> bool:
+    """A real auction lot is numbered from 1. "0"/"00" is never a lot — it is a
+    boilerplate footer artifact ("Lotto 00", "E.I. .../Lotto 00"). Treating it as
+    a lot spawns a phantom lot that hijacks each real lot's CONCLUDING valuation
+    page (which carries "Lotto 00" in its footer), excluding that page's stima /
+    "valore nello stato di fatto" from the owning lot's isolated context. Dropping
+    it lets those pages carry forward to the lot whose section they conclude."""
+    try:
+        return int(lot_id) >= 1
+    except (TypeError, ValueError):
+        return False
 
 
 # ---------------------------------------------------------------------------

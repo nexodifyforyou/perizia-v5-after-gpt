@@ -89,6 +89,10 @@ def main() -> int:
     else:
         worksheet = _load(job_dir / "analyst_worksheet.json")
     worksheet.pop("_saved_at", None)
+    # Match the orchestrator: complete the valuation chain's terminal net values
+    # before validation/contract/gate (grounded doc-signals authority on the
+    # lot's pages + promotion from mis-slotted uncertain_money).
+    worksheet = contract_mod.complete_valuation_terminals(worksheet, pages)
     worksheet, gate_report = validator_mod.apply_compliance_evidence_gate(worksheet, pages)
     validator_report = validator_mod.validate_worksheet(worksheet, pages)
     if validator_report.get("validation_status") != validator_mod.STATUS_VALIDATED:

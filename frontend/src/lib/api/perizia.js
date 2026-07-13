@@ -59,3 +59,16 @@ export const getCorrectnessV2CustomerView = (analysisId, options = {}, requestCo
     ...requestConfig
   });
 };
+
+// Submit the customer's money-confirmation answers (human-in-the-loop money-role
+// disambiguation). `answers` is {ambiguity_id: option_id}. Server re-runs the
+// gate deterministically (no OpenAI) and returns the final sanitized report.
+export const submitCorrectnessV2MoneyConfirmation = (
+  analysisId, jobId, answers, requestConfig = {}
+) => {
+  return axios.post(
+    `${correctnessV2Base(analysisId)}/customer-view/confirm-money`,
+    { job_id: jobId, answers: answers || {} },
+    { withCredentials: true, ...requestConfig }
+  );
+};

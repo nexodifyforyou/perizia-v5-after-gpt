@@ -102,10 +102,18 @@ def test_chained_value_labels_classified_by_role_not_by_bleed():
     assert by_amount[43654.2]["role"] == doc_signals.ROLE_MARKET_VALUE
     assert by_amount[5250.0]["role"] == doc_signals.ROLE_REGULARIZATION_COST
     # "Valore di Mercato ... nello stato di fatto e di diritto in cui si
-    # trova" is the MARKET value: the trailing "stato di fatto" wording is
-    # boilerplate appended to essentially every value line, and the head noun
-    # ("Mercato") names the role.
+    # trova" reads as the MARKET value by priority (the trailing "stato di
+    # fatto" wording is boilerplate appended to essentially every value line),
+    # BUT real perizie also use the same wording to NAME the current-state
+    # value (market - regularization). The text alone cannot decide, so the
+    # signal keeps market as the primary role and exposes state-of-fact as a
+    # document-supported alternative reading.
     assert by_amount[38404.2]["role"] == doc_signals.ROLE_MARKET_VALUE
+    assert by_amount[38404.2]["role_alternatives"] == [
+        doc_signals.ROLE_STATE_OF_FACT_VALUE
+    ]
+    # A plain market label without the qualifier stays unambiguous.
+    assert by_amount[43654.2]["role_alternatives"] == []
     assert by_amount[294.0]["role"] == doc_signals.ROLE_BUYER_SIDE_COST
     # "Valore di vendita giudiziaria ... nello stato di fatto" is judicial sale.
     assert by_amount[38110.2]["role"] == doc_signals.ROLE_JUDICIAL_SALE_VALUE
@@ -153,6 +161,56 @@ def test_next_section_heading_never_labels_previous_amount():
     signals = doc_signals.extract_money_signals(pages)
     big = [s for s in signals if s["amount"] == 43654.20]
     assert big and big[0]["kind"] == "importo_generico"
+
+
+def test_section_total_before_adjustments_heading_is_not_a_cost():
+    # Regression (Codogno lotto 1): the Riepilogo table ends with a duplicated
+    # section TOTAL ("€ 452. 494,00 € 452. 494,00") immediately followed by the
+    # numbered heading "8.4. Adeguamenti e correzioni della stima". The bare
+    # `adeguament` token must NOT bind the heading to the preceding total and
+    # classify a stima/market value as a regularization cost (which then
+    # false-blocks an arithmetically correct chain with MONEY_ROLE_MISMATCH).
+    # The REAL regularization cost further down the page must keep its role.
+    pages = [{
+        "page_number": 1,
+        "text": (
+            "Riepilogo: E Area pertinenziale 1170,79 € 32.788,00 "
+            "€ 452. 494,00 € 452. 494,00 \n"
+            "8.4. Adeguamenti e correzioni della stima \n"
+            "Riduzione del valore del 15% per differenza tra oneri tributari "
+            "e per l'immediatezza della vendita giudiziaria: € 67.874,10 \n"
+            "Spese tecniche di regolarizzazione urbanistica e catastale: "
+            "€ 14.000,00"
+        ),
+    }]
+    signals = doc_signals.extract_money_signals(pages)
+    total = [s for s in signals if s["amount"] == 452494.0]
+    assert total, signals
+    for sig in total:
+        assert sig["role"] != doc_signals.ROLE_REGULARIZATION_COST, sig
+        assert sig["kind"] != "costo_regolarizzazione", sig
+    cost = [s for s in signals if s["amount"] == 14000.0]
+    assert cost and cost[0]["role"] == doc_signals.ROLE_REGULARIZATION_COST
+
+
+def test_stima_adjustment_heading_wording_never_names_a_cost():
+    # "Adeguamenti e correzioni della stima" (any adeguamenti/correzioni/
+    # rettifiche variant) is the name of the adjustments SECTION, not a cost
+    # label — even without a numbered heading prefix, and even in the
+    # before-amount window.
+    assert doc_signals.classify_money_context(
+        "adeguamenti e correzioni della stima"
+    )[0] != "costo_regolarizzazione"
+    assert doc_signals.label_kind(
+        "Adeguamenti e correzioni della stima"
+    ) != "costo_regolarizzazione"
+    # A genuine cost label with the same stem keeps matching.
+    assert doc_signals.classify_money_context(
+        "spese di adeguamento impianti a carico dell'acquirente:"
+    )[0] == "costo_regolarizzazione"
+    assert doc_signals.classify_money_context(
+        "spese tecniche di regolarizzazione urbanistica e catastale:"
+    )[0] == "costo_regolarizzazione"
 
 
 def test_explicit_value_phrase_beats_comparable_wording():
@@ -794,6 +852,63 @@ def test_formality_capital_as_buyer_cost_warns():
     ]
     assert conflicts, "formality capital shown as buyer cost must contradict"
     assert audit["coverage_status"] in ("WARNING", "FAIL")
+
+
+def test_ambiguous_market_stato_label_accepts_state_of_fact_placement():
+    # Torino regression (analysis_9418e2972795, page 18): the document carries
+    # BOTH a plain market value AND a "Valore di Mercato ... nello stato di
+    # fatto" line that IS the current-state value (market - regularization,
+    # the chain balances). The report exposes 38.404,20 under "Valore nello
+    # stato di fatto": a document-supported reading, so it must be covered —
+    # never a MONEY_ROLE_MISMATCH.
+    pages = [{
+        "page_number": 18,
+        "text": (
+            "Valore di mercato (1000/1000 di piena proprietà): €. 43.654,20 "
+            "Spese di regolarizzazione delle difformità (vedi cap.8): €. 5.250,00 "
+            "Valore di Mercato dell'immobile nello stato di fatto e di diritto "
+            "in cui si trova: €. 38.404,20 Spese di cancellazione delle "
+            "trascrizioni ed iscrizioni a carico dell'acquirente: €. 294,00 "
+            "Valore di vendita giudiziaria dell'immobile: €. 38.110,20"
+        ),
+    }]
+    report = _minimal_report(valuation_chain=[
+        {"label": "Valore di mercato", "amount": 43654.2, "kind": "value"},
+        {"label": "Costi di regolarizzazione", "amount": 5250.0, "kind": "deduction"},
+        {"label": "Valore nello stato di fatto", "amount": 38404.2, "kind": "value"},
+        {"label": "Costi di cancellazione formalità", "amount": 294.0, "kind": "deduction"},
+        {"label": "Valore di vendita giudiziaria", "amount": 38110.2, "kind": "value"},
+    ])
+    audit = _audit(pages, report)
+    assert not any(f.get("role_conflict") for f in audit["fact_coverage"])
+    fact = next(
+        f for f in audit["fact_coverage"]
+        if f.get("source") == "page_money" and "38404.2" in f["document_fact"]
+    )
+    assert fact["match_status"] == coverage_audit.MATCH
+    assert not any(
+        o.get("role_conflict")
+        for o in audit["critical_omissions"] + audit["important_warnings"]
+    )
+
+
+def test_ambiguous_label_still_contradicts_unsupported_roles():
+    # Ambiguity is NOT leniency: the same wording still contradicts when the
+    # report shows the amount under a role the text does not support at all.
+    pages = [{
+        "page_number": 1,
+        "text": (
+            "Valore di Mercato dell'immobile nello stato di fatto e di diritto "
+            "in cui si trova: €. 38.404,20"
+        ),
+    }]
+    report = _minimal_report(market_comparatives=[
+        {"label": "Comparativo di zona", "amount": 38404.2, "evidence_pages": [1]},
+    ])
+    audit = _audit(pages, report)
+    conflict = [o for o in audit["critical_omissions"] if o.get("role_conflict")]
+    assert conflict, "value demoted to comparable must still contradict"
+    assert audit["coverage_status"] == "FAIL"
 
 
 def test_rent_amount_in_rent_bucket_is_covered():

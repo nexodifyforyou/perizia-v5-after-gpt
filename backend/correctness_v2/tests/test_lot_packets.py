@@ -163,6 +163,53 @@ def test_analyst_target_lot_prompt_focuses_one_lot():
     assert "ESCLUSIVAMENTE IL LOTTO" not in user2
 
 
+def test_trailing_valuation_page_stays_with_the_lot_it_concludes():
+    # Regression (Codogno): a lot's CONCLUDING valuation page carries a boilerplate
+    # "Lotto 00" footer artifact. "00" must NOT be read as a real lot (lots number
+    # from 1) — otherwise it spawns a phantom lot that hijacks p2/p4 (the stima /
+    # "valore nello stato di fatto" pages) away from lots 1/2.
+    pages = [
+        {"page_number": 1, "text": "Lotto 1 - descrizione dell'immobile e consistenza."},
+        {"page_number": 2, "text": (
+            "Valore nello stato di fatto: € 100.000,00. "
+            "E.I. 123/2024 - Lotto 00 - Astalegale.net")},
+        {"page_number": 3, "text": "Lotto 2 - descrizione del secondo immobile."},
+        {"page_number": 4, "text": (
+            "Valore nello stato di fatto: € 80.000,00. Lotto 00")},
+    ]
+    seg = lot_packets.segment_pages(pages, ["1", "2"])
+    # No phantom "0"/"00" lot; the valuation pages carry forward to their lot.
+    assert "00" not in seg["lot_pages"] and "0" not in seg["lot_pages"]
+    assert seg["lot_ids"] == ["1", "2"]
+    assert seg["lot_pages"]["1"] == [1, 2]
+    assert seg["lot_pages"]["2"] == [3, 4]
+    # The concluding valuation page is now in the lot's isolated context.
+    assert 2 in {p["page_number"] for p in lot_packets.select_lot_pages(pages, seg, "1")}
+    assert 4 in {p["page_number"] for p in lot_packets.select_lot_pages(pages, seg, "2")}
+
+
+def test_zero_lot_ids_are_never_real_lots():
+    assert lot_packets._numeric_lot_ids("Lotto 00 in calce alla pagina") == []
+    assert lot_packets._numeric_lot_ids("Lotto 0") == []
+    # A genuine numbered lot is still detected.
+    assert lot_packets._numeric_lot_ids("Lotto 3 - immobile") == ["3"]
+
+
+def test_multi_lot_boundary_page_stays_shared_not_stolen():
+    # A page that explicitly names TWO real lots (a summary/boundary table) stays
+    # SHARED and is excluded from single-lot re-analysis — the trailing-page fix
+    # must not turn such a page into one lot's owned page.
+    pages = [
+        {"page_number": 1, "text": "Lotto 1 - primo immobile."},
+        {"page_number": 2, "text": "Riepilogo: Lotto 1 e Lotto 2 - tabella comparativa."},
+        {"page_number": 3, "text": "Lotto 2 - secondo immobile."},
+    ]
+    seg = lot_packets.segment_pages(pages, ["1", "2"])
+    assert seg["shared_pages"] == [2]
+    assert 2 not in seg["lot_pages"]["1"]
+    assert 2 not in {p["page_number"] for p in lot_packets.select_lot_pages(pages, seg, "1")}
+
+
 def test_normalize_lot_token_handles_varied_wordings():
     assert lots.normalize_lot_token("Lotto 2") == "2"
     assert lots.normalize_lot_token("LOTTO PRIMO") == "1"

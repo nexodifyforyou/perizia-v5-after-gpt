@@ -44,6 +44,7 @@ LOT_INDEX_FILE = "lot_index.json"
 PER_LOT_PACKETS_FILE = "per_lot_packets.json"
 SELECTED_LOT_CONTEXT_FILE = "selected_lot_context.json"
 LOT_SELECTION_REQUIRED_FILE = "lot_selection_required.json"
+MONEY_CONFIRMATION_REQUIRED_FILE = "money_confirmation_required.json"
 ANALYZE_ALL_RESULT_FILE = "analyze_all_result.json"
 COMPLIANCE_GATE_FILE = "compliance_gate_report.json"
 # Step 3B artifact: the deterministic customer-facing report.
@@ -164,6 +165,10 @@ def save_selected_lot_context(job_id: str, context: Dict[str, Any]) -> str:
 
 def save_lot_selection_required(job_id: str, payload: Dict[str, Any]) -> str:
     return save_json(job_id, LOT_SELECTION_REQUIRED_FILE, payload)
+
+
+def save_money_confirmation_required(job_id: str, payload: Dict[str, Any]) -> str:
+    return save_json(job_id, MONEY_CONFIRMATION_REQUIRED_FILE, payload)
 
 
 def save_analyze_all_result(job_id: str, payload: Dict[str, Any]) -> str:

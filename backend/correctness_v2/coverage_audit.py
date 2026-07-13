@@ -80,6 +80,9 @@ _SKIP_KEYS = {
     "schema_version", "analysis_id", "job_id", "_saved_at", "disclaimer",
     "sections_meta", "report_status", "evidence_pages", "kind", "signal_id",
     "quality_control", "customer_evidence_index", "admin_evidence_index",
+    # The money-confirmation prompt echoes ambiguous amounts (with page excerpts)
+    # only to ASK the customer — never a report placement; never index it.
+    "money_confirmation",
     # Pure formatting duplicates of structured amounts: indexing them would
     # create role-less wildcard entries that defeat role-aware matching.
     "amount_display", "value_display", "cost_display",
@@ -152,9 +155,13 @@ class ReportPool:
         spans = sorted(doc_signals.amounts_in_text(raw), key=lambda t: t[1])
         for i, (amount, _s, _e) in enumerate(spans):
             # Role from the text preceding the amount (same detector as pages).
-            window = doc_signals.classification_window(raw, spans, i)
-            kind, _sev, _lab = doc_signals.classify_money_context(norm_text(window))
-            self.amounts.append((amount, section, _roles_for_kind(section, kind)))
+            window_norm = norm_text(doc_signals.classification_window(raw, spans, i))
+            kind, _sev, _lab = doc_signals.classify_money_context(window_norm)
+            # Ambiguous value wording plays EVERY role its text supports.
+            roles = _roles_for_kind(section, kind) | doc_signals.value_role_alternatives(
+                window_norm, kind
+            )
+            self.amounts.append((amount, section, roles))
 
     def add_amount(self, section: str, amount: Any, roles: Any = None) -> None:
         if amount is None or isinstance(amount, bool):
@@ -194,17 +201,21 @@ class ReportPool:
         return out
 
     def lookup_amount(
-        self, amount: float, role: Optional[str] = None
+        self, amount: float, role: Optional[str] = None,
+        role_alternatives: Any = (),
     ) -> Tuple[List[str], List[str], frozenset]:
         """(match_sections, conflict_sections, conflict_roles) in ONE pass.
 
-        conflict_* describe entries where the amount exists but only under an
-        incompatible role."""
+        ``role_alternatives`` are other roles the DOCUMENT wording equally
+        supports (doc_signals.value_role_alternatives): a placement under any
+        supported reading is a match, never a conflict. conflict_* describe
+        entries where the amount exists but only under an incompatible role."""
+        acceptable = [role] + [r for r in role_alternatives or () if r]
         matches: set = set()
         conflict_secs: set = set()
         conflict_roles: set = set()
         for _val, sec, entry_roles in self._candidates(amount):
-            if self._entry_matches_role(entry_roles, role):
+            if any(self._entry_matches_role(entry_roles, r) for r in acceptable):
                 matches.add(sec)
             else:
                 conflict_secs.add(sec)
@@ -263,9 +274,11 @@ def _roles_for_kind(section: str, kind: Optional[str]) -> frozenset:
 def _row_roles(section: str, node: Dict[str, Any]) -> frozenset:
     """Money roles a report row plays: label semantics + contract roles + section."""
     label = node.get("label") or node.get("area")
-    roles = set(
-        _roles_for_kind(section, doc_signals.label_kind(label) if label else None)
-    )
+    label_kind = doc_signals.label_kind(label) if label else None
+    roles = set(_roles_for_kind(section, label_kind))
+    # A row keeping the document's ambiguous value wording plays every role
+    # that wording supports (same rule as the page-side signals).
+    roles |= doc_signals.value_role_alternatives(norm_text(label), label_kind)
     for tok in node.get("roles") or []:
         mapped = _ROW_ROLE_TOKENS.get(str(tok))
         if mapped:
@@ -539,6 +552,25 @@ def _worksheet_facts(worksheet: Dict[str, Any]) -> List[Dict[str, Any]]:
 # ---------------------------------------------------------------------------
 # Fact evaluation against the report pool
 # ---------------------------------------------------------------------------
+def _confirmation_role_candidates(doc_role: str, conflict_roles: Any) -> List[str]:
+    """Distinct candidate roles a customer could confirm for one amount.
+
+    The document-detected role first, then the CORE roles the report actually
+    placed the same amount under. These are the ">=2 real interpretations tied
+    to a specific amount+page" that make a money ambiguity customer-resolvable
+    (money_confirmation.py builds the prompt from them). Background/uncertain
+    roles never seed a confirmation — they are already safe placements."""
+    candidates: List[str] = []
+    for role in [doc_role, *(conflict_roles or ())]:
+        if not role:
+            continue
+        if role not in doc_signals.CORE_MONEY_ROLES:
+            continue
+        if role not in candidates:
+            candidates.append(role)
+    return candidates
+
+
 def _role_conflict_update(
     out: Dict[str, Any], role: str, conflicts: List[str], conflict_roles: Any
 ) -> Dict[str, Any]:
@@ -553,11 +585,14 @@ def _role_conflict_update(
     role_label = doc_signals.ROLE_LABELS_IT.get(role, role)
     misleading = doc_signals.conflict_is_misleading(role, conflict_roles)
     if misleading:
+        candidates = _confirmation_role_candidates(role, conflict_roles)
         out.update({
             "match_status": CONTRADICTED,
             "report_location": ", ".join(conflicts),
             "action": "",
             "role_conflict": True,
+            # >=2 candidate roles make this a customer-resolvable ambiguity.
+            "confirmation_roles": candidates if len(candidates) >= 2 else [],
             "software_output": (
                 f"Importo presente nel report ma con un ruolo diverso ({', '.join(conflicts)})"
             ),
@@ -697,15 +732,28 @@ def _finalize_missing(fact: Dict[str, Any]) -> Dict[str, Any]:
 # Page signals evaluation (document -> report)
 # ---------------------------------------------------------------------------
 def _evaluate_money_signal(
-    sig: Dict[str, Any], pool: ReportPool, role_covered: Dict[str, bool]
+    sig: Dict[str, Any], pool: ReportPool, role_covered: Dict[str, bool],
+    confirmations: Optional[Dict[str, str]] = None,
 ) -> Dict[str, Any]:
     role = sig.get("role") or doc_signals.role_for_kind(sig.get("kind"))
-    sections, role_conflicts, conflict_roles = pool.lookup_amount(sig["amount"], role)
+    alternatives = list(sig.get("role_alternatives") or ())
+    # Customer-confirmed ground truth (human-in-the-loop money confirmation):
+    # once the customer confirms which reading of this amount is correct, that
+    # role becomes an ACCEPTED placement, so a report row under the confirmed
+    # role is a match and the previous role conflict is resolved. Confirming a
+    # role the report does NOT carry leaves the block in place (fail-closed).
+    confirmed_role = (confirmations or {}).get(sig["signal_id"])
+    if confirmed_role and confirmed_role not in alternatives and confirmed_role != role:
+        alternatives.append(confirmed_role)
+    sections, role_conflicts, conflict_roles = pool.lookup_amount(
+        sig["amount"], role, alternatives
+    )
     action, location = _classify_sections(sections)
     fact = {
         "fact_id": sig["signal_id"],
         "category": sig["category"],
         "document_fact": f"{sig['label']}: {sig['amount']}",
+        "amount": sig["amount"],
         "evidence_pages": [sig["page"]],
         "severity": sig["severity"],
         "source": "page_money",
@@ -893,11 +941,17 @@ def build_coverage_audit(
     validator_report: Optional[Dict[str, Any]] = None,
     lot_report: Optional[Dict[str, Any]] = None,
     lot_index: Optional[Dict[str, Any]] = None,
+    money_confirmations: Optional[Dict[str, str]] = None,
 ) -> Tuple[Dict[str, Any], Dict[str, Any]]:
     """Build (coverage_audit, page_by_page_audit) for a rendered report.
 
     Selection mode (report_status == LOT_SELECTION_REQUIRED) audits lot
     structure + per-lot money preservation; full mode audits everything.
+
+    ``money_confirmations`` maps a money signal's fact_id -> the role the
+    customer confirmed as correct (human-in-the-loop disambiguation). A
+    confirmed role is treated as an accepted placement, so a previously-blocking
+    role ambiguity the customer resolved no longer contradicts.
     """
     pool = build_report_pool(customer_report)
     selection_mode = (customer_report or {}).get("report_status") == "LOT_SELECTION_REQUIRED"
@@ -960,7 +1014,9 @@ def build_coverage_audit(
             fact_coverage.append(_maybe_finalize(_evaluate_fact(fact, pool)))
         for sig in signals:
             if sig["signal_type"] == "money":
-                fact_coverage.append(_evaluate_money_signal(sig, pool, role_covered))
+                fact_coverage.append(
+                    _evaluate_money_signal(sig, pool, role_covered, money_confirmations)
+                )
             else:
                 fact_coverage.append(_evaluate_topic_signal(sig, pool))
 
@@ -1056,6 +1112,15 @@ def _omission_view(fact: Dict[str, Any]) -> Dict[str, Any]:
         view["role"] = fact["role"]
     if fact.get("role_conflict"):
         view["role_conflict"] = True
+    # Carried for the money-confirmation builder (customer disambiguation): the
+    # amount, its verbatim page excerpt, and the >=2 candidate roles. Present
+    # only for resolvable money ambiguities; absent everywhere else.
+    if fact.get("amount") is not None:
+        view["amount"] = fact["amount"]
+    if fact.get("snippet"):
+        view["snippet"] = fact["snippet"]
+    if fact.get("confirmation_roles"):
+        view["confirmation_roles"] = list(fact["confirmation_roles"])
     return view
 
 

@@ -174,6 +174,17 @@ def amounts_in_text(text: Any) -> List[Tuple[float, int, int]]:
 #     value. "Stato di fatto"/"valore di realizzo" (net realizable value in
 #     the current state, NOT the judicial sale) is the current/state value and
 #     is matched last among the value kinds.
+#
+#     BUT the priority winner is only the PRIMARY reading: the same wording
+#     "Valore di Mercato ... nello stato di fatto e di diritto in cui si trova"
+#     is used by real perizie BOTH for the plain market value (trailing
+#     boilerplate) AND as the name of the current-state value (market value net
+#     of regularization, in chains that also carry a separate plain market
+#     value). Text alone cannot decide, so a window that matches MORE THAN ONE
+#     explicit value phrase additionally exposes the other readings via
+#     value_role_alternatives(); the coverage audit accepts the report placing
+#     that amount under ANY document-supported reading and still contradicts
+#     roles the text does not support.
 _MONEY_KINDS: List[Tuple[str, str, str, re.Pattern]] = [
     ("prezzo_base", SEV_CRITICAL, "Prezzo base d'asta", re.compile(r"prezzo\s+base|base\s+d'?asta")),
     ("offerta_minima", SEV_CRITICAL, "Offerta minima", re.compile(r"offerta\s+minima")),
@@ -196,6 +207,70 @@ _MONEY_KINDS: List[Tuple[str, str, str, re.Pattern]] = [
 
 _VALUE_KIND_NAMES = ("valore_vendita", "valore_stato", "valore_mercato")
 
+# Canonical Italian phrasing of the two TERMINAL net values a perizia derives
+# after the 8.4 "Adeguamenti e correzioni della stima" adjustments. Both lines
+# open with "valore dell'immobile al netto delle decurtazioni ..." and differ
+# only by who bears the regularization:
+#   * "... a carico della procedura"   -> valore nello stato di fatto (state)
+#   * "... a carico dell'acquirente"   -> valore di vendita giudiziaria (sale;
+#      the buyer also bears the regularization cost)
+# These lines frequently share one long label split across the two amounts, so
+# the amount's own before-window can be too short to see the "al netto delle
+# decurtazioni" anchor — this is detected with a wider window (still truncated
+# at the previous amount) and ONLY rescues amounts left as importo_generico, so
+# it never downgrades an already-correct classification.
+_NET_DEDUCTIONS_ANCHOR_RE = re.compile(r"netto\s+delle\s+decurtazion")
+# Apostrophe class tolerates straight ('), curly (’), grave (`) and a bare
+# space: PDF text extraction renders "dell'acquirente" any of these ways.
+_CARICO_ACQUIRENTE_RE = re.compile(r"carico\s+dell[\s'’‘`]*acquirente")
+_CARICO_PROCEDURA_RE = re.compile(r"carico\s+della\s+procedura")
+
+
+def classify_net_terminal(context_norm: str) -> Optional[Tuple[str, str, str]]:
+    """Terminal net value (state-of-fact / judicial sale) from canonical wording.
+
+    Returns (kind, severity, label_it) or None. Requires the net-of-deductions
+    anchor so an ordinary "a carico dell'acquirente" buyer cost is never misread
+    as a judicial sale value. The role is decided by the "a carico ..." phrase
+    NEAREST the amount (rightmost in the before-window): a wide window can also
+    contain earlier "a carico dell'acquirente" cost lines (e.g. "Oneri ...
+    Nessuno") that belong to other rows, so first-match would swap the roles."""
+    if not _NET_DEDUCTIONS_ANCHOR_RE.search(context_norm):
+        return None
+    acq = [m.start() for m in _CARICO_ACQUIRENTE_RE.finditer(context_norm)]
+    proc = [m.start() for m in _CARICO_PROCEDURA_RE.finditer(context_norm)]
+    last_acq = max(acq) if acq else -1
+    last_proc = max(proc) if proc else -1
+    if last_acq < 0 and last_proc < 0:
+        return ("valore_stato", SEV_CRITICAL, "Valore nello stato di fatto") \
+            if "stato di fatto" in context_norm else None
+    if last_acq > last_proc:
+        return ("valore_vendita", SEV_CRITICAL, "Valore di vendita giudiziaria")
+    return ("valore_stato", SEV_CRITICAL, "Valore nello stato di fatto")
+
+# Wording of the stima ADJUSTMENTS chapter heading ("8.4. Adeguamenti e
+# correzioni della stima", "Correzioni/Rettifiche della stima", ...). It names
+# the SECTION that adjusts the estimate, not any cost: without masking, the
+# bare `adeguament` token of costo_regolarizzazione binds the section TOTAL
+# printed just before the heading (a stima/market value) as a regularization
+# cost, and the coverage audit then false-blocks an arithmetically correct
+# valuation chain (MONEY_ROLE_MISMATCH). Generic across perizie by design.
+_STIMA_ADJUSTMENT_HEADING_RE = re.compile(
+    r"(?:adeguament|correzion|rettific)\w*"
+    r"(?:\s+e\s+(?:adeguament|correzion|rettific)\w*)?"
+    r"\s+(?:della|delle|di|alla)\s+stim\w*"
+)
+
+# Numbered section heading ("8.4. Adeguamenti...", "7.1 Criterio di stima").
+# A heading STARTS a new section: text after it can never be the trailing
+# label of an amount that belongs to the previous section.
+_SECTION_HEADING_RE = re.compile(r"\b\d{1,2}(?:\.\d{1,2})+(?!\d)\.?\s")
+
+
+def _mask_stima_adjustment_heading(context_norm: str) -> str:
+    """Blank out stima-adjustment heading wording before kind matching."""
+    return _STIMA_ADJUSTMENT_HEADING_RE.sub(" ", context_norm)
+
 
 def classify_money_context(context_norm: str) -> Tuple[str, str, str]:
     """Return (kind, severity, label_it) for the text around an amount.
@@ -206,6 +281,7 @@ def classify_money_context(context_norm: str) -> Tuple[str, str, str]:
     perito derived it. Listing rows (annunci/borsino) don't carry the explicit
     value phrases, so they still classify as comparables.
     """
+    context_norm = _mask_stima_adjustment_heading(context_norm)
     for kind, severity, label, pattern in _MONEY_KINDS:
         if not pattern.search(context_norm):
             continue
@@ -360,6 +436,30 @@ def conflict_is_misleading(doc_role: str, entry_roles: Any) -> bool:
 
 def role_for_kind(kind: Any) -> str:
     return ROLE_BY_KIND.get(str(kind or ""), ROLE_UNCERTAIN_MONEY)
+
+
+def value_role_alternatives(context_norm: str, kind: Any) -> frozenset:
+    """Alternative VALUE roles the wording of a label/window also supports.
+
+    Italian perizie append "nello stato di fatto e di diritto in cui si trova"
+    as boilerplate to nearly every value line, but the SAME phrase also names
+    the current-state value ("Valore di Mercato ... nello stato di fatto" as
+    market minus regularization in a full valuation chain). When one
+    classification window carries more than one explicit value phrase the text
+    alone cannot decide the role: classify_money_context keeps a deterministic
+    PRIMARY kind (priority order above _MONEY_KINDS) and this returns the other
+    document-supported readings. Non-value kinds never get alternatives, and a
+    role never appears both as primary and alternative.
+    """
+    kind = str(kind or "")
+    if kind not in _VALUE_KIND_NAMES:
+        return frozenset()
+    primary = role_for_kind(kind)
+    return frozenset(
+        role_for_kind(k)
+        for k, _sev, _lab, pattern in _MONEY_KINDS
+        if k in _VALUE_KIND_NAMES and k != kind and pattern.search(context_norm)
+    ) - {primary}
 
 
 def label_kind(label: Any) -> str:
@@ -529,13 +629,24 @@ def classify_after_fallback(text: str, spans: List[Tuple[float, int, int]], idx:
     matched phrase anywhere in the window, the phrase is the heading of the
     NEXT line ("€ 43.654,20 € VALORE DI VENDITA GIUDIZIARIA (FJV): ...") — the
     amount stays generic rather than risking a swapped money role.
+
+    Same fail-safe for numbered section headings: the window is truncated at
+    "8.4. " etc., because a heading STARTS a new section — its title ("8.4.
+    Adeguamenti e correzioni della stima") and everything after it label the
+    NEXT section's content, never the preceding amount (which is typically the
+    previous section's total). Without the cut, a section-total stima value
+    printed right before the adjustments chapter inherits `adeguament` and
+    becomes a false regularization cost.
     """
     _amount, _s, e = spans[idx]
     hi = min(len(text), e + max_after)
     if idx + 1 < len(spans):
         hi = min(hi, spans[idx + 1][1])
     window = text[e:hi]
-    n = norm_text(window)
+    heading = _SECTION_HEADING_RE.search(window)
+    if heading:
+        window = window[: heading.start()]
+    n = _mask_stima_adjustment_heading(norm_text(window))
     for kind, severity, label, pattern in _MONEY_KINDS:
         m = pattern.search(n)
         if not m:
@@ -559,11 +670,19 @@ def extract_money_signals(pages: List[Dict[str, Any]], *, min_amount: float = 50
         for i, (amount, s, e) in enumerate(spans):
             if amount < min_amount:
                 continue
-            kind, severity, label = classify_money_context(
-                norm_text(classification_window(text, spans, i))
-            )
+            window_norm = norm_text(classification_window(text, spans, i))
+            kind, severity, label = classify_money_context(window_norm)
             if kind == "importo_generico":
-                kind, severity, label = classify_after_fallback(text, spans, i)
+                # A terminal net value ("... al netto delle decurtazioni ... a
+                # carico della procedura/acquirente") whose long label sits
+                # beyond the default before-window: look wider (still truncated
+                # at the previous amount) before giving up to the after-fallback.
+                wide_norm = norm_text(classification_window(text, spans, i, max_before=400))
+                terminal = classify_net_terminal(wide_norm)
+                if terminal:
+                    kind, severity, label = terminal
+                else:
+                    kind, severity, label = classify_after_fallback(text, spans, i)
             key = (pnum, kind, round(amount, 2))
             if key in seen:
                 continue
@@ -578,6 +697,11 @@ def extract_money_signals(pages: List[Dict[str, Any]], *, min_amount: float = 50
                     "label": label,
                     "amount": round(amount, 2),
                     "role": role_for_kind(kind),
+                    # Other value roles this wording ALSO supports (ambiguous
+                    # label): the audit accepts any of them as coverage.
+                    "role_alternatives": sorted(
+                        value_role_alternatives(window_norm, kind)
+                    ),
                     "snippet": _clean_snippet(_context_window(text, s, e)),
                 }
             )

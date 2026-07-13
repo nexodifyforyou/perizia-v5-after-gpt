@@ -1,5 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { getCorrectnessV2CustomerView } from '../../lib/api/perizia';
+import {
+  getCorrectnessV2CustomerView,
+  submitCorrectnessV2MoneyConfirmation,
+} from '../../lib/api/perizia';
 
 // Single source of truth for the sanitized Correctness V2 customer report.
 //
@@ -37,6 +40,9 @@ export const useCorrectnessV2CustomerView = (analysisId, { enabled = true } = {}
   // does not exist yet, we keep the selector data so they can navigate back
   // instead of hitting a dead end.
   const [lotSelectionReport, setLotSelectionReport] = useState(null);
+  // Money-confirmation submission state (human-in-the-loop disambiguation).
+  const [confirmingMoney, setConfirmingMoney] = useState(false);
+  const [moneyConfirmError, setMoneyConfirmError] = useState('');
   const mountedRef = useRef(false);
   const pollCountRef = useRef(0);
 
@@ -109,6 +115,39 @@ export const useCorrectnessV2CustomerView = (analysisId, { enabled = true } = {}
   const report = payload && payload.available ? (payload.report || null) : null;
   const available = Boolean(payload && payload.available && payload.report);
   const isLotSelection = report?.report_status === 'LOT_SELECTION_REQUIRED';
+  const isMoneyConfirmation = report?.report_status === 'MONEY_CONFIRMATION_REQUIRED';
+
+  // Submit the customer's answers {ambiguity_id: option_id}; on success the
+  // server returns the finalized report, which we swap in directly.
+  const submitMoneyConfirmation = useCallback((answers) => {
+    const jobId = report?.job_id;
+    if (!jobId) return Promise.resolve(false);
+    setConfirmingMoney(true);
+    setMoneyConfirmError('');
+    return submitCorrectnessV2MoneyConfirmation(analysisId, jobId, answers)
+      .then((response) => {
+        if (!mountedRef.current) return false;
+        const data = response.data;
+        if (data?.available && data?.report) {
+          setPayload({ available: true, report: data.report });
+          return true;
+        }
+        // Answers accepted but the report still is not customer-ready.
+        setMoneyConfirmError('Le conferme non hanno risolto tutte le verifiche necessarie.');
+        return false;
+      })
+      .catch((err) => {
+        if (!mountedRef.current) return false;
+        const detail = err?.response?.data?.detail;
+        setMoneyConfirmError(
+          detail?.reason_human || 'Impossibile inviare le conferme. Riprovare.'
+        );
+        return false;
+      })
+      .finally(() => {
+        if (mountedRef.current) setConfirmingMoney(false);
+      });
+  }, [analysisId, report]);
   // A lot was selected but its report is not available (yet): keep the user in
   // the customer surface (message + back to lots) instead of a dead end.
   const lotUnavailable = Boolean(
@@ -126,6 +165,10 @@ export const useCorrectnessV2CustomerView = (analysisId, { enabled = true } = {}
     available,
     preparing,
     isLotSelection,
+    isMoneyConfirmation,
+    submitMoneyConfirmation,
+    confirmingMoney,
+    moneyConfirmError,
     lotUnavailable,
     lotSelectionReport,
     selectedLotId,

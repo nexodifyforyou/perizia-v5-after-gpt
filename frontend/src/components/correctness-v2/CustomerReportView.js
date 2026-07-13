@@ -7,6 +7,7 @@ import {
   ChevronDown,
   ClipboardList,
   Coins,
+  FileText,
   Info,
   KeyRound,
   Loader2,
@@ -15,6 +16,7 @@ import {
   ScrollText,
   Search,
   ShieldCheck,
+  UploadCloud,
 } from 'lucide-react';
 import { Button } from '../ui/button';
 import { Input } from '../ui/input';
@@ -35,6 +37,15 @@ const LOT_RENDER_LIMIT = 40;
 const EVIDENCE_PREVIEW_LIMIT = 7;
 const EVIDENCE_FULL_RENDER_LIMIT = 200;
 const CHECKLIST_PREVIEW_LIMIT = 8;
+
+// Reassuring processing-time expectation shown on every "waiting" screen.
+// Calibrated to REAL measured timings (first report ~70-113s, each selected lot
+// ~130-215s) and phrased so it is never "blown past": a calm range, no hard
+// number, no spinner-anxiety. Kept in one place so both waiting screens agree.
+const PREPARING_TIME_HINT =
+  'Di solito bastano 1–2 minuti; per perizie con più lotti può richiedere qualche '
+  + 'minuto in più. Puoi lasciare questa pagina aperta: il report comparirà qui '
+  + 'automaticamente appena pronto.';
 
 // Accent-insensitive normalization for generic text matching (never for display).
 const normText = (value) => String(value ?? '')
@@ -121,6 +132,16 @@ const DECISION_TONES = {
     icon: CheckCircle2,
     iconClass: 'text-emerald-300',
     chip: 'good',
+  },
+  // Not an error and not the amber "verify" tone: a neutral, informational blue
+  // for "the document is not readable, here is how to help us read it".
+  non_leggibile: {
+    box: 'border-sky-500/40 bg-gradient-to-br from-sky-500/15 via-sky-950/20 to-transparent',
+    bar: 'bg-sky-400',
+    title: 'text-sky-100',
+    icon: FileText,
+    iconClass: 'text-sky-300',
+    chip: 'info',
   },
 };
 
@@ -984,8 +1005,7 @@ const CustomerLotPendingBox = ({ preparing, onBackToLots }) => (
         <div>
           <p className="text-sm font-medium text-zinc-100">Report del lotto in preparazione</p>
           <p className="mt-1 text-sm leading-6 text-zinc-400">
-            Stiamo generando il report per il lotto selezionato: comparirà qui automaticamente appena pronto.
-            Può richiedere alcuni minuti.
+            Stiamo generando il report per il lotto selezionato. {PREPARING_TIME_HINT}
           </p>
         </div>
       </div>
@@ -998,6 +1018,198 @@ const CustomerLotPendingBox = ({ preparing, onBackToLots }) => (
       </div>
     )}
   </div>
+);
+
+// ---------------------------------------------------------------------------
+// Money confirmation: human-in-the-loop disambiguation of an ambiguous amount.
+// "Abbiamo trovato due possibili interpretazioni per questo importo. Quale è
+// corretta?" — shows the amount, the verbatim excerpt + page reference, radio
+// options, and a submit that finalizes the report with the customer's choice.
+// ---------------------------------------------------------------------------
+const CustomerMoneyConfirmation = ({ confirmation, onSubmit, submitting, error }) => {
+  const ambiguities = Array.isArray(confirmation?.ambiguities) ? confirmation.ambiguities : [];
+  const [answers, setAnswers] = useState({});
+
+  if (!ambiguities.length) return null;
+
+  const choose = (ambiguityId, optionId) => {
+    setAnswers((prev) => ({ ...prev, [ambiguityId]: optionId }));
+  };
+  const allAnswered = ambiguities.every((amb) => answers[amb?.ambiguity_id]);
+
+  return (
+    <section
+      data-testid="cv2-customer-money-confirmation"
+      className="space-y-4 rounded-xl border border-gold/30 bg-gradient-to-b from-zinc-900 to-zinc-950/80 p-4 sm:p-5"
+    >
+      <div className="flex items-start gap-3">
+        <Coins className="mt-0.5 h-5 w-5 shrink-0 text-gold" />
+        <div>
+          <h3 className="text-lg font-semibold text-zinc-100">Conferma richiesta su alcuni importi</h3>
+          <p className="mt-1 text-sm leading-6 text-zinc-400">
+            {compactText(
+              confirmation?.message,
+              'Per uno o più importi la perizia supporta più letture: seleziona quella corretta per finalizzare il report.',
+            )}
+          </p>
+        </div>
+      </div>
+
+      <div className="space-y-4">
+        {ambiguities.map((amb, idx) => {
+          const ambiguityId = amb?.ambiguity_id || `amb-${idx}`;
+          const options = Array.isArray(amb?.options) ? amb.options : [];
+          const pages = Array.isArray(amb?.evidence_pages) ? amb.evidence_pages : [];
+          const pageRef = amb?.page || (pages.length ? pages[0] : null);
+          return (
+            <article
+              key={ambiguityId}
+              data-testid="cv2-customer-money-ambiguity"
+              className="rounded-lg border border-zinc-800 bg-zinc-950/80 p-4"
+            >
+              <div className="flex flex-wrap items-baseline justify-between gap-2">
+                <span className="font-mono text-lg font-semibold text-gold">
+                  {compactText(amb?.amount_display, '')}
+                </span>
+                {pageRef && (
+                  <span className="text-xs text-zinc-500">Da verificare a pag. {pageRef}</span>
+                )}
+              </div>
+
+              {amb?.excerpt && (
+                <blockquote className="mt-3 flex gap-2 rounded-md border border-zinc-800 bg-zinc-900/60 p-3 text-sm italic leading-6 text-zinc-300">
+                  <Quote className="mt-0.5 h-4 w-4 shrink-0 text-zinc-600" />
+                  <span className="break-words">{compactText(amb.excerpt)}</span>
+                </blockquote>
+              )}
+
+              <p className="mt-3 text-sm text-zinc-300">
+                {compactText(amb?.question, 'Quale interpretazione è corretta?')}
+              </p>
+
+              <div className="mt-3 space-y-2">
+                {options.map((option, oIdx) => {
+                  const optionId = option?.option_id || `opt-${oIdx}`;
+                  const checked = answers[ambiguityId] === optionId;
+                  return (
+                    <label
+                      key={optionId}
+                      data-testid={`cv2-customer-money-option-${optionId}`}
+                      className={`flex cursor-pointer items-center gap-3 rounded-md border p-3 text-sm transition-colors ${
+                        checked
+                          ? 'border-gold/50 bg-gold/10 text-zinc-100'
+                          : 'border-zinc-800 bg-zinc-950 text-zinc-300 hover:border-zinc-700'
+                      }`}
+                    >
+                      <input
+                        type="radio"
+                        name={`money-ambiguity-${ambiguityId}`}
+                        value={optionId}
+                        checked={checked}
+                        onChange={() => choose(ambiguityId, optionId)}
+                        disabled={submitting}
+                        className="h-4 w-4 accent-gold"
+                      />
+                      <span className="break-words">{compactText(option?.label, optionId)}</span>
+                    </label>
+                  );
+                })}
+              </div>
+            </article>
+          );
+        })}
+      </div>
+
+      {error && (
+        <div className="flex items-start gap-2 rounded-md border border-red-500/30 bg-red-500/5 p-3 text-sm text-red-200">
+          <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+          <span>{error}</span>
+        </div>
+      )}
+
+      <div className="flex items-center justify-end gap-3">
+        <Button
+          type="button"
+          data-testid="cv2-customer-money-submit"
+          onClick={() => onSubmit(answers)}
+          disabled={!allAnswered || submitting}
+          className="bg-gold text-zinc-950 hover:bg-gold-dim"
+        >
+          {submitting ? (
+            <span className="inline-flex items-center gap-2">
+              <Loader2 className="h-4 w-4 animate-spin" /> Invio in corso...
+            </span>
+          ) : (
+            'Conferma e completa il report'
+          )}
+        </Button>
+      </div>
+    </section>
+  );
+};
+
+// ---------------------------------------------------------------------------
+// Document-not-readable: positive, guidance-first screen. NOT a scary error —
+// the uploaded file simply can't be read (scan/photo/image or text hidden by
+// redactions/highlights), so we tell the customer exactly how to give us a
+// readable PDF and make re-upload obvious. No admin/technical detail is shown.
+// ---------------------------------------------------------------------------
+const NOT_READABLE_TIPS = [
+  "Esporta o salva la perizia come PDF con testo selezionabile (ad es. «Salva come PDF» dal programma di origine), non come immagine.",
+  "Evita di fotografare o scansionare le pagine: il testo deve poter essere selezionato e copiato.",
+  "Assicurati che non ci siano evidenziazioni scure o annerimenti che coprono il testo.",
+];
+
+const CustomerDocumentNotReadable = ({ report }) => (
+  <article
+    data-testid="cv2-customer-not-readable"
+    className="space-y-6 rounded-xl border border-sky-500/30 bg-gradient-to-b from-zinc-900 to-zinc-950/70 p-4 sm:p-6"
+  >
+    <CustomerDecisionBox decision={report?.decision} />
+
+    <section className="rounded-2xl border border-sky-500/30 bg-sky-500/5 p-5">
+      <div className="flex items-start gap-3.5">
+        <span className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-sky-500/30 bg-zinc-950/40">
+          <FileText className="h-5 w-5 text-sky-300" />
+        </span>
+        <div className="min-w-0">
+          <h2 className="text-lg font-semibold leading-snug text-sky-100">
+            Per completare l'analisi ci serve un PDF leggibile
+          </h2>
+          <p className="mt-2 text-sm leading-6 text-zinc-300">
+            Questo file sembra una scansione, una foto o un'immagine, oppure contiene
+            redazioni o evidenziazioni che coprono il testo: non riusciamo a leggerne il
+            contenuto in modo affidabile. Per procedere, carica di nuovo la perizia come
+            PDF con testo selezionabile (non una scansione o una foto delle pagine).
+          </p>
+        </div>
+      </div>
+
+      <div className="mt-5 rounded-xl border border-zinc-800 bg-zinc-950/60 p-4">
+        <p className="text-[11px] font-medium uppercase tracking-wide text-zinc-500">
+          Come ottenere un PDF leggibile
+        </p>
+        <ul className="mt-2.5 space-y-2">
+          {NOT_READABLE_TIPS.map((tip, idx) => (
+            <li key={`tip-${idx}`} className="flex items-start gap-2 text-sm leading-6 text-zinc-300">
+              <CheckCircle2 className="mt-1 h-4 w-4 shrink-0 text-sky-300" />
+              <span className="min-w-0">{tip}</span>
+            </li>
+          ))}
+        </ul>
+      </div>
+
+      <div
+        data-testid="cv2-customer-not-readable-cta"
+        className="mt-5 flex items-center gap-3 rounded-xl border border-sky-400/40 bg-sky-500/10 p-4"
+      >
+        <UploadCloud className="h-5 w-5 shrink-0 text-sky-200" />
+        <p className="text-sm font-medium leading-6 text-sky-100">
+          Carica di nuovo la perizia in formato PDF con testo selezionabile per riprovare.
+        </p>
+      </div>
+    </section>
+  </article>
 );
 
 // ---------------------------------------------------------------------------
@@ -1056,7 +1268,9 @@ const CustomerReportView = ({ analysisId, state: externalState }) => {
   const {
     loading, error, payload, report, preparing,
     isLotSelection, lotUnavailable, selectedLotId, selectLot, backToLots,
+    isMoneyConfirmation, submitMoneyConfirmation, confirmingMoney, moneyConfirmError,
   } = state;
+  const isNotReadable = report?.report_status === 'DOCUMENT_NOT_READABLE';
 
   if (loading && !payload) {
     return (
@@ -1085,7 +1299,7 @@ const CustomerReportView = ({ analysisId, state: externalState }) => {
           <div>
             <p className="font-medium text-zinc-100">Report cliente in preparazione</p>
             <p className="mt-1 leading-6 text-zinc-400">
-              L'analisi è in corso: il report comparirà qui automaticamente appena pronto.
+              L'analisi è in corso. {PREPARING_TIME_HINT}
             </p>
           </div>
         </div>
@@ -1099,6 +1313,17 @@ const CustomerReportView = ({ analysisId, state: externalState }) => {
     );
   }
 
+  // A non-readable document takes precedence over every normal branch: it must
+  // never fall through to the standard report body or the amber "da verificare"
+  // tone. Show only the clear "carica un PDF leggibile" guidance.
+  if (report?.report_status === 'DOCUMENT_NOT_READABLE') {
+    return (
+      <div data-testid="cv2-customer-view" className="space-y-4">
+        <CustomerDocumentNotReadable report={report} />
+      </div>
+    );
+  }
+
   return (
     <div data-testid="cv2-customer-view" className="space-y-4">
       {loading && (
@@ -1106,18 +1331,30 @@ const CustomerReportView = ({ analysisId, state: externalState }) => {
           <Loader2 className="h-3.5 w-3.5 animate-spin" /> Aggiornamento...
         </div>
       )}
-      {isLotSelection ? (
+      {isNotReadable ? (
+        <CustomerDocumentNotReadable report={report} />
+      ) : isLotSelection ? (
         <CustomerLotSelector
           selection={report.lot_selection}
           onSelectLot={selectLot}
           disabled={loading}
         />
       ) : (
-        <CustomerReportBody
-          report={report}
-          onBackToLots={backToLots}
-          showBack={Boolean(selectedLotId)}
-        />
+        <>
+          {isMoneyConfirmation && (
+            <CustomerMoneyConfirmation
+              confirmation={report.money_confirmation}
+              onSubmit={submitMoneyConfirmation}
+              submitting={confirmingMoney}
+              error={moneyConfirmError}
+            />
+          )}
+          <CustomerReportBody
+            report={report}
+            onBackToLots={backToLots}
+            showBack={Boolean(selectedLotId)}
+          />
+        </>
       )}
     </div>
   );
@@ -1133,6 +1370,8 @@ export {
   CustomerChecklistSection,
   CustomerEvidence,
   CustomerLotSelector,
+  CustomerMoneyConfirmation,
+  CustomerDocumentNotReadable,
   buildEvidencePreview,
   shortExcerpt,
 };

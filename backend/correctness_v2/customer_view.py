@@ -28,7 +28,12 @@ from typing import Any, Dict, List, Optional
 # Report statuses a customer may see. Manual-review / validation-failed / any
 # pipeline-failure status is never surfaced to a customer.
 CUSTOMER_SAFE_STATUSES = frozenset(
-    {"REPORT_READY", "LOT_SELECTION_REQUIRED", "DOCUMENT_NOT_READABLE"}
+    {
+        "REPORT_READY",
+        "LOT_SELECTION_REQUIRED",
+        "MONEY_CONFIRMATION_REQUIRED",
+        "DOCUMENT_NOT_READABLE",
+    }
 )
 
 # Money buckets a customer sees. market_comparatives / context_values are
@@ -58,6 +63,7 @@ _ADMIN_ONLY_KEYS = frozenset(
 _STATUS_LABELS = {
     "REPORT_READY": "Report pronto",
     "LOT_SELECTION_REQUIRED": "Selezione del lotto richiesta",
+    "MONEY_CONFIRMATION_REQUIRED": "Conferma importi richiesta",
     "DOCUMENT_NOT_READABLE": "Perizia non leggibile",
 }
 
@@ -297,6 +303,35 @@ def _customer_lot_selection(selection: Any) -> Dict[str, Any]:
     return {"message": selection.get("message"), "lots": lots}
 
 
+def _customer_money_confirmation(mc: Any) -> Dict[str, Any]:
+    """Money-confirmation prompt for the customer: only the presentable fields.
+
+    Every value already exists in the report's money_confirmation block; no
+    admin/evidence-index data is exposed. ``ambiguity_id``/``option_id`` are the
+    opaque keys the customer's answer is submitted with."""
+    mc = mc if isinstance(mc, dict) else {}
+    ambiguities: List[Dict[str, Any]] = []
+    for amb in mc.get("ambiguities") or []:
+        amb = amb if isinstance(amb, dict) else {}
+        options = [
+            {"option_id": o.get("option_id"), "label": o.get("label")}
+            for o in amb.get("options") or []
+            if isinstance(o, dict) and o.get("option_id")
+        ]
+        ambiguities.append(
+            {
+                "ambiguity_id": amb.get("ambiguity_id"),
+                "amount_display": amb.get("amount_display"),
+                "page": amb.get("page"),
+                "evidence_pages": list(amb.get("evidence_pages") or []),
+                "excerpt": amb.get("excerpt"),
+                "question": amb.get("question"),
+                "options": options,
+            }
+        )
+    return {"message": mc.get("message"), "ambiguities": ambiguities}
+
+
 def is_customer_safe(report: Optional[Dict[str, Any]], job: Optional[Dict[str, Any]] = None) -> bool:
     """A report is customer-safe only if its status is REPORT_READY /
     LOT_SELECTION_REQUIRED and the job (when supplied) flags it safe."""
@@ -350,6 +385,11 @@ def sanitize_customer_report(
 
     if status == "LOT_SELECTION_REQUIRED" and report.get("lot_selection"):
         out["lot_selection"] = _customer_lot_selection(report.get("lot_selection"))
+
+    if status == "MONEY_CONFIRMATION_REQUIRED" and report.get("money_confirmation"):
+        out["money_confirmation"] = _customer_money_confirmation(
+            report.get("money_confirmation")
+        )
 
     # Defense in depth: guarantee no admin-only key ever slips through, even if
     # the projection above is extended incautiously later.
