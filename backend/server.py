@@ -20672,6 +20672,27 @@ try:
 except Exception as _cv2_exc:  # pragma: no cover - defensive startup guard
     logger.warning(f"correctness_v2 router not registered: {_cv2_exc}")
 
+
+@app.on_event("startup")
+async def _correctness_v2_recover_stale_jobs():
+    """On startup, any QUEUED/RUNNING v2 job is orphaned (its process is gone).
+
+    Recover them to a fail-closed JOB_STALLED so no job stays falsely RUNNING
+    forever. Completed atomic artifacts are never touched and remain reusable.
+    Wrapped so a failure here can never break app startup.
+    """
+    try:
+        from correctness_v2 import orchestrator as _cv2_orchestrator
+
+        recovered = _cv2_orchestrator.recover_stale_jobs(force=True)
+        if recovered:
+            logger.warning(
+                f"correctness_v2 recovered {len(recovered)} stale job(s) on startup"
+            )
+    except Exception as _cv2_recover_exc:  # pragma: no cover - defensive guard
+        logger.warning(f"correctness_v2 stale-job recovery skipped: {_cv2_recover_exc}")
+
+
 def custom_openapi():
     if app.openapi_schema:
         return app.openapi_schema
