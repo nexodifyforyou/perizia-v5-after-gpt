@@ -52,11 +52,21 @@ class OpenAIClientError(RuntimeError):
 REASON_RATE_LIMITED = "OPENAI_RATE_LIMITED"
 REASON_TIMEOUT = "OPENAI_TIMEOUT"
 REASON_SERVER_ERROR = "OPENAI_SERVER_ERROR"
+# Account credit/quota exhausted (a 429 with error code 'insufficient_quota').
+# This is NOT transient — retrying cannot help until billing is topped up — so it
+# is deliberately kept OUT of TRANSIENT_REASON_CODES (fail fast, no retry) and is
+# surfaced to admins as an unmistakable "recharge required" signal.
+REASON_QUOTA_EXHAUSTED = "OPENAI_QUOTA_EXHAUSTED"
 
 # The subset of reason codes that indicate a transient, retryable failure.
 TRANSIENT_REASON_CODES = frozenset(
     {REASON_RATE_LIMITED, REASON_TIMEOUT, REASON_SERVER_ERROR}
 )
+
+
+def is_quota_exhausted_reason(reason_code: Any) -> bool:
+    """True when ``reason_code`` denotes exhausted account credit/quota."""
+    return str(reason_code or "") == REASON_QUOTA_EXHAUSTED
 
 
 def is_transient_reason(reason_code: Any) -> bool:
@@ -83,6 +93,14 @@ def classify_openai_exception(exc: BaseException) -> str:
         status_int = int(status) if status is not None else None
     except (TypeError, ValueError):
         status_int = None
+
+    # A 429 caused by exhausted account credit carries the structured error code
+    # 'insufficient_quota' — distinguish it from a transient rate-limit 429 so it
+    # is never retried and is surfaced as a distinct "recharge required" signal.
+    code = getattr(exc, "code", None)
+    err_type = getattr(exc, "type", None)
+    if str(code or "") == "insufficient_quota" or str(err_type or "") == "insufficient_quota":
+        return REASON_QUOTA_EXHAUSTED
 
     if status_int == 429 or "RateLimit" in name:
         return REASON_RATE_LIMITED

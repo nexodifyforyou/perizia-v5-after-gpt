@@ -980,8 +980,20 @@ def _run_analyze_all(
         artifacts.save_lot_subartifact(
             job_id, norm_lot, artifacts.ANALYST_WORKSHEET_FILE, result.worksheet
         )
-        lot_worksheet, gate_report = validator_mod.apply_compliance_evidence_gate(
+        # Deterministic valuation-chain completion — the SAME grounding the
+        # single-lot / selected-lot path applies (see _build_single_lot_contract):
+        # make grounded doc_signals the authority for THIS lot's terminal net
+        # values (state-of-fact / judicial sale) BEFORE validation, read verbatim
+        # from the lot's own isolated pages. Without this, analyze_all lots were at
+        # the mercy of which single terminal the analyst nondeterministically
+        # emitted (causing spurious MONEY_ROLE_MISMATCH on lots whose document
+        # states multiple grounded terminals); with it, the lot converges to the
+        # document's own values. Additive + grounded: already-correct lots untouched.
+        grounded_worksheet = contract_mod.complete_valuation_terminals(
             result.worksheet, selected_pages
+        )
+        lot_worksheet, gate_report = validator_mod.apply_compliance_evidence_gate(
+            grounded_worksheet, selected_pages
         )
         artifacts.save_lot_subartifact(
             job_id, norm_lot, artifacts.COMPLIANCE_GATE_FILE, gate_report
@@ -1806,52 +1818,93 @@ def _finish_analyst_failed(
     created_at: str,
     admin_only: bool,
 ) -> Dict[str, Any]:
-    """OpenAI/analyst failure -> FAILED_ANALYSIS. No report. No fallback."""
+    """OpenAI/analyst failure -> FAILED_ANALYSIS. No report. No fallback.
+
+    Splits messaging: the CUSTOMER only ever sees a neutral "temporarily
+    unavailable" message (never OpenAI / quota / any technical cause), while the
+    ADMIN job status carries the precise reason_code. Account-credit exhaustion
+    (OPENAI_QUOTA_EXHAUSTED) additionally surfaces an unmistakable admin
+    "ricarica necessaria" signal so it is recognized at a glance as a top-up.
+    """
+    from . import openai_client as _oai
+
     reason_code = getattr(exc, "reason_code", "ANALYST_FAILED") or "ANALYST_FAILED"
     detail = str(exc)
+    is_quota = _oai.is_quota_exhausted_reason(reason_code)
+
     error_path = artifacts.save_error(
         job_id,
         {
             "status": JobStatus.FAILED_ANALYSIS,
             "stage": "step2:analyst",
             "reason_code": reason_code,
+            "credit_exhausted": is_quota,
             "detail": detail,
             "no_old_fallback": True,
             "no_report": True,
         },
     )
     artifacts_saved["error"] = error_path
-    reason_human = "La generazione del foglio di lavoro analista (OpenAI) è fallita."
+
+    # Customer-facing text: NEUTRAL, never names OpenAI/quota/any provider.
+    # "Servizio occupato, riprova o contatta l'amministratore" — a customer who
+    # hits this is nudged to flag it to the admin, who then knows to recharge.
+    customer_reason_human = (
+        "Il servizio è momentaneamente occupato e non disponibile. Riprova tra "
+        "qualche minuto oppure contatta l'amministratore."
+    )
     _save_safe_customer_report(
         job_id,
         analysis_id,
         artifacts_saved,
         report_status=JobStatus.NEEDS_MANUAL_REVIEW,
         job_status_value=JobStatus.FAILED_ANALYSIS,
-        reason_code=reason_code,
-        reason_human=reason_human,
+        reason_code="SERVICE_TEMPORARILY_UNAVAILABLE",
+        reason_human=customer_reason_human,
     )
+
+    # Admin-facing text: precise. For credit exhaustion, an at-a-glance recharge
+    # banner + actionable steps; otherwise the generic analyst-failure guidance.
+    if is_quota:
+        admin_reason_human = (
+            "⚠️ CREDITO API ESAURITO — ricarica necessaria. L'analisi non può "
+            "essere completata finché il piano non viene ricaricato."
+        )
+        admin_troubleshoot = (
+            "OpenAI ha restituito 429 'insufficient_quota' (credito/piano esaurito): "
+            f"{detail}. Ricaricare il credito API; nessun report è stato generato "
+            "(fail-closed). Il cliente vede solo un messaggio neutro di indisponibilità."
+        )
+        admin_next_steps = [
+            "Ricaricare il credito / aggiornare il piano OpenAI (billing).",
+            "Rieseguire l'analisi dopo la ricarica.",
+        ]
+    else:
+        admin_reason_human = "La generazione del foglio di lavoro analista è fallita."
+        admin_troubleshoot = (
+            "Lo stadio OpenAI della Correctness Mode v2 è fallito in modo controllato "
+            f"(fail-closed). Dettaglio: {detail}. Nessun report è stato generato e non "
+            "è stato eseguito alcun fallback al vecchio analizzatore."
+        )
+        admin_next_steps = [
+            "Controllare openai_request.json (senza segreti) e error.json nel job.",
+            "Verificare la configurazione del modello (CORRECTNESS_V2_OPENAI_MODEL) e la chiave API.",
+            "Riprovare una volta risolta la causa.",
+        ]
+
     payload = job_status.make_failure_status(
         job_id=job_id,
         analysis_id=analysis_id,
         status=JobStatus.FAILED_ANALYSIS,
         current_stage=_step2_stage("analyst_failed"),
         reason_code=reason_code,
-        reason_human=reason_human,
-        troubleshoot_message=(
-            "Lo stadio OpenAI della Correctness Mode v2 è fallito in modo controllato "
-            f"(fail-closed). Dettaglio: {detail}. Nessun report è stato generato e non "
-            "è stato eseguito alcun fallback al vecchio analizzatore."
-        ),
-        next_steps=[
-            "Controllare openai_request.json (senza segreti) e error.json nel job.",
-            "Verificare la configurazione del modello (CORRECTNESS_V2_OPENAI_MODEL) e la chiave API.",
-            "Riprovare una volta risolta la causa.",
-        ],
+        reason_human=admin_reason_human,
+        troubleshoot_message=admin_troubleshoot,
+        next_steps=admin_next_steps,
         artifacts_saved=artifacts_saved,
         created_at=created_at,
         admin_only=admin_only,
-        extra={"no_report": True},
+        extra={"no_report": True, "credit_exhausted": is_quota},
     )
     artifacts.save_job_status(job_id, payload)
     return payload
