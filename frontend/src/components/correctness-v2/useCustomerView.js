@@ -6,14 +6,14 @@ import {
 
 // Single source of truth for the sanitized Correctness V2 customer report.
 //
-// Both AnalysisResult (to decide whether the legacy report must be hidden) and
-// CustomerReportView (to render) read the SAME hook instance so the sanitized
-// endpoint is fetched once and the "is a safe V2 customer report available?"
-// answer never diverges between the page and the rendered report.
+// Both AnalysisResult (page shell / loading state) and CustomerReportView
+// (to render) read the SAME hook instance so the sanitized endpoint is fetched
+// once and the availability answer never diverges between the page and the
+// rendered report.
 //
 // A generic network failure or a 404 (feature disabled / no report) is treated
-// as "unavailable" for gating purposes: `available` is false, so the caller
-// falls back to the legacy report instead of stacking two reports.
+// as "unavailable": `available` is false and CustomerReportView renders the
+// matching safe state (never a blank page).
 //
 // When the backend reports `preparing: true` (a V2 job is running for this
 // analysis — e.g. auto-started on upload or by a customer lot selection), the
@@ -45,6 +45,8 @@ export const useCorrectnessV2CustomerView = (analysisId, { enabled = true } = {}
   const [moneyConfirmError, setMoneyConfirmError] = useState('');
   const mountedRef = useRef(false);
   const pollCountRef = useRef(0);
+  // Bumped by reload() to re-run the initial fetch (customer retry action).
+  const [reloadTick, setReloadTick] = useState(0);
 
   useEffect(() => {
     mountedRef.current = true;
@@ -74,8 +76,8 @@ export const useCorrectnessV2CustomerView = (analysisId, { enabled = true } = {}
           return;
         }
         if (silent) return; // Keep the last good payload on background poll errors.
-        // Any other failure is a safe "unavailable" for gating (legacy fallback),
-        // and surfaces an error message inside the customer surface.
+        // Any other failure is a safe "unavailable": CustomerReportView shows
+        // its service-unavailable state with a retry, never a blank page.
         setError('Impossibile caricare il report cliente.');
         setPayload({ available: false, reason_code: 'ERROR' });
       })
@@ -93,7 +95,7 @@ export const useCorrectnessV2CustomerView = (analysisId, { enabled = true } = {}
     const controller = new AbortController();
     load(selectedLotId, controller.signal);
     return () => controller.abort();
-  }, [active, load, selectedLotId]);
+  }, [active, load, selectedLotId, reloadTick]);
 
   const preparing = Boolean(payload && !payload.available && payload.preparing);
 
@@ -156,10 +158,15 @@ export const useCorrectnessV2CustomerView = (analysisId, { enabled = true } = {}
 
   const selectLot = useCallback((lotId) => setSelectedLotId(lotId), []);
   const backToLots = useCallback(() => setSelectedLotId(null), []);
+  const reload = useCallback(() => {
+    setError('');
+    setReloadTick((tick) => tick + 1);
+  }, []);
 
   return {
     loading,
     error,
+    reload,
     payload,
     report,
     available,

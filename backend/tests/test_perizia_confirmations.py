@@ -870,6 +870,9 @@ async def test_occupazione_user_confirmation_is_stored_and_applied(fake_db, monk
         assert record["check_type"] == "stato_occupativo"
         assert record["user_confirmed_value"] == "LIBERO"
         assert record["candidate_1_value"]
+        # The full-payload detail route is now gated to the exact owner/admin;
+        # make the fixture caller the configured owner for the detail read.
+        monkeypatch.setattr(server, "MASTER_ADMIN_EMAIL", "user@example.com")
         detail = await client.get("/api/analysis/perizia/analysis_occ")
         assert detail.status_code == 200
         field_state = detail.json()["result"]["field_states"]["stato_occupativo"]
@@ -904,6 +907,9 @@ async def test_urbanistica_user_confirmation_is_stored_and_applied_without_break
         assert record["user_confirmed_value"] == "NON EMERGONO ABUSI"
         assert record["notes"] == "Confermato da tecnico"
         assert record["candidate_1_value"]
+        # The full-payload detail route is now gated to the exact owner/admin;
+        # make the fixture caller the configured owner for the detail read.
+        monkeypatch.setattr(server, "MASTER_ADMIN_EMAIL", "user@example.com")
         detail = await client.get("/api/analysis/perizia/analysis_urb")
         assert detail.status_code == 200
         payload = detail.json()["result"]
@@ -941,6 +947,9 @@ async def test_catastale_user_confirmation_is_stored_and_applied_without_breakin
         assert record["user_confirmed_value"] == "CONFORME"
         assert record["notes"] == "Confermato da geometra"
         assert record["candidate_1_value"]
+        # The full-payload detail route is now gated to the exact owner/admin;
+        # make the fixture caller the configured owner for the detail read.
+        monkeypatch.setattr(server, "MASTER_ADMIN_EMAIL", "user@example.com")
         detail = await client.get("/api/analysis/perizia/analysis_cat")
         assert detail.status_code == 200
         payload = detail.json()["result"]
@@ -977,6 +986,9 @@ async def test_opponibilita_user_confirmation_is_stored_and_applied_without_brea
         assert record["field_key"] == "field_states.opponibilita_occupazione"
         assert record["user_confirmed_value"] == "TITOLO NON OPPONIBILE"
         assert record["notes"] == "Confermato da legale"
+        # The full-payload detail route is now gated to the exact owner/admin;
+        # make the fixture caller the configured owner for the detail read.
+        monkeypatch.setattr(server, "MASTER_ADMIN_EMAIL", "user@example.com")
         detail = await client.get("/api/analysis/perizia/analysis_opp")
         assert detail.status_code == 200
         payload = detail.json()["result"]

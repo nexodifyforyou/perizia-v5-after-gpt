@@ -210,12 +210,65 @@ describe('CustomerReportView', () => {
     expect(container.querySelector('[data-testid="cv2-evidence-admin-debug"]')).toBeNull();
   });
 
-  test('shows an unavailable message when no customer report exists', async () => {
-    getCorrectnessV2CustomerView.mockResolvedValue({ data: { available: false, reason_code: 'NO_CUSTOMER_REPORT' } });
+  test('NO_REPORT: historical analysis without a V2 report shows the exact copy', async () => {
+    getCorrectnessV2CustomerView.mockResolvedValue({ data: { available: false, reason_code: 'NO_REPORT' } });
     await render();
 
     expect(container.querySelector('[data-testid="cv2-customer-unavailable"]')).toBeTruthy();
-    expect(text()).toContain('non è ancora disponibile');
+    expect(text()).toContain('Il nuovo report cliente non è ancora disponibile per questa analisi.');
+    expect(container.querySelector('[data-testid="legacy-report-body"]')).toBeNull();
+  });
+
+  test('VERIFICATION_REQUIRED: shows the verification copy, never internal codes', async () => {
+    getCorrectnessV2CustomerView.mockResolvedValue({
+      data: { available: false, preparing: false, reason_code: 'VERIFICATION_REQUIRED' },
+    });
+    await render();
+
+    expect(container.querySelector('[data-testid="cv2-customer-verification-required"]')).toBeTruthy();
+    expect(text()).toContain('Report cliente non disponibile: verifica tecnica richiesta.');
+    expect(text()).not.toContain('CONTRACT_VALIDATION_FAILED');
+    expect(text()).not.toContain('NEEDS_MANUAL_REVIEW');
+    expect(container.querySelector('[data-testid="legacy-report-body"]')).toBeNull();
+  });
+
+  test('SERVICE_BUSY: shows the busy copy, never internal codes', async () => {
+    getCorrectnessV2CustomerView.mockResolvedValue({
+      data: { available: false, preparing: false, reason_code: 'SERVICE_BUSY' },
+    });
+    await render();
+
+    expect(container.querySelector('[data-testid="cv2-customer-service-busy"]')).toBeTruthy();
+    expect(text()).toContain(
+      "Il servizio è momentaneamente occupato e non disponibile. Riprova tra qualche minuto oppure contatta l'amministratore."
+    );
+    expect(text()).not.toContain('OPENAI_QUOTA_EXHAUSTED');
+    expect(container.querySelector('[data-testid="legacy-report-body"]')).toBeNull();
+  });
+
+  test('SERVICE_UNAVAILABLE: safe message plus a working retry action', async () => {
+    getCorrectnessV2CustomerView
+      .mockResolvedValueOnce({
+        data: { available: false, preparing: false, reason_code: 'SERVICE_UNAVAILABLE' },
+      })
+      .mockResolvedValueOnce({ data: { available: true, report: sanitizedReport } });
+    await render();
+
+    expect(container.querySelector('[data-testid="cv2-customer-service-unavailable"]')).toBeTruthy();
+    expect(text()).toContain('Il servizio non è al momento disponibile. Riprova più tardi.');
+    expect(container.querySelector('[data-testid="legacy-report-body"]')).toBeNull();
+
+    await click('[data-testid="cv2-customer-retry"]');
+    expect(getCorrectnessV2CustomerView).toHaveBeenCalledTimes(2);
+    expect(container.querySelector('[data-testid="cv2-customer-report"]')).toBeTruthy();
+  });
+
+  test('a fetch failure (non-404) degrades to the service-unavailable state', async () => {
+    getCorrectnessV2CustomerView.mockRejectedValue(new Error('network down'));
+    await render();
+
+    expect(container.querySelector('[data-testid="cv2-customer-service-unavailable"]')).toBeTruthy();
+    expect(container.querySelector('[data-testid="legacy-report-body"]')).toBeNull();
   });
 
   test('lot selection: choosing a lot refetches the customer view with the selected lot', async () => {
@@ -244,7 +297,7 @@ describe('CustomerReportView', () => {
 
   test('shows a preparing state (not unavailable) while the backend generates the report', async () => {
     getCorrectnessV2CustomerView.mockResolvedValue({
-      data: { available: false, preparing: true, reason_code: 'NO_CUSTOMER_REPORT' },
+      data: { available: false, preparing: true, reason_code: 'PREPARING' },
     });
     await render();
     expect(container.querySelector('[data-testid="cv2-customer-preparing"]')).toBeTruthy();
@@ -258,7 +311,7 @@ describe('CustomerReportView', () => {
   test('selecting a lot with no report keeps the customer flow (pending box + back to lots)', async () => {
     getCorrectnessV2CustomerView
       .mockResolvedValueOnce({ data: { available: true, report: lotSelectionReport } })
-      .mockResolvedValueOnce({ data: { available: false, preparing: true, reason_code: 'NO_CUSTOMER_REPORT' } })
+      .mockResolvedValueOnce({ data: { available: false, preparing: true, reason_code: 'PREPARING' } })
       .mockResolvedValueOnce({ data: { available: true, report: lotSelectionReport } });
 
     await render();
@@ -467,7 +520,7 @@ describe('CustomerReportView', () => {
 
   test('preparing state sets a reassuring processing-time expectation', async () => {
     getCorrectnessV2CustomerView.mockResolvedValue({
-      data: { available: false, preparing: true, reason_code: 'NO_CUSTOMER_REPORT' },
+      data: { available: false, preparing: true, reason_code: 'PREPARING' },
     });
     await render();
     expect(container.querySelector('[data-testid="cv2-customer-preparing"]')).toBeTruthy();

@@ -85,7 +85,7 @@ echo "[5/8] Gate A: strict estratto parity..."
 BASE_URL="$BASE_URL" SESSION_TOKEN="$SESSION_TOKEN" OFFLINE_QA="$OFFLINE_QA" OFFLINE_QA_TOKEN="$OFFLINE_QA_TOKEN" ./.venv/bin/python scripts/regression_gate_estratto_parity_strict.py \
   --analysis-id "$NEW_AID" --estratto-pdf "$ESTRATTO_PDF" --run-dir "$RUN_DIR"
 
-echo "[6/8] Capture frontend snapshot..."
+echo "[6/8] Capture V2 customer-surface snapshot..."
 cd "$FRONTEND_DIR"
 HOST=127.0.0.1 PORT=5180 npm start > "$RUN_DIR/frontend_gate.log" 2>&1 &
 FEPID=$!
@@ -97,12 +97,19 @@ for _ in $(seq 1 80); do
   curl -sS -I http://127.0.0.1:5180 >/dev/null 2>&1 && break
   sleep 1
 done
-NEW_AID="$NEW_AID" RUN_DIR="$RUN_DIR" FRONTEND_URL="http://127.0.0.1:5180/analysis/${NEW_AID}?debug=1" SESSION_TOKEN="$SESSION_TOKEN" \
+# The `?debug=1` snapshot payload path is gone: it existed only to render the
+# removed legacy report body without a session. The page is now driven by the
+# real API (metadata endpoint + sanitized V2 customer view) using the caller's
+# session, so we navigate to the plain analysis URL.
+NEW_AID="$NEW_AID" RUN_DIR="$RUN_DIR" FRONTEND_URL="http://127.0.0.1:5180/analysis/${NEW_AID}" SESSION_TOKEN="$SESSION_TOKEN" \
+  API_COOKIE_DOMAIN="${API_COOKIE_DOMAIN:-127.0.0.1}" \
   node scripts/capture_ui_snapshot.mjs
 
-echo "[7/8] Gate B: frontend parity..."
+echo "[7/8] Gate B: V2 customer-surface safety (no legacy DOM/fetch, safe reason codes)..."
 cd "$BACKEND_DIR"
-SESSION_TOKEN="$SESSION_TOKEN" ./.venv/bin/python scripts/regression_gate_frontend_parity.py --run-dir "$RUN_DIR"
+BASE_URL="$BASE_URL" SESSION_TOKEN="$SESSION_TOKEN" NORMAL_SESSION_TOKEN="${NORMAL_SESSION_TOKEN:-}" \
+  ./.venv/bin/python scripts/regression_gate_v2_customer_surface.py \
+  --run-dir "$RUN_DIR" --analysis-id "$NEW_AID" --base-url "$BASE_URL"
 
 echo "[8/8] Gate C: decisione rapida specificity..."
 BASE_URL="$BASE_URL" SESSION_TOKEN="$SESSION_TOKEN" OFFLINE_QA="$OFFLINE_QA" OFFLINE_QA_TOKEN="$OFFLINE_QA_TOKEN" ./.venv/bin/python scripts/regression_gate_decisione_rapida_specific.py --analysis-id "$NEW_AID"

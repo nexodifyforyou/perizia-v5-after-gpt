@@ -101,8 +101,11 @@ def test_customer_view_unavailable_when_no_safe_report(customer_app, artifacts_r
     assert response.status_code == 200
     data = response.json()
     assert data["available"] is False
-    assert data["reason_code"] == "NO_CUSTOMER_REPORT"
+    # Unrecoverable pipeline failure -> safe generic public code, never the
+    # internal status.
+    assert data["reason_code"] == "SERVICE_UNAVAILABLE"
     assert data["preparing"] is False
+    assert "FAILED_ANALYSIS" not in response.text
 
 
 def test_customer_view_reports_preparing_while_a_job_runs(customer_app, artifacts_root):
@@ -127,6 +130,7 @@ def test_customer_view_reports_preparing_while_a_job_runs(customer_app, artifact
     data = response.json()
     assert data["available"] is False
     assert data["preparing"] is True
+    assert data["reason_code"] == "PREPARING"
 
 
 def test_customer_view_missing_lot_triggers_autostart_when_enabled(
@@ -212,3 +216,123 @@ def test_customer_view_selects_the_requested_lot_report(customer_app, artifacts_
     assert data["selected_lot_id"] == "2"
     assert data["report"]["title"] == "Lotto 2"
     assert data["report"]["lot_structure"]["selected_lot"] == "2"
+
+
+# ---------------------------------------------------------------------------
+# Customer-safe reason-code mapping (closed public enum). No internal job
+# status, OpenAI error name or validator code may ever reach a customer.
+# ---------------------------------------------------------------------------
+
+_ALLOWED_CUSTOMER_KEYS = {"available", "selected_lot_id", "preparing", "reason_code", "report"}
+
+# Internal raw codes that must NEVER appear in a customer response body.
+_INTERNAL_CODES = (
+    "OPENAI_QUOTA_EXHAUSTED",
+    "OPENAI_RATE_LIMITED",
+    "OPENAI_TIMEOUT",
+    "OPENAI_SERVER_ERROR",
+    "OPENAI_CALL_FAILED",
+    "CONTRACT_VALIDATION_FAILED",
+    "NEEDS_MANUAL_REVIEW",
+    "FAILED_ANALYSIS",
+    "FAILED_CONTRACT_BUILD",
+    "FAILED_GROUNDING",
+    "JOB_STALLED",
+    "REPORT_QUALITY_GATE_FAILED",
+    "NO_CUSTOMER_REPORT",
+)
+
+
+def _save_terminal_job(job_id, analysis_id, status, reason_code=None):
+    artifacts.save_job_status(
+        job_id,
+        {
+            "job_id": job_id,
+            "analysis_id": analysis_id,
+            "status": status,
+            "reason_code": reason_code,
+            "safe_to_show_customer": False,
+            "artifacts_saved": {},
+        },
+    )
+
+
+def _assert_customer_payload_is_safe(response):
+    data = response.json()
+    assert set(data.keys()) <= _ALLOWED_CUSTOMER_KEYS
+    assert data["reason_code"] in api.PUBLIC_REASON_CODES
+    for raw in _INTERNAL_CODES:
+        assert raw not in response.text
+    return data
+
+
+@pytest.mark.parametrize(
+    "status,reason_code,expected",
+    [
+        ("QUEUED", None, "PREPARING"),
+        ("RUNNING", None, "PREPARING"),
+        ("PDF_QUALITY_OK", None, "PREPARING"),
+        ("FAILED_ANALYSIS", "OPENAI_QUOTA_EXHAUSTED", "SERVICE_BUSY"),
+        ("FAILED_ANALYSIS", "OPENAI_RATE_LIMITED", "SERVICE_BUSY"),
+        ("FAILED_ANALYSIS", "OPENAI_TIMEOUT", "SERVICE_BUSY"),
+        ("FAILED_ANALYSIS", "OPENAI_SERVER_ERROR", "SERVICE_BUSY"),
+        ("CONTRACT_VALIDATION_FAILED", None, "VERIFICATION_REQUIRED"),
+        ("NEEDS_MANUAL_REVIEW", "REPORT_QUALITY_GATE_FAILED", "VERIFICATION_REQUIRED"),
+        ("FAILED_GROUNDING", None, "VERIFICATION_REQUIRED"),
+        ("FAILED_ANALYSIS", "OPENAI_CALL_FAILED", "SERVICE_UNAVAILABLE"),
+        ("FAILED_CONTRACT_BUILD", None, "SERVICE_UNAVAILABLE"),
+        ("JOB_STALLED", None, "SERVICE_UNAVAILABLE"),
+        ("CANCELLED", None, "SERVICE_UNAVAILABLE"),
+        ("SOME_FUTURE_STATUS", "SOME_FUTURE_REASON", "SERVICE_UNAVAILABLE"),
+    ],
+)
+def test_customer_view_maps_every_job_state_to_the_closed_enum(
+    customer_app, artifacts_root, status, reason_code, expected
+):
+    analysis_id = f"analysis_enum_{status.lower()}_{str(reason_code).lower()}"
+    _save_terminal_job(f"cv2_enum_{analysis_id}", analysis_id, status, reason_code)
+
+    response = _sync_get(
+        customer_app,
+        f"/api/analysis/perizia/{analysis_id}/correctness-v2/customer-view/latest",
+    )
+
+    assert response.status_code == 200
+    data = _assert_customer_payload_is_safe(response)
+    assert data["available"] is False
+    assert data["reason_code"] == expected
+
+
+def test_customer_view_no_job_yields_no_report(customer_app, artifacts_root):
+    response = _sync_get(
+        customer_app,
+        "/api/analysis/perizia/analysis_without_any_job/correctness-v2/customer-view/latest",
+    )
+    assert response.status_code == 200
+    data = _assert_customer_payload_is_safe(response)
+    assert data["available"] is False
+    assert data["preparing"] is False
+    assert data["reason_code"] == "NO_REPORT"
+
+
+def test_customer_view_available_payload_has_no_extra_keys(customer_app, artifacts_root):
+    analysis_id = "analysis_keys_ready"
+    _save(
+        "cv2_keys_ready",
+        analysis_id,
+        {
+            "schema_version": "cv2.customer_report.v1",
+            "analysis_id": analysis_id,
+            "job_id": "cv2_keys_ready",
+            "report_status": "REPORT_READY",
+            "title": "Report cliente",
+        },
+    )
+    response = _sync_get(
+        customer_app,
+        f"/api/analysis/perizia/{analysis_id}/correctness-v2/customer-view/latest",
+    )
+    assert response.status_code == 200
+    data = response.json()
+    assert set(data.keys()) <= _ALLOWED_CUSTOMER_KEYS
+    assert data["available"] is True

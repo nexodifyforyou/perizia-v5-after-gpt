@@ -9,10 +9,10 @@ import CorrectnessV2Panel from './CorrectnessV2Panel';
 //                  operator only). Everyone who reaches this surface sees the
 //                  sanitized "Report cliente" tab; the admin tab is additive.
 //
-// The parent (AnalysisResult) decides WHETHER to mount this surface at all:
-// it mounts for the exact-email admin always, and for any customer/tester only
-// once a safe sanitized V2 customer report exists. This component never renders
-// the legacy report and never leaks admin/debug data into the customer tab.
+// This surface is the ONLY report surface: the parent (AnalysisResult) mounts
+// it for every role once the availability probe resolves. CustomerReportView
+// owns every customer sub-state internally, and this component never leaks
+// admin/debug data into the customer tab.
 //
 // The Customer Report is served from the sanitized customer-view endpoint and
 // never contains admin/debug/quality/artifact data. The Admin View is the full
