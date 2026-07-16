@@ -54,6 +54,73 @@ def _has_in_progress_job(analysis_id: str) -> bool:
 
 
 # ---------------------------------------------------------------------------
+# Customer-safe reason codes (closed public enum).
+#
+# These are the ONLY reason_code values a customer may ever receive from the
+# customer-view endpoint when no report is available. Internal job statuses,
+# OpenAI error names, validator codes, stack traces and artifact paths must
+# never pass through: everything is whitelist-mapped, and anything unrecognised
+# degrades to SERVICE_UNAVAILABLE (never the raw value). The exact-admin
+# diagnostic path (Vista admin) is unaffected and keeps full internal detail.
+# ---------------------------------------------------------------------------
+PUBLIC_REASON_PREPARING = "PREPARING"
+PUBLIC_REASON_SERVICE_BUSY = "SERVICE_BUSY"
+PUBLIC_REASON_VERIFICATION_REQUIRED = "VERIFICATION_REQUIRED"
+PUBLIC_REASON_SERVICE_UNAVAILABLE = "SERVICE_UNAVAILABLE"
+PUBLIC_REASON_NO_REPORT = "NO_REPORT"
+
+PUBLIC_REASON_CODES = frozenset(
+    {
+        PUBLIC_REASON_PREPARING,
+        PUBLIC_REASON_SERVICE_BUSY,
+        PUBLIC_REASON_VERIFICATION_REQUIRED,
+        PUBLIC_REASON_SERVICE_UNAVAILABLE,
+        PUBLIC_REASON_NO_REPORT,
+    }
+)
+
+# Terminal job statuses meaning the pipeline failed closed on a correctness
+# concern: a human must verify before a customer report can be produced.
+_VERIFICATION_REQUIRED_STATUSES = frozenset(
+    {
+        JobStatus.CONTRACT_VALIDATION_FAILED,
+        JobStatus.NEEDS_MANUAL_REVIEW,
+        JobStatus.FAILED_GROUNDING,
+    }
+)
+
+
+def _public_unavailable_reason(analysis_id: str, preparing: bool) -> str:
+    """Map the latest job's internal state to the closed public enum.
+
+    Whitelist-map only: no raw job status or internal reason_code is ever
+    returned. The result is always a member of ``PUBLIC_REASON_CODES``.
+    """
+    if preparing:
+        return PUBLIC_REASON_PREPARING
+    latest = artifacts.latest_job_for_analysis(analysis_id)
+    if not isinstance(latest, dict) or not latest:
+        # Historical analysis: no V2 job and no active preparation.
+        return PUBLIC_REASON_NO_REPORT
+    status = str(latest.get("status") or "")
+    internal_reason = latest.get("reason_code")
+    if _is_in_progress_status(status):
+        return PUBLIC_REASON_PREPARING
+    # Temporary capacity/quota failures: retrying later can succeed (quota
+    # after a recharge; rate-limit/timeout/5xx on their own). Reuse the
+    # openai_client helpers -- never re-derive the classification here.
+    if openai_client.is_quota_exhausted_reason(internal_reason) or openai_client.is_transient_reason(
+        internal_reason
+    ):
+        return PUBLIC_REASON_SERVICE_BUSY
+    if status in _VERIFICATION_REQUIRED_STATUSES:
+        return PUBLIC_REASON_VERIFICATION_REQUIRED
+    # Any other terminal state (dependency failure, unrecoverable transient
+    # failure, or anything unrecognised) degrades to the safe generic value.
+    return PUBLIC_REASON_SERVICE_UNAVAILABLE
+
+
+# ---------------------------------------------------------------------------
 # System auto-start (product path): run a V2 job in the background for a new
 # analysis, or for a customer-selected lot that has no report yet. Never blocks
 # the caller, never raises, and refuses to stack jobs on a running analysis.
@@ -396,8 +463,9 @@ async def correctness_v2_customer_view(analysis_id: str, request: Request) -> Di
     status, report = _find_customer_job(analysis_id, selected_lot_id)
     if not report:
         # No safe report (yet). Tell the client whether one is being prepared,
-        # so the UI can show a "report in preparazione" state instead of
-        # silently presenting the legacy report as the final product.
+        # so the UI can show the correct customer state (preparing / busy /
+        # verification required / unavailable / no report). The reason_code is
+        # ALWAYS a member of the closed public enum -- never an internal code.
         preparing = _has_in_progress_job(analysis_id)
         if not preparing and selected_lot_id is not None:
             # A customer picked a lot that was never analyzed: when auto-start
@@ -415,7 +483,7 @@ async def correctness_v2_customer_view(analysis_id: str, request: Request) -> Di
             "available": False,
             "selected_lot_id": selected_lot_id,
             "preparing": bool(preparing),
-            "reason_code": "NO_CUSTOMER_REPORT",
+            "reason_code": _public_unavailable_reason(analysis_id, bool(preparing)),
         }
     return {
         "available": True,

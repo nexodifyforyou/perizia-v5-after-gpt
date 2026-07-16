@@ -111,14 +111,13 @@ CORRECTNESS_V2_ADMIN_VIEW_EMAIL = os.environ.get(
     'CORRECTNESS_V2_ADMIN_VIEW_EMAIL', 'nexodifyforyou@gmail.com'
 ).strip().lower()
 BETA_UNLIMITED_EMAILS = _parse_email_allowlist(
-    os.environ.get('BETA_UNLIMITED_EMAILS', 'geomazzantiriccardo@gmail.com')
+    os.environ.get('BETA_UNLIMITED_EMAILS', '')
 )
 BETA_PARTNER_DEFAULT_TYPE = os.environ.get('BETA_PARTNER_DEFAULT_TYPE', 'geometra')
 ADMIN_OWNER_FEEDBACK_NAME = os.environ.get('ADMIN_OWNER_FEEDBACK_NAME', 'Syed / Nexodify Admin')
 # Optional display-name mapping for known beta partners (email -> name).
-BETA_PARTNER_NAMES = {
-    'geomazzantiriccardo@gmail.com': 'Geom. Riccardo Mazzanti',
-}
+# Empty by default; populate via config if a beta programme resumes.
+BETA_PARTNER_NAMES: Dict[str, str] = {}
 DOC_AI_TIMEOUT_SECONDS = int(os.environ.get('DOC_AI_TIMEOUT_SECONDS', '30'))
 LLM_TIMEOUT_SECONDS = int(os.environ.get('LLM_TIMEOUT_SECONDS', '45'))
 PIPELINE_TIMEOUT_SECONDS = int(os.environ.get('PIPELINE_TIMEOUT_SECONDS', '120'))
@@ -1188,6 +1187,29 @@ async def require_master_admin(request: Request) -> User:
     """Require admin/owner user with matching configured email."""
     user = await require_auth(request)
     if not _user_is_admin(user):
+        raise HTTPException(status_code=403, detail="Forbidden")
+    return user
+
+
+def _is_exact_owner_admin_email(email: Optional[str]) -> bool:
+    """Exact-email owner/operator gate for the TEMPORARY legacy report routes.
+
+    Deliberately narrower than the general admin allowlist: only the single
+    configured owner email passes (master admin email or the exact-email
+    Correctness v2 operator, both of which resolve to the owner). Other
+    admin/master users and all normal customers are rejected. These routes are
+    retired when the V2 PDF/HTML exporter replaces the legacy renderer.
+    """
+    if not email:
+        return False
+    normalized = email.strip().lower()
+    return _is_master_admin_email(normalized) or _is_correctness_v2_admin_view_email(normalized)
+
+
+async def require_exact_owner_admin(request: Request) -> User:
+    """Require the exact-email owner/operator (see _is_exact_owner_admin_email)."""
+    user = await require_auth(request)
+    if not _is_exact_owner_admin_email(user.email):
         raise HTTPException(status_code=403, detail="Forbidden")
     return user
 
@@ -16764,8 +16786,13 @@ async def _render_print_pdf_via_frontend(analysis_id: str, session_token: str, a
     },
 )
 async def download_perizia_pdf(analysis_id: str, request: Request):
-    """Generate and download PDF report for analysis (real PDF bytes)"""
-    user = await require_auth(request)
+    """Generate and download PDF report for analysis (real PDF bytes).
+
+    TEMPORARY: renders the OLD report payload. Gated to the exact owner/admin
+    until the Correctness V2 PDF/HTML exporter replaces it; customers get no
+    download until then.
+    """
+    user = await require_exact_owner_admin(request)
 
     analysis = await _get_perizia_analysis_for_user(analysis_id, user)
     result = analysis.get("result", {}) or {}
@@ -16796,7 +16823,14 @@ async def download_perizia_pdf(analysis_id: str, request: Request):
     },
 )
 async def download_perizia_print_pdf(analysis_id: str, request: Request):
-    user = await require_auth(request)
+    """TEMPORARY legacy print-PDF endpoint (headless render of /print).
+
+    Gated to the exact owner/admin until the Correctness V2 PDF/HTML exporter
+    replaces it. SECURITY-CRITICAL ORDER: the authorization check below MUST
+    run before _render_print_pdf_via_frontend — no headless/Chromium process
+    may ever be spawned for an unauthorized request.
+    """
+    user = await require_exact_owner_admin(request)
     analysis = await db.perizia_analyses.find_one(
         {"analysis_id": analysis_id, "user_id": user.user_id},
         {"_id": 0}
@@ -16831,8 +16865,12 @@ async def download_perizia_print_pdf(analysis_id: str, request: Request):
     },
 )
 async def download_perizia_html(analysis_id: str, request: Request):
-    """Generate and download HTML report for analysis"""
-    user = await require_auth(request)
+    """Generate and download HTML report for analysis.
+
+    TEMPORARY: renders the OLD report payload. Gated to the exact owner/admin
+    until the Correctness V2 PDF/HTML exporter replaces it.
+    """
+    user = await require_exact_owner_admin(request)
 
     analysis = await _get_perizia_analysis_for_user(analysis_id, user)
     result = analysis.get("result", {}) or {}
@@ -19793,14 +19831,44 @@ def _refresh_list_analysis_semaforo(analysis: Dict[str, Any]) -> Optional[str]:
 
 @api_router.get("/history/perizia/{analysis_id}")
 async def get_perizia_detail(analysis_id: str, request: Request):
-    """Get specific perizia analysis"""
-    user = await require_auth(request)
+    """Get specific perizia analysis (full OLD report payload).
+
+    TEMPORARY: gated to the exact owner/admin (headless print renderer and
+    internal migration/rollback). Normal customers and other admins use the
+    metadata endpoint below plus the Correctness V2 customer view instead.
+    """
+    user = await require_exact_owner_admin(request)
     return await _get_perizia_analysis_for_user(analysis_id, user)
+
+@api_router.get("/analysis/perizia/{analysis_id}/meta")
+async def get_perizia_analysis_meta(analysis_id: str, request: Request):
+    """Minimal page-shell metadata for an analysis. NO report content.
+
+    Whitelist-projected key by key: the OLD report payload (result/data/...)
+    must never appear here, and new fields never leak by default. Ownership
+    semantics match the detail endpoint (the analysis owner only).
+    """
+    user = await require_auth(request)
+    analysis, _storage_mode, _storage_path = await _get_perizia_analysis_for_user_with_storage(
+        analysis_id, user
+    )
+    return {
+        "analysis_id": analysis.get("analysis_id"),
+        "case_id": analysis.get("case_id"),
+        "case_title": analysis.get("case_title"),
+        "file_name": analysis.get("file_name"),
+        "created_at": analysis.get("created_at"),
+        "pages_count": analysis.get("pages_count"),
+        "document_hash": analysis.get("document_hash") or analysis.get("input_sha256"),
+    }
 
 @api_router.get("/analysis/perizia/{analysis_id}")
 async def get_perizia_detail_alias(analysis_id: str, request: Request):
-    """Alias of history detail endpoint with identical auth and ownership checks."""
-    user = await require_auth(request)
+    """Alias of history detail endpoint with identical auth and ownership checks.
+
+    TEMPORARY: gated to the exact owner/admin like the route above.
+    """
+    user = await require_exact_owner_admin(request)
     return await _get_perizia_analysis_for_user(analysis_id, user)
 
 @api_router.get("/history/images")
@@ -19996,7 +20064,7 @@ async def health():
     return {"status": "healthy", "timestamp": datetime.now(timezone.utc).isoformat()}
 
 # ============================================================================
-# BETA PARTNER STRUCTURED FEEDBACK (Mazzanti beta dashboard)
+# BETA PARTNER STRUCTURED FEEDBACK (beta partner dashboard)
 # ----------------------------------------------------------------------------
 # Stores structured expert feedback on AI-generated reports in the
 # `beta_feedback` collection. This is an internal, non-public learning/evaluation

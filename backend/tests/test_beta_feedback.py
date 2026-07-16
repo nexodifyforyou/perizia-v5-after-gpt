@@ -9,6 +9,12 @@ import httpx
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 import server as server
 
+# Fixture identity for beta-partner tests. Never assert privileges for a real
+# person's address: beta status is config-driven, so tests monkeypatch the
+# allowlist/name map with this synthetic address.
+BETA_FIXTURE_EMAIL = "beta.partner@example.test"
+BETA_FIXTURE_NAME = "Geom. Beta Partner"
+
 
 # ---------------------------------------------------------------------------
 # Minimal async Mongo fake (supports dotted nested-key matching).
@@ -168,7 +174,8 @@ def fake_db(monkeypatch):
     monkeypatch.setattr(server, "db", db)
     server.MASTER_ADMIN_EMAIL = "admin@nexodify.com"
     monkeypatch.setattr(server, "ADMIN_EMAILS", frozenset({"nexodifyforyou@gmail.com"}))
-    monkeypatch.setattr(server, "BETA_UNLIMITED_EMAILS", frozenset({"geomazzantiriccardo@gmail.com"}))
+    monkeypatch.setattr(server, "BETA_UNLIMITED_EMAILS", frozenset({BETA_FIXTURE_EMAIL}))
+    monkeypatch.setattr(server, "BETA_PARTNER_NAMES", {BETA_FIXTURE_EMAIL: BETA_FIXTURE_NAME})
     return db
 
 
@@ -184,8 +191,8 @@ def _seed_session(db, user_doc, token):
 
 def _beta_user():
     return {
-        "user_id": "user_beta", "email": "geomazzantiriccardo@gmail.com",
-        "name": "Geom. Mazzanti", "plan": "free", "is_master_admin": False, "quota": {},
+        "user_id": "user_beta", "email": BETA_FIXTURE_EMAIL,
+        "name": BETA_FIXTURE_NAME, "plan": "free", "is_master_admin": False, "quota": {},
     }
 
 
@@ -240,18 +247,41 @@ def test_learning_label_mapping_all_types():
         assert label["human_review_required"] is human, ft
 
 
-def test_beta_email_helpers():
-    assert server._is_beta_unlimited_email("geomazzantiriccardo@gmail.com") is True
-    assert server._is_beta_unlimited_email("GEOMazzantiRiccardo@Gmail.com") is True
+def test_beta_email_helpers(fake_db):
+    assert server._is_beta_unlimited_email(BETA_FIXTURE_EMAIL) is True
+    # Normalization: upper case, mixed case, surrounding whitespace.
+    assert server._is_beta_unlimited_email(BETA_FIXTURE_EMAIL.upper()) is True
+    assert server._is_beta_unlimited_email("Beta.Partner@Example.Test") is True
+    assert server._is_beta_unlimited_email(f"  {BETA_FIXTURE_EMAIL}  ") is True
     assert server._is_beta_unlimited_email("someone@else.com") is False
     assert server._is_beta_unlimited_email(None) is False
+
+
+def test_beta_default_grants_nothing_when_env_unset(monkeypatch):
+    """Regression: with BETA_UNLIMITED_EMAILS unset, the code default is empty
+    and no real email — in particular the former beta partner's — is privileged."""
+    monkeypatch.delenv("BETA_UNLIMITED_EMAILS", raising=False)
+    default_allowlist = server._parse_email_allowlist(
+        os.environ.get("BETA_UNLIMITED_EMAILS", "")
+    )
+    assert default_allowlist == frozenset()
+    monkeypatch.setattr(server, "BETA_UNLIMITED_EMAILS", default_allowlist)
+    assert server._is_beta_unlimited_email("geomazzantiriccardo@gmail.com") is False
+
+
+def test_no_real_beta_email_hardcoded_in_server_source():
+    """Regression lock: the removed hardcoded beta email must never reappear in
+    server.py — beta entitlement is config/operational input only."""
+    with open(server.__file__, "r", encoding="utf-8") as fh:
+        source = fh.read()
+    assert "geomazzantiriccardo" not in source.lower()
 
 
 def test_admin_email_helpers(fake_db):
     assert server._is_admin_email("admin@nexodify.com") is True
     assert server._is_admin_email("nexodifyforyou@gmail.com") is True
     assert server._is_admin_email("NEXODIFYFORYOU@GMAIL.COM") is True
-    assert server._is_admin_email("geomazzantiriccardo@gmail.com") is False
+    assert server._is_admin_email(BETA_FIXTURE_EMAIL) is False
     assert server._user_is_admin(server.User(**_admin_user())) is True
     assert server._user_is_admin(server.User(**_beta_user())) is False
 
@@ -284,7 +314,7 @@ async def test_normal_user_is_debited(fake_db):
     assert len(fake_db.credit_ledger.items) >= 1
 
 
-def test_credit_exempt_user():
+def test_credit_exempt_user(fake_db):
     assert server._is_credit_exempt_user(server.User(**_beta_user())) is True
     assert server._is_credit_exempt_user(server.User(**_admin_user())) is True
     assert server._is_credit_exempt_user(server.User(**_normal_user())) is False
@@ -390,7 +420,7 @@ async def test_user_sees_only_own_feedback(fake_db):
 async def test_admin_sees_all_feedback(fake_db):
     token = _seed_session(fake_db, _admin_user(), "sess_admin")
     fake_db.beta_feedback.items.extend([
-        {"id": "fb_a", "user_id": "user_beta", "user_email": "geomazzantiriccardo@gmail.com",
+        {"id": "fb_a", "user_id": "user_beta", "user_email": BETA_FIXTURE_EMAIL,
          "created_at": "2026-01-01T00:00:00", "section_key": "costi_oneri", "priority": "alta",
          "status": "new", "learning_label": {"error_category": "over_classification", "is_error": True, "model_should_learn": True}},
         {"id": "fb_b", "user_id": "user_norm", "user_email": "mario@example.com",
@@ -438,19 +468,19 @@ async def test_admin_filter_model_should_learn(fake_db):
 async def test_admin_filter_by_user_email(fake_db):
     token = _seed_session(fake_db, _admin_user(), "sess_admin")
     fake_db.beta_feedback.items.extend([
-        {"id": "fb_mazzanti", "user_id": "user_beta", "user_email": "geomazzantiriccardo@gmail.com",
+        {"id": "fb_beta", "user_id": "user_beta", "user_email": BETA_FIXTURE_EMAIL,
          "created_at": "2026-01-01T00:00:00", "status": "new", "priority": "media", "learning_label": {}},
         {"id": "fb_admin", "user_id": "user_admin", "user_email": "nexodifyforyou@gmail.com",
          "created_at": "2026-01-02T00:00:00", "status": "new", "priority": "bassa", "learning_label": {}},
     ])
     resp = await _client_request(
         "GET",
-        "/api/admin/beta-feedback?user_email=geomazzantiriccardo",
+        "/api/admin/beta-feedback?user_email=beta.partner",
         token=token,
     )
     assert resp.status_code == 200
     ids = [i["id"] for i in resp.json()["items"]]
-    assert ids == ["fb_mazzanti"]
+    assert ids == ["fb_beta"]
 
 
 @pytest.mark.anyio
@@ -491,7 +521,7 @@ async def test_admin_update_rejects_bad_status(fake_db):
 async def test_export_json(fake_db):
     token = _seed_session(fake_db, _admin_user(), "sess_admin")
     fake_db.beta_feedback.items.append({
-        "id": "fb_x", "user_id": "user_beta", "user_email": "geomazzantiriccardo@gmail.com",
+        "id": "fb_x", "user_id": "user_beta", "user_email": BETA_FIXTURE_EMAIL,
         "created_at": "2026-01-01T00:00:00", "feedback_type": "sbagliato",
         "learning_label": {"error_category": "wrong_output"},
         "item_reference": {}, "original_ai_output": {},
@@ -507,7 +537,7 @@ async def test_export_json(fake_db):
 async def test_export_csv(fake_db):
     token = _seed_session(fake_db, _admin_user(), "sess_admin")
     fake_db.beta_feedback.items.append({
-        "id": "fb_x", "user_id": "user_beta", "user_email": "geomazzantiriccardo@gmail.com",
+        "id": "fb_x", "user_id": "user_beta", "user_email": BETA_FIXTURE_EMAIL,
         "created_at": "2026-01-01T00:00:00", "feedback_type": "sbagliato", "priority": "alta",
         "section_key": "costi_oneri", "section_label_it": "Costi e oneri",
         "expert_comment": "comment with, comma", "status": "new",
@@ -524,7 +554,7 @@ async def test_export_csv(fake_db):
 
 
 @pytest.mark.anyio
-async def test_admin_can_submit_test_feedback_distinguishable_from_mazzanti(fake_db):
+async def test_admin_can_submit_test_feedback_distinguishable_from_beta_partner(fake_db):
     admin_token = _seed_session(fake_db, _admin_user(), "sess_admin")
     beta_token = _seed_session(fake_db, _beta_user(), "sess_beta")
 
@@ -548,13 +578,13 @@ async def test_admin_can_submit_test_feedback_distinguishable_from_mazzanti(fake
 
     beta_resp = await _client_request("POST", "/api/beta-feedback", token=beta_token, json={
         "feedback_type": "sbagliato",
-        "expert_comment": "Feedback tecnico Mazzanti",
+        "expert_comment": "Feedback tecnico del beta partner",
     })
     assert beta_resp.status_code == 200, beta_resp.text
     beta_fb = beta_resp.json()["feedback"]
-    assert beta_fb["user_email"] == "geomazzantiriccardo@gmail.com"
+    assert beta_fb["user_email"] == BETA_FIXTURE_EMAIL
     assert beta_fb["user_role"] == "beta_partner"
-    assert beta_fb["beta_partner_name"] == "Geom. Riccardo Mazzanti"
+    assert beta_fb["beta_partner_name"] == BETA_FIXTURE_NAME
     assert beta_fb["beta_partner_type"] == "geometra"
 
     assert admin_fb["user_role"] != beta_fb["user_role"]

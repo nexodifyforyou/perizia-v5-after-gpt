@@ -37,14 +37,12 @@ import { AuthProvider, useAuth } from "./context/AuthContext";
 const ProtectedRoute = ({ children }) => {
   const { user, loading } = useAuth();
   const location = useLocation();
-  const isDebugSnapshotMode =
-    location.search?.includes('debug=1') &&
-    typeof window !== 'undefined' &&
-    window.__DEBUG_ANALYSIS_PAYLOAD__;
 
-  if (isDebugSnapshotMode) {
-    return children;
-  }
+  // NOTE: the `?debug=1` + window.__DEBUG_ANALYSIS_PAYLOAD__ auth bypass that
+  // used to live here was removed with the legacy report body: it existed only
+  // to let snapshot tooling render that body without a session. Nothing reads
+  // that global on this route any more, and an auth bypass must not outlive
+  // its purpose.
 
   if (loading) {
     return (
@@ -191,8 +189,12 @@ function AppRouter() {
       <Route path="/analysis/:analysisId" element={
         <ProtectedRoute><AnalysisResult /></ProtectedRoute>
       } />
+      {/* TEMPORARY print view: exists only for the backend headless PDF
+          renderer (owner/admin sessions). Defence-in-depth guard here; the
+          backend endpoint gating is the authority. Retired with the V2
+          exporter. */}
       <Route path="/analysis/:analysisId/print" element={
-        <ProtectedRoute><AnalysisPrintView /></ProtectedRoute>
+        <AdminRoute><AnalysisPrintView /></AdminRoute>
       } />
       <Route path="/forensics" element={
         <ProtectedRoute>

@@ -1269,6 +1269,7 @@ const CustomerReportView = ({ analysisId, state: externalState }) => {
     loading, error, payload, report, preparing,
     isLotSelection, lotUnavailable, selectedLotId, selectLot, backToLots,
     isMoneyConfirmation, submitMoneyConfirmation, confirmingMoney, moneyConfirmError,
+    reload,
   } = state;
   const isNotReadable = report?.report_status === 'DOCUMENT_NOT_READABLE';
 
@@ -1280,9 +1281,11 @@ const CustomerReportView = ({ analysisId, state: externalState }) => {
     );
   }
 
-  if (error) {
-    return <div className="rounded-lg border border-red-500/30 bg-red-500/5 p-4 text-sm text-red-200">{error}</div>;
-  }
+  // Service failure (hook error or backend SERVICE_UNAVAILABLE): safe generic
+  // message plus a retry action. Never a blank page, never internal detail.
+  const serviceUnavailable = Boolean(
+    error || (payload && !payload.available && payload.reason_code === 'SERVICE_UNAVAILABLE')
+  );
 
   if (!report) {
     if (lotUnavailable) {
@@ -1305,10 +1308,53 @@ const CustomerReportView = ({ analysisId, state: externalState }) => {
         </div>
       );
     }
+    if (serviceUnavailable) {
+      return (
+        <div data-testid="cv2-customer-service-unavailable" className="space-y-3 rounded-lg border border-red-500/30 bg-red-500/5 p-4 text-sm">
+          <div className="flex items-start gap-3">
+            <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-red-300" />
+            <p className="leading-6 text-red-200">
+              Il servizio non è al momento disponibile. Riprova più tardi.
+            </p>
+          </div>
+          {typeof reload === 'function' && (
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              data-testid="cv2-customer-retry"
+              onClick={reload}
+            >
+              Riprova
+            </Button>
+          )}
+        </div>
+      );
+    }
+    if (payload?.reason_code === 'VERIFICATION_REQUIRED') {
+      return (
+        <div data-testid="cv2-customer-verification-required" className="flex items-start gap-3 rounded-lg border border-amber-400/30 bg-amber-500/5 p-4 text-sm">
+          <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-300" />
+          <p className="leading-6 text-amber-100">
+            Report cliente non disponibile: verifica tecnica richiesta.
+          </p>
+        </div>
+      );
+    }
+    if (payload?.reason_code === 'SERVICE_BUSY') {
+      return (
+        <div data-testid="cv2-customer-service-busy" className="flex items-start gap-3 rounded-lg border border-amber-400/30 bg-amber-500/5 p-4 text-sm">
+          <Info className="mt-0.5 h-4 w-4 shrink-0 text-amber-300" />
+          <p className="leading-6 text-amber-100">
+            Il servizio è momentaneamente occupato e non disponibile. Riprova tra qualche minuto oppure contatta l'amministratore.
+          </p>
+        </div>
+      );
+    }
     return (
       <div data-testid="cv2-customer-unavailable" className="flex items-start gap-3 rounded-lg border border-zinc-800 bg-zinc-950 p-4 text-sm text-zinc-400">
         <Info className="mt-0.5 h-4 w-4 text-zinc-500" />
-        <p>Il report cliente non è ancora disponibile per questa analisi.</p>
+        <p>Il nuovo report cliente non è ancora disponibile per questa analisi.</p>
       </div>
     );
   }

@@ -196,6 +196,9 @@ async def test_pdf_endpoint_renders_customer_facing_detail_read_model(monkeypatc
     monkeypatch.setattr(server, "require_auth", fake_require_auth)
     monkeypatch.setattr(server, "_get_perizia_analysis_for_user", fake_get_perizia_analysis_for_user)
     monkeypatch.setattr(pdf_report, "build_perizia_pdf_bytes", fake_build_pdf_bytes)
+    # The legacy render endpoints are gated to the exact owner/admin; make the
+    # fixture caller the configured owner.
+    monkeypatch.setattr(server, "MASTER_ADMIN_EMAIL", "user@test.local")
 
     response = await server.download_perizia_pdf("analysis_pdf", object())
 
@@ -230,6 +233,9 @@ async def test_html_endpoint_renders_customer_facing_detail_read_model(monkeypat
     monkeypatch.setattr(server, "require_auth", fake_require_auth)
     monkeypatch.setattr(server, "_get_perizia_analysis_for_user", fake_get_perizia_analysis_for_user)
     monkeypatch.setattr(server, "generate_report_html", fake_generate_report_html)
+    # The legacy render endpoints are gated to the exact owner/admin; make the
+    # fixture caller the configured owner.
+    monkeypatch.setattr(server, "MASTER_ADMIN_EMAIL", "user@test.local")
 
     response = await server.download_perizia_html("analysis_html", object())
 
