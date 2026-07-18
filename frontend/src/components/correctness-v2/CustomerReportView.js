@@ -22,6 +22,7 @@ import { Button } from '../ui/button';
 import { Input } from '../ui/input';
 import { compactText, pagesText, DetailBlock } from './shared';
 import { useCorrectnessV2CustomerView } from './useCustomerView';
+import CustomerDecisionReport from './CustomerDecisionReport';
 
 // ---------------------------------------------------------------------------
 // Customer report: decision-oriented reading flow rendered ONLY from the
@@ -1221,16 +1222,22 @@ const CustomerDocumentNotReadable = ({ report }) => (
 // ---------------------------------------------------------------------------
 // Report body
 // ---------------------------------------------------------------------------
-const CustomerReportBody = ({ report, onBackToLots, showBack, backLabel }) => (
-  <article data-testid="cv2-customer-report" className="space-y-8 rounded-xl border border-zinc-800 bg-gradient-to-b from-zinc-900 to-zinc-950/70 p-4 sm:p-6">
-    <header className="space-y-3">
-      {showBack && <LotBackButton onBackToLots={onBackToLots} label={backLabel} />}
-      <div className="border-b border-zinc-800 pb-4">
-        <h2 className="text-2xl font-serif font-bold leading-snug text-zinc-100">{compactText(report?.title, 'Report cliente')}</h2>
-        {report?.subtitle && <p className="mt-1.5 text-sm text-zinc-400">{compactText(report.subtitle)}</p>}
-      </div>
-    </header>
-
+// Correctness V2 customer-report fallback body.
+//
+// This is NOT the legacy analysis report. It is the previous *sanitized
+// Correctness V2 customer renderer* built from the same customer-safe payload
+// (case_identity / money_sections / occupancy_section / compliance_section /
+// formalities_section / buyer_checklist / customer_evidence_index). It is used
+// ONLY for backward compatibility, when an existing safe artifact predates the
+// decision model and therefore carries no `decision_model` key. It:
+//   * renders customer-sanitized Correctness V2 content only (no legacy
+//     Panoramica/Costi/Rischi/Dettagli/Red-Flags body, no raw admin report);
+//   * issues NO network request and starts NO analysis job (pure render of the
+//     already-fetched sanitized payload);
+//   * never overrides a valid decision_model (the caller prefers the decision
+//     report whenever `report.decision_model` is present).
+const V2CustomerReportFallback = ({ report }) => (
+  <>
     <CustomerDecisionBox decision={report?.decision} />
     <CustomerPropertySection report={report} />
     <CustomerOccupancySection section={report?.occupancy_section} />
@@ -1241,6 +1248,35 @@ const CustomerReportBody = ({ report, onBackToLots, showBack, backLabel }) => (
     <CustomerOtherFindings riskSections={report?.risk_sections} complianceItems={report?.compliance_section} />
     <CustomerChecklistSection checklist={report?.buyer_checklist} />
     <CustomerEvidence evidence={report?.customer_evidence_index} />
+  </>
+);
+
+const CustomerReportBody = ({
+  report, onBackToLots, showBack, backLabel,
+  onSubmitConfirmation, confirmingFinding, findingConfirmError,
+}) => (
+  <article data-testid="cv2-customer-report" className="space-y-8 rounded-xl border border-zinc-800 bg-gradient-to-b from-zinc-900 to-zinc-950/70 p-4 sm:p-6">
+    <header className="space-y-3">
+      {showBack && <LotBackButton onBackToLots={onBackToLots} label={backLabel} />}
+      <div className="border-b border-zinc-800 pb-4">
+        <h2 className="text-2xl font-serif font-bold leading-snug text-zinc-100">{compactText(report?.title, 'Report cliente')}</h2>
+        {report?.subtitle && <p className="mt-1.5 text-sm text-zinc-400">{compactText(report.subtitle)}</p>}
+      </div>
+    </header>
+
+    {report?.decision_model && report?.report_status === 'REPORT_READY' ? (
+      // The decision workflow is the surface for a finalized report only.
+      // Interactive states (money-confirmation) render the informative V2
+      // customer body, never a decision verdict.
+      <CustomerDecisionReport
+        report={report}
+        onSubmitConfirmation={onSubmitConfirmation}
+        confirmingFinding={confirmingFinding}
+        findingConfirmError={findingConfirmError}
+      />
+    ) : (
+      <V2CustomerReportFallback report={report} />
+    )}
 
     {report?.disclaimer && (
       <footer className="rounded-lg border border-zinc-800 bg-zinc-950/70 p-4 text-xs leading-5 text-zinc-500">
@@ -1266,6 +1302,7 @@ const CustomerReportView = ({ analysisId, state: externalState, backLabel }) => 
     loading, error, payload, report, preparing,
     isLotSelection, lotUnavailable, selectedLotId, selectLot, backToLots,
     isMoneyConfirmation, submitMoneyConfirmation, confirmingMoney, moneyConfirmError,
+    submitFindingConfirmation, confirmingFinding, findingConfirmError,
     reload,
   } = state;
   const isNotReadable = report?.report_status === 'DOCUMENT_NOT_READABLE';
@@ -1411,6 +1448,9 @@ const CustomerReportView = ({ analysisId, state: externalState, backLabel }) => 
             onBackToLots={backToLots}
             showBack={Boolean(selectedLotId)}
             backLabel={backLabel}
+            onSubmitConfirmation={submitFindingConfirmation}
+            confirmingFinding={confirmingFinding}
+            findingConfirmError={findingConfirmError}
           />
         </>
       )}
@@ -1430,6 +1470,7 @@ export {
   CustomerLotSelector,
   CustomerMoneyConfirmation,
   CustomerDocumentNotReadable,
+  V2CustomerReportFallback,
   buildEvidencePreview,
   shortExcerpt,
 };

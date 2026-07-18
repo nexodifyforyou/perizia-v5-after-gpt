@@ -24,7 +24,16 @@ from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, HTTPException, Request
 
-from . import artifacts, customer_view, feature_flags, job_status, openai_client, workspace
+from . import (
+    artifacts,
+    customer_view,
+    decision_model,
+    feature_flags,
+    job_status,
+    openai_client,
+    user_confirmations,
+    workspace,
+)
 from .orchestrator import resolve_money_confirmation, start_job
 from .schemas import JobStatus
 
@@ -472,9 +481,18 @@ def _find_customer_job(analysis_id: str, selected_lot_id: Optional[str] = None):
     return best[1], best[2]
 
 
+async def _confirmations_for(analysis_id: str, user) -> List[Dict[str, Any]]:
+    """Owner's persisted confirmations for the analysis (never raises on read)."""
+    try:
+        return await user_confirmations.list_for_analysis(analysis_id, user.user_id)
+    except Exception:  # pragma: no cover - a store hiccup must not break the read
+        logger.exception("Failed to load user confirmations for %s", analysis_id)
+        return []
+
+
 @router.get("/{analysis_id}/correctness-v2/customer-view/latest")
 async def correctness_v2_customer_view(analysis_id: str, request: Request) -> Dict[str, Any]:
-    await _resolve_customer_access(request, analysis_id)
+    user, _is_admin = await _resolve_customer_access(request, analysis_id)
 
     raw_lot = request.query_params.get("selected_lot_id")
     selected_lot_id = (str(raw_lot).strip() or None) if raw_lot is not None else None
@@ -496,11 +514,145 @@ async def correctness_v2_customer_view(analysis_id: str, request: Request) -> Di
             "preparing": bool(preparing),
             "reason_code": _public_unavailable_reason(analysis_id, bool(preparing)),
         }
+    confirmations = await _confirmations_for(analysis_id, user)
     return {
         "available": True,
         "selected_lot_id": selected_lot_id,
         "preparing": False,
-        "report": customer_view.sanitize_customer_report(report, status),
+        "report": customer_view.sanitize_customer_report(report, status, confirmations),
+    }
+
+
+def _find_decision_finding(report: Dict[str, Any], finding_id: str) -> Optional[Dict[str, Any]]:
+    """Rebuild the decision model server-side and return the eligible finding, if any."""
+    model = decision_model.build_decision_model(report, [])
+    for finding in model.get("findings") or []:
+        if finding.get("finding_id") == finding_id:
+            return finding
+    return None
+
+
+@router.post("/{analysis_id}/correctness-v2/customer-view/confirm-finding")
+async def correctness_v2_confirm_finding(
+    analysis_id: str, request: Request
+) -> Dict[str, Any]:
+    """Owner submits/updates a focused confirmation on a decision-model finding.
+
+    Body: {"job_id", "finding_id", "option_id", "note"?}. The finding must exist
+    in the decision model rebuilt for that job's report AND be confirmation-
+    eligible; the option must be one of the offered options (or "non_sicuro").
+    Persisted authoritatively in MongoDB (owner only). Zero OpenAI/jobs/credits.
+    Returns the refreshed sanitized report with the confirmation joined.
+    """
+    user, _is_admin = await _resolve_customer_access(request, analysis_id)
+
+    try:
+        body = await request.json()
+    except Exception:
+        body = None
+    if not isinstance(body, dict):
+        raise HTTPException(
+            status_code=400,
+            detail={"reason_code": "INVALID_BODY", "reason_human": "Richiesta non valida."},
+        )
+    job_id = str(body.get("job_id") or "").strip()
+    finding_id = str(body.get("finding_id") or "").strip()
+    option_id = str(body.get("option_id") or "").strip()
+    note = body.get("note")
+    if not (job_id and finding_id and option_id):
+        raise HTTPException(
+            status_code=400,
+            detail={"reason_code": "INVALID_BODY", "reason_human": "Dati di conferma mancanti."},
+        )
+
+    status = artifacts.read_job_status(job_id)
+    if not isinstance(status, dict) or str(status.get("analysis_id")) != str(analysis_id):
+        raise HTTPException(status_code=404, detail="Job not found")
+    report = artifacts.read_json(job_id, artifacts.CUSTOMER_REPORT_FILE)
+    if not customer_view.is_customer_safe(report, status):
+        raise HTTPException(status_code=404, detail="Report not available")
+
+    finding = _find_decision_finding(report, finding_id)
+    if not finding or not (finding.get("confirmation") or {}).get("eligible"):
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "reason_code": "INVALID_CONFIRMATION",
+                "reason_human": "Conferma non disponibile per questo elemento.",
+            },
+        )
+
+    lot_id = (report.get("lot_structure") or {}).get("selected_lot")
+    try:
+        await user_confirmations.submit(
+            analysis_id=analysis_id,
+            lot_id=lot_id,
+            finding=finding,
+            option_id=option_id,
+            user_id=user.user_id,
+            report_version=report.get("schema_version"),
+            job_id=job_id,
+            note=note,
+        )
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=400,
+            detail={"reason_code": "INVALID_CONFIRMATION", "reason_human": str(exc)},
+        )
+
+    confirmations = await _confirmations_for(analysis_id, user)
+    return {
+        "available": True,
+        "job_id": job_id,
+        "report": customer_view.sanitize_customer_report(report, status, confirmations),
+    }
+
+
+@router.get("/{analysis_id}/correctness-v2/customer-view/confirmations")
+async def correctness_v2_confirmations(analysis_id: str, request: Request) -> Dict[str, Any]:
+    """Owner view of their own confirmations (customer projection only)."""
+    user, _is_admin = await _resolve_customer_access(request, analysis_id)
+    confirmations = await _confirmations_for(analysis_id, user)
+    return {
+        "analysis_id": analysis_id,
+        "confirmations": [
+            {
+                "finding_id": c.get("finding_id"),
+                "selected_option": c.get("selected_option"),
+                "selected_label": c.get("selected_label"),
+                "page": c.get("page"),
+                "status": c.get("status"),
+                "updated_at": c.get("updated_at"),
+            }
+            for c in confirmations
+        ],
+    }
+
+
+@router.get("/{analysis_id}/correctness-v2/jobs/{job_id}/decision-model")
+async def correctness_v2_decision_model(
+    analysis_id: str, job_id: str, request: Request
+) -> Dict[str, Any]:
+    """Admin-only (Vista admin): raw decision model + confirmations + audit.
+
+    Behind the exact-email admin gate (``_resolve_user_and_guard``). Shows the
+    original finding vs the user confirmation, readiness, and evidence identity.
+    """
+    await _resolve_user_and_guard(request)
+    status = artifacts.read_job_status(job_id)
+    if not isinstance(status, dict) or str(status.get("analysis_id")) != str(analysis_id):
+        raise HTTPException(status_code=404, detail="Job not found")
+    report = artifacts.read_json(job_id, artifacts.CUSTOMER_REPORT_FILE)
+    if not isinstance(report, dict):
+        raise HTTPException(status_code=404, detail="Report not found")
+    confirmations = await user_confirmations.list_all_for_analysis(analysis_id)
+    audit = await user_confirmations.audit_for_analysis(analysis_id)
+    return {
+        "analysis_id": analysis_id,
+        "job_id": job_id,
+        "decision_model": decision_model.build_decision_model(report, confirmations),
+        "confirmations": confirmations,
+        "audit": audit,
     }
 
 

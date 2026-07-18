@@ -25,6 +25,30 @@ export const compactText = (value, fallback = '-') => {
   return String(value);
 };
 
+// Closed tone → chip classes map (§UX rule 9). Red is reserved for a genuinely
+// fail-closed/blocking report; regular action items are amber, never red.
+const CHIP_TONES = {
+  verde: 'border-emerald-500/30 bg-emerald-500/10 text-emerald-200',
+  ambra: 'border-amber-400/30 bg-amber-500/10 text-amber-200',
+  conferma: 'border-amber-400/30 bg-amber-500/10 text-amber-200',
+  blu: 'border-sky-500/30 bg-sky-500/10 text-sky-200',
+  oro: 'border-gold/40 bg-gold/10 text-gold',
+  slate: 'border-zinc-700 bg-zinc-800/60 text-zinc-300',
+  rosso: 'border-red-500/30 bg-red-500/10 text-red-200',
+};
+
+export const StatusChip = ({ tone = 'slate', children, testId }) => {
+  const cls = CHIP_TONES[tone] || CHIP_TONES.slate;
+  return (
+    <span
+      data-testid={testId}
+      className={`inline-flex items-center rounded-full border px-2.5 py-0.5 text-xs font-medium ${cls}`}
+    >
+      {children}
+    </span>
+  );
+};
+
 export const pagesText = (pages) => {
   const normalized = [...new Set((Array.isArray(pages) ? pages : [])
     .map((p) => Number(p))
