@@ -21,6 +21,42 @@ import { toast } from 'sonner';
 
 const API_URL = process.env.REACT_APP_BACKEND_URL;
 
+// ---------------------------------------------------------------------------
+// Storico lot workspace summary (plan §G): each perizia row carries an
+// additive `v2` summary from the backend. We render a progress line like
+// "6 lotti · 4 pronti · 1 da verificare · 1 non analizzato" (zero categories
+// omitted) plus a restrained status color. Counts come from the backend as-is.
+// ---------------------------------------------------------------------------
+const buildHistoryV2Summary = (v2) => {
+  if (!v2 || typeof v2 !== 'object') return '';
+  const count = Number(v2.lot_count) || 0;
+  if (count <= 0) return '';
+  const parts = [`${count} ${count === 1 ? 'lotto' : 'lotti'}`];
+  const push = (value, singular, plural) => {
+    const n = Number(value) || 0;
+    if (n > 0) parts.push(`${n} ${n === 1 ? singular : plural}`);
+  };
+  push(v2.ready, 'pronto', 'pronti');
+  push(v2.preparing, 'in preparazione', 'in preparazione');
+  push(v2.confirmation_required, 'conferma richiesta', 'conferme richieste');
+  push(v2.verification_required, 'da verificare', 'da verificare');
+  push(v2.failed, 'non completato', 'non completati');
+  push(v2.not_analyzed, 'non analizzato', 'non analizzati');
+  return parts.join(' · ');
+};
+
+// Restrained status colors: green ready / blue preparing / amber
+// confirmation+verification / red failed / slate not-analyzed.
+const historyV2Dot = (v2) => {
+  if (Number(v2?.failed) > 0) return 'bg-red-400';
+  if (Number(v2?.confirmation_required) > 0 || Number(v2?.verification_required) > 0) return 'bg-amber-400';
+  if (Number(v2?.preparing) > 0) return 'bg-sky-400';
+  const count = Number(v2?.lot_count) || 0;
+  if (count > 0 && Number(v2?.ready) === count) return 'bg-emerald-400';
+  if (Number(v2?.ready) > 0) return 'bg-emerald-400/70';
+  return 'bg-zinc-500';
+};
+
 // Delete Confirmation Modal
 const DeleteModal = ({ isOpen, onClose, onConfirm, title, message, isLoading }) => {
   if (!isOpen) return null;
@@ -318,6 +354,18 @@ const History = () => {
                               {new Date(analysis.created_at).toLocaleDateString('it-IT')}
                             </span>
                           </div>
+                          {buildHistoryV2Summary(analysis.v2) && (
+                            <p
+                              data-testid={`history-v2-summary-${analysis.analysis_id}`}
+                              className="mt-1.5 flex items-center gap-1.5 text-xs text-zinc-400"
+                            >
+                              <span
+                                className={`h-1.5 w-1.5 shrink-0 rounded-full ${historyV2Dot(analysis.v2)}`}
+                                aria-hidden="true"
+                              />
+                              {buildHistoryV2Summary(analysis.v2)}
+                            </p>
+                          )}
                         </div>
                       </Link>
                       <div className="flex items-center gap-3 self-end sm:self-auto">

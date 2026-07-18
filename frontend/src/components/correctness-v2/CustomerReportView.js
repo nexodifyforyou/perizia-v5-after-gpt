@@ -986,19 +986,25 @@ const CustomerLotSelector = ({ selection, onSelectLot, disabled }) => {
   );
 };
 
+// Back-to-lots action shared by every selected-lot sub-state. Purely a URL /
+// state change: it NEVER triggers an API call or a job.
+const LotBackButton = ({ onBackToLots, label = 'Torna alla scelta del lotto' }) => (
+  <button
+    type="button"
+    onClick={onBackToLots}
+    data-testid="cv2-customer-back-to-lots"
+    className="inline-flex items-center gap-1 text-xs text-zinc-400 hover:text-zinc-200"
+  >
+    <ArrowLeft className="h-3.5 w-3.5" /> {label}
+  </button>
+);
+
 // Selected lot has no report yet: graceful state with back navigation. When a
 // job is being prepared in background this view keeps itself updated via the
 // shared hook's silent polling.
-const CustomerLotPendingBox = ({ preparing, onBackToLots }) => (
+const CustomerLotPendingBox = ({ preparing, onBackToLots, backLabel }) => (
   <div data-testid="cv2-customer-lot-pending" className="space-y-3 rounded-xl border border-zinc-800 bg-zinc-900/80 p-5">
-    <button
-      type="button"
-      onClick={onBackToLots}
-      data-testid="cv2-customer-back-to-lots"
-      className="inline-flex items-center gap-1 text-xs text-zinc-400 hover:text-zinc-200"
-    >
-      <ArrowLeft className="h-3.5 w-3.5" /> Torna alla scelta del lotto
-    </button>
+    <LotBackButton onBackToLots={onBackToLots} label={backLabel} />
     {preparing ? (
       <div className="flex items-start gap-3">
         <Loader2 className="mt-0.5 h-5 w-5 animate-spin text-gold" />
@@ -1215,19 +1221,10 @@ const CustomerDocumentNotReadable = ({ report }) => (
 // ---------------------------------------------------------------------------
 // Report body
 // ---------------------------------------------------------------------------
-const CustomerReportBody = ({ report, onBackToLots, showBack }) => (
+const CustomerReportBody = ({ report, onBackToLots, showBack, backLabel }) => (
   <article data-testid="cv2-customer-report" className="space-y-8 rounded-xl border border-zinc-800 bg-gradient-to-b from-zinc-900 to-zinc-950/70 p-4 sm:p-6">
     <header className="space-y-3">
-      {showBack && (
-        <button
-          type="button"
-          onClick={onBackToLots}
-          data-testid="cv2-customer-back-to-lots"
-          className="inline-flex items-center gap-1 text-xs text-zinc-400 hover:text-zinc-200"
-        >
-          <ArrowLeft className="h-3.5 w-3.5" /> Torna alla scelta del lotto
-        </button>
-      )}
+      {showBack && <LotBackButton onBackToLots={onBackToLots} label={backLabel} />}
       <div className="border-b border-zinc-800 pb-4">
         <h2 className="text-2xl font-serif font-bold leading-snug text-zinc-100">{compactText(report?.title, 'Report cliente')}</h2>
         {report?.subtitle && <p className="mt-1.5 text-sm text-zinc-400">{compactText(report.subtitle)}</p>}
@@ -1262,7 +1259,7 @@ const CustomerReportBody = ({ report, onBackToLots, showBack }) => (
 // never diverges from what is rendered here. When no `state` is supplied the
 // component self-fetches (kept for standalone use / unit tests).
 // ---------------------------------------------------------------------------
-const CustomerReportView = ({ analysisId, state: externalState }) => {
+const CustomerReportView = ({ analysisId, state: externalState, backLabel }) => {
   const internalState = useCorrectnessV2CustomerView(analysisId, { enabled: !externalState });
   const state = externalState || internalState;
   const {
@@ -1288,13 +1285,27 @@ const CustomerReportView = ({ analysisId, state: externalState }) => {
   );
 
   if (!report) {
-    if (lotUnavailable) {
+    // In workspace mode a selected `?lot=` may point at a lot whose report is
+    // still being generated (RUNNING): show the pending box (which polls via
+    // the side-effect-free GET) with a way back to the overview — never a dead
+    // end, never a duplicate start.
+    if (lotUnavailable || (selectedLotId && preparing)) {
       return (
         <div data-testid="cv2-customer-view" className="space-y-4">
-          <CustomerLotPendingBox preparing={preparing} onBackToLots={backToLots} />
+          <CustomerLotPendingBox preparing={preparing} onBackToLots={backToLots} backLabel={backLabel} />
         </div>
       );
     }
+    // Any other selected-lot sub-state keeps a visible way back to the lots
+    // overview; going back is purely a URL change (no API/job call).
+    const withLotBack = (node) => (
+      selectedLotId ? (
+        <div className="space-y-3">
+          <LotBackButton onBackToLots={backToLots} label={backLabel} />
+          {node}
+        </div>
+      ) : node
+    );
     if (preparing) {
       return (
         <div data-testid="cv2-customer-preparing" className="flex items-start gap-3 rounded-lg border border-gold/25 bg-gold/5 p-4 text-sm">
@@ -1309,7 +1320,7 @@ const CustomerReportView = ({ analysisId, state: externalState }) => {
       );
     }
     if (serviceUnavailable) {
-      return (
+      return withLotBack(
         <div data-testid="cv2-customer-service-unavailable" className="space-y-3 rounded-lg border border-red-500/30 bg-red-500/5 p-4 text-sm">
           <div className="flex items-start gap-3">
             <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-red-300" />
@@ -1332,7 +1343,7 @@ const CustomerReportView = ({ analysisId, state: externalState }) => {
       );
     }
     if (payload?.reason_code === 'VERIFICATION_REQUIRED') {
-      return (
+      return withLotBack(
         <div data-testid="cv2-customer-verification-required" className="flex items-start gap-3 rounded-lg border border-amber-400/30 bg-amber-500/5 p-4 text-sm">
           <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-300" />
           <p className="leading-6 text-amber-100">
@@ -1342,7 +1353,7 @@ const CustomerReportView = ({ analysisId, state: externalState }) => {
       );
     }
     if (payload?.reason_code === 'SERVICE_BUSY') {
-      return (
+      return withLotBack(
         <div data-testid="cv2-customer-service-busy" className="flex items-start gap-3 rounded-lg border border-amber-400/30 bg-amber-500/5 p-4 text-sm">
           <Info className="mt-0.5 h-4 w-4 shrink-0 text-amber-300" />
           <p className="leading-6 text-amber-100">
@@ -1351,7 +1362,7 @@ const CustomerReportView = ({ analysisId, state: externalState }) => {
         </div>
       );
     }
-    return (
+    return withLotBack(
       <div data-testid="cv2-customer-unavailable" className="flex items-start gap-3 rounded-lg border border-zinc-800 bg-zinc-950 p-4 text-sm text-zinc-400">
         <Info className="mt-0.5 h-4 w-4 text-zinc-500" />
         <p>Il nuovo report cliente non è ancora disponibile per questa analisi.</p>
@@ -1399,6 +1410,7 @@ const CustomerReportView = ({ analysisId, state: externalState }) => {
             report={report}
             onBackToLots={backToLots}
             showBack={Boolean(selectedLotId)}
+            backLabel={backLabel}
           />
         </>
       )}

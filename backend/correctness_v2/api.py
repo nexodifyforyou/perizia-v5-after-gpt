@@ -24,7 +24,7 @@ from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, HTTPException, Request
 
-from . import artifacts, customer_view, feature_flags, job_status, openai_client
+from . import artifacts, customer_view, feature_flags, job_status, openai_client, workspace
 from .orchestrator import resolve_money_confirmation, start_job
 from .schemas import JobStatus
 
@@ -33,11 +33,20 @@ router = APIRouter(prefix="/analysis/perizia", tags=["correctness_v2"])
 logger = logging.getLogger(__name__)
 
 # Statuses of a job that is still working towards a report. Everything else is
-# terminal (a report, a controlled stop, or a diagnosed failure).
+# terminal (a report, a controlled stop, or a diagnosed failure). Kept in sync
+# with workspace._IN_PROGRESS_STATUSES and the orchestrator's _STALEABLE_STATUSES:
+# a persisted PDF_QUALITY_OK/WARNING is always a TERMINAL step-1-only artifact
+# (the full customer pipeline never persists it), so it is NOT in progress.
 _IN_PROGRESS_STATUSES = frozenset(
     {
         JobStatus.QUEUED,
         JobStatus.RUNNING,
+    }
+)
+
+# Terminal step-1-only statuses (quality gate ran, analysis never did).
+_QUALITY_ONLY_STATUSES = frozenset(
+    {
         JobStatus.PDF_QUALITY_OK,
         JobStatus.PDF_QUALITY_WARNING,
     }
@@ -106,6 +115,10 @@ def _public_unavailable_reason(analysis_id: str, preparing: bool) -> str:
     internal_reason = latest.get("reason_code")
     if _is_in_progress_status(status):
         return PUBLIC_REASON_PREPARING
+    if status in _QUALITY_ONLY_STATUSES:
+        # Terminal step-1-only artifact: the quality gate ran but no analysis
+        # ever did — there is no report and none is being prepared.
+        return PUBLIC_REASON_NO_REPORT
     # Temporary capacity/quota failures: retrying later can succeed (quota
     # after a recharge; rate-limit/timeout/5xx on their own). Reuse the
     # openai_client helpers -- never re-derive the classification here.
@@ -441,7 +454,13 @@ def _find_customer_job(analysis_id: str, selected_lot_id: Optional[str] = None):
             continue
         if selected_lot_id is not None:
             lot = (report.get("lot_structure") or {})
-            if str(report.get("report_status")) != "REPORT_READY":
+            # A paused MONEY_CONFIRMATION_REQUIRED report is customer-safe and
+            # must resume its confirmation prompt instead of being skipped
+            # (skipping it made the lot look report-less and caused duplicates).
+            if str(report.get("report_status")) not in (
+                "REPORT_READY",
+                "MONEY_CONFIRMATION_REQUIRED",
+            ):
                 continue
             if str(lot.get("selected_lot")) != str(selected_lot_id):
                 continue
@@ -466,19 +485,11 @@ async def correctness_v2_customer_view(analysis_id: str, request: Request) -> Di
         # so the UI can show the correct customer state (preparing / busy /
         # verification required / unavailable / no report). The reason_code is
         # ALWAYS a member of the closed public enum -- never an internal code.
+        #
+        # PURE READ: this GET never spawns a job. All customer job creation
+        # goes through POST .../lots/{lot_id}/generate (explicit action only) --
+        # a failed lot must never be silently re-run by opening or polling it.
         preparing = _has_in_progress_job(analysis_id)
-        if not preparing and selected_lot_id is not None:
-            # A customer picked a lot that was never analyzed: when auto-start
-            # is enabled, the product generates that lot's report on demand
-            # (same pipeline the admin would run; no admin controls needed).
-            pages_count = await _analysis_pages_count(analysis_id)
-            if pages_count > 0:
-                preparing = autostart_job(
-                    analysis_id,
-                    pages_count,
-                    selected_lot_id=selected_lot_id,
-                    reason="customer_lot_selection",
-                )
         return {
             "available": False,
             "selected_lot_id": selected_lot_id,
@@ -540,6 +551,202 @@ async def correctness_v2_confirm_money(
         "job_id": job_id,
         "report_status": result.get("status"),
         "report": customer_view.sanitize_customer_report(report, result) if safe and report else None,
+    }
+
+
+# ---------------------------------------------------------------------------
+# Storico lot workspace (customer-facing, ownership-gated).
+#
+#   GET  .../workspace                      -> pure-read lot overview, 0 side effects
+#   GET  .../lots/{lot_id}/generate/preview -> authoritative credit preview, read-only
+#   POST .../lots/{lot_id}/generate         -> the ONLY customer job-creation path
+#
+# Billing rule (plan §D/§M): credits are charged ONCE per upload (page-banded,
+# lot-agnostic) by the existing upload debit. Lot generation and rerun consume
+# ZERO additional credits: no debit is ever issued from these endpoints and no
+# per-lot price exists. The preview only READS the existing wallet/exemption
+# accessors and reports that truthfully.
+# ---------------------------------------------------------------------------
+async def _lot_credit_preview(user: Any, analysis_id: str) -> Dict[str, Any]:
+    """Authoritative credit preview for lot generation/rerun (read-only)."""
+    import server  # type: ignore  # lazy: avoid circular import
+
+    quota = getattr(user, "quota", None)
+    quota = quota if isinstance(quota, dict) else {}
+    try:
+        available = int(quota.get("perizia_scans_remaining", 0) or 0)
+    except (TypeError, ValueError):
+        available = 0
+    return {
+        "can_start": True,
+        "will_consume_credit": False,
+        "credits_required": 0,
+        "available_credits": available,
+        "already_paid_at_upload": True,
+        "exempt": bool(server._is_credit_exempt_user(user)),
+        "reason": None,
+    }
+
+
+@router.get("/{analysis_id}/correctness-v2/workspace")
+async def correctness_v2_workspace(analysis_id: str, request: Request) -> Dict[str, Any]:
+    """Customer-safe lot overview for an analysis. Pure read: ZERO side effects.
+
+    Never spawns a job, never calls OpenAI, never debits credits -- opening or
+    polling the workspace is always free and always safe.
+    """
+    user, _is_admin = await _resolve_customer_access(request, analysis_id)
+    payload = workspace.build_workspace(analysis_id)
+    payload["credit_preview"] = await _lot_credit_preview(user, analysis_id)
+    return payload
+
+
+@router.get("/{analysis_id}/correctness-v2/lots/{lot_id}/generate/preview")
+async def correctness_v2_lot_generate_preview(
+    analysis_id: str, lot_id: str, request: Request
+) -> Dict[str, Any]:
+    """Read-only preview of what generating/rerunning a lot would do."""
+    user, _is_admin = await _resolve_customer_access(request, analysis_id)
+    preview = await _lot_credit_preview(user, analysis_id)
+    preview["lot_state"] = (
+        workspace.latest_lot_outcome(analysis_id, lot_id) or workspace.STATE_NOT_ANALYZED
+    )
+    preview["can_start"] = workspace.lot_in_progress(analysis_id, lot_id) is None
+    return preview
+
+
+def _lot_dedup_response(running: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+    """The 'a job already covers this lot' response (no spawn, reuse it)."""
+    return {
+        "deduplicated": True,
+        "reused_report": False,
+        "spawned": False,
+        "job_id": (running or {}).get("job_id"),
+        "state": "RUNNING",
+        "preparing": True,
+    }
+
+
+@router.post("/{analysis_id}/correctness-v2/lots/{lot_id}/generate")
+async def correctness_v2_generate_lot(
+    analysis_id: str, lot_id: str, request: Request
+) -> Dict[str, Any]:
+    """Explicitly generate (or, with force, rerun) one lot's report.
+
+    Server-authoritative reuse/dedup rules, applied in order (plan §E):
+      A. a customer-safe report already exists and not force -> reuse it, no job;
+      B. a job already covers this lot -> deduplicate onto it, no new job;
+      C. a FAILED/VERIFICATION_REQUIRED lot never auto-reruns: 409 unless force;
+      D. otherwise exactly ONE job is spawned (in-flight marker closes the race).
+    No credit debit ever happens here (see billing rule above).
+    """
+    await _resolve_customer_access(request, analysis_id)
+
+    try:
+        body = await request.json()
+    except Exception:
+        body = None
+    force = bool(body.get("force")) if isinstance(body, dict) else False
+
+    # A. Existing safe report: serve the stored artifact, never rebuild via LLM.
+    status, report = workspace.find_lot_safe_report(analysis_id, lot_id)
+    if report is not None and not force:
+        return {
+            "deduplicated": False,
+            "reused_report": True,
+            "spawned": False,
+            "job_id": (status or {}).get("job_id"),
+            "state": report.get("report_status"),
+            "preparing": False,
+        }
+
+    # B. A job is already working on this lot: reuse it, no duplicate.
+    running = workspace.lot_in_progress(analysis_id, lot_id)
+    if running is not None:
+        return _lot_dedup_response(running)
+
+    # C. Failed/verification-required lots never auto-rerun (the core fix):
+    # the customer must explicitly confirm the rerun (force=true).
+    if not force:
+        outcome = workspace.latest_lot_outcome(analysis_id, lot_id)
+        if outcome in (workspace.STATE_FAILED, workspace.STATE_VERIFICATION_REQUIRED):
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "reason_code": "LOT_FAILED_RERUN_REQUIRED",
+                    "reason_human": (
+                        "Il lotto ha un tentativo non completato: confermare la rigenerazione."
+                    ),
+                },
+            )
+
+    # D. Claim the per-(analysis, lot) generation slot atomically so two
+    # simultaneous requests spawn exactly one job.
+    if not workspace.begin_generation(analysis_id, lot_id):
+        return _lot_dedup_response(workspace.lot_in_progress(analysis_id, lot_id))
+
+    spawned = False
+    try:
+        selected = None if not workspace.is_multi_lot(analysis_id) else str(lot_id)
+        pages_count = await _analysis_pages_count(analysis_id)
+        if pages_count <= 0:
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "reason_code": "ANALYSIS_NOT_READY",
+                    "reason_human": "L'analisi non è pronta: pagine non disponibili.",
+                },
+            )
+
+        def _run() -> None:
+            try:
+                import server  # type: ignore  # lazy: avoid circular import
+
+                def _page_loader(aid: str) -> List[Dict[str, Any]]:
+                    return server._load_pages_for_analysis(aid, pages_count)
+
+                start_job(
+                    analysis_id,
+                    _page_loader,
+                    is_admin=False,
+                    openai_caller=openai_client.call_openai_json,
+                    selected_lot_id=selected,
+                    analyze_all=False,
+                )
+            except Exception:
+                logger.exception(
+                    "correctness_v2 lot generate job failed analysis_id=%s lot=%s",
+                    analysis_id,
+                    lot_id,
+                )
+            finally:
+                workspace.finish_generation(analysis_id, lot_id)
+
+        thread = threading.Thread(
+            target=_run,
+            name=f"cv2-lot-generate-{analysis_id}-{lot_id}",
+            daemon=True,
+        )
+        thread.start()
+        spawned = True
+        logger.info(
+            "correctness_v2 lot generate spawned analysis_id=%s lot=%s force=%s",
+            analysis_id,
+            lot_id,
+            force,
+        )
+    finally:
+        # Once the thread is running IT owns the marker (released in its own
+        # finally); on any earlier exit the request must release it here.
+        if not spawned:
+            workspace.finish_generation(analysis_id, lot_id)
+
+    return {
+        "deduplicated": False,
+        "reused_report": False,
+        "spawned": True,
+        "state": "RUNNING",
+        "preparing": True,
     }
 
 

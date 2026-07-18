@@ -54,6 +54,37 @@ export const getCorrectnessV2CustomerView = (analysisId, options = {}, requestCo
   });
 };
 
+// Customer-safe lot workspace (Storico lot workspace). Pure read with ZERO
+// side effects: per-lot state, safe display values and the authoritative
+// credit preview. Never starts jobs.
+export const getCorrectnessV2Workspace = (analysisId, requestConfig = {}) => {
+  return axios.get(`${correctnessV2Base(analysisId)}/workspace`, {
+    withCredentials: true,
+    ...requestConfig
+  });
+};
+
+// Explicit per-lot generation/rerun. This POST is the ONLY customer path that
+// may create a job. `force=true` is an explicit rerun; with `force=false` the
+// server reuses existing reports/jobs and answers 409
+// {detail:{reason_code:"LOT_FAILED_RERUN_REQUIRED"}} on a failed lot.
+export const generateCorrectnessV2Lot = (analysisId, lotId, force = false, requestConfig = {}) => {
+  return axios.post(
+    `${correctnessV2Base(analysisId)}/lots/${lotId}/generate`,
+    { force: Boolean(force) },
+    { withCredentials: true, ...requestConfig }
+  );
+};
+
+// Authoritative credit preview for a lot generation/rerun. Read-only. The
+// frontend renders these values verbatim and NEVER computes credits itself.
+export const getCorrectnessV2LotCreditPreview = (analysisId, lotId, requestConfig = {}) => {
+  return axios.get(`${correctnessV2Base(analysisId)}/lots/${lotId}/generate/preview`, {
+    withCredentials: true,
+    ...requestConfig
+  });
+};
+
 // Submit the customer's money-confirmation answers (human-in-the-loop money-role
 // disambiguation). `answers` is {ambiguity_id: option_id}. Server re-runs the
 // gate deterministically (no OpenAI) and returns the final sanitized report.
