@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   getCorrectnessV2CustomerView,
   submitCorrectnessV2MoneyConfirmation,
+  submitCorrectnessV2FindingConfirmation,
 } from '../../lib/api/perizia';
 
 // Single source of truth for the sanitized Correctness V2 customer report.
@@ -61,6 +62,9 @@ export const useCorrectnessV2CustomerView = (
   // Money-confirmation submission state (human-in-the-loop disambiguation).
   const [confirmingMoney, setConfirmingMoney] = useState(false);
   const [moneyConfirmError, setMoneyConfirmError] = useState('');
+  // Focused finding-confirmation submission state (decision-model findings).
+  const [confirmingFinding, setConfirmingFinding] = useState(false);
+  const [findingConfirmError, setFindingConfirmError] = useState('');
   const mountedRef = useRef(false);
   const pollCountRef = useRef(0);
   // Bumped by reload() to re-run the initial fetch (customer retry action).
@@ -169,6 +173,36 @@ export const useCorrectnessV2CustomerView = (
         if (mountedRef.current) setConfirmingMoney(false);
       });
   }, [analysisId, report]);
+  // Submit/update a focused confirmation on a decision-model finding. On success
+  // the server returns the refreshed sanitized report, swapped in directly.
+  // Returns true when the confirmation was saved. Zero jobs/credits/OpenAI.
+  const submitFindingConfirmation = useCallback((findingId, optionId, note) => {
+    const jobId = report?.job_id;
+    if (!jobId || !findingId || !optionId) return Promise.resolve(false);
+    setConfirmingFinding(true);
+    setFindingConfirmError('');
+    return submitCorrectnessV2FindingConfirmation(analysisId, jobId, findingId, optionId, note)
+      .then((response) => {
+        if (!mountedRef.current) return false;
+        const data = response.data;
+        if (data?.available && data?.report) {
+          setPayload({ available: true, report: data.report });
+          return true;
+        }
+        setFindingConfirmError('Impossibile salvare la conferma.');
+        return false;
+      })
+      .catch((err) => {
+        if (!mountedRef.current) return false;
+        const detail = err?.response?.data?.detail;
+        setFindingConfirmError(detail?.reason_human || 'Impossibile salvare la conferma. Riprovare.');
+        return false;
+      })
+      .finally(() => {
+        if (mountedRef.current) setConfirmingFinding(false);
+      });
+  }, [analysisId, report]);
+
   // A lot was selected but its report is not available (yet): keep the user in
   // the customer surface (message + back to lots) instead of a dead end.
   const lotUnavailable = Boolean(
@@ -200,6 +234,9 @@ export const useCorrectnessV2CustomerView = (
     submitMoneyConfirmation,
     confirmingMoney,
     moneyConfirmError,
+    submitFindingConfirmation,
+    confirmingFinding,
+    findingConfirmError,
     lotUnavailable,
     lotSelectionReport,
     selectedLotId,

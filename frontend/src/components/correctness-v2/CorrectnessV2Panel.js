@@ -13,6 +13,7 @@ import { Button } from '../ui/button';
 import { Badge } from '../ui/badge';
 import { Input } from '../ui/input';
 import { compactText, pagesText, DetailBlock, TextList } from './shared';
+import AdminDecisionModelPreview from './AdminDecisionModelPreview';
 import {
   getCorrectnessV2CustomerReport,
   getCorrectnessV2Job,
@@ -861,6 +862,10 @@ const CorrectnessV2CustomerReport = ({ report }) => {
       </section>
 
       <QualityControlSection qualityControl={report.quality_control} />
+
+      {report.analysis_id && report.job_id && (
+        <AdminDecisionModelPreview analysisId={report.analysis_id} jobId={report.job_id} />
+      )}
 
       <EvidenceIndex
         customerEvidence={report.customer_evidence_index}

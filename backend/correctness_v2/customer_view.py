@@ -23,7 +23,9 @@ from __future__ import annotations
 
 import re
 import unicodedata
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Sequence
+
+from . import decision_model
 
 # Report statuses a customer may see. Manual-review / validation-failed / any
 # pipeline-failure status is never surfaced to a customer.
@@ -348,12 +350,17 @@ def is_customer_safe(report: Optional[Dict[str, Any]], job: Optional[Dict[str, A
 
 
 def sanitize_customer_report(
-    report: Dict[str, Any], job: Optional[Dict[str, Any]] = None
+    report: Dict[str, Any],
+    job: Optional[Dict[str, Any]] = None,
+    confirmations: Sequence[Dict[str, Any]] = (),
 ) -> Dict[str, Any]:
     """Return the customer-safe projection of a full ``customer_report`` dict.
 
     Strips every admin/debug field, keeps presentable customer content, and adds
-    a derived executive ``decision`` box. The input dict is never mutated.
+    a derived executive ``decision`` box plus the read-time ``decision_model``
+    (§C). ``confirmations`` is the list of persisted user confirmations for this
+    analysis (from MongoDB), joined into the decision model at read time. The
+    input dict is never mutated.
     """
     report = report if isinstance(report, dict) else {}
     decision = derive_decision(report)
@@ -382,6 +389,11 @@ def sanitize_customer_report(
         "customer_evidence_index": list(report.get("customer_evidence_index") or []),
         "disclaimer": report.get("disclaimer"),
     }
+
+    # Read-time customer decision model (§C). Built from the FULL stored report
+    # (before admin keys are stripped above is irrelevant — the builder reads only
+    # customer-safe fields) with user confirmations joined. Pure, no OpenAI.
+    out["decision_model"] = decision_model.build_decision_model(report, confirmations)
 
     if status == "LOT_SELECTION_REQUIRED" and report.get("lot_selection"):
         out["lot_selection"] = _customer_lot_selection(report.get("lot_selection"))

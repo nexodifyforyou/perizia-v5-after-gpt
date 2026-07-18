@@ -97,3 +97,34 @@ export const submitCorrectnessV2MoneyConfirmation = (
     { withCredentials: true, ...requestConfig }
   );
 };
+
+// Submit/update a focused confirmation on a single decision-model finding.
+// Persisted authoritatively in MongoDB (owner only). Deterministic: zero
+// OpenAI, zero jobs, zero credits. Returns the refreshed sanitized report.
+export const submitCorrectnessV2FindingConfirmation = (
+  analysisId, jobId, findingId, optionId, note, requestConfig = {}
+) => {
+  const body = { job_id: jobId, finding_id: findingId, option_id: optionId };
+  if (note) body.note = note;
+  return axios.post(
+    `${correctnessV2Base(analysisId)}/customer-view/confirm-finding`,
+    body,
+    { withCredentials: true, ...requestConfig }
+  );
+};
+
+// Owner's own confirmations for an analysis (customer projection only).
+export const getCorrectnessV2Confirmations = (analysisId, requestConfig = {}) => {
+  return axios.get(`${correctnessV2Base(analysisId)}/customer-view/confirmations`, {
+    withCredentials: true,
+    ...requestConfig,
+  });
+};
+
+// Admin-only (Vista admin): raw decision model + confirmations + audit for a job.
+export const getCorrectnessV2DecisionModel = (analysisId, jobId, requestConfig = {}) => {
+  return axios.get(`${correctnessV2Base(analysisId)}/jobs/${jobId}/decision-model`, {
+    withCredentials: true,
+    ...requestConfig,
+  });
+};
