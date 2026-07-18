@@ -930,6 +930,12 @@ def _build_sources(report: Dict[str, Any], evidence: Sequence[Dict[str, Any]]) -
         if _norm(section) == _norm("Superfici e dati catastali"):
             surface_pages |= set(_pages([entry.get("page")]))
             continue
+        # Market comparatives (OMI / listings) are NOT decisive evidence — they are
+        # already represented by the single collapsed "comparatives" line in the
+        # Numeri section (§6/§J). Keep them out of the decisive-sources list so
+        # they never crowd out identity / valuation-chain / conformity evidence.
+        if _norm(topic).startswith("comparativ"):
+            continue
         key = _norm(topic)
         if key in seen_topics:
             continue

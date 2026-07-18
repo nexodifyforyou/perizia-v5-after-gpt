@@ -298,6 +298,26 @@ def test_sources_prune_and_cap():
     assert val["excerpt"] == "valore di vendita giudiziaria 38110"
 
 
+# 17b. market comparatives are excluded from decisive evidence (fonti), not just
+#      collapsed — they never crowd out identity/valuation/conformity sources.
+def test_comparatives_excluded_from_decisive_evidence():
+    evidence = [
+        {"page": 2, "topic": "Valore di mercato", "report_section": "Valutazione",
+         "perizia_excerpt": "valore di mercato 43654", "coverage_status": "covered"},
+        {"page": 7, "topic": "conformità edilizia", "report_section": "Conformità",
+         "perizia_excerpt": "difformità edilizia regolarizzabile", "coverage_status": "covered"},
+    ] + [
+        {"page": 16, "topic": f"Comparativo {i} OMI - prezzo unitario", "report_section": "Comparativi",
+         "perizia_excerpt": f"comparativo {i} 1500/mq", "coverage_status": "covered"}
+        for i in range(1, 6)
+    ]
+    m = dm.build_decision_model(_report(customer_evidence_index=evidence), [])
+    fonti = m["sections"]["fonti"]
+    assert not any(s["title"].lower().startswith("comparativ") for s in fonti["primary"])
+    titles = " ".join(s["title"].lower() for s in fonti["primary"])
+    assert "valore di mercato" in titles and "conformità edilizia" in titles
+
+
 # 18. confirmation eligibility: excerpt required (else professional check), cap 5
 def test_confirmation_requires_excerpt():
     # occupancy with a risk but NO matching evidence excerpt -> professional check, not a form
