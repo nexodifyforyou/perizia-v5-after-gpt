@@ -15,11 +15,24 @@ import {
 // as "unavailable": `available` is false and CustomerReportView renders the
 // matching safe state (never a blank page).
 //
+// SELECTED LOT (URL-persisted): the page owns the `?lot=` search param and
+// passes it in as `selectedLotId` together with an `onSelectLot` writer, so
+// refresh / back / forward / deep links preserve the selected lot. When no
+// controller is supplied (standalone use / unit tests) the hook falls back to
+// plain internal state, exactly as before.
+//
+// SIDE-EFFECT-FREE READS: the customer-view GET only *reports* state — it
+// never creates jobs (generation happens exclusively through the explicit
+// POST /lots/{lot_id}/generate action). Selecting/opening a lot therefore
+// never auto-generates, and polling while `preparing` is safe: it can never
+// respawn work server-side.
+//
 // When the backend reports `preparing: true` (a V2 job is running for this
-// analysis — e.g. auto-started on upload or by a customer lot selection), the
-// hook silently re-polls the sanitized endpoint until the report appears or a
-// terminal outcome makes `preparing` false. Silent polls never toggle
-// `loading`, so the page never flashes back to a placeholder while waiting.
+// analysis — e.g. auto-started on upload or explicitly started from the lot
+// workspace), the hook silently re-polls the sanitized endpoint until the
+// report appears or a terminal outcome makes `preparing` false. Silent polls
+// never toggle `loading`, so the page never flashes back to a placeholder
+// while waiting.
 
 const PREPARING_POLL_MS = 8000;
 const PREPARING_MAX_POLLS = 225; // ~30 minutes of background polling
@@ -30,12 +43,17 @@ const isCanceledError = (error) => (
   error?.message === 'canceled'
 );
 
-export const useCorrectnessV2CustomerView = (analysisId, { enabled = true } = {}) => {
+export const useCorrectnessV2CustomerView = (
+  analysisId,
+  { enabled = true, selectedLotId: controlledLotId, onSelectLot } = {},
+) => {
   const active = Boolean(enabled && analysisId);
+  const controlled = typeof onSelectLot === 'function';
   const [loading, setLoading] = useState(active);
   const [error, setError] = useState('');
   const [payload, setPayload] = useState(null);
-  const [selectedLotId, setSelectedLotId] = useState(null);
+  const [internalLotId, setInternalLotId] = useState(null);
+  const selectedLotId = controlled ? (controlledLotId || null) : internalLotId;
   // Remembered lot-selection report: when a customer picks a lot whose report
   // does not exist yet, we keep the selector data so they can navigate back
   // instead of hitting a dead end.
@@ -99,7 +117,8 @@ export const useCorrectnessV2CustomerView = (analysisId, { enabled = true } = {}
 
   const preparing = Boolean(payload && !payload.available && payload.preparing);
 
-  // Background poll while the backend is preparing the report for us.
+  // Background poll while the backend is preparing the report for us. The GET
+  // is side-effect-free (it can never start a job), so this poll only waits.
   useEffect(() => {
     if (!active || !preparing) return undefined;
     if (pollCountRef.current >= PREPARING_MAX_POLLS) return undefined;
@@ -156,8 +175,13 @@ export const useCorrectnessV2CustomerView = (analysisId, { enabled = true } = {}
     selectedLotId && payload && !payload.available && lotSelectionReport
   );
 
-  const selectLot = useCallback((lotId) => setSelectedLotId(lotId), []);
-  const backToLots = useCallback(() => setSelectedLotId(null), []);
+  // Selecting a lot ONLY changes which report is fetched/displayed (URL param
+  // in controlled mode). It never triggers generation.
+  const selectLot = useCallback((lotId) => {
+    if (controlled) onSelectLot(lotId || null);
+    else setInternalLotId(lotId || null);
+  }, [controlled, onSelectLot]);
+  const backToLots = useCallback(() => selectLot(null), [selectLot]);
   const reload = useCallback(() => {
     setError('');
     setReloadTick((tick) => tick + 1);

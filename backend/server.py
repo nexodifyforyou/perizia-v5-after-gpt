@@ -18986,7 +18986,21 @@ async def get_perizia_history(request: Request, limit: int = 20, skip: int = 0):
                 },
             }
         )
-    
+
+    # Additive Correctness v2 lot-workspace summary per row (pure read: no job
+    # spawn, no OpenAI, no debit). Legacy semaforo fields stay untouched; a
+    # workspace failure must never break the Storico listing.
+    for row in compact_rows:
+        try:
+            from correctness_v2 import workspace as cv2_workspace  # lazy
+
+            ws = cv2_workspace.build_workspace(row["analysis_id"])
+            row["v2"] = {"state": ws["analysis_state"], **ws["summary"]}
+        except Exception:
+            logging.getLogger(__name__).exception(
+                "history v2 summary failed analysis_id=%s", row.get("analysis_id")
+            )
+
     total = await db.perizia_analyses.count_documents({"user_id": user.user_id})
     
     return {"analyses": compact_rows, "total": total, "limit": safe_limit, "skip": safe_skip}

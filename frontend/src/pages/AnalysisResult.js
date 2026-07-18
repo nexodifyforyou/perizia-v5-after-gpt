@@ -1,11 +1,12 @@
-import React, { useState, useEffect } from 'react';
-import { useParams, Link, useNavigate } from 'react-router-dom';
+import React, { useState, useEffect, useCallback } from 'react';
+import { useParams, Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { Sidebar } from './Dashboard';
 import { Button } from '../components/ui/button';
 import TechnicalFeedbackModal from '../components/TechnicalFeedbackModal';
 import CorrectnessV2Tabs from '../components/correctness-v2/CorrectnessV2Tabs';
 import { useCorrectnessV2CustomerView } from '../components/correctness-v2/useCustomerView';
+import { useLotWorkspace } from '../components/correctness-v2/useLotWorkspace';
 import { computeCorrectnessV2Visibility } from '../components/correctness-v2/visibility';
 import { MessageSquarePlus, FileText, AlertTriangle, ArrowLeft, Trash2, X } from 'lucide-react';
 import axios from 'axios';
@@ -41,11 +42,44 @@ const AnalysisResult = () => {
   const [feedbackModalOpen, setFeedbackModalOpen] = useState(false);
   const canGiveTechnicalFeedback = Boolean(user?.is_beta_partner || user?.is_master_admin);
 
+  // URL-persisted lot selection (Storico lot workspace, plan §F): the selected
+  // lot lives in `?lot=` so refresh / back / forward / deep links keep it.
+  const [searchParams, setSearchParams] = useSearchParams();
+  const lotParam = searchParams.get('lot') || null;
+  const handleSelectLot = useCallback((lotId) => {
+    setSearchParams((prev) => {
+      const next = new URLSearchParams(prev);
+      if (lotId) next.set('lot', String(lotId));
+      else next.delete('lot');
+      return next;
+    });
+  }, [setSearchParams]);
+
+  // Customer-safe per-lot workspace (pure read, zero side effects). When the
+  // endpoint is unavailable (rollout 404 / failure) the page falls back to the
+  // pre-workspace customer-view behavior.
+  const workspaceState = useLotWorkspace(analysisId);
+  // Multi-lot analyses land on the lot overview — never a stale latest-lot
+  // report — until the customer explicitly opens a lot (`?lot=`).
+  const lotOverviewActive = Boolean(
+    workspaceState.available &&
+    workspaceState.workspace?.analysis_state === 'LOT_OVERVIEW' &&
+    !lotParam
+  );
+
   // The customer view is fetched ONCE via this shared hook and handed to the
-  // tabs, so the page's decisions never diverge from what renders.
+  // tabs, so the page's decisions never diverge from what renders. While the
+  // lot overview is active the hook is disabled: returning to the overview
+  // ("Torna ai lotti") is purely a URL change and fires NO API call.
   const isExactAdmin = Boolean(user?.correctness_v2_admin_view);
-  const correctnessV2 = useCorrectnessV2CustomerView(analysisId);
-  const v2Resolved = !correctnessV2.loading;
+  const correctnessV2 = useCorrectnessV2CustomerView(analysisId, {
+    enabled: !lotOverviewActive,
+    selectedLotId: lotParam,
+    onSelectLot: handleSelectLot,
+  });
+  const v2Resolved = Boolean(
+    workspaceState.resolved && (lotOverviewActive || !correctnessV2.loading)
+  );
   const correctnessV2Visibility = computeCorrectnessV2Visibility({
     isExactAdmin,
     v2Resolved,
@@ -238,6 +272,10 @@ const AnalysisResult = () => {
             analysisId={analysisId}
             canSeeAdminTab={correctnessV2Visibility.showAdminTab}
             customerState={correctnessV2}
+            workspaceState={workspaceState}
+            showLotOverview={lotOverviewActive}
+            onOpenLot={handleSelectLot}
+            backLabel={workspaceState.available ? 'Torna ai lotti' : undefined}
           />
         )}
       </main>

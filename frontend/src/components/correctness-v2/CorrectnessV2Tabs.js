@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { LayoutDashboard, User } from 'lucide-react';
 import CustomerReportView from './CustomerReportView';
 import CorrectnessV2Panel from './CorrectnessV2Panel';
+import LotWorkspace from './LotWorkspace';
 
 // Role-aware container for the Correctness V2 surface.
 //
@@ -22,7 +23,20 @@ const TABS = {
   admin: { label: 'Vista admin', icon: LayoutDashboard },
 };
 
-const CorrectnessV2Tabs = ({ analysisId, canSeeAdminTab = false, customerState }) => {
+// Storico lot workspace: when the page says the analysis is a multi-lot
+// overview (`showLotOverview`, i.e. workspace `analysis_state === "LOT_OVERVIEW"`
+// and no `?lot=` selected) the customer tab renders the lot overview instead of
+// a report — never a stale latest-lot report. Opening a lot sets `?lot=` via
+// `onOpenLot`; "Torna ai lotti" clears it with zero API/job calls.
+const CorrectnessV2Tabs = ({
+  analysisId,
+  canSeeAdminTab = false,
+  customerState,
+  workspaceState,
+  showLotOverview = false,
+  onOpenLot,
+  backLabel,
+}) => {
   const [active, setActive] = useState('customer');
 
   const showAdminTab = Boolean(canSeeAdminTab);
@@ -69,7 +83,11 @@ const CorrectnessV2Tabs = ({ analysisId, canSeeAdminTab = false, customerState }
         </div>
       ) : (
         <div data-testid="cv2-customer-tab-panel">
-          <CustomerReportView analysisId={analysisId} state={customerState} />
+          {showLotOverview && workspaceState ? (
+            <LotWorkspace analysisId={analysisId} state={workspaceState} onOpenLot={onOpenLot} />
+          ) : (
+            <CustomerReportView analysisId={analysisId} state={customerState} backLabel={backLabel} />
+          )}
         </div>
       )}
     </section>

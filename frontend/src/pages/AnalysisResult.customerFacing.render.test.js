@@ -16,11 +16,25 @@ import AnalysisResult from './AnalysisResult';
 
 jest.mock('axios');
 
-jest.mock('react-router-dom', () => ({
-  Link: ({ children, to, ...props }) => <a href={to} {...props}>{children}</a>,
-  useParams: () => ({ analysisId: 'test-analysis' }),
-  useNavigate: () => jest.fn(),
-}), { virtual: true });
+jest.mock('react-router-dom', () => {
+  const ReactMock = require('react');
+  return {
+    Link: ({ children, to, ...props }) => <a href={to} {...props}>{children}</a>,
+    useParams: () => ({ analysisId: 'test-analysis' }),
+    useNavigate: () => jest.fn(),
+    // Stateful search-params mock so the URL-persisted `?lot=` selection works
+    // inside tests exactly like in the real router.
+    useSearchParams: () => {
+      const [params, setParams] = ReactMock.useState(() => new URLSearchParams(''));
+      const set = ReactMock.useCallback((updater) => {
+        setParams((prev) => new URLSearchParams(
+          typeof updater === 'function' ? updater(prev) : updater
+        ));
+      }, []);
+      return [params, set];
+    },
+  };
+}, { virtual: true });
 
 let mockUser = { name: 'Test User' };
 jest.mock('../context/AuthContext', () => ({

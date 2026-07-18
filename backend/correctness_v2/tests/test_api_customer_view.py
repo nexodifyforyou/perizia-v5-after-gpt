@@ -133,32 +133,62 @@ def test_customer_view_reports_preparing_while_a_job_runs(customer_app, artifact
     assert data["reason_code"] == "PREPARING"
 
 
-def test_customer_view_missing_lot_triggers_autostart_when_enabled(
+def _count_job_dirs():
+    root = artifacts.jobs_root()
+    if not root.exists():
+        return 0
+    return sum(1 for p in root.iterdir() if p.is_dir())
+
+
+def test_customer_view_missing_lot_does_not_autostart(
     customer_app, artifacts_root, monkeypatch
 ):
-    analysis_id = "analysis_cust_lot_autostart"
-    calls = {}
+    """Opening/polling a lot with no report must NEVER create a job.
 
-    async def _pages_count(aid):
-        return 42
+    All customer job creation goes through POST .../lots/{lot_id}/generate;
+    the GET only reports state (preparing derives solely from an existing
+    in-progress job).
+    """
+    analysis_id = "analysis_cust_lot_no_autostart"
 
-    def _fake_autostart(aid, pages_count, *, selected_lot_id=None, reason=""):
-        calls["args"] = (aid, pages_count, selected_lot_id, reason)
-        return True
+    def _never(*args, **kwargs):  # the removed side effect must not resurface
+        raise AssertionError("customer-view GET must never call autostart_job")
 
-    monkeypatch.setattr(api, "_analysis_pages_count", _pages_count)
-    monkeypatch.setattr(api, "autostart_job", _fake_autostart)
+    monkeypatch.setattr(api, "autostart_job", _never)
 
+    jobs_before = _count_job_dirs()
     response = _sync_get(
         customer_app,
         f"/api/analysis/perizia/{analysis_id}/correctness-v2/customer-view/latest?selected_lot_id=2",
     )
+    assert response.status_code == 200
+    data = response.json()
+    assert data["available"] is False
+    assert data["preparing"] is False  # no in-progress job exists
+    assert data["reason_code"] == "NO_REPORT"
+    assert _count_job_dirs() == jobs_before  # zero jobs created by the GET
 
+    # With an existing in-progress job, preparing is True -- still no new job.
+    artifacts.save_job_status(
+        "cv2_no_autostart_running",
+        {
+            "job_id": "cv2_no_autostart_running",
+            "analysis_id": analysis_id,
+            "status": "RUNNING",
+            "safe_to_show_customer": False,
+            "artifacts_saved": {},
+        },
+    )
+    jobs_before = _count_job_dirs()
+    response = _sync_get(
+        customer_app,
+        f"/api/analysis/perizia/{analysis_id}/correctness-v2/customer-view/latest?selected_lot_id=2",
+    )
     assert response.status_code == 200
     data = response.json()
     assert data["available"] is False
     assert data["preparing"] is True
-    assert calls["args"] == (analysis_id, 42, "2", "customer_lot_selection")
+    assert _count_job_dirs() == jobs_before
 
 
 def test_autostart_job_noop_when_flag_disabled(artifacts_root, monkeypatch):
@@ -271,7 +301,10 @@ def _assert_customer_payload_is_safe(response):
     [
         ("QUEUED", None, "PREPARING"),
         ("RUNNING", None, "PREPARING"),
-        ("PDF_QUALITY_OK", None, "PREPARING"),
+        # Terminal step-1-only artifact: no report exists and none is being
+        # prepared (PDF_QUALITY_* is never persisted by the customer pipeline).
+        ("PDF_QUALITY_OK", None, "NO_REPORT"),
+        ("PDF_QUALITY_WARNING", None, "NO_REPORT"),
         ("FAILED_ANALYSIS", "OPENAI_QUOTA_EXHAUSTED", "SERVICE_BUSY"),
         ("FAILED_ANALYSIS", "OPENAI_RATE_LIMITED", "SERVICE_BUSY"),
         ("FAILED_ANALYSIS", "OPENAI_TIMEOUT", "SERVICE_BUSY"),

@@ -186,6 +186,10 @@ function AppRouter() {
       <Route path="/analysis/new" element={
         <ProtectedRoute><NewAnalysis /></ProtectedRoute>
       } />
+      {/* Storico lot workspace: the selected lot is URL-persisted as
+          `?lot=<lot_id>` (read via useSearchParams inside AnalysisResult), so
+          refresh / back / forward / deep links preserve it. The route itself
+          stays `/analysis/:analysisId` — no lot path segment. */}
       <Route path="/analysis/:analysisId" element={
         <ProtectedRoute><AnalysisResult /></ProtectedRoute>
       } />
