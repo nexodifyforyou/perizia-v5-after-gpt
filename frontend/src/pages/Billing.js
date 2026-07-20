@@ -546,6 +546,20 @@ const Billing = () => {
   // Subscription management stays available so a tester on a paid plan is never
   // trapped. No Stripe/checkout/webhook behaviour changes — purely presentation.
   const betaActive = Boolean(accountState?.betaProgram?.active);
+  // Beta quota (configurable perizia allowance, docs/beta_perizia_limits_plan.md
+  // §O): UNLIMITED keeps today's presentation unchanged; LIMITED renders the
+  // real remaining/limit numbers from the API. Purchase/recharge CTAs stay
+  // hidden only while the beta allowance is actually available (UNLIMITED or
+  // AVAILABLE) — once EXHAUSTED, normal plan controls resurface exactly as if
+  // beta were inactive, per mission. Values are always the API's, never
+  // computed here and never a fake 9999/infinite placeholder.
+  const betaQuota = accountState?.betaProgram?.quota || null;
+  const betaQuotaState = betaQuota?.state || (betaActive ? 'UNLIMITED' : null);
+  const betaQuotaLimit = betaQuota?.limit ?? null;
+  const betaQuotaRemaining = betaQuota?.remaining ?? null;
+  const betaQuotaReserved = Number(betaQuota?.reserved || 0);
+  const betaExhausted = betaActive && betaQuotaState === 'EXHAUSTED';
+  const betaAllowanceAvailable = betaActive && !betaExhausted;
   const normalizedSubscriptionStatus = String(subscriptionState.status || '').trim().toLowerCase();
   const hasRecurringSubscription = Boolean(
     currentRecurringPlanId &&
@@ -847,15 +861,30 @@ const Billing = () => {
         {betaActive && (
           <div className="mb-8 rounded-xl border border-gold/30 bg-gold/10 p-5" data-testid="billing-beta-banner">
             <div className="mb-1 flex flex-wrap items-center gap-2">
-              <span className="rounded-full border border-gold/40 bg-gold/20 px-2.5 py-1 text-[11px] font-bold uppercase tracking-wide text-gold">
-                Accesso Beta
+              <span className={`rounded-full border px-2.5 py-1 text-[11px] font-bold uppercase tracking-wide ${
+                betaExhausted ? 'border-amber-500/40 bg-amber-500/20 text-amber-300' : 'border-gold/40 bg-gold/20 text-gold'
+              }`}>
+                {betaExhausted ? 'Limite beta raggiunto' : 'Accesso Beta'}
               </span>
               <p className="font-semibold text-gold">Programma Beta attivo</p>
             </div>
             <p className="text-sm text-zinc-200">
-              Analisi illimitate durante il programma beta: le analisi non consumano crediti. I crediti già
-              acquistati restano salvati e saranno nuovamente utilizzabili al termine dell'accesso beta.
+              {betaExhausted
+                ? `0 perizie beta disponibili su ${betaQuotaLimit ?? '—'}`
+                : betaQuotaState === 'AVAILABLE'
+                  ? `${betaQuotaRemaining ?? 0} perizie beta disponibili su ${betaQuotaLimit ?? '—'}`
+                  : "Analisi illimitate durante il programma beta: le analisi non consumano crediti. I crediti già acquistati restano salvati e saranno nuovamente utilizzabili al termine dell'accesso beta."}
             </p>
+            {betaExhausted && (
+              <p className="mt-2 text-sm text-amber-200">
+                Gli eventuali crediti acquistati restano disponibili.
+              </p>
+            )}
+            {betaQuotaReserved > 0 && (
+              <p className="mt-2 text-sm text-zinc-300" data-testid="billing-beta-in-progress">
+                {betaQuotaReserved === 1 ? '1 analisi in elaborazione' : `${betaQuotaReserved} analisi in elaborazione`}
+              </p>
+            )}
           </div>
         )}
 
@@ -962,7 +991,7 @@ const Billing = () => {
               </div>
             </div>
           )}
-          {!betaActive && (
+          {!betaAllowanceAvailable && (
             <div className="mt-6 flex justify-start">
               <Button asChild className="bg-gold text-zinc-950 hover:bg-gold-dim">
                 <Link to="#billing-plans">Ricarica crediti</Link>
@@ -971,11 +1000,11 @@ const Billing = () => {
           )}
         </div>
 
-        {!betaActive && (
+        {!betaAllowanceAvailable && (
         <h3 className="text-xl font-serif font-bold text-zinc-100 mb-6">Piani Disponibili</h3>
         )}
 
-        {!betaActive && (
+        {!betaAllowanceAvailable && (
         <div id="billing-plans" className="grid grid-cols-1 gap-6 md:grid-cols-2 xl:grid-cols-5">
           {loading ? (
             <div className="col-span-full text-center py-12">

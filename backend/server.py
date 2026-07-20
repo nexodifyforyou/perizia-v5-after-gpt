@@ -1109,6 +1109,18 @@ def _normalize_account_state(user_doc: Dict[str, Any]) -> Dict[str, Any]:
         if is_beta_partner
         else None
     )
+    # Derived quota state (configurable per-tester perizia allowance, a second
+    # entitlement axis orthogonal to ACTIVE/PENDING/REVOKED). Refreshes on
+    # every request because beta_snapshot itself is re-resolved from the DB
+    # every request (get_current_user) -- no restart, no re-login needed.
+    beta_quota_state = None
+    if is_beta_partner:
+        try:
+            from beta_program import quota as _beta_quota
+
+            beta_quota_state = _beta_quota.derive_quota_state(beta_snapshot)
+        except Exception:  # pragma: no cover - fail closed (never block auth)
+            beta_quota_state = None
     feature_access = {
         "can_use_assistant": is_master_admin,
         "can_use_image_forensics": is_master_admin,
@@ -1119,6 +1131,7 @@ def _normalize_account_state(user_doc: Dict[str, Any]) -> Dict[str, Any]:
         "is_beta_partner": is_beta_partner,
         "beta_partner_name": beta_partner_name,
         "beta_partner_type": beta_partner_type,
+        "beta_quota": beta_quota_state,
         "plan": plan,
         "quota": quota,
         "perizia_credits": perizia_credits,
@@ -1190,11 +1203,18 @@ def _build_user_response(user: User) -> Dict[str, Any]:
     # internal notes, membership_id or audit detail.
     beta_snapshot = user_response.get("beta_program") or {}
     beta_active = normalized["is_beta_partner"]
-    user_response["beta_program"] = {
+    beta_program_response: Dict[str, Any] = {
         "active": bool(beta_active),
         "display_name": normalized["beta_partner_name"] if beta_active else None,
         "member_since": beta_snapshot.get("activated_at") if beta_active else None,
     }
+    # Derived quota block ({mode, limit, consumed, reserved, remaining, state,
+    # quota_version}) -- present only for an active beta member (frontend
+    # defaults to UNLIMITED when absent). Backend-derived only: nothing here
+    # is ever influenced by client-supplied input.
+    if beta_active and normalized.get("beta_quota"):
+        beta_program_response["quota"] = normalized["beta_quota"]
+    user_response["beta_program"] = beta_program_response
     return user_response
 
 async def get_current_user(request: Request) -> Optional[User]:
@@ -12215,10 +12235,19 @@ async def _apply_perizia_credit_debit_with_ledger(
     reference_id: str,
     description_it: str,
     metadata: Optional[Dict[str, Any]] = None,
+    beta_slot_granted: Optional[bool] = None,
 ) -> bool:
     if _user_is_admin(user):
         return False
-    if _user_has_active_beta(user):
+    # Exemption is decided per-analysis by the caller (beta_slot_granted), not
+    # merely by "is this account an active beta member" -- an EXHAUSTED
+    # LIMITED tester who falls back to their real paid plan for THIS analysis
+    # must be debited normally. When the caller does not pass an explicit
+    # value (the one other, currently-uncalled reference,
+    # _decrement_quota_if_applicable), behaviour is unchanged: fall back to
+    # the account-level predicate.
+    exempt = _user_has_active_beta(user) if beta_slot_granted is None else bool(beta_slot_granted)
+    if exempt:
         membership_id = (getattr(user, "beta_program", None) or {}).get("membership_id")
         logger.info(
             f"beta_partner_unlimited_access user={user.email} "
@@ -16278,14 +16307,36 @@ async def analyze_perizia(request: Request, file: UploadFile = File(...)):
     user = await require_auth(request)
     request_id = f"req_{uuid.uuid4().hex[:12]}"
     logger.info(f"[{request_id}] perizia_upload_start user={user.user_id} file={file.filename}")
-    
+
+    # IDs minted up-front, before any other check: analysis_id is the beta
+    # quota ledger's authoritative idempotency key from the very first line of
+    # this handler (backend-generated, unguessable -- never a browser-supplied
+    # value). This is the ONLY call site in the app that mints a new
+    # analysis_id; every other analysis-touching endpoint (lot generation,
+    # storico workspace, job polling, reruns, confirmations) operates on an
+    # existing one and never reserves a beta slot. See beta_program/quota.py.
+    case_id = f"case_{uuid.uuid4().hex[:8]}"
+    run_id = f"run_{uuid.uuid4().hex[:8]}"
+    analysis_id = f"analysis_{uuid.uuid4().hex[:12]}"
+
+    from beta_program import quota as beta_quota
+
+    beta_outcome = await beta_quota.resolve_upload_slot(user, analysis_id)
+    beta_slot_exempt = beta_outcome.get("mode") in ("UNLIMITED", "GRANTED")
+
     # Check file type - PDF only
     if not file.filename.lower().endswith('.pdf'):
+        await beta_quota.finalize_on_failure(
+            analysis_id, reason_if_before_paid=beta_quota.REASON_INVALID_FILE_TYPE
+        )
         raise HTTPException(status_code=400, detail="Solo file PDF sono accettati / Only PDF files are accepted")
-    
+
     if file.content_type and file.content_type != "application/pdf":
+        await beta_quota.finalize_on_failure(
+            analysis_id, reason_if_before_paid=beta_quota.REASON_INVALID_FILE_TYPE
+        )
         raise HTTPException(status_code=400, detail="Solo file PDF sono accettati / Only PDF files are accepted")
-    
+
     # Read PDF content
     contents = await file.read()
     input_sha256 = hashlib.sha256(contents).hexdigest()
@@ -16295,10 +16346,16 @@ async def analyze_perizia(request: Request, file: UploadFile = File(...)):
         uploaded_reader = PdfReader(io.BytesIO(contents))
         uploaded_pages_count = len(uploaded_reader.pages)
     except Exception:
+        await beta_quota.finalize_on_failure(
+            analysis_id, reason_if_before_paid=beta_quota.REASON_DOCUMENT_UNREADABLE_BEFORE_PAID_ANALYSIS
+        )
         raise HTTPException(status_code=400, detail="PDF non valido o non leggibile.")
 
     required_perizia_credits = _get_required_perizia_credits(uploaded_pages_count)
     if required_perizia_credits is None:
+        await beta_quota.finalize_on_failure(
+            analysis_id, reason_if_before_paid=beta_quota.REASON_PAGE_COUNT_UNSUPPORTED
+        )
         raise HTTPException(
             status_code=400,
             detail={
@@ -16309,15 +16366,46 @@ async def analyze_perizia(request: Request, file: UploadFile = File(...)):
         )
 
     remaining_perizia_credits = int(user.quota.get("perizia_scans_remaining", 0) or 0)
-    beta_unlimited = _user_has_active_beta(user)
-    if beta_unlimited:
+    if beta_slot_exempt:
         logger.info(
-            f"[{request_id}] beta_partner_unlimited_access user={user.email} "
-            f"reason=beta_partner_unlimited_access pages={uploaded_pages_count} "
-            f"required_credits={required_perizia_credits} remaining_credits={remaining_perizia_credits} "
-            f"credit_block=skipped"
+            f"[{request_id}] beta_quota_slot_applied user={user.email} mode={beta_outcome.get('mode')} "
+            f"pages={uploaded_pages_count} required_credits={required_perizia_credits} "
+            f"remaining_credits={remaining_perizia_credits} credit_block=skipped"
         )
-    if remaining_perizia_credits < required_perizia_credits and not _is_credit_exempt_user(user):
+    if remaining_perizia_credits < required_perizia_credits and not (_user_is_admin(user) or beta_slot_exempt):
+        if beta_outcome.get("mode") == "FALLBACK":
+            # This tester's beta allowance is exhausted (or a resolver race)
+            # AND their real purchased balance also does not cover this
+            # upload: block before any paid work whatsoever -- zero OpenAI
+            # call, zero job, zero Stripe call, zero partial debit. No beta
+            # usage row was ever created for this attempt (the reservation
+            # itself failed), so nothing needs releasing here.
+            beta_quota_view = None
+            try:
+                beta_quota_view = beta_quota.derive_quota_state(getattr(user, "beta_program", None) or {})
+            except Exception:
+                beta_quota_view = None
+            raise HTTPException(
+                status_code=403,
+                detail={
+                    "code": "BETA_LIMIT_REACHED",
+                    "message_it": (
+                        "Hai raggiunto il limite di analisi incluse nel programma beta per questa fase. "
+                        "Gli eventuali crediti acquistati restano disponibili."
+                    ),
+                    "message_en": (
+                        "You have reached the beta program's included-analysis limit for this phase. "
+                        "Any purchased credits remain available."
+                    ),
+                    "required_credits": required_perizia_credits,
+                    "remaining_credits": remaining_perizia_credits,
+                    "pages_count": uploaded_pages_count,
+                    "beta_limit": {
+                        "consumed": (beta_quota_view or {}).get("consumed"),
+                        "limit": (beta_quota_view or {}).get("limit"),
+                    },
+                },
+            )
         raise HTTPException(
             status_code=403,
             detail={
@@ -16336,10 +16424,6 @@ async def analyze_perizia(request: Request, file: UploadFile = File(...)):
             }
         )
 
-    # Generate IDs early for consistent logging + persistence
-    case_id = f"case_{uuid.uuid4().hex[:8]}"
-    run_id = f"run_{uuid.uuid4().hex[:8]}"
-    analysis_id = f"analysis_{uuid.uuid4().hex[:12]}"
     offline_qa = user.user_id == "offline_qa"
     use_offline_fixture = offline_qa and _should_use_offline_fixture(request)
 
@@ -16402,6 +16486,12 @@ async def analyze_perizia(request: Request, file: UploadFile = File(...)):
                     except Exception as subset_err:
                         logger.warning(f"[{request_id}] docai_subset_build_failed err={subset_err}")
 
+                # Paid call site 1/3 (owner amendment): Document AI OCR is a
+                # real, billed Google call. Mark BEFORE it fires so a later
+                # failure/timeout/UNREADABLE outcome is honestly CONSUMED, not
+                # released -- money is about to be spent regardless of the
+                # eventual report outcome.
+                await beta_quota.mark_paid_processing_started(analysis_id)
                 ocr_pages, ocr_full_text, ocr_error = await _extract_with_docai(docai_contents, mime_type, request_id)
                 ocr_replaced_pages: List[int] = []
                 if not ocr_error and ocr_pages:
@@ -16505,7 +16595,29 @@ async def analyze_perizia(request: Request, file: UploadFile = File(...)):
             error_code="PIPELINE_TIMEOUT",
             error_message=f"Pipeline exceeded {PIPELINE_TIMEOUT_SECONDS}s"
         )
-        raise HTTPException(status_code=504, detail={"error": "PIPELINE_TIMEOUT", "message": f"Pipeline exceeded {PIPELINE_TIMEOUT_SECONDS}s", "retry": True})
+        # Owner amendment: a timeout that hit AFTER paid processing already
+        # began (e.g. mid-Document-AI-OCR) must CONSUME, not release -- the
+        # marker (set immediately before that call) is the sole authority
+        # here, never the timeout itself.
+        timeout_outcome = await beta_quota.finalize_on_failure(
+            analysis_id, reason_if_before_paid=beta_quota.REASON_PIPELINE_TIMEOUT
+        )
+        timeout_detail = {"error": "PIPELINE_TIMEOUT", "message": f"Pipeline exceeded {PIPELINE_TIMEOUT_SECONDS}s", "retry": True}
+        if timeout_outcome == "CONSUMED":
+            timeout_detail["beta_quota_consumed_without_report"] = True
+        raise HTTPException(status_code=504, detail=timeout_detail)
+    except HTTPException:
+        raise
+    except Exception:
+        # Defensive catch-all: an unrelated exception aborted the handler
+        # before/while run_pipeline() ran. If paid processing had already
+        # begun (marker set), this CONSUMES per the owner amendment; otherwise
+        # it releases the reservation so the tester's allowance is not spent
+        # on a job that never started.
+        await beta_quota.finalize_on_failure(
+            analysis_id, reason_if_before_paid=beta_quota.REASON_JOB_CREATION_FAILURE_BEFORE_PROCESSING
+        )
+        raise
 
     _normalize_evidence_offsets(result, pages)
 
@@ -16632,6 +16744,11 @@ async def analyze_perizia(request: Request, file: UploadFile = File(...)):
 
     # QA Gate: LLM-powered challenge + deterministic safety sweep.
     # raw_text (full_text) and internal_runtime are available here.
+    # Paid call site 2/3 (owner amendment): this call may invoke a real LLM
+    # internally (qa_meta["llm_used"]); mark unconditionally right before it
+    # fires, matching the mission's literal call-site definition of the
+    # consumption boundary (never inferred from the eventual report status).
+    await beta_quota.mark_paid_processing_started(analysis_id)
     try:
         qa_meta = apply_customer_contract_qa_gate(
             result,
@@ -16650,6 +16767,9 @@ async def analyze_perizia(request: Request, file: UploadFile = File(...)):
     # let Gemini write only narrative copy from that final cleaned contract.
     apply_customer_decision_contract(result)
     _sync_lots_overview_from_result_lots(result)
+    # Paid call site 3/3 (owner amendment): the Gemini narrator. Marked
+    # unconditionally right before it fires, same rule as site 2 above.
+    await beta_quota.mark_paid_processing_started(analysis_id)
     try:
         narrator_meta = await _apply_post_qa_decision_narrator(
             result,
@@ -16755,9 +16875,35 @@ async def analyze_perizia(request: Request, file: UploadFile = File(...)):
             logger.info(f"[{request_id}] offline_persist_ok analysis_id={analysis_id}")
         except Exception as e:
             logger.warning(f"[{request_id}] offline_persist_failed {e}")
-    else:
-        await db.perizia_analyses.insert_one(analysis_dict)
+    beta_quota_consumed_without_report = False
+    if not offline_qa:
+        try:
+            await db.perizia_analyses.insert_one(analysis_dict)
+        except Exception:
+            # Owner amendment: by this point paid processing (the QA gate,
+            # site 2/3 above) has already unconditionally run, so the marker
+            # will already be set and this CONSUMES rather than releases --
+            # money was already spent regardless of whether the record could
+            # be durably persisted.
+            await beta_quota.finalize_on_failure(
+                analysis_id, reason_if_before_paid=beta_quota.REASON_UPLOAD_PERSISTENCE_FAILURE
+            )
+            raise
         logger.info(f"[{request_id}] persist_done analysis_id={analysis_id}")
+
+        # Beta quota: consume the reservation now that persistence has
+        # succeeded. Owner amendment -- CONSUME regardless of COMPLETED vs
+        # UNREADABLE (paid processing already ran unconditionally before this
+        # point); a no-op when there was no reservation (not beta, UNLIMITED,
+        # or the normal-plan fallback path).
+        consumed_now = await beta_quota.consume_slot(
+            analysis_id, reason=beta_quota.REASON_CONSUMED_PAID_PROCESSING_STARTED
+        )
+        beta_quota_consumed_without_report = bool(
+            consumed_now
+            and beta_outcome.get("mode") == "GRANTED"
+            and analysis_dict.get("status") != "COMPLETED"
+        )
 
         # Correctness V2 product path: when auto-start is enabled, every new
         # analysis also gets a V2 job in the background so the customer lands
@@ -16779,6 +16925,10 @@ async def analyze_perizia(request: Request, file: UploadFile = File(...)):
                 )
 
         # Decrement exact perizia credits band only after successful persistence.
+        # Never debited for a beta-covered attempt (beta_slot_exempt); an
+        # EXHAUSTED tester who fell back to their real plan (beta_slot_exempt
+        # False here because beta_outcome was FALLBACK) is debited exactly
+        # like a non-beta customer.
         await _apply_perizia_credit_debit_with_ledger(
             user,
             amount=required_perizia_credits,
@@ -16793,6 +16943,7 @@ async def analyze_perizia(request: Request, file: UploadFile = File(...)):
                 "required_credits": required_perizia_credits,
                 "file_name": file.filename,
             },
+            beta_slot_granted=beta_slot_exempt,
         )
 
     logger.info(f"[{request_id}] respond_ok analysis_id={analysis_id}")
@@ -16801,6 +16952,11 @@ async def analyze_perizia(request: Request, file: UploadFile = File(...)):
         "analysis_id": analysis.analysis_id,
         "case_id": case_id,
         "run_id": run_id,
+        # True only when this analysis was honestly counted against the
+        # tester's beta allowance even though it produced no usable report
+        # (paid processing had already begun). Absent/False in every other
+        # case (normal completed report, non-beta upload, UNLIMITED beta).
+        "beta_quota_consumed_without_report": beta_quota_consumed_without_report,
         "result": result
     }
 
@@ -20850,6 +21006,22 @@ async def _correctness_v2_recover_stale_jobs():
         logger.warning(f"correctness_v2 stale-job recovery skipped: {_cv2_recover_exc}")
 
 
+@app.on_event("startup")
+async def _beta_quota_recover_stale_reservations():
+    """On startup, reconcile any beta-quota RESERVED row left over from a
+    process that died mid-request (indexed, bounded -- never a full scan; see
+    beta_program/quota.py:recover_stale_reservations). Wrapped so a failure
+    here can never break app startup."""
+    try:
+        from beta_program import quota as _beta_quota
+
+        report = await _beta_quota.recover_stale_reservations()
+        if report.get("scanned"):
+            logger.warning(f"beta_quota stale reservation sweep: {report}")
+    except Exception as _beta_quota_recover_exc:  # pragma: no cover - defensive guard
+        logger.warning(f"beta_quota stale reservation recovery skipped: {_beta_quota_recover_exc}")
+
+
 def custom_openapi():
     if app.openapi_schema:
         return app.openapi_schema
@@ -20962,14 +21134,17 @@ async def ensure_indexes():
         except Exception as e:
             logger.warning(f"Index creation failed for {collection.name}.{field}: {e}")
 
-    # Beta program (memberships + audit) and the v2_job_events telemetry mirror.
-    # Additive, idempotent, and defensive so a failure never breaks startup.
+    # Beta program (memberships + audit), the v2_job_events telemetry mirror,
+    # and the beta-quota usage ledger. Additive, idempotent, and defensive so
+    # a failure never breaks startup.
     try:
         from beta_program import store as _beta_store
         from beta_program import signals as _beta_signals
+        from beta_program import quota as _beta_quota
 
         await _beta_store.ensure_indexes()
         await _beta_signals.ensure_indexes()
+        await _beta_quota.ensure_indexes()
     except Exception as e:
         logger.warning(f"beta_program index creation failed: {e}")
 
