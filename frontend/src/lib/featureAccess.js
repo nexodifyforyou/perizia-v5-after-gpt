@@ -29,13 +29,29 @@ export const getAccountState = (user) => {
   const periziaCredits = user?.account?.perizia_credits || user?.perizia_credits || {};
   const subscription = user?.account?.subscription || user?.subscription_state || {};
 
+  // Beta program: an ACTIVE membership grants unlimited analyses (an entitlement,
+  // never a wallet number). Drives the "Programma Beta" plan label and the
+  // "Analisi illimitate" credit copy. Purchased credits remain preserved and are
+  // still shown as "Crediti preservati" in Billing.
+  const betaProgramRaw = user?.beta_program || {};
+  const betaProgramActive = Boolean(betaProgramRaw.active ?? user?.is_beta_partner);
+  const betaProgram = {
+    active: betaProgramActive,
+    displayName: betaProgramRaw.display_name || user?.beta_partner_name || null,
+    memberSince: betaProgramRaw.member_since || null,
+  };
+
   return {
     isMasterAdmin: Boolean(user?.is_master_admin),
     isBetaPartner: Boolean(user?.is_beta_partner),
     betaPartnerName: user?.beta_partner_name || null,
     betaPartnerType: user?.beta_partner_type || null,
+    betaProgram,
+    // Exact-owner flag that gates the Programma Beta admin surface on the client.
+    // Backend authorization remains authoritative regardless of this flag.
+    isExactOwner: Boolean(user?.correctness_v2_admin_view),
     planId,
-    planLabel: PLAN_LABELS[planId] || String(planId || 'free'),
+    planLabel: betaProgramActive ? 'Programma Beta' : (PLAN_LABELS[planId] || String(planId || 'free')),
     quota: {
       perizia_scans_remaining: effectiveQuota.perizia_scans_remaining ?? DEFAULT_QUOTA.perizia_scans_remaining,
       image_scans_remaining: effectiveQuota.image_scans_remaining ?? DEFAULT_QUOTA.image_scans_remaining,

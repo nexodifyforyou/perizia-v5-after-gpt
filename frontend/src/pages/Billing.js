@@ -541,6 +541,11 @@ const Billing = () => {
   const currentRecurringPlanId = subscriptionState.currentPlanId || accountState.planId;
   const monthlyCredits = accountState?.periziaCredits?.monthlyRemaining ?? 0;
   const extraCredits = accountState?.periziaCredits?.extraRemaining ?? 0;
+  // Active beta: analyses are free (an entitlement), so purchase/recharge CTAs
+  // are hidden and the real purchased balance is shown as "Crediti preservati".
+  // Subscription management stays available so a tester on a paid plan is never
+  // trapped. No Stripe/checkout/webhook behaviour changes — purely presentation.
+  const betaActive = Boolean(accountState?.betaProgram?.active);
   const normalizedSubscriptionStatus = String(subscriptionState.status || '').trim().toLowerCase();
   const hasRecurringSubscription = Boolean(
     currentRecurringPlanId &&
@@ -839,6 +844,21 @@ const Billing = () => {
           </div>
         )}
 
+        {betaActive && (
+          <div className="mb-8 rounded-xl border border-gold/30 bg-gold/10 p-5" data-testid="billing-beta-banner">
+            <div className="mb-1 flex flex-wrap items-center gap-2">
+              <span className="rounded-full border border-gold/40 bg-gold/20 px-2.5 py-1 text-[11px] font-bold uppercase tracking-wide text-gold">
+                Accesso Beta
+              </span>
+              <p className="font-semibold text-gold">Programma Beta attivo</p>
+            </div>
+            <p className="text-sm text-zinc-200">
+              Analisi illimitate durante il programma beta: le analisi non consumano crediti. I crediti già
+              acquistati restano salvati e saranno nuovamente utilizzabili al termine dell'accesso beta.
+            </p>
+          </div>
+        )}
+
         <div className="mb-8 rounded-xl border border-zinc-800 bg-zinc-900 p-5 sm:p-6">
           <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
             <div className="min-w-0">
@@ -874,8 +894,8 @@ const Billing = () => {
                 {extraCredits}
               </p>
             </div>
-            <div className="p-4 bg-zinc-950 rounded-lg">
-              <p className="text-xs text-zinc-500 mb-1">Totale crediti disponibili</p>
+            <div className="p-4 bg-zinc-950 rounded-lg" data-testid="billing-total-credits">
+              <p className="text-xs text-zinc-500 mb-1">{betaActive ? 'Crediti preservati' : 'Totale crediti disponibili'}</p>
               <p className="text-2xl font-mono font-bold text-gold">
                 {totalAvailableCredits}
               </p>
@@ -907,7 +927,9 @@ const Billing = () => {
             <p>I crediti extra restano separati, sono acquistabili in qualsiasi momento e si usano solo dopo i crediti mensili.</p>
           </div>
           {hasManagedSubscription && (
-            <div className="mt-4 flex flex-wrap gap-3">
+            <div className="mt-4">
+              <p className="mb-2 text-xs font-mono uppercase tracking-wide text-zinc-500">Gestisci abbonamento</p>
+              <div className="flex flex-wrap gap-3">
               {!subscriptionState.cancelAtPeriodEnd ? (
                 <Button
                   onClick={() => handleSubscriptionAction('/api/billing/subscription/cancel', 'Cancellazione a fine periodo attivata.')}
@@ -937,17 +959,23 @@ const Billing = () => {
                   {subscriptionActionLoading === '/api/billing/subscription/clear-pending-change' ? 'Invio...' : 'Annulla cambio piano'}
                 </Button>
               )}
+              </div>
             </div>
           )}
-          <div className="mt-6 flex justify-start">
-            <Button asChild className="bg-gold text-zinc-950 hover:bg-gold-dim">
-              <Link to="#billing-plans">Ricarica crediti</Link>
-            </Button>
-          </div>
+          {!betaActive && (
+            <div className="mt-6 flex justify-start">
+              <Button asChild className="bg-gold text-zinc-950 hover:bg-gold-dim">
+                <Link to="#billing-plans">Ricarica crediti</Link>
+              </Button>
+            </div>
+          )}
         </div>
 
+        {!betaActive && (
         <h3 className="text-xl font-serif font-bold text-zinc-100 mb-6">Piani Disponibili</h3>
+        )}
 
+        {!betaActive && (
         <div id="billing-plans" className="grid grid-cols-1 gap-6 md:grid-cols-2 xl:grid-cols-5">
           {loading ? (
             <div className="col-span-full text-center py-12">
@@ -1067,6 +1095,7 @@ const Billing = () => {
             ))
           )}
         </div>
+        )}
 
         <div className="mt-8 p-4 bg-zinc-900/50 border border-zinc-800 rounded-lg">
           <h3 className="text-lg font-semibold text-zinc-100 mb-2">Come funzionano i crediti</h3>

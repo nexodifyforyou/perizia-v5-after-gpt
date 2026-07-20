@@ -124,7 +124,7 @@ def start_job(
         current_stage=_stage("queued"),
         admin_only=admin_only,
     )
-    saved_status_path = artifacts.save_job_status(job_id, queued)
+    saved_status_path = _save_job_status(job_id, queued)
 
     # 2) RUNNING
     running = job_status.make_status(
@@ -136,7 +136,7 @@ def start_job(
         created_at=queued["created_at"],
         artifacts_saved={"job_status": saved_status_path},
     )
-    artifacts.save_job_status(job_id, running)
+    _save_job_status(job_id, running)
 
     created_at = queued["created_at"]
 
@@ -240,6 +240,113 @@ def _parse_iso(ts: Any) -> Optional[datetime]:
     return dt
 
 
+# ---------------------------------------------------------------------------
+# Operational telemetry (mirror only — see beta_program/signals.py contract).
+#
+# ``_save_job_status`` wraps the authoritative on-disk status write so that, AND
+# ONLY AFTER, ``job_status.json`` is persisted, a best-effort telemetry event is
+# emitted. Telemetry NEVER alters pipeline output, validation, billing, credits,
+# report state, or customer visibility, and NEVER raises into the pipeline.
+# ---------------------------------------------------------------------------
+def _telemetry_status_map() -> Dict[str, str]:
+    from beta_program import signals as _sig
+
+    return {
+        JobStatus.REPORT_READY: _sig.EVENT_REPORT_READY,
+        JobStatus.MONEY_CONFIRMATION_REQUIRED: _sig.EVENT_CONFIRMATION_REQUIRED,
+        JobStatus.CONTRACT_VALIDATION_FAILED: _sig.EVENT_VERIFICATION_REQUIRED,
+        JobStatus.NEEDS_MANUAL_REVIEW: _sig.EVENT_VERIFICATION_REQUIRED,
+        JobStatus.FAILED_GROUNDING: _sig.EVENT_VERIFICATION_REQUIRED,
+        JobStatus.PDF_QUALITY_BLOCKED: _sig.EVENT_DOCUMENT_NOT_READABLE,
+    }
+
+
+_TRANSIENT_FAIL_STATUSES = frozenset(
+    {
+        JobStatus.FAILED_ANALYSIS,
+        JobStatus.FAILED_CONTRACT_BUILD,
+        JobStatus.FAILED_NARRATION_NO_REPORT,
+        JobStatus.JOB_STALLED,
+    }
+)
+
+
+def _status_duration_seconds(payload: Dict[str, Any]) -> Optional[float]:
+    start = _parse_iso(payload.get("created_at"))
+    end = _parse_iso(payload.get("updated_at"))
+    if start and end and end >= start:
+        return round((end - start).total_seconds(), 1)
+    return None
+
+
+def _emit_status_telemetry(job_id: str, payload: Dict[str, Any]) -> None:
+    """Emit one operational event for a persisted terminal/HITL status. Never
+    raises; a failure here is swallowed so the pipeline is unaffected."""
+    try:
+        from beta_program import signals as _sig
+
+        status = str(payload.get("status") or "")
+        analysis_id = payload.get("analysis_id")
+        if not analysis_id:
+            return
+        reason = payload.get("reason_code")
+        event = _telemetry_status_map().get(status)
+        if event is None and status in _TRANSIENT_FAIL_STATUSES:
+            try:
+                from . import openai_client as _oai
+
+                if _oai.is_quota_exhausted_reason(reason) or _oai.is_transient_reason(reason):
+                    event = _sig.EVENT_SERVICE_BUSY
+                else:
+                    event = _sig.EVENT_SERVICE_UNAVAILABLE
+            except Exception:
+                event = _sig.EVENT_SERVICE_UNAVAILABLE
+        if event is None:
+            return
+        lot_id = payload.get("selected_lot_id") or payload.get("lot_id")
+        # user_id is deliberately NOT resolved here: that lookup is a Mongo read
+        # and this runs on the pipeline thread. The telemetry worker resolves it.
+        user_id = None
+        _sig.emit_v2_job_event(
+            event,
+            job_id=job_id,
+            analysis_id=analysis_id,
+            user_id=user_id,
+            lot_id=lot_id,
+            status=status,
+            reason_code=reason,
+            duration_seconds=_status_duration_seconds(payload),
+        )
+
+        # Best-effort: a failed lot rerun that still has a preserved safe report.
+        if event in (_sig.EVENT_SERVICE_UNAVAILABLE, _sig.EVENT_SERVICE_BUSY, _sig.EVENT_VERIFICATION_REQUIRED) and lot_id:
+            try:
+                from . import workspace as _ws
+
+                _status, _report = _ws.find_lot_safe_report(analysis_id, lot_id)
+                if _report is not None:
+                    _sig.emit_v2_job_event(
+                        _sig.EVENT_FAILED_RERUN_SAFE_REPORT_PRESERVED,
+                        job_id=job_id,
+                        analysis_id=analysis_id,
+                        user_id=user_id,
+                        lot_id=lot_id,
+                        status=status,
+                        reason_code=reason,
+                    )
+            except Exception:
+                pass
+    except Exception:  # telemetry must never affect the pipeline
+        pass
+
+
+def _save_job_status(job_id: str, payload: Dict[str, Any]) -> str:
+    """Authoritative status write, then best-effort telemetry (never blocks)."""
+    path = artifacts.save_job_status(job_id=job_id, status_payload=payload)
+    _emit_status_telemetry(job_id, payload)
+    return path
+
+
 def recover_stale_jobs(
     *,
     force: bool = False,
@@ -322,7 +429,7 @@ def _mark_job_stalled(job_id: str, prev_status: Dict[str, Any]) -> str:
         admin_only=bool(prev_status.get("admin_only", True)),
         extra={"recovered_from_status": prev_status.get("status")},
     )
-    artifacts.save_job_status(job_id, payload)
+    _save_job_status(job_id, payload)
     return job_id
 
 
@@ -354,7 +461,7 @@ def _finish_quality(
         created_at=created_at,
         extra=extra,
     )
-    artifacts.save_job_status(job_id, payload)
+    _save_job_status(job_id, payload)
     return payload
 
 
@@ -668,7 +775,7 @@ def _build_single_lot_contract(
         created_at=created_at,
         extra=payload_extra,
     )
-    artifacts.save_job_status(job_id, payload)
+    _save_job_status(job_id, payload)
     return payload
 
 
@@ -1190,7 +1297,7 @@ def _run_analyze_all(
             safe_to_show_customer=True,
             **common,
         )
-    artifacts.save_job_status(job_id, payload)
+    _save_job_status(job_id, payload)
     return payload
 
 
@@ -1327,7 +1434,7 @@ def _finish_lot_selection_required(
             **gate_extra,
         },
     )
-    artifacts.save_job_status(job_id, payload)
+    _save_job_status(job_id, payload)
     return payload
 
 
@@ -1390,7 +1497,7 @@ def _finish_selected_lot_not_found(
         admin_only=admin_only,
         extra={"no_report": True, "available_lot_ids": lot_ids, "selected_lot_id": selected_lot_id},
     )
-    artifacts.save_job_status(job_id, payload)
+    _save_job_status(job_id, payload)
     return payload
 
 
@@ -1443,7 +1550,7 @@ def _finish_lot_ambiguous(
             "manual_review_required": True,
         },
     )
-    artifacts.save_job_status(job_id, payload)
+    _save_job_status(job_id, payload)
     return payload
 
 
@@ -1549,7 +1656,7 @@ def _finish_quality_gate_failed(
             "contract_generated": True,
         },
     )
-    artifacts.save_job_status(job_id, payload)
+    _save_job_status(job_id, payload)
     return payload
 
 
@@ -1604,7 +1711,7 @@ def _finish_money_confirmation_required(
             "contract_generated": True,
         },
     )
-    artifacts.save_job_status(job_id, payload)
+    _save_job_status(job_id, payload)
     return payload
 
 
@@ -1693,7 +1800,7 @@ def resolve_money_confirmation(
             "money_confirmations": confirmations,
         },
     )
-    artifacts.save_job_status(job_id, payload)
+    _save_job_status(job_id, payload)
     return payload
 
 
@@ -1745,7 +1852,7 @@ def _finish_quality_gate_error(
         created_at=created_at,
         extra={"quality_gate_status": "ERROR", "contract_generated": True},
     )
-    artifacts.save_job_status(job_id, payload)
+    _save_job_status(job_id, payload)
     return payload
 
 
@@ -1806,7 +1913,7 @@ def _finish_report_render_failed(
         admin_only=admin_only,
         extra={"no_report": True},
     )
-    artifacts.save_job_status(job_id, payload)
+    _save_job_status(job_id, payload)
     return payload
 
 
@@ -1906,7 +2013,7 @@ def _finish_analyst_failed(
         admin_only=admin_only,
         extra={"no_report": True, "credit_exhausted": is_quota},
     )
-    artifacts.save_job_status(job_id, payload)
+    _save_job_status(job_id, payload)
     return payload
 
 
@@ -1965,7 +2072,7 @@ def _finish_validation_failed(
         admin_only=admin_only,
         extra={"no_report": True, "violation_codes": codes},
     )
-    artifacts.save_job_status(job_id, payload)
+    _save_job_status(job_id, payload)
     return payload
 
 
@@ -2021,7 +2128,7 @@ def _finish_contract_build_failed(
         admin_only=admin_only,
         extra={"no_report": True},
     )
-    artifacts.save_job_status(job_id, payload)
+    _save_job_status(job_id, payload)
     return payload
 
 
@@ -2092,7 +2199,7 @@ def _finish_blocked(
         payload["safe_to_show_customer"] = True
         payload["report_status"] = not_readable.get("report_status")
 
-    artifacts.save_job_status(job_id, payload)
+    _save_job_status(job_id, payload)
     return payload
 
 
@@ -2153,7 +2260,7 @@ def _finish_failed_analysis(
         admin_only=admin_only,
     )
     try:
-        artifacts.save_job_status(job_id, payload)
+        _save_job_status(job_id, payload)
     except Exception:
         pass
     return payload

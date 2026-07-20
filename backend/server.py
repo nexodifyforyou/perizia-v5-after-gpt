@@ -240,6 +240,9 @@ class User(BaseModel):
     })
     perizia_credits: Dict[str, Any] = Field(default_factory=dict)
     subscription_state: Dict[str, Any] = Field(default_factory=dict)
+    # Request-scoped beta entitlement snapshot resolved from the DB membership in
+    # get_current_user. Empty {} = no active beta. NEVER persisted into db.users.
+    beta_program: Dict[str, Any] = Field(default_factory=dict)
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 class UserSession(BaseModel):
@@ -642,22 +645,61 @@ def _is_correctness_v2_admin_view_email(email: Optional[str]) -> bool:
     return bool(email and email.strip().lower() == CORRECTNESS_V2_ADMIN_VIEW_EMAIL)
 
 
-def _is_beta_unlimited_email(email: Optional[str]) -> bool:
-    """True only for explicitly allowlisted beta partner emails."""
-    return bool(email and email.strip().lower() in BETA_UNLIMITED_EMAILS)
+def _user_has_active_beta(user: Optional["User"]) -> bool:
+    """True when the request-scoped beta snapshot marks an ACTIVE membership.
+
+    This is the ONLY runtime source of beta entitlement. The resolver in
+    get_current_user stamps user.beta_program from beta_program_memberships;
+    the environment allowlist (BETA_UNLIMITED_EMAILS) is never consulted here.
+    """
+    if user is None:
+        return False
+    snapshot = getattr(user, "beta_program", None) or {}
+    return bool(snapshot.get("active"))
 
 
 def _is_credit_exempt_user(user: Optional["User"]) -> bool:
-    """Credit-block/debit exemption: admin/owner or allowlisted beta partner."""
+    """Credit-block/debit exemption: admin/owner or ACTIVE beta member."""
     if user is None:
         return False
-    return _user_is_admin(user) or _is_beta_unlimited_email(user.email)
+    return _user_is_admin(user) or _user_has_active_beta(user)
 
 
 def _beta_partner_name_for_email(email: Optional[str]) -> Optional[str]:
     if not email:
         return None
     return BETA_PARTNER_NAMES.get(email.strip().lower())
+
+
+def _resolve_entitlement_context(user: Optional["User"]) -> str:
+    """Observational-only tag (OWNER|BETA|PAID|FREE) for beta-period reporting.
+
+    Pure metadata: no billing/report/validation logic reads it. OWNER for admins,
+    BETA for active members, PAID when the user is on a paid recurring plan,
+    else FREE.
+    """
+    if _user_is_admin(user):
+        return "OWNER"
+    if _user_has_active_beta(user):
+        return "BETA"
+    plan = str(getattr(user, "plan", "") or "").lower()
+    if plan in PAID_RECURRING_PLAN_IDS:
+        return "PAID"
+    return "FREE"
+
+
+async def _link_pending_beta_membership(email: Optional[str], user_id: str) -> None:
+    """On authentication, activate a PENDING beta membership for this email.
+
+    Only touches PENDING memberships (never REVOKED). Never raises — a failure
+    here must never block login.
+    """
+    try:
+        from beta_program import store as _beta_store
+
+        await _beta_store.link_pending_membership(email, user_id)
+    except Exception as exc:  # pragma: no cover - login must never fail on this
+        logger.warning(f"beta_program link_pending_membership failed: {exc}")
 
 
 def _is_complete_quota(quota: Any) -> bool:
@@ -1057,7 +1099,16 @@ def _normalize_account_state(user_doc: Dict[str, Any]) -> Dict[str, Any]:
     subscription_state = _normalize_subscription_state({**user_doc, "plan": plan})
     quota["perizia_scans_remaining"] = perizia_credits["total_available"]
 
-    is_beta_partner = _is_beta_unlimited_email(normalized_email)
+    # Beta entitlement comes ONLY from the request-scoped snapshot resolved from
+    # the DB membership (get_current_user). Admin/owner is never a beta tester.
+    beta_snapshot = user_doc.get("beta_program") or {}
+    is_beta_partner = (not is_master_admin) and bool(beta_snapshot.get("active"))
+    beta_partner_name = beta_snapshot.get("display_name") if is_beta_partner else None
+    beta_partner_type = (
+        (beta_snapshot.get("partner_type") or BETA_PARTNER_DEFAULT_TYPE)
+        if is_beta_partner
+        else None
+    )
     feature_access = {
         "can_use_assistant": is_master_admin,
         "can_use_image_forensics": is_master_admin,
@@ -1066,8 +1117,8 @@ def _normalize_account_state(user_doc: Dict[str, Any]) -> Dict[str, Any]:
     return {
         "is_master_admin": is_master_admin,
         "is_beta_partner": is_beta_partner,
-        "beta_partner_name": _beta_partner_name_for_email(normalized_email),
-        "beta_partner_type": BETA_PARTNER_DEFAULT_TYPE if is_beta_partner else None,
+        "beta_partner_name": beta_partner_name,
+        "beta_partner_type": beta_partner_type,
         "plan": plan,
         "quota": quota,
         "perizia_credits": perizia_credits,
@@ -1134,6 +1185,16 @@ def _build_user_response(user: User) -> Dict[str, Any]:
     user_response["correctness_v2_admin_view"] = _is_correctness_v2_admin_view_email(
         user_response.get("email")
     )
+    # Customer-safe beta presentation (drives "Programma Beta" plan label,
+    # "Analisi illimitate" credit copy, and hidden purchase CTAs). Never exposes
+    # internal notes, membership_id or audit detail.
+    beta_snapshot = user_response.get("beta_program") or {}
+    beta_active = normalized["is_beta_partner"]
+    user_response["beta_program"] = {
+        "active": bool(beta_active),
+        "display_name": normalized["beta_partner_name"] if beta_active else None,
+        "member_since": beta_snapshot.get("activated_at") if beta_active else None,
+    }
     return user_response
 
 async def get_current_user(request: Request) -> Optional[User]:
@@ -1163,6 +1224,21 @@ async def get_current_user(request: Request) -> Optional[User]:
     if not user_doc:
         return None
     user_doc = await _recover_subscription_state_from_local_records(user_doc)
+
+    # Resolve the beta entitlement snapshot from the DB membership on EVERY
+    # authenticated request. This is what makes activation/revocation apply on the
+    # next request with no restart and no session surgery. Request-scoped only —
+    # never persisted into db.users (admin never counts as a tester).
+    if _is_admin_email(user_doc.get("email")):
+        user_doc["beta_program"] = {}
+    else:
+        try:
+            from beta_program import store as _beta_store
+
+            user_doc["beta_program"] = await _beta_store.resolve_snapshot(user_doc.get("email"))
+        except Exception as _beta_exc:  # fail closed: no beta on resolver failure
+            logger.warning(f"beta_program resolve failed in get_current_user: {_beta_exc}")
+            user_doc["beta_program"] = {}
 
     normalized_user_doc = await _apply_normalized_account_state(user_doc, persist=True)
     await _ensure_opening_balance_baseline_for_user_doc(normalized_user_doc)
@@ -1219,7 +1295,7 @@ async def require_beta_or_admin(request: Request) -> User:
     user = await require_auth(request)
     if _user_is_admin(user):
         return user
-    if _is_beta_unlimited_email(user.email):
+    if _user_has_active_beta(user):
         return user
     raise HTTPException(status_code=403, detail="Forbidden")
 
@@ -12142,10 +12218,12 @@ async def _apply_perizia_credit_debit_with_ledger(
 ) -> bool:
     if _user_is_admin(user):
         return False
-    if _is_beta_unlimited_email(user.email):
+    if _user_has_active_beta(user):
+        membership_id = (getattr(user, "beta_program", None) or {}).get("membership_id")
         logger.info(
             f"beta_partner_unlimited_access user={user.email} "
-            f"reason=beta_partner_unlimited_access reference_type={reference_type} "
+            f"reason=beta_partner_unlimited_access membership_id={membership_id} "
+            f"reference_type={reference_type} "
             f"reference_id={reference_id} debit=skipped amount={amount}"
         )
         return False
@@ -12468,6 +12546,7 @@ async def _get_or_create_authenticated_user(email: str, name: Optional[str], pic
             {"$set": update_data}
         )
 
+        await _link_pending_beta_membership(email, user_id)
         updated_user = await db.users.find_one({"user_id": user_id}, {"_id": 0})
         normalized_user = await _apply_normalized_account_state(updated_user, persist=True)
         await _ensure_opening_balance_baseline_for_user_doc(normalized_user)
@@ -12492,6 +12571,7 @@ async def _get_or_create_authenticated_user(email: str, name: Optional[str], pic
     user_dict["quota"]["perizia_scans_remaining"] = user_dict["perizia_credits"]["total_available"]
     user_dict["created_at"] = user_dict["created_at"].isoformat()
     await db.users.insert_one(user_dict)
+    await _link_pending_beta_membership(email, user_id)
     await _ensure_opening_balance_baseline_for_user_doc(user_dict)
     return User(**user_dict)
 
@@ -16229,7 +16309,7 @@ async def analyze_perizia(request: Request, file: UploadFile = File(...)):
         )
 
     remaining_perizia_credits = int(user.quota.get("perizia_scans_remaining", 0) or 0)
-    beta_unlimited = _is_beta_unlimited_email(user.email)
+    beta_unlimited = _user_has_active_beta(user)
     if beta_unlimited:
         logger.info(
             f"[{request_id}] beta_partner_unlimited_access user={user.email} "
@@ -16662,6 +16742,10 @@ async def analyze_perizia(request: Request, file: UploadFile = File(...)):
     analysis_dict["created_at"] = analysis_dict["created_at"].isoformat()
     analysis_dict["raw_text"] = full_text[:100000]  # Store raw text for assistant
     analysis_dict["status"] = "UNREADABLE" if result.get("analysis_status") == "UNREADABLE" else "COMPLETED"
+    # Non-billing observational tag for beta-vs-paid reporting only. Never read by
+    # any billing/report/validation path; kept beside user_id (already omitted
+    # from customer responses).
+    analysis_dict["entitlement_context"] = _resolve_entitlement_context(user)
     if offline_qa:
         try:
             out_dir = Path("/tmp/perizia_qa_run")
@@ -20357,7 +20441,8 @@ async def create_beta_feedback(request: Request, payload: BetaFeedbackCreate):
 
     learning_label = _derive_beta_learning_label(feedback_type)
 
-    is_beta_partner = _is_beta_unlimited_email(user.email)
+    is_beta_partner = _user_has_active_beta(user)
+    beta_snapshot = getattr(user, "beta_program", None) or {}
     now_iso = _now_iso()
     feedback_id = f"betafb_{uuid.uuid4().hex[:16]}"
     doc: Dict[str, Any] = {
@@ -20367,8 +20452,8 @@ async def create_beta_feedback(request: Request, payload: BetaFeedbackCreate):
         "user_id": user.user_id,
         "user_email": user.email,
         "user_role": "admin" if is_admin else ("beta_partner" if is_beta_partner else "user"),
-        "beta_partner_name": ADMIN_OWNER_FEEDBACK_NAME if is_admin else (_beta_partner_name_for_email(user.email) or user.name),
-        "beta_partner_type": BETA_PARTNER_DEFAULT_TYPE if is_beta_partner else "altro",
+        "beta_partner_name": ADMIN_OWNER_FEEDBACK_NAME if is_admin else (beta_snapshot.get("display_name") or user.name),
+        "beta_partner_type": (beta_snapshot.get("partner_type") or BETA_PARTNER_DEFAULT_TYPE) if is_beta_partner else "altro",
         "analysis_id": analysis_id,
         "case_id": case_id,
         "file_name": file_name,
@@ -20448,47 +20533,18 @@ def _build_beta_feedback_admin_query(
     return _merge_query(query, date_query) if date_query else query
 
 
-@api_router.get("/admin/beta-feedback")
-async def admin_list_beta_feedback(
-    request: Request,
-    user_email: Optional[str] = None,
-    analysis_id: Optional[str] = None,
-    section_key: Optional[str] = None,
-    feedback_type: Optional[str] = None,
-    priority: Optional[str] = None,
-    status: Optional[str] = None,
-    date_from: Optional[str] = None,
-    date_to: Optional[str] = None,
-    model_should_learn: Optional[bool] = None,
-    error_category: Optional[str] = None,
-    page: int = 1,
-    page_size: int = 50,
-):
-    """Admin: list all beta feedback with filters."""
-    admin_user = await require_master_admin(request)
-    page = max(1, page)
-    page_size = max(1, min(200, page_size))
-    query = _build_beta_feedback_admin_query(
-        user_email=user_email, analysis_id=analysis_id, section_key=section_key,
-        feedback_type=feedback_type, priority=priority, status=status,
-        date_from=date_from, date_to=date_to, model_should_learn=model_should_learn,
-        error_category=error_category,
-    )
-    total = await db.beta_feedback.count_documents(query)
-    items = await db.beta_feedback.find(query, {"_id": 0}).sort("created_at", -1).skip((page - 1) * page_size).limit(page_size).to_list(page_size)
+async def _compute_beta_feedback_metrics_aggregated(query: Dict[str, Any]) -> Dict[str, Any]:
+    """Deterministic feedback metrics for a query, without loading every doc
+    unconditionally: only the matching rows' tiny metric projection is read.
 
-    # Aggregate summary metrics for the admin command center.
-    all_for_metrics = await db.beta_feedback.find({}, {
+    (Replaces the legacy ``find({}).to_list(None)`` that scanned the whole
+    collection on every admin view.)
+    """
+    rows = await db.beta_feedback.find(query, {
         "_id": 0, "status": 1, "priority": 1, "section_key": 1,
         "learning_label.error_category": 1, "learning_label.is_error": 1,
     }).to_list(None)
-    metrics = _compute_beta_feedback_metrics(all_for_metrics)
-
-    await _write_admin_audit(admin_user, "ADMIN_API_VIEW", meta={"endpoint": "beta-feedback", "page": page})
-    return {
-        "items": items, "page": page, "page_size": page_size, "total": total,
-        "metrics": metrics,
-    }
+    return _compute_beta_feedback_metrics(rows)
 
 
 def _compute_beta_feedback_metrics(rows: List[Dict[str, Any]]) -> Dict[str, Any]:
@@ -20519,27 +20575,54 @@ def _compute_beta_feedback_metrics(rows: List[Dict[str, Any]]) -> Dict[str, Any]
     }
 
 
-@api_router.patch("/admin/beta-feedback/{feedback_id}")
-async def admin_update_beta_feedback(feedback_id: str, request: Request, payload: BetaFeedbackStatusUpdate):
-    """Admin: update status / admin_notes / reviewer of a feedback record."""
-    admin_user = await require_master_admin(request)
+# Owner-facing interpretation category (separate from the tester's feedback_type,
+# which stays verbatim). Owner metadata never rewrites original tester wording.
+BETA_OWNER_CATEGORIES = {
+    "accuratezza_report", "informazione_mancante", "informazione_confusa",
+    "esperienza_utente", "velocita", "selezione_lotti", "conferme",
+    "problema_tecnico", "feedback_positivo", "richiesta_funzionalita", "altro",
+}
+
+
+async def _apply_beta_feedback_owner_update(
+    admin_user: "User", feedback_id: str, fields: Dict[str, Any]
+) -> Dict[str, Any]:
+    """Owner update of feedback METADATA only.
+
+    Writes: status, admin_notes (owner note), owner_priority, owner_category.
+    NEVER overwrites the tester's original ``expert_comment``, ``feedback_type``,
+    or tester-supplied ``priority``. Owner interpretation stays namespaced under
+    ``owner_*`` and ``admin_notes`` so it is always distinguishable from what the
+    tester actually said (Part 17 separation).
+    """
     existing = await db.beta_feedback.find_one({"id": feedback_id}, {"_id": 0})
     if not existing:
         raise HTTPException(status_code=404, detail="Feedback non trovato")
 
     update_fields: Dict[str, Any] = {"updated_at": _now_iso()}
-    if payload.status is not None:
-        if payload.status not in BETA_FEEDBACK_STATUSES:
+    if "status" in fields and fields["status"] is not None:
+        if fields["status"] not in BETA_FEEDBACK_STATUSES:
             raise HTTPException(status_code=422, detail="status non valido")
-        update_fields["status"] = payload.status
-    if payload.admin_notes is not None:
-        update_fields["admin_notes"] = _sanitize_beta_text(payload.admin_notes, BETA_COMMENT_MAX_LEN)
+        update_fields["status"] = fields["status"]
+    if "admin_notes" in fields and fields["admin_notes"] is not None:
+        update_fields["admin_notes"] = _sanitize_beta_text(fields["admin_notes"], BETA_COMMENT_MAX_LEN)
+    if "priority" in fields and fields["priority"] is not None:
+        if fields["priority"] not in BETA_FEEDBACK_PRIORITIES:
+            raise HTTPException(status_code=422, detail="priority non valida")
+        update_fields["owner_priority"] = fields["priority"]
+    if "category" in fields and fields["category"] is not None:
+        if fields["category"] not in BETA_OWNER_CATEGORIES:
+            raise HTTPException(status_code=422, detail="category non valida")
+        update_fields["owner_category"] = fields["category"]
     update_fields["reviewed_by"] = admin_user.email
     update_fields["reviewed_at"] = _now_iso()
 
     await db.beta_feedback.update_one({"id": feedback_id}, {"$set": update_fields})
-    await _write_admin_audit(admin_user, "ADMIN_BETA_FEEDBACK_UPDATE", meta={
-        "feedback_id": feedback_id, "status": update_fields.get("status"),
+    await _write_admin_audit(admin_user, "BETA_PROGRAM_FEEDBACK_UPDATE", meta={
+        "feedback_id": feedback_id,
+        "status": update_fields.get("status"),
+        "owner_priority": update_fields.get("owner_priority"),
+        "owner_category": update_fields.get("owner_category"),
     })
     updated = await db.beta_feedback.find_one({"id": feedback_id}, {"_id": 0})
     return {"ok": True, "feedback": updated}
@@ -20600,35 +20683,16 @@ def _beta_feedback_to_csv_row(doc: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
-@api_router.get("/admin/beta-feedback/export")
-async def admin_export_beta_feedback(
-    request: Request,
-    format: str = "json",
-    user_email: Optional[str] = None,
-    analysis_id: Optional[str] = None,
-    section_key: Optional[str] = None,
-    feedback_type: Optional[str] = None,
-    priority: Optional[str] = None,
-    status: Optional[str] = None,
-    date_from: Optional[str] = None,
-    date_to: Optional[str] = None,
-    model_should_learn: Optional[bool] = None,
-    error_category: Optional[str] = None,
+async def _export_beta_feedback_for_query(
+    admin_user: "User", query: Dict[str, Any], format: str
 ):
-    """Admin: export structured feedback as JSON or CSV.
+    """Export feedback matching ``query`` as JSON / JSONL / CSV.
 
     Only stored evidence / original_ai_output snippets are exported; full document
     contents are never exposed through this endpoint.
     """
-    admin_user = await require_master_admin(request)
-    query = _build_beta_feedback_admin_query(
-        user_email=user_email, analysis_id=analysis_id, section_key=section_key,
-        feedback_type=feedback_type, priority=priority, status=status,
-        date_from=date_from, date_to=date_to, model_should_learn=model_should_learn,
-        error_category=error_category,
-    )
     docs = await db.beta_feedback.find(query, {"_id": 0}).sort("created_at", -1).to_list(None)
-    await _write_admin_audit(admin_user, "ADMIN_BETA_FEEDBACK_EXPORT", meta={
+    await _write_admin_audit(admin_user, "BETA_PROGRAM_FEEDBACK_EXPORT", meta={
         "format": format, "count": len(docs),
     })
 
@@ -20727,11 +20791,12 @@ async def beta_dashboard_summary(request: Request):
         "osservazioni_alta_priorita": sum(1 for fb in feedback_rows if fb.get("priority") in {"alta", "bloccante"}),
     }
 
+    _beta_snapshot = getattr(user, "beta_program", None) or {}
     return {
         "user": {
             "email": user.email,
-            "name": _beta_partner_name_for_email(user.email) or user.name,
-            "is_beta_partner": _is_beta_unlimited_email(user.email),
+            "name": _beta_snapshot.get("display_name") or user.name,
+            "is_beta_partner": _user_has_active_beta(user),
             "is_master_admin": bool(user.is_master_admin),
         },
         "analyses": analysis_rows,
@@ -20753,6 +20818,16 @@ try:
     app.include_router(correctness_v2_router, prefix="/api")
 except Exception as _cv2_exc:  # pragma: no cover - defensive startup guard
     logger.warning(f"correctness_v2 router not registered: {_cv2_exc}")
+
+# Beta Program (owner-managed) admin router. Registered under /api like the rest;
+# every route is exact-owner gated inside the router. Wrapped defensively so a
+# problem here can never break app startup.
+try:
+    from beta_program.api import router as beta_program_router
+
+    app.include_router(beta_program_router, prefix="/api")
+except Exception as _beta_exc:  # pragma: no cover - defensive startup guard
+    logger.warning(f"beta_program router not registered: {_beta_exc}")
 
 
 @app.on_event("startup")
@@ -20887,6 +20962,32 @@ async def ensure_indexes():
         except Exception as e:
             logger.warning(f"Index creation failed for {collection.name}.{field}: {e}")
 
+    # Beta program (memberships + audit) and the v2_job_events telemetry mirror.
+    # Additive, idempotent, and defensive so a failure never breaks startup.
+    try:
+        from beta_program import store as _beta_store
+        from beta_program import signals as _beta_signals
+
+        await _beta_store.ensure_indexes()
+        await _beta_signals.ensure_indexes()
+    except Exception as e:
+        logger.warning(f"beta_program index creation failed: {e}")
+
+    # Additional beta-related indexes on existing collections (compound + status).
+    try:
+        await db.perizia_analyses.create_index([("user_id", 1), ("status", 1)])
+        await db.perizia_analyses.create_index("entitlement_context")
+        await db.beta_feedback.create_index("user_role")
+    except Exception as e:
+        logger.warning(f"beta_program auxiliary index creation failed: {e}")
+
 @app.on_event("shutdown")
 async def shutdown_db_client():
+    # Bounded best-effort telemetry flush first; never allowed to hang shutdown.
+    try:
+        from beta_program import signals as _beta_signals
+
+        _beta_signals.shutdown(timeout=2.0)
+    except Exception as _flush_exc:  # pragma: no cover - shutdown tolerance
+        logger.warning(f"beta_program telemetry flush at shutdown failed: {_flush_exc}")
     client.close()

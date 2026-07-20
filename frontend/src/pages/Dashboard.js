@@ -66,8 +66,16 @@ const Sidebar = ({ user, logout }) => {
     { icon: <Image className="w-5 h-5" />, label: 'Immagini', path: '/admin/images' },
     { icon: <MessageSquare className="w-5 h-5" />, label: 'Assistente', path: '/admin/assistant' },
     { icon: <CreditCard className="w-5 h-5" />, label: 'Transazioni', path: '/admin/transactions' },
-    { icon: <MessageSquareText className="w-5 h-5" />, label: 'Beta Feedback', path: '/admin/beta-feedback' },
   ];
+  // Programma Beta is exact-owner only (backend enforces this authoritatively).
+  // Single sidebar entry — never a duplicate.
+  if (accountState.isExactOwner) {
+    adminItems.push({
+      icon: <MessageSquareText className="w-5 h-5" />,
+      label: 'Programma Beta',
+      path: '/admin/beta-program',
+    });
+  }
 
   const handleLogout = async () => {
     await logout();
@@ -152,16 +160,26 @@ const Sidebar = ({ user, logout }) => {
             </div>
             <CreditCard className="mt-0.5 h-4 w-4 flex-shrink-0 text-gold" />
           </div>
-          <div className="mb-3 flex items-end justify-between gap-3">
-            <div>
-              <p className="text-[11px] font-mono uppercase tracking-[0.24em] text-zinc-500">Crediti disponibili</p>
-              <p className="mt-1 text-xl font-mono font-bold text-gold">{availablePeriziaCredits}</p>
+          {accountState.betaProgram?.active ? (
+            <div className="mb-3" data-testid="sidebar-beta-unlimited">
+              <p className="text-[11px] font-mono uppercase tracking-[0.24em] text-zinc-500">Analisi</p>
+              <p className="mt-1 text-sm font-semibold text-gold">Illimitate</p>
+              <p className="mt-1 text-[11px] text-zinc-500">Analisi illimitate durante il programma beta</p>
             </div>
-            <span className="text-[11px] text-zinc-500">Perizie</span>
-          </div>
-          <Button asChild className="w-full bg-zinc-100 text-zinc-950 hover:bg-zinc-200">
-            <Link to="/billing">Ricarica crediti</Link>
-          </Button>
+          ) : (
+            <div className="mb-3 flex items-end justify-between gap-3">
+              <div>
+                <p className="text-[11px] font-mono uppercase tracking-[0.24em] text-zinc-500">Crediti disponibili</p>
+                <p className="mt-1 text-xl font-mono font-bold text-gold">{availablePeriziaCredits}</p>
+              </div>
+              <span className="text-[11px] text-zinc-500">Perizie</span>
+            </div>
+          )}
+          {!accountState.betaProgram?.active && (
+            <Button asChild className="w-full bg-zinc-100 text-zinc-950 hover:bg-zinc-200">
+              <Link to="/billing">Ricarica crediti</Link>
+            </Button>
+          )}
         </div>
         <Button
           variant="outline"
@@ -324,8 +342,17 @@ const Dashboard = () => {
                 {accountState.planLabel}
               </span>
             </div>
-            <p className="text-3xl font-bold text-zinc-100">{availablePeriziaCredits}</p>
-            <p className="text-sm text-zinc-500">Crediti disponibili</p>
+            {accountState.betaProgram?.active ? (
+              <div data-testid="dashboard-beta-unlimited">
+                <p className="text-2xl font-bold text-gold">Illimitate</p>
+                <p className="text-sm text-zinc-500">Analisi illimitate durante il programma beta</p>
+              </div>
+            ) : (
+              <>
+                <p className="text-3xl font-bold text-zinc-100">{availablePeriziaCredits}</p>
+                <p className="text-sm text-zinc-500">Crediti disponibili</p>
+              </>
+            )}
           </div>
         </div>
         
