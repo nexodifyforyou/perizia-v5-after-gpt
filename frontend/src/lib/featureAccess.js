@@ -35,10 +35,29 @@ export const getAccountState = (user) => {
   // still shown as "Crediti preservati" in Billing.
   const betaProgramRaw = user?.beta_program || {};
   const betaProgramActive = Boolean(betaProgramRaw.active ?? user?.is_beta_partner);
+  // Beta quota: a second, orthogonal entitlement axis on top of membership
+  // status (docs/beta_perizia_limits_plan.md §D/§O) — UNLIMITED (default,
+  // matches today's unlimited-analyses behaviour) or LIMITED to N analyses per
+  // phase. Absence of a `quota` block (older snapshot, or not yet rolled out)
+  // is treated as UNLIMITED so existing beta testers keep today's experience.
+  // Values are always taken verbatim from the API — never computed/derived
+  // client-side, and never a placeholder like 9999.
+  const quotaRaw = betaProgramRaw.quota || null;
+  const quotaMode = quotaRaw?.mode || (betaProgramActive ? 'UNLIMITED' : null);
+  const quotaState = quotaRaw?.state || (betaProgramActive ? 'UNLIMITED' : null);
   const betaProgram = {
     active: betaProgramActive,
     displayName: betaProgramRaw.display_name || user?.beta_partner_name || null,
     memberSince: betaProgramRaw.member_since || null,
+    quota: {
+      mode: quotaMode,
+      state: quotaState,
+      limit: quotaRaw?.limit ?? null,
+      consumed: quotaRaw?.consumed ?? 0,
+      reserved: quotaRaw?.reserved ?? 0,
+      remaining: quotaRaw?.remaining ?? null,
+      quotaVersion: quotaRaw?.quota_version ?? null,
+    },
   };
 
   return {

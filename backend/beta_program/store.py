@@ -193,6 +193,11 @@ async def resolve_snapshot(email: Any) -> Dict[str, Any]:
                 "partner_type": 1,
                 "activated_at": 1,
                 "entitlement_version": 1,
+                "quota_mode": 1,
+                "analysis_limit": 1,
+                "analysis_consumed": 1,
+                "analysis_reserved": 1,
+                "quota_version": 1,
             },
         )
     except Exception as exc:  # pragma: no cover - fail closed
@@ -207,6 +212,13 @@ async def resolve_snapshot(email: Any) -> Dict[str, Any]:
         "partner_type": doc.get("partner_type") or DEFAULT_PARTNER_TYPE,
         "activated_at": doc.get("activated_at"),
         "entitlement_version": doc.get("entitlement_version"),
+        # Quota fields (additive; missing on a pre-feature doc means
+        # UNLIMITED, per beta_program.quota.derive_quota_state's defaults).
+        "quota_mode": doc.get("quota_mode"),
+        "analysis_limit": doc.get("analysis_limit"),
+        "analysis_consumed": doc.get("analysis_consumed"),
+        "analysis_reserved": doc.get("analysis_reserved"),
+        "quota_version": doc.get("quota_version"),
     }
 
 
@@ -360,6 +372,18 @@ async def add_tester(
         "entitlement_version": 1,
         "last_entitlement_change_at": now,
         "migration_source": migration_source,
+        # Quota (perizia allowance) defaults -- every new membership starts
+        # UNLIMITED; the owner opts a tester into LIMITED+N afterward via the
+        # quota API. Additive fields, see beta_program/quota.py.
+        "quota_mode": "UNLIMITED",
+        "analysis_limit": None,
+        "analysis_consumed": 0,
+        "analysis_reserved": 0,
+        "quota_version": 1,
+        "quota_period_started_at": now,
+        "quota_updated_at": None,
+        "quota_updated_by": None,
+        "quota_note": None,
     }
     try:
         await db[MEMBERSHIPS_COLLECTION].insert_one(dict(membership))
@@ -542,9 +566,22 @@ def public_membership(doc: Dict[str, Any], *, include_note: bool = True) -> Dict
         "updated_at": doc.get("updated_at"),
         "entitlement_version": doc.get("entitlement_version"),
         "migration_source": doc.get("migration_source"),
+        # Quota (raw stored fields; the derived {mode, limit, consumed,
+        # reserved, remaining, state, quota_version} block is added by the
+        # API layer as "quota" -- see beta_program/quota.py:derive_quota_state,
+        # not duplicated here to avoid a store<->quota import cycle).
+        "quota_mode": doc.get("quota_mode") or "UNLIMITED",
+        "analysis_limit": doc.get("analysis_limit"),
+        "analysis_consumed": doc.get("analysis_consumed") or 0,
+        "analysis_reserved": doc.get("analysis_reserved") or 0,
+        "quota_version": doc.get("quota_version") or 1,
+        "quota_period_started_at": doc.get("quota_period_started_at"),
+        "quota_updated_at": doc.get("quota_updated_at"),
+        "quota_updated_by": doc.get("quota_updated_by"),
     }
     if include_note:
         view["internal_note"] = doc.get("internal_note")
+        view["quota_note"] = doc.get("quota_note")
     return view
 
 

@@ -20,7 +20,7 @@ from __future__ import annotations
 import logging
 from typing import Any, Dict, List, Optional
 
-from . import store
+from . import quota, store
 
 logger = logging.getLogger(__name__)
 
@@ -29,6 +29,36 @@ def _server():
     import server  # type: ignore  # lazy
 
     return server
+
+
+async def apply_quota_defaults(*, dry_run: bool = True) -> Dict[str, Any]:
+    """Backfill quota defaults (UNLIMITED/null/version=1/reserved=0/consumed=0)
+    onto every existing membership that predates the quota feature (no
+    ``quota_mode`` field at all). Idempotent: a membership that already has
+    ``quota_mode`` set is skipped untouched -- safe to run repeatedly. Never
+    retroactively counts historical analyses (only ever writes the additive
+    defaults, never a nonzero ``analysis_consumed``).
+    """
+    server = _server()
+    db = server.db
+    report: Dict[str, Any] = {"dry_run": dry_run, "defaulted": [], "skipped_existing_quota": [], "total": 0}
+    docs = await db[store.MEMBERSHIPS_COLLECTION].find({}, {"_id": 0}).to_list(None)
+    report["total"] = len(docs)
+    now = quota._now()
+    for doc in docs:
+        email = doc.get("normalized_email")
+        if "quota_mode" in doc:
+            report["skipped_existing_quota"].append(email)
+            continue
+        if dry_run:
+            report["defaulted"].append(email)
+            continue
+        defaults = quota._quota_defaults(doc.get("added_at") or now)
+        await db[store.MEMBERSHIPS_COLLECTION].update_one(
+            {"membership_id": doc.get("membership_id")}, {"$set": defaults}
+        )
+        report["defaulted"].append(email)
+    return report
 
 
 async def run_migration(
@@ -119,4 +149,5 @@ async def run_migration(
             logger.warning("migration add skipped email=%s: %s", normalized, exc.reason_code)
             report["skipped_existing"].append(normalized)
 
+    report["quota_defaults"] = await apply_quota_defaults(dry_run=dry_run)
     return report

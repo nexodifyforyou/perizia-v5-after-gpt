@@ -10,8 +10,18 @@ import {
   CheckCircle
 } from 'lucide-react';
 import axios from 'axios';
+import { toast } from 'sonner';
 
 const API_URL = process.env.REACT_APP_BACKEND_URL;
+
+// Honest, mission-required copy for a beta attempt that consumed a slot even
+// though it produced no usable report (paid processing had already started —
+// docs/beta_perizia_limits_plan.md, "OWNER AMENDMENT" in §F). The backend
+// field name that carries this flag on the upload response is not yet fixed
+// by contract at the time this was written; `beta_quota_consumed_without_report`
+// is this frontend's assumed field name — reconcile with the backend agent.
+const BETA_CONSUMED_WITHOUT_REPORT_MESSAGE_IT =
+  "L'analisi non ha prodotto un report utilizzabile, ma è stata conteggiata perché l'elaborazione del documento era già iniziata.";
 const TIMELINE_STAGES = [
   { key: 'RECEIVED', icon: '✅', it: 'Documento ricevuto', en: 'Document received' },
   { key: 'READ', icon: '📄', it: 'Lettura PDF', en: 'Reading PDF' },
@@ -72,6 +82,15 @@ const buildUploadErrorState = (err) => {
     toDisplayString(directMessageIt) ||
     toDisplayString(directMessage) ||
     (typeof backendDetail === 'string' ? toDisplayString(backendDetail) : null);
+
+  if (backendDetail?.code === 'BETA_LIMIT_REACHED') {
+    return {
+      titleIt: 'Limite beta raggiunto',
+      titleEn: 'Beta limit reached',
+      bodyIt: "Hai completato le analisi previste per questa fase beta. I report già generati restano disponibili. Contatta l'amministratore del programma per estendere il test oppure utilizza il tuo piano disponibile.",
+      bodyEn: 'You have completed the analyses included in this beta phase. Reports already generated remain available. Contact the program administrator to extend the test, or use your available plan.'
+    };
+  }
 
   if (backendDetail?.code === 'INSUFFICIENT_PERIZIA_CREDITS') {
     const facts = [
@@ -244,6 +263,9 @@ const NewAnalysis = () => {
 
       clearUploadTimers();
       setAwaitingResponse(false);
+      if (response.data?.beta_quota_consumed_without_report) {
+        toast.info(BETA_CONSUMED_WITHOUT_REPORT_MESSAGE_IT);
+      }
       await refreshUser();
       setCurrentStage(STAGE_INDEX.FINALIZE);
       await new Promise((resolve) => setTimeout(resolve, 700));

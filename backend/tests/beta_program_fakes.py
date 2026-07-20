@@ -52,6 +52,40 @@ class FakeCursor:
         return list(self.items[:length])
 
 
+def _eval_expr(doc, expr):
+    """Minimal Mongo ``$expr`` evaluator: field refs (``"$field"``), ``$add``,
+    ``$subtract``, ``$lt``, ``$lte``, ``$gt``, ``$gte``, ``$eq``. Enough to
+    faithfully model the beta-quota atomic reservation filter; correctness for
+    the real behaviour is additionally exercised against genuine Mongo in the
+    live validation (see docs/beta_perizia_limits_plan.md §V)."""
+    if isinstance(expr, str) and expr.startswith("$"):
+        return _get_nested(doc, expr[1:]) if "." in expr[1:] else doc.get(expr[1:])
+    if isinstance(expr, dict):
+        for op, args in expr.items():
+            if op == "$add":
+                return sum((_eval_expr(doc, a) or 0) for a in args)
+            if op == "$subtract":
+                a, b = args
+                return (_eval_expr(doc, a) or 0) - (_eval_expr(doc, b) or 0)
+            if op == "$lt":
+                a, b = args
+                return (_eval_expr(doc, a) or 0) < (_eval_expr(doc, b) or 0)
+            if op == "$lte":
+                a, b = args
+                return (_eval_expr(doc, a) or 0) <= (_eval_expr(doc, b) or 0)
+            if op == "$gt":
+                a, b = args
+                return (_eval_expr(doc, a) or 0) > (_eval_expr(doc, b) or 0)
+            if op == "$gte":
+                a, b = args
+                return (_eval_expr(doc, a) or 0) >= (_eval_expr(doc, b) or 0)
+            if op == "$eq":
+                a, b = args
+                return _eval_expr(doc, a) == _eval_expr(doc, b)
+        return None
+    return expr
+
+
 def _match(doc, filt):
     if not filt:
         return True
@@ -62,6 +96,10 @@ def _match(doc, filt):
             continue
         if key == "$or":
             if not any(_match(doc, f) for f in value):
+                return False
+            continue
+        if key == "$expr":
+            if not _eval_expr(doc, value):
                 return False
             continue
         doc_val = _get_nested(doc, key) if "." in key else doc.get(key)
@@ -79,11 +117,21 @@ def _match(doc, filt):
                 if doc_val == value["$ne"]:
                     return False
                 continue
-            if "$gte" in value or "$lte" in value:
+            if "$exists" in value:
+                exists = doc_val is not None or key in doc
+                if bool(value["$exists"]) != exists:
+                    return False
+                continue
+            if "$gte" in value or "$lte" in value or "$lt" in value or "$gt" in value:
                 gte, lte = value.get("$gte"), value.get("$lte")
+                lt, gt = value.get("$lt"), value.get("$gt")
                 if gte is not None and (doc_val is None or doc_val < gte):
                     return False
                 if lte is not None and (doc_val is None or doc_val > lte):
+                    return False
+                if lt is not None and (doc_val is None or not (doc_val < lt)):
+                    return False
+                if gt is not None and (doc_val is None or not (doc_val > gt)):
                     return False
                 continue
             if doc_val != value:
@@ -154,6 +202,37 @@ class FakeCollection:
         if "$inc" in update:
             for k, v in update["$inc"].items():
                 doc[k] = doc.get(k, 0) + v
+
+    async def find_one_and_update(self, filt, update, return_document=None, upsert=False):
+        """Faithful-enough single-document conditional update, including
+        ``$expr`` filters, to model the real Mongo atomic reservation (see
+        beta_program/quota.py). Always returns the document AFTER the update
+        (matching every call site in this codebase, which passes
+        ``return_document=ReturnDocument.AFTER``); returns ``None`` when the
+        filter matches nothing (no capacity / condition not met), exactly like
+        real Mongo. NOTE: this fake does not model true concurrent races --
+        genuine atomicity is exercised against real Mongo in the live
+        validation, not here.
+        """
+        matches = [d for d in self.items if _match(d, filt)]
+        if not matches:
+            if upsert:
+                new_doc = dict(update.get("$setOnInsert", {}))
+                if "$set" in update:
+                    new_doc.update(update["$set"])
+                if "$inc" in update:
+                    for k, v in update["$inc"].items():
+                        new_doc[k] = new_doc.get(k, 0) + v
+                self.items.append(new_doc)
+                return dict(new_doc)
+            return None
+        doc = matches[0]
+        if "$set" in update:
+            doc.update(update["$set"])
+        if "$inc" in update:
+            for k, v in update["$inc"].items():
+                doc[k] = doc.get(k, 0) + v
+        return dict(doc)
 
     async def create_index(self, keys, **kwargs):
         return None
