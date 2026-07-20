@@ -26,7 +26,7 @@ import AdminPerizie from "./pages/admin/AdminPerizie";
 import AdminImages from "./pages/admin/AdminImages";
 import AdminAssistant from "./pages/admin/AdminAssistant";
 import AdminTransactions from "./pages/admin/AdminTransactions";
-import AdminBetaFeedback from "./pages/admin/AdminBetaFeedback";
+import AdminBetaProgram from "./pages/admin/AdminBetaProgram";
 import BetaDashboard from "./pages/BetaDashboard";
 import { Sidebar } from "./pages/Dashboard";
 
@@ -82,6 +82,34 @@ const AdminRoute = ({ children }) => {
   }
 
   if (!user?.is_master_admin) {
+    return <Navigate to="/dashboard" replace />;
+  }
+
+  return children;
+};
+
+// Exact-owner-only route (Programma Beta). Mirrors the backend
+// require_exact_owner_admin gate; backend authorization remains authoritative.
+const OwnerRoute = ({ children }) => {
+  const { user, loading } = useAuth();
+  const location = useLocation();
+
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-[#09090b] flex items-center justify-center">
+        <div className="text-center">
+          <div className="w-12 h-12 border-4 border-gold border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
+          <p className="text-zinc-400 font-mono text-sm">Authenticating...</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (!user) {
+    return <Navigate to="/" state={{ from: location }} replace />;
+  }
+
+  if (!user?.correctness_v2_admin_view) {
     return <Navigate to="/dashboard" replace />;
   }
 
@@ -247,8 +275,15 @@ function AppRouter() {
       <Route path="/admin/transactions" element={
         <AdminRoute><AdminTransactions /></AdminRoute>
       } />
+      <Route path="/admin/beta-program" element={
+        <OwnerRoute><AdminBetaProgram /></OwnerRoute>
+      } />
+      {/* Old path redirects so bookmarks don't 404 (single destination).
+          Gated by the same OwnerRoute as /admin/beta-program: an
+          unauthorized visitor is denied by the guard itself and never
+          reaches the inner Navigate, so no beta data is ever requested. */}
       <Route path="/admin/beta-feedback" element={
-        <AdminRoute><AdminBetaFeedback /></AdminRoute>
+        <OwnerRoute><Navigate to="/admin/beta-program?tab=feedback" replace /></OwnerRoute>
       } />
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>

@@ -129,3 +129,7 @@ backend/_correctness_v2/
 # Test fixtures (versioned)
 !backend/tests/fixtures/perizie/
 !backend/tests/fixtures/perizie/1859886_c_perizia.pdf
+
+# Local agent/session scratch (never committed)
+.codex
+.runs/

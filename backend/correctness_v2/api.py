@@ -41,6 +41,34 @@ router = APIRouter(prefix="/analysis/perizia", tags=["correctness_v2"])
 
 logger = logging.getLogger(__name__)
 
+
+def _emit_lot_signal(
+    event_type: str,
+    analysis_id: str,
+    lot_id: Optional[str],
+    user_id: Optional[str],
+    *,
+    job_id: Optional[str] = None,
+) -> None:
+    """Best-effort operational telemetry for a lot decision. Never raises.
+
+    Telemetry only: does not affect reuse/dedup/spawn behaviour. Idempotent on
+    (job_id-or-analysis, lot_id, event_type) so repeated polls don't inflate a
+    metric.
+    """
+    try:
+        from beta_program import signals as _sig
+
+        _sig.emit_v2_job_event(
+            event_type,
+            job_id=job_id or f"lot_{analysis_id}",
+            analysis_id=analysis_id,
+            user_id=user_id,
+            lot_id=lot_id,
+        )
+    except Exception:  # telemetry must never affect the pipeline
+        pass
+
 # Statuses of a job that is still working towards a report. Everything else is
 # terminal (a report, a controlled stop, or a diagnosed failure). Kept in sync
 # with workspace._IN_PROGRESS_STATUSES and the orchestrator's _STALEABLE_STATUSES:
@@ -665,7 +693,8 @@ async def correctness_v2_confirm_money(
     Body: {"job_id": "...", "answers": {ambiguity_id: option_id, ...}}. Ownership
     is enforced (any authenticated owner or an admin). Deterministic: no OpenAI.
     """
-    await _resolve_customer_access(request, analysis_id)
+    _cm_user, _cm_is_admin = await _resolve_customer_access(request, analysis_id)
+    _cm_user_id = getattr(_cm_user, "user_id", None)
 
     try:
         body = await request.json()
@@ -698,6 +727,9 @@ async def correctness_v2_confirm_money(
 
     report = artifacts.read_json(job_id, artifacts.CUSTOMER_REPORT_FILE)
     safe = customer_view.is_customer_safe(report, result)
+    _emit_lot_signal(
+        "CONFIRMATION_COMPLETED", analysis_id, None, _cm_user_id, job_id=job_id
+    )
     return {
         "available": bool(safe and report),
         "job_id": job_id,
@@ -792,7 +824,8 @@ async def correctness_v2_generate_lot(
       D. otherwise exactly ONE job is spawned (in-flight marker closes the race).
     No credit debit ever happens here (see billing rule above).
     """
-    await _resolve_customer_access(request, analysis_id)
+    _lot_user, _lot_is_admin = await _resolve_customer_access(request, analysis_id)
+    _lot_user_id = getattr(_lot_user, "user_id", None)
 
     try:
         body = await request.json()
@@ -803,6 +836,10 @@ async def correctness_v2_generate_lot(
     # A. Existing safe report: serve the stored artifact, never rebuild via LLM.
     status, report = workspace.find_lot_safe_report(analysis_id, lot_id)
     if report is not None and not force:
+        _emit_lot_signal(
+            "LOT_REPORT_REUSED", analysis_id, lot_id, _lot_user_id,
+            job_id=(status or {}).get("job_id"),
+        )
         return {
             "deduplicated": False,
             "reused_report": True,
@@ -815,7 +852,15 @@ async def correctness_v2_generate_lot(
     # B. A job is already working on this lot: reuse it, no duplicate.
     running = workspace.lot_in_progress(analysis_id, lot_id)
     if running is not None:
+        _emit_lot_signal(
+            "LOT_JOB_DEDUPLICATED", analysis_id, lot_id, _lot_user_id,
+            job_id=(running or {}).get("job_id"),
+        )
         return _lot_dedup_response(running)
+
+    # A forced rerun of an existing lot (customer explicitly re-ran).
+    if force:
+        _emit_lot_signal("LOT_RERUN_FORCED", analysis_id, lot_id, _lot_user_id)
 
     # C. Failed/verification-required lots never auto-rerun (the core fix):
     # the customer must explicitly confirm the rerun (force=true).

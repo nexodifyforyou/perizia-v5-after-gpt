@@ -148,19 +148,30 @@ class FakeCollection:
                 else:
                     doc[k] = doc.get(k, 0) + v
 
-    async def create_index(self, field):
+    async def create_index(self, keys, **kwargs):
         return None
 
 
 class FakeDB:
     def __init__(self):
+        self._collections = {}
         for name in [
             "users", "user_sessions", "perizia_analyses", "image_forensics",
             "assistant_qa", "payment_transactions", "credit_ledger",
             "billing_records", "admin_audit_log", "admin_user_notes",
             "perizia_confirmations", "beta_feedback", "security_audit_log",
+            "beta_program_memberships", "beta_program_audit", "v2_job_events",
         ]:
-            setattr(self, name, FakeCollection(name))
+            coll = FakeCollection(name)
+            setattr(self, name, coll)
+            self._collections[name] = coll
+
+    def __getitem__(self, name):
+        if name not in self._collections:
+            coll = FakeCollection(name)
+            setattr(self, name, coll)
+            self._collections[name] = coll
+        return self._collections[name]
 
 
 @pytest.fixture()
@@ -174,9 +185,36 @@ def fake_db(monkeypatch):
     monkeypatch.setattr(server, "db", db)
     server.MASTER_ADMIN_EMAIL = "admin@nexodify.com"
     monkeypatch.setattr(server, "ADMIN_EMAILS", frozenset({"nexodifyforyou@gmail.com"}))
+    # Env allowlist is INERT at runtime after the DB migration; keep it populated
+    # to prove it grants nothing (regression tests rely on this).
     monkeypatch.setattr(server, "BETA_UNLIMITED_EMAILS", frozenset({BETA_FIXTURE_EMAIL}))
-    monkeypatch.setattr(server, "BETA_PARTNER_NAMES", {BETA_FIXTURE_EMAIL: BETA_FIXTURE_NAME})
+    monkeypatch.setattr(server, "BETA_PARTNER_NAMES", {})
+    # Reset the store's index-ready flag so ensure_indexes is safe across tests.
+    from beta_program import store as beta_store
+    beta_store._indexes_ready = False
     return db
+
+
+def _seed_beta_membership(db, email, user_id, *, status="ACTIVE", display_name=BETA_FIXTURE_NAME):
+    now = datetime.now(timezone.utc).isoformat()
+    db.beta_program_memberships.items.append({
+        "membership_id": f"betam_{user_id}",
+        "normalized_email": email.strip().lower(),
+        "user_id": user_id if status != "PENDING" else None,
+        "display_name": display_name,
+        "partner_type": "geometra",
+        "status": status,
+        "added_by": "nexodifyforyou@gmail.com",
+        "added_at": now,
+        "activated_at": now if status == "ACTIVE" else None,
+        "revoked_at": now if status == "REVOKED" else None,
+        "reactivated_at": None,
+        "updated_at": now,
+        "internal_note": None,
+        "entitlement_version": 1,
+        "last_entitlement_change_at": now,
+        "migration_source": None,
+    })
 
 
 def _seed_session(db, user_doc, token):
@@ -186,13 +224,26 @@ def _seed_session(db, user_doc, token):
         "user_id": user_doc["user_id"],
         "expires_at": (datetime.now(timezone.utc) + timedelta(days=1)).isoformat(),
     })
+    # The beta fixture becomes ACTIVE via a DB membership (the new source of
+    # truth), not via the env allowlist.
+    if user_doc.get("email") == BETA_FIXTURE_EMAIL and not any(
+        m.get("normalized_email") == BETA_FIXTURE_EMAIL for m in db.beta_program_memberships.items
+    ):
+        _seed_beta_membership(db, BETA_FIXTURE_EMAIL, user_doc["user_id"])
     return token
 
 
 def _beta_user():
+    # For direct-helper tests: carry the request-scoped snapshot the resolver
+    # would stamp for an ACTIVE membership. Endpoint tests re-resolve from the DB
+    # membership seeded by _seed_session (this snapshot is then re-derived).
     return {
         "user_id": "user_beta", "email": BETA_FIXTURE_EMAIL,
         "name": BETA_FIXTURE_NAME, "plan": "free", "is_master_admin": False, "quota": {},
+        "beta_program": {
+            "active": True, "membership_id": "betam_user_beta",
+            "display_name": BETA_FIXTURE_NAME, "partner_type": "geometra",
+        },
     }
 
 
@@ -247,26 +298,39 @@ def test_learning_label_mapping_all_types():
         assert label["human_review_required"] is human, ft
 
 
-def test_beta_email_helpers(fake_db):
-    assert server._is_beta_unlimited_email(BETA_FIXTURE_EMAIL) is True
-    # Normalization: upper case, mixed case, surrounding whitespace.
-    assert server._is_beta_unlimited_email(BETA_FIXTURE_EMAIL.upper()) is True
-    assert server._is_beta_unlimited_email("Beta.Partner@Example.Test") is True
-    assert server._is_beta_unlimited_email(f"  {BETA_FIXTURE_EMAIL}  ") is True
-    assert server._is_beta_unlimited_email("someone@else.com") is False
-    assert server._is_beta_unlimited_email(None) is False
+def test_beta_email_normalization():
+    from beta_program import store as beta_store
+    # Normalization: upper case, mixed case, surrounding whitespace all collapse.
+    assert beta_store.normalize_beta_email(BETA_FIXTURE_EMAIL.upper()) == BETA_FIXTURE_EMAIL
+    assert beta_store.normalize_beta_email("Beta.Partner@Example.Test") == BETA_FIXTURE_EMAIL
+    assert beta_store.normalize_beta_email(f"  {BETA_FIXTURE_EMAIL}  ") == BETA_FIXTURE_EMAIL
+    assert beta_store.normalize_beta_email(None) == ""
 
 
-def test_beta_default_grants_nothing_when_env_unset(monkeypatch):
-    """Regression: with BETA_UNLIMITED_EMAILS unset, the code default is empty
-    and no real email — in particular the former beta partner's — is privileged."""
-    monkeypatch.delenv("BETA_UNLIMITED_EMAILS", raising=False)
-    default_allowlist = server._parse_email_allowlist(
-        os.environ.get("BETA_UNLIMITED_EMAILS", "")
-    )
-    assert default_allowlist == frozenset()
-    monkeypatch.setattr(server, "BETA_UNLIMITED_EMAILS", default_allowlist)
-    assert server._is_beta_unlimited_email("geomazzantiriccardo@gmail.com") is False
+def test_active_beta_snapshot_grants_exemption():
+    """Beta is now an entitlement resolved from the DB snapshot, never the env."""
+    active = server.User(**_beta_user())
+    assert server._user_has_active_beta(active) is True
+    # An identical user WITHOUT the resolved snapshot is not exempt, even though
+    # the email is in BETA_UNLIMITED_EMAILS — the env grants nothing at runtime.
+    doc = _beta_user()
+    doc["beta_program"] = {}
+    inactive = server.User(**doc)
+    assert server._user_has_active_beta(inactive) is False
+
+
+def test_env_allowlist_grants_nothing_at_runtime(fake_db):
+    """Regression: a populated BETA_UNLIMITED_EMAILS must NOT grant runtime beta.
+
+    Only an ACTIVE DB membership does. Riccardo's former address, even if it
+    reappeared in the env, is never privileged without a membership."""
+    # No membership seeded -> snapshot is empty -> not exempt.
+    doc = _beta_user()
+    doc["beta_program"] = {}
+    user = server.User(**doc)
+    assert server._user_has_active_beta(user) is False
+    assert server._is_credit_exempt_user(user) is False
+    assert "geomazzantiriccardo" not in server.BETA_PARTNER_NAMES
 
 
 def test_no_real_beta_email_hardcoded_in_server_source():
@@ -427,7 +491,7 @@ async def test_admin_sees_all_feedback(fake_db):
          "created_at": "2026-01-02T00:00:00", "section_key": "superficie", "priority": "bassa",
          "status": "accepted", "learning_label": {"error_category": "low_utility", "is_error": False, "model_should_learn": True}},
     ])
-    resp = await _client_request("GET", "/api/admin/beta-feedback", token=token)
+    resp = await _client_request("GET", "/api/admin/beta-program/feedback", token=token)
     assert resp.status_code == 200
     data = resp.json()
     assert data["total"] == 2
@@ -438,14 +502,14 @@ async def test_admin_sees_all_feedback(fake_db):
 @pytest.mark.anyio
 async def test_admin_owner_can_access_admin_feedback_endpoints(fake_db):
     token = _seed_session(fake_db, _admin_user(), "sess_admin")
-    resp = await _client_request("GET", "/api/admin/beta-feedback", token=token)
+    resp = await _client_request("GET", "/api/admin/beta-program/feedback", token=token)
     assert resp.status_code == 200
     assert resp.json()["total"] == 0
 
 
 @pytest.mark.anyio
 async def test_unauthenticated_cannot_access_admin_feedback_endpoint(fake_db):
-    resp = await _client_request("GET", "/api/admin/beta-feedback")
+    resp = await _client_request("GET", "/api/admin/beta-program/feedback")
     assert resp.status_code == 401
 
 
@@ -458,7 +522,7 @@ async def test_admin_filter_model_should_learn(fake_db):
         {"id": "fb_b", "user_id": "u2", "created_at": "2026-01-02T00:00:00",
          "learning_label": {"model_should_learn": False}},
     ])
-    resp = await _client_request("GET", "/api/admin/beta-feedback?model_should_learn=true", token=token)
+    resp = await _client_request("GET", "/api/admin/beta-program/feedback?model_should_learn=true", token=token)
     assert resp.status_code == 200
     ids = [i["id"] for i in resp.json()["items"]]
     assert ids == ["fb_a"]
@@ -475,7 +539,7 @@ async def test_admin_filter_by_user_email(fake_db):
     ])
     resp = await _client_request(
         "GET",
-        "/api/admin/beta-feedback?user_email=beta.partner",
+        "/api/admin/beta-program/feedback?user_email=beta.partner",
         token=token,
     )
     assert resp.status_code == 200
@@ -486,9 +550,9 @@ async def test_admin_filter_by_user_email(fake_db):
 @pytest.mark.anyio
 async def test_non_admin_cannot_access_admin_endpoint(fake_db):
     token = _seed_session(fake_db, _beta_user(), "sess_beta")
-    resp = await _client_request("GET", "/api/admin/beta-feedback", token=token)
+    resp = await _client_request("GET", "/api/admin/beta-program/feedback", token=token)
     assert resp.status_code == 403
-    export_resp = await _client_request("GET", "/api/admin/beta-feedback/export?format=json", token=token)
+    export_resp = await _client_request("GET", "/api/admin/beta-program/feedback/export?format=json", token=token)
     assert export_resp.status_code == 403
 
 
@@ -499,7 +563,7 @@ async def test_admin_can_update_status(fake_db):
         "id": "fb_x", "user_id": "user_beta", "created_at": "2026-01-01T00:00:00",
         "status": "new", "admin_notes": None,
     })
-    resp = await _client_request("PATCH", "/api/admin/beta-feedback/fb_x", token=token, json={
+    resp = await _client_request("PATCH", "/api/admin/beta-program/feedback/fb_x", token=token, json={
         "status": "accepted", "admin_notes": "Verificato.",
     })
     assert resp.status_code == 200
@@ -513,7 +577,7 @@ async def test_admin_can_update_status(fake_db):
 async def test_admin_update_rejects_bad_status(fake_db):
     token = _seed_session(fake_db, _admin_user(), "sess_admin")
     fake_db.beta_feedback.items.append({"id": "fb_x", "user_id": "u", "created_at": "2026-01-01T00:00:00", "status": "new"})
-    resp = await _client_request("PATCH", "/api/admin/beta-feedback/fb_x", token=token, json={"status": "bogus"})
+    resp = await _client_request("PATCH", "/api/admin/beta-program/feedback/fb_x", token=token, json={"status": "bogus"})
     assert resp.status_code == 422
 
 
@@ -526,7 +590,7 @@ async def test_export_json(fake_db):
         "learning_label": {"error_category": "wrong_output"},
         "item_reference": {}, "original_ai_output": {},
     })
-    resp = await _client_request("GET", "/api/admin/beta-feedback/export?format=json", token=token)
+    resp = await _client_request("GET", "/api/admin/beta-program/feedback/export?format=json", token=token)
     assert resp.status_code == 200
     data = resp.json()
     assert data["total"] == 1
@@ -544,7 +608,7 @@ async def test_export_csv(fake_db):
         "learning_label": {"error_category": "wrong_output", "is_error": True},
         "item_reference": {"item_path": "result.x[0]"}, "original_ai_output": {"title": "T"},
     })
-    resp = await _client_request("GET", "/api/admin/beta-feedback/export?format=csv", token=token)
+    resp = await _client_request("GET", "/api/admin/beta-program/feedback/export?format=csv", token=token)
     assert resp.status_code == 200
     assert "text/csv" in resp.headers["content-type"]
     body = resp.text
