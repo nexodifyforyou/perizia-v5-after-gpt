@@ -11,6 +11,7 @@ Covers:
 """
 
 import asyncio
+import json
 
 import httpx
 import pytest
@@ -113,7 +114,10 @@ def test_sanitize_keeps_customer_content_and_adds_decision():
     assert out["compliance_section"][0]["area"] == "urbanistica"
     assert out["formalities_section"][0]["type"] == "ipoteca"
     assert out["buyer_checklist"][0]["action"] == "Verificare"
-    assert out["customer_evidence_index"][0]["topic"] == "Conformità urbanistica"
+    assert "customer_evidence_index" not in out
+    # Customer evidence is exposed only through the validated/fail-closed
+    # decision-model source projection, never as the raw legacy index.
+    assert "fonti" in out["decision_model"]["sections"]
     decision = out["decision"]
     assert decision["level"] in customer_view._DECISION_LABELS
     assert decision["label"]
@@ -125,6 +129,176 @@ def test_sanitize_does_not_mutate_input():
     customer_view.sanitize_customer_report(report)
     assert "quality_control" in report  # original untouched
     assert "market_comparatives" in report["money_sections"]
+
+
+def test_sanitize_recursively_strips_old_validator_diagnostics():
+    source_fact = "La documentazione ex art. 567 risulta completa."
+    diagnostic = (
+        " Declassata a 'uncertain' (verifica manuale): classificata "
+        "'conforming' ma il testo citato non contiene una dichiarazione "
+        "esplicita di conformità per il contesto analizzato."
+    )
+    standalone_diagnostic = (
+        "Conformità 'vincoli': classificata 'conforming' senza alcuna pagina "
+        "di evidenza; stato impostato a 'uncertain' e richiesta verifica manuale."
+    )
+    report = _full_report(
+        risk_sections=[
+            {
+                "section_id": "da_verificare",
+                "items": [{"summary": source_fact + diagnostic}],
+            }
+        ],
+        compliance_section=[
+            {"area": "Completezza", "classification": "uncertain", "notes": source_fact + diagnostic},
+            {"area": "Vincoli", "classification": "conforming", "notes": standalone_diagnostic},
+        ],
+        beni_sections=[
+            {
+                "bene_id": "1",
+                "risks": [{"details": [source_fact + diagnostic]}],
+            }
+        ],
+    )
+
+    out = customer_view.sanitize_customer_report(report)
+
+    assert out["risk_sections"][0]["items"][0]["summary"] == source_fact
+    assert out["compliance_section"][0]["notes"] == source_fact
+    assert out["compliance_section"][1]["notes"] == ""
+    assert all("classification" not in item for item in out["compliance_section"])
+    assert out["beni_sections"][0]["risks"][0]["details"] == [source_fact]
+    customer_text = json.dumps(
+        {
+            "risk_sections": out["risk_sections"],
+            "compliance_section": out["compliance_section"],
+            "beni_sections": out["beni_sections"],
+        },
+        ensure_ascii=False,
+    ).lower()
+    for forbidden in (
+        "declassata",
+        "verifica manuale",
+        "classificata 'conforming'",
+        "stato impostato a 'uncertain'",
+    ):
+        assert forbidden not in customer_text
+    # The persisted/administrative source remains byte-for-byte untouched.
+    assert report["risk_sections"][0]["items"][0]["summary"] == source_fact + diagnostic
+
+
+def test_sanitize_keeps_source_classification_that_is_not_an_internal_enum():
+    source_text = "L'area è classificata 'AREC 2' dal PGT."
+    report = _full_report(
+        risk_sections=[],
+        compliance_section=[{"area": "Urbanistica", "notes": source_text}],
+        beni_sections=[],
+    )
+
+    out = customer_view.sanitize_customer_report(report)
+
+    assert out["compliance_section"][0]["notes"] == source_text
+
+
+def test_sanitize_strips_internal_limitations_everywhere_including_money_reason():
+    source_fact = "Il valore di stima del Bene 3 è € 6.480."
+    limitation = " Lo schema non prevede un campo separato per questo valore."
+    report = _full_report(
+        executive_summary=[{"text": source_fact + limitation}],
+        money_sections={
+            **_full_report()["money_sections"],
+            "uncertain_money": [
+                {
+                    "label": "Importo esplicito",
+                    "amount": 6480,
+                    "reason": "Limitazione del parser: il backend-field non è disponibile.",
+                    "evidence_pages": [8],
+                }
+            ],
+        },
+        buyer_checklist=[
+            {"action": "Verificare il fatto. Il database-field non supporta il dato."}
+        ],
+    )
+
+    out = customer_view.sanitize_customer_report(report)
+    rendered = json.dumps(out, ensure_ascii=False).lower()
+
+    assert out["executive_summary"][0]["text"] == source_fact
+    assert out["money_sections"]["uncertain_money"][0]["amount"] == 6480
+    assert out["money_sections"]["uncertain_money"][0]["reason"] == ""
+    assert out["buyer_checklist"][0]["action"] == "Verificare il fatto."
+    for forbidden in (
+        "schema non prevede",
+        "parser",
+        "backend-field",
+        "database-field",
+    ):
+        assert forbidden not in rendered
+    # Sanitization is projection-only.
+    assert report["executive_summary"][0]["text"] == source_fact + limitation
+
+
+def test_sanitize_strips_data_model_and_internal_format_limitations_only():
+    source_fact = "Il valore del garage è dichiarato in € 6.480."
+    report = _full_report(
+        executive_summary=[
+            {
+                "text": source_fact
+                + " Il modello dati non consente di rappresentare il valore separatamente."
+            },
+            {
+                "text": source_fact
+                + " Il formato interno non prevede un campo dedicato."
+            },
+        ],
+        compliance_section=[{
+            "area": "Catastale",
+            "notes": "Il modello dei dati catastali è riportato nella planimetria; "
+                     "il formato interno del locale è rettangolare. "
+                     "Il formato interno non prevede pareti divisorie.",
+        }],
+    )
+
+    out = customer_view.sanitize_customer_report(report)
+
+    assert [row["text"] for row in out["executive_summary"]] == [source_fact, source_fact]
+    assert out["compliance_section"][0]["notes"] == (
+        "Il modello dei dati catastali è riportato nella planimetria; "
+        "il formato interno del locale è rettangolare. "
+        "Il formato interno non prevede pareti divisorie."
+    )
+
+
+def test_raw_legacy_customer_evidence_is_hidden_but_validated_fonti_remains():
+    report = _full_report(
+        customer_evidence_index=[
+            {
+                "page": 8,
+                "topic": "Urbanistica",
+                "report_section": "Conformità",
+                "perizia_excerpt": "La destinazione urbanistica è indicata nel PGT.",
+                "coverage_status": "covered",
+            },
+            {
+                "page": 99,
+                "topic": "Valore di stima Bene N° 3 - Garage",
+                "perizia_excerpt": "Valore di stima Bene N° 2 € 26.100,00",
+            },
+        ]
+    )
+
+    out = customer_view.sanitize_customer_report(report)
+
+    assert "customer_evidence_index" not in out
+    rendered = json.dumps(out, ensure_ascii=False)
+    assert "Valore di stima Bene N° 2 € 26.100,00" not in rendered
+    fonti = out["decision_model"]["sections"]["fonti"]["primary"]
+    assert any(
+        row.get("title") == "Urbanistica"
+        and "destinazione urbanistica" in (row.get("excerpt") or "").lower()
+        for row in fonti
+    )
 
 
 def test_decision_attenzione_for_critical_risk():

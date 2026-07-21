@@ -237,7 +237,7 @@ def test_compliance_status_map():
     assert by_topic["catastale"]["status_label"] == "Regolarizzabile secondo la perizia"
     assert by_topic["urbanistica"]["status_label"] == "Conforme secondo la perizia"
     assert by_topic["urbanistica"]["tone"] == "verde"
-    assert by_topic["impianto_gas"]["status_label"] == "Non verificato o non dichiarato"
+    assert by_topic["impianto_gas"]["status_label"] == "Da chiarire"
 
 
 # 14. formality three-way split + summary/detail dedup; distinct amounts preserved
@@ -583,3 +583,259 @@ def test_no_forbidden_tokens():
     blob = json.dumps(m, ensure_ascii=False)
     for token in _FORBIDDEN_TOKENS:
         assert token not in blob, f"forbidden token leaked: {token}"
+
+
+def test_negative_declared_phrases_win_over_positive_substrings():
+    rep = _report(compliance_section=[
+        {
+            "area": "Completezza documentazione ex art. 567 c.p.c.",
+            "classification": "uncertain",
+            "notes": "La documentazione non risulta completa.",
+            "evidence_pages": [4],
+        },
+        {
+            "area": "Continuità delle trascrizioni",
+            "classification": "uncertain",
+            "notes": "Non sussiste continuità delle trascrizioni.",
+            "evidence_pages": [5],
+        },
+        {
+            "area": "Proprietà e diritti posti in vendita",
+            "classification": "uncertain",
+            "notes": "Non risulta la proprietà 1/1 in capo all'esecutato.",
+            "evidence_pages": [6],
+        },
+    ])
+
+    findings = dm.build_decision_model(rep, [])["findings"]
+    by_page = {finding["page"]: finding for finding in findings}
+    assert by_page[4]["status"] == "da_chiarire"
+    assert by_page[4]["status_label"] == "Dichiarata incompleta dalla perizia"
+    assert by_page[5]["status"] == "da_chiarire"
+    assert by_page[5]["status_label"] == "Da chiarire"
+    assert by_page[6]["status"] == "da_chiarire"
+    assert by_page[6]["status_label"] == "Da chiarire"
+    assert all("dichiarata dalla perizia" not in finding["status_label"].lower() for finding in findings)
+
+
+@pytest.mark.parametrize("notes", [
+    "Non è provata la proprietà dell’esecutato.",
+    "Proprietà da verificare documentalmente.",
+])
+def test_unproven_ownership_requires_documentary_check(notes):
+    rep = _report(compliance_section=[{
+        "area": "Titolarità e diritti posti in vendita",
+        "classification": "uncertain",
+        "notes": notes,
+        "evidence_pages": [6],
+    }])
+    finding = dm.build_decision_model(rep, [])["findings"][0]
+    assert finding["status"] == "da_verificare"
+    assert finding["status_label"] == "Da verificare documentalmente"
+    assert "dichiarat" not in finding["status_label"].lower()
+
+
+@pytest.mark.parametrize(("notes", "status", "label"), [
+    ("Proprietà da verificare.", "da_verificare", "Da verificare documentalmente"),
+    (
+        "La proprietà deve essere verificata documentalmente.",
+        "da_verificare",
+        "Da verificare documentalmente",
+    ),
+    (
+        "Proprietà non determinabile dalla sola perizia.",
+        "non_determinabile",
+        "Non determinabile dalla sola perizia",
+    ),
+    ("Il diritto di proprietà è incerto.", "da_chiarire", "Da chiarire"),
+    (
+        "La proprietà è dichiarata 1/1 dalla perizia.",
+        "dichiarato_perizia",
+        "Proprietà 1/1 dichiarata dalla perizia",
+    ),
+])
+def test_uncertain_ownership_requires_explicit_declaration(notes, status, label):
+    rep = _report(compliance_section=[{
+        "area": "Titolarità e diritti posti in vendita",
+        "classification": "uncertain",
+        "notes": notes,
+        "evidence_pages": [6],
+    }])
+    finding = dm.build_decision_model(rep, [])["findings"][0]
+    assert finding["status"] == status
+    assert finding["status_label"] == label
+
+
+@pytest.mark.parametrize(("notes", "expected_status"), [
+    ("Proprietà non accertata dalla perizia.", "da_verificare"),
+    ("Proprietà non attestata dalla perizia.", "da_verificare"),
+    ("Proprietà non provata dalla perizia.", "da_verificare"),
+    ("Proprietà non dimostrata dalla perizia.", "da_verificare"),
+    ("Proprietà non documentata dalla perizia.", "da_verificare"),
+    ("Non è stata accertata la proprietà dell’esecutato.", "da_verificare"),
+    ("Non risulta attestata la proprietà dell’esecutato.", "da_verificare"),
+    ("Non è provata la proprietà dell’esecutato.", "da_verificare"),
+    ("Proprietà non dichiarata dalla perizia.", "non_dichiarato"),
+    ("Proprietà non indicata dalla perizia.", "non_dichiarato"),
+    ("Proprietà non riportata dalla perizia.", "non_dichiarato"),
+    ("Non viene dichiarata la proprietà nella perizia.", "non_dichiarato"),
+    ("Non viene indicata la proprietà nella perizia.", "non_dichiarato"),
+    ("Non risulta riportata la proprietà nella perizia.", "non_dichiarato"),
+])
+def test_negated_ownership_declarations_are_never_positive(notes, expected_status):
+    rep = _report(compliance_section=[{
+        "area": "Titolarità e diritti posti in vendita",
+        "classification": "uncertain",
+        "notes": notes,
+        "evidence_pages": [6],
+    }])
+    finding = dm.build_decision_model(rep, [])["findings"][0]
+    assert finding["status"] == expected_status
+    assert finding["status"] != "dichiarato_perizia"
+    if expected_status == "non_dichiarato":
+        assert finding["status_label"] == "Non dichiarato dalla perizia"
+    else:
+        assert finding["status_label"] == "Da verificare documentalmente"
+
+
+@pytest.mark.parametrize("notes", [
+    "La proprietà è dichiarata 1/1 dalla perizia.",
+    "La proprietà risulta attestata 1/1 dalla perizia.",
+    "La perizia ha accertato la proprietà 1/1 dell’esecutato.",
+])
+def test_explicit_positive_ownership_declarations_remain_declared(notes):
+    rep = _report(compliance_section=[{
+        "area": "Titolarità e diritti posti in vendita",
+        "classification": "uncertain",
+        "notes": notes,
+        "evidence_pages": [6],
+    }])
+    finding = dm.build_decision_model(rep, [])["findings"][0]
+    assert finding["status"] == "dichiarato_perizia"
+    assert finding["status_label"] == "Proprietà 1/1 dichiarata dalla perizia"
+
+
+def test_cached_component_recovery_requires_asset_type_and_rejects_personal_spans():
+    def cached(text):
+        return {"_cached_input_pages": [{"page_number": 26, "text": text}]}
+
+    wrong_asset = cached("Bene N° 3 - Magazzino\nValore di stima del bene: € 6.480,00")
+    assert dm._find_cached_component_excerpt(
+        wrong_asset, [26], "Bene N° 3", 6480, "Garage"
+    ) is None
+    assert dm._find_cached_component_excerpt(
+        wrong_asset, [26], "Bene N° 3", 6480, "Magazzino"
+    )["excerpt"].endswith("€ 6.480,00")
+    # Missing expected type cannot silently fall back to Bene number + amount.
+    assert dm._find_cached_component_excerpt(
+        wrong_asset, [26], "Bene N° 3", 6480
+    ) is None
+    incidental_expected_type = cached(
+        "Bene N° 3 - Magazzino con accesso dal garage\n"
+        "Valore di stima del bene: € 6.480,00"
+    )
+    assert dm._find_cached_component_excerpt(
+        incidental_expected_type, [26], "Bene N° 3", 6480, "Garage"
+    ) is None
+
+    for personal in (
+        "Mario Rossi",
+        "Alberto Bianchi",
+        "Telefono 333 123 4567",
+        "Cellulare: +39 333 123 4567",
+        "PEC: persona@example.test",
+        "carta identità CA12345AA",
+        "passaporto YA1234567",
+        "patente AB1234567",
+        "data di nascita 01/02/1980",
+        "documento di riconoscimento ZZ1234567",
+        "tessera sanitaria 1234567890",
+    ):
+        assert dm._find_cached_component_excerpt(
+            cached(f"Bene N° 3 - Garage {personal} Valore di stima: € 6.480,00"),
+            [26], "Bene N° 3", 6480, "Garage",
+        ) is None
+
+    address_only = cached(
+        "Bene N° 3 - Garage\nComune: San Giorgio Bigarello (MN)\n"
+        "Via Martiri di Belfiore n. 9\nValore di stima: € 6.480,00"
+    )
+    recovered = dm._find_cached_component_excerpt(
+        address_only, [26], "Bene N° 3", 6480, "Garage"
+    )
+    assert recovered is not None
+    assert "Via Martiri di Belfiore" in recovered["excerpt"]
+
+    cadastral_only = cached(
+        "Bene N° 3 - Garage\nFoglio 12, particella 345, subalterno 6; "
+        "categoria C/6\nValore di stima: € 6.480,00"
+    )
+    assert dm._find_cached_component_excerpt(
+        cadastral_only, [26], "Bene N° 3", 6480, "Garage"
+    ) is not None
+
+
+def test_category_evidence_cannot_cross_plant_or_building_subcategories():
+    rep = _report(
+        compliance_section=[
+            {"area": "Impianto gas", "classification": "uncertain", "notes": "Da verificare.", "evidence_pages": [11]},
+            {"area": "Impianto elettrico", "classification": "uncertain", "notes": "Da verificare.", "evidence_pages": [12]},
+            {"area": "Conformità edilizia", "classification": "uncertain", "notes": "Da verificare.", "evidence_pages": [13]},
+            {"area": "Vincoli di edilizia residenziale pubblica", "classification": "uncertain", "notes": "Da verificare.", "evidence_pages": [14]},
+        ],
+        customer_evidence_index=[
+            {"page": 11, "topic": "Impianto gas", "report_section": "Conformità", "perizia_excerpt": "Impianto elettrico: dichiarazione di conformità assente.", "coverage_status": "covered"},
+            {"page": 12, "topic": "Impianto elettrico", "report_section": "Conformità", "perizia_excerpt": "Impianto gas: dichiarazione di conformità assente.", "coverage_status": "covered"},
+            {"page": 13, "topic": "Conformità edilizia", "report_section": "Conformità", "perizia_excerpt": "Nessun vincolo di edilizia residenziale pubblica.", "coverage_status": "covered"},
+            {"page": 14, "topic": "Vincoli di edilizia residenziale pubblica", "report_section": "Conformità", "perizia_excerpt": "Difformità edilizia da regolarizzare con titolo abilitativo.", "coverage_status": "covered"},
+        ],
+    )
+    findings = dm.build_decision_model(rep, [])["findings"]
+    assert len(findings) == 4
+    assert all(finding["evidence"]["excerpt"] is None for finding in findings)
+    assert all(
+        finding["evidence"]["note"] == "Estratto decisivo non disponibile"
+        for finding in findings
+    )
+    sources = dm.build_decision_model(rep, [])["sections"]["fonti"]["primary"]
+    assert all(source["excerpt_status"] == "excerpt_missing" for source in sources)
+
+
+def test_access_only_checklist_drives_readiness_state_and_label():
+    rep = _report(risk_sections=[{
+        "section_id": "accesso",
+        "items": [{
+            "area": "Accesso al garage",
+            "summary": "Accesso attraverso un immobile di altra proprietà non compreso nella procedura.",
+            "evidence_pages": [7],
+        }],
+    }])
+    model = dm.build_decision_model(rep, [])
+    assert model["findings"] == []
+    assert model["sections"]["verifiche"]["open_count"] == 1
+    assert model["readiness"]["professional_checks_open"] == 1
+    assert model["readiness"]["state"] == "READY_FOR_REVIEW"
+    assert model["readiness"]["label"] == "Verifiche professionali aperte"
+    assert model["sections"]["stato_verifiche"]["label"] == "Verifiche professionali aperte"
+    assert model["esito"]["level"] == "ambra"
+
+
+def test_checklist_total_counts_only_the_eight_displayed_ranked_actions():
+    rep = _report(risk_sections=[{
+        "section_id": "condizioni",
+        "items": [
+            {
+                "area": f"Copertura magazzino {index}",
+                "summary": "Copertura danneggiata del magazzino da verificare.",
+                "evidence_pages": [20 + index],
+            }
+            for index in range(10)
+        ],
+    }])
+    model = dm.build_decision_model(rep, [])
+    checklist = model["sections"]["verifiche"]
+    assert len(checklist["items"]) == 8
+    assert checklist["total"] == 8
+    assert checklist["open_count"] == 8
+    assert checklist["completed_count"] == 0
+    assert model["readiness"]["professional_checks_open"] == 8

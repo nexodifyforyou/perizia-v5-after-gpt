@@ -1,0 +1,60 @@
+{
+  "schema_version": "cv2.customer_report.v1",
+  "analysis_id": "analysis_fixture_mantova",
+  "job_id": "cv2_fixture_mantova",
+  "report_status": "REPORT_READY",
+  "case_identity": {"tribunale": "Tribunale di Mantova", "procedura_rge": "233/2024", "lotto": "Lotto Unico", "address": "San Giorgio Bigarello (MN), Via Martiri di Belfiore n. 9", "property_type": "Appartamento, magazzino/rustico e garage/autorimessa", "ownership_right": "Proprietà 1/1", "evidence_pages": [1]},
+  "lot_structure": {"lot_count": 1, "selected_lot": "unico", "bene_count": 3},
+  "beni_sections": [
+    {"bene_id": "1", "title": "Bene 1 - Appartamento", "property_type": "Appartamento", "evidence_pages": [25]},
+    {"bene_id": "2", "title": "Bene 2 - Magazzino/rustico", "property_type": "Magazzino/rustico", "evidence_pages": [25]},
+    {"bene_id": "3", "title": "Bene 3 - Garage", "property_type": "Garage/autorimessa", "evidence_pages": [26]}
+  ],
+  "money_sections": {
+    "valuation_chain": [
+      {"label": "Valore di mercato", "amount": 125280, "kind": "value", "evidence_pages": [26]},
+      {"label": "Deprezzamento complessivo implicito", "amount": 45280, "kind": "deduction", "evidence_pages": [26]},
+      {"label": "Valore nello stato di fatto", "amount": 80000, "kind": "value", "evidence_pages": [26]}
+    ],
+    "auction_terms": [{"label": "Prezzo base d'asta", "amount": 80000, "kind": "auction_term", "evidence_pages": [28]}],
+    "buyer_side_costs": [], "procedure_cancelled_formalities": [], "market_comparatives": [], "context_values": [],
+    "uncertain_money": [
+      {"label": "Valore di stima Bene N° 1 - Appartamento", "amount": 92700, "evidence_pages": [25]},
+      {"label": "Valore di stima Bene N° 2 - Magazzino", "amount": 26100, "evidence_pages": [25]},
+      {"label": "Valore di stima Bene N° 3 - Garage", "amount": 6480, "evidence_pages": [25, 26]}
+    ]
+  },
+  "occupancy_section": {"status": "Occupato dal nucleo famigliare del soggetto esecutato", "status_label": "Occupato dal nucleo famigliare del soggetto esecutato", "risks": ["La perizia non indica contratti di locazione"], "evidence_pages": [16]},
+  "compliance_section": [
+    {"area": "Completezza documentazione ex art. 567 c.p.c.", "classification": "uncertain", "notes": "Dichiarata completa dalla perizia", "evidence_pages": [6]},
+    {"area": "Titolarità e diritti posti in vendita", "classification": "uncertain", "notes": "Proprietà 1/1 dichiarata dalla perizia", "evidence_pages": [7]},
+    {"area": "Continuità delle trascrizioni", "classification": "uncertain", "notes": "Continuità delle trascrizioni dichiarata dalla perizia", "evidence_pages": [18]},
+    {"area": "Conformità catastale / DOCFA", "classification": "uncertain", "notes": "Difformità rilevate; aggiornamenti DOCFA predisposti dal perito. Verificare l’avvenuta registrazione e la situazione catastale definitiva.", "evidence_pages": [22]},
+    {"area": "Regolarità edilizia", "classification": "regularizable", "notes": "Difformità sanabili o ripristinabili secondo il perito; modalità, ammissibilità e costo definitivo da confermare con il Comune", "evidence_pages": [23]},
+    {"area": "Agibilità", "classification": "regularizable", "notes": "Bene 1 e Bene 2 agibili; Bene 3 non risulta agibile", "evidence_pages": [23]},
+    {"area": "Dichiarazioni di conformità impianti", "classification": "non_conforming", "notes": "Assenza della dichiarazione di conformità per alcuni impianti", "evidence_pages": [24]},
+    {"area": "Certificazione energetica APE", "classification": "non_conforming", "notes": "APE non disponibile", "evidence_pages": [23]},
+    {"area": "Edilizia residenziale pubblica convenzionata/agevolata", "classification": "uncertain", "notes": "Non risultano vincoli ancora vigenti", "evidence_pages": [5]},
+    {"area": "Destinazione urbanistica PGT", "classification": "uncertain", "notes": "Classificazione AREC 2 in area di attenzione archeologica", "evidence_pages": [28]}
+  ],
+  "risk_sections": [{"section_id": "rischi", "items": [
+    {"area": "Accesso al magazzino/rustico", "summary": "Accesso attraverso autorimessa di altra proprietà non compresa nella procedura", "evidence_pages": [14]},
+    {"area": "Stato manutentivo", "summary": "Magazzino in condizioni mediocri con copertura danneggiata", "evidence_pages": [14]}
+  ]}],
+  "formalities_section": [
+    {"type": "ipoteca", "type_label": "Ipoteca", "description": "Formalità da cancellare con il decreto di trasferimento", "cancelled_by_procedure": true, "buyer_burden": false, "amount": 165000, "evidence_pages": [31]},
+    {"type": "pignoramento", "type_label": "Pignoramento", "description": "Formalità da cancellare con il decreto di trasferimento", "cancelled_by_procedure": true, "buyer_burden": false, "evidence_pages": [31]}
+  ],
+  "buyer_checklist": [],
+  "customer_evidence_index": [
+    {"page": 6, "topic": "Completezza documentazione ex art. 567 c.p.c.", "report_section": "Conformità", "perizia_excerpt": "La documentazione di cui all'art. 567 c.p.c. risulta completa.", "coverage_status": "covered"},
+    {"page": 22, "topic": "Conformità catastale / DOCFA", "report_section": "Conformità", "perizia_excerpt": "Sono state predisposte dal perito nuove planimetrie DOCFA per aggiornare gli identificativi catastali; l’avvenuta registrazione non è attestata dalla perizia.", "coverage_status": "covered"},
+    {"page": 23, "topic": "Certificazione energetica APE", "report_section": "Conformità", "perizia_excerpt": "Non esiste il certificato energetico dell'immobile / APE.", "coverage_status": "covered"},
+    {"page": 25, "topic": "Valore di stima Bene N° 1 - Appartamento", "report_section": "Valori", "perizia_excerpt": "Bene N° 1 - Appartamento. Valore di stima del bene: € 92.700,00", "coverage_status": "covered"},
+    {"page": 25, "topic": "Valore di stima Bene N° 2 - Magazzino", "report_section": "Valori", "perizia_excerpt": "Bene N° 2 - Magazzino. Valore di stima del bene: € 26.100,00", "coverage_status": "covered"},
+    {"page": 25, "topic": "Valore di stima Bene N° 3 - Garage", "report_section": "Valori", "perizia_excerpt": "Bene N° 2 - Magazzino. Valore di stima del bene: € 26.100,00", "coverage_status": "covered"},
+    {"page": 26, "topic": "Valore di stima Bene N° 3 - Garage", "report_section": "Valori", "perizia_excerpt": "Bene N° 3 - Garage. Valore di stima del bene: € 6.480,00", "coverage_status": "covered"},
+    {"page": 26, "topic": "Valore finale di stima", "report_section": "Valori", "perizia_excerpt": "Rischio mancata garanzia 10% Stato d'uso e manutenzione 10% Oneri di regolarizzazione 15% Valore finale di stima: € 80.000,00", "coverage_status": "covered"},
+    {"page": 28, "topic": "Destinazione urbanistica PGT", "report_section": "Conformità", "perizia_excerpt": "Destinazione urbanistica: AREC 2, area di attenzione archeologica.", "coverage_status": "covered"}
+  ]
+}

@@ -1,10 +1,20 @@
 import asyncio
+import json
+from pathlib import Path
 
 import httpx
 from fastapi import FastAPI
 import pytest
 
 from correctness_v2 import api, artifacts
+
+
+_MANTOVA_REPORT_FIXTURE = (
+    Path(__file__).parent / "fixtures" / "mantova_customer_report_sanitized.json"
+)
+_MANTOVA_PAGES_FIXTURE = (
+    Path(__file__).parent / "fixtures" / "mantova_cached_pages_sanitized.json"
+)
 
 
 @pytest.fixture()
@@ -60,6 +70,13 @@ def test_customer_view_returns_sanitized_report_without_admin_fields(customer_ap
             "quality_control": {"rows": [{"pagina": 1}], "coverage_status": "PASS"},
             "admin_evidence_index": [{"page": 1, "raw_keys": "money[0]"}],
             "evidence_index": [{"page": 1, "referenced_by": ["money[0]"]}],
+            "customer_evidence_index": [
+                {
+                    "page": 25,
+                    "topic": "Valore Bene 3",
+                    "perizia_excerpt": "Valore Bene 2 EUR 26.100,00",
+                }
+            ],
         },
     )
 
@@ -80,8 +97,171 @@ def test_customer_view_returns_sanitized_report_without_admin_fields(customer_ap
     assert "quality_control" not in report
     assert "admin_evidence_index" not in report
     assert "evidence_index" not in report
+    assert "customer_evidence_index" not in report
     assert "market_comparatives" not in report["money_sections"]
     assert "EUR 999,00" not in body
+    assert "Valore Bene 2 EUR 26.100,00" not in body
+
+
+def test_cached_mantova_route_repairs_legacy_evidence_without_writes(
+    customer_app, artifacts_root, monkeypatch
+):
+    """The GET repairs the old cached shape from existing text, read-only.
+
+    The legacy report deliberately retains only the incorrect Bene 3 evidence
+    row (Bene 2 / EUR 26,100).  The decisive Bene 3 / EUR 6,480 span exists only
+    in the already-cached input page, matching the production compatibility
+    path without requiring report regeneration.
+    """
+    analysis_id = "analysis_cached_mantova_fixture"
+    job_id = "cv2_cached_mantova_fixture"
+    report = json.loads(_MANTOVA_REPORT_FIXTURE.read_text(encoding="utf-8"))
+    report["analysis_id"] = analysis_id
+    report["job_id"] = job_id
+    report["customer_evidence_index"] = [
+        row
+        for row in report["customer_evidence_index"]
+        if not (
+            row.get("topic") == "Valore di stima Bene N° 3 - Garage"
+            and row.get("page") == 26
+        )
+    ]
+    _save(job_id, analysis_id, report)
+    cached_pages = json.loads(_MANTOVA_PAGES_FIXTURE.read_text(encoding="utf-8"))
+    artifacts.save_input_pages(job_id, cached_pages)
+
+    async def _no_confirmations(*_args, **_kwargs):
+        return []
+
+    def _forbidden(*_args, **_kwargs):
+        raise AssertionError("cached customer-view GET attempted a write or job")
+
+    monkeypatch.setattr(api, "_confirmations_for", _no_confirmations)
+    monkeypatch.setattr(api, "autostart_job", _forbidden)
+    monkeypatch.setattr(api, "start_job", _forbidden)
+
+    job_path = artifacts.job_dir(job_id)
+    before = {
+        path.name: (path.read_bytes(), path.stat().st_mtime_ns)
+        for path in job_path.iterdir()
+        if path.is_file()
+    }
+    # Apply write sentinels only after arranging the isolated cached fixture.
+    monkeypatch.setattr(artifacts, "save_json", _forbidden)
+    monkeypatch.setattr(artifacts, "_write_json", _forbidden)
+
+    response = _sync_get(
+        customer_app,
+        f"/api/analysis/perizia/{analysis_id}/correctness-v2/customer-view/latest",
+    )
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["available"] is True
+    model = data["report"]["decision_model"]
+    components = model["sections"]["numeri"]["composizione_valore"]["items"]
+    assert "6.480,00" in components[2]["evidence"]["excerpt"]
+    assert "26.100,00" not in components[2]["evidence"]["excerpt"]
+    assert model["sections"]["verifiche"]["items"][0]["title"] == (
+        "Verificare il titolo di accesso al magazzino/rustico"
+    )
+    assert model["sections"]["numeri"]["riconciliazione"]["difference"] == 1432
+    assert all(
+        row["cancellation_state"] == "to_be_cancelled"
+        for row in model["sections"]["formalita"]["cancellate"]
+    )
+    assert "schema non prevede" not in response.text.lower()
+    assert "_cached_input_pages" not in response.text
+    assert "customer_evidence_index" not in data["report"]
+
+    after = {
+        path.name: (path.read_bytes(), path.stat().st_mtime_ns)
+        for path in job_path.iterdir()
+        if path.is_file()
+    }
+    assert after == before
+
+
+@pytest.mark.parametrize(
+    "mismatch",
+    ("report_job", "report_analysis", "status_job"),
+)
+def test_customer_view_fails_closed_on_cached_artifact_identity_mismatch(
+    customer_app, artifacts_root, mismatch
+):
+    analysis_id = f"analysis_identity_{mismatch}"
+    actual_job_id = f"cv2_identity_{mismatch}"
+    report = {
+        "schema_version": "cv2.customer_report.v1",
+        "analysis_id": analysis_id,
+        "job_id": actual_job_id,
+        "report_status": "REPORT_READY",
+        "title": "Report cache",
+    }
+    if mismatch == "report_job":
+        report["job_id"] = "cv2_other_directory"
+    elif mismatch == "report_analysis":
+        report["analysis_id"] = "analysis_other_owner"
+    _save(actual_job_id, analysis_id, report)
+    if mismatch == "status_job":
+        artifacts.save_job_status(
+            actual_job_id,
+            {
+                "job_id": "cv2_other_directory",
+                "analysis_id": analysis_id,
+                "status": "REPORT_READY",
+                "safe_to_show_customer": True,
+                "artifacts_saved": {},
+            },
+        )
+
+    response = _sync_get(
+        customer_app,
+        f"/api/analysis/perizia/{analysis_id}/correctness-v2/customer-view/latest",
+    )
+
+    assert response.status_code == 200
+    assert response.json()["available"] is False
+
+
+def test_cached_pages_are_read_from_enumerated_job_not_report_field(
+    customer_app, artifacts_root, monkeypatch
+):
+    """A legacy report without an embedded job id stays bound to its directory."""
+    analysis_id = "analysis_enumerated_cache_binding"
+    actual_job_id = "cv2_enumerated_cache_binding"
+    report = {
+        "schema_version": "cv2.customer_report.v1",
+        "analysis_id": analysis_id,
+        # Legacy cache deliberately has no report['job_id'].
+        "report_status": "REPORT_READY",
+        "title": "Report cache legacy",
+    }
+    _save(actual_job_id, analysis_id, report)
+    artifacts.save_input_pages(actual_job_id, [{"page": 1, "text": "testo cache"}])
+
+    calls = []
+    original_read_json = artifacts.read_json
+
+    def _record_read(job_id, filename):
+        calls.append((job_id, filename))
+        return original_read_json(job_id, filename)
+
+    monkeypatch.setattr(artifacts, "read_json", _record_read)
+
+    response = _sync_get(
+        customer_app,
+        f"/api/analysis/perizia/{analysis_id}/correctness-v2/customer-view/latest",
+    )
+
+    assert response.status_code == 200
+    assert response.json()["available"] is True
+    assert (actual_job_id, artifacts.INPUT_PAGES_FILE) in calls
+    assert all(
+        job_id == actual_job_id
+        for job_id, filename in calls
+        if filename == artifacts.INPUT_PAGES_FILE
+    )
 
 
 def test_customer_view_unavailable_when_no_safe_report(customer_app, artifacts_root):

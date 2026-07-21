@@ -94,20 +94,31 @@ const AcquistoSection = ({ acquisto }) => {
         {acquisto.occupazione_sintesi && <IdentityRow label="Occupazione" value={acquisto.occupazione_sintesi} />}
         <Pages pages={id.pagine} />
       </div>
+
       {Array.isArray(acquisto.beni) && acquisto.beni.length > 0 && (
         <div className="space-y-2" data-testid="cv2-beni">
           {acquisto.beni.map((b, i) => (
-            <div key={`${b.titolo}-${i}`} className="rounded-lg border border-zinc-800 bg-zinc-950/50 p-3">
-              <p className="text-sm font-medium text-zinc-100">{b.titolo}</p>
-              {Array.isArray(b.pertinenze) && b.pertinenze.length > 0 && (
-                <ul className="mt-1.5 space-y-1">
-                  {b.pertinenze.map((p, j) => (
-                    <li key={`${p.label}-${j}`} className="text-xs text-zinc-400">• {p.label}{p.nota ? ` — ${p.nota}` : ''}</li>
-                  ))}
-                </ul>
-              )}
-              <Pages pages={b.pagine} />
-            </div>
+            <details
+              key={`${b.titolo}-${i}`}
+              data-testid={`cv2-bene-${i + 1}`}
+              className="rounded-lg border border-zinc-800 bg-zinc-950/50"
+            >
+              <summary className="cursor-pointer select-none p-3 text-sm font-medium text-zinc-100">
+                {b.titolo}
+              </summary>
+              <div className="border-t border-zinc-800 px-3 pb-3 pt-2">
+                <IdentityRow label="Tipologia" value={b.tipologia} />
+                <IdentityRow label="Indirizzo" value={b.indirizzo} />
+                {Array.isArray(b.pertinenze) && b.pertinenze.length > 0 && (
+                  <ul className="mt-1.5 space-y-1">
+                    {b.pertinenze.map((p, j) => (
+                      <li key={`${p.label}-${j}`} className="text-xs text-zinc-400">• {p.label}{p.nota ? ` — ${p.nota}` : ''}</li>
+                    ))}
+                  </ul>
+                )}
+                <Pages pages={b.pagine} />
+              </div>
+            </details>
           ))}
         </div>
       )}
@@ -136,6 +147,26 @@ const NumeriPrincipali = ({ numeri, moneyFindings, confirmSlot }) => {
           </div>
         ))}
       </div>
+
+      {numeri.composizione_valore && (
+        <div className="rounded-lg border border-zinc-800 bg-zinc-950/50 p-3" data-testid="cv2-value-composition">
+          <p className="text-xs uppercase tracking-wide text-zinc-500">{numeri.composizione_valore.title}</p>
+          {(numeri.composizione_valore.items || []).map((item, i) => (
+            <div key={`${item.label}-${i}`} className="mt-1.5 text-sm">
+              <div className="flex items-center justify-between gap-3">
+                <span className="text-zinc-300">{item.label}</span><span className="tabular-nums text-zinc-100">{item.amount_display}</span>
+              </div>
+              {item.evidence?.excerpt
+                ? <p className="mt-1 text-xs italic text-zinc-500">{item.evidence.excerpt}</p>
+                : item.evidence?.note && <p className="mt-1 text-xs text-zinc-500">{item.evidence.note}</p>}
+              <Pages page={item.evidence?.page} pages={item.pages} />
+            </div>
+          ))}
+          <div className="mt-2 flex items-center justify-between border-t border-zinc-800 pt-2 text-sm font-medium">
+            <span className="text-zinc-200">Totale</span><span className="tabular-nums text-zinc-100">{numeri.composizione_valore.total_display}</span>
+          </div>
+        </div>
+      )}
 
       {Array.isArray(numeri.costi_potenziali) && numeri.costi_potenziali.length > 0 && (
         <div className="space-y-2" data-testid="cv2-costi">
@@ -285,7 +316,28 @@ const VerificheSection = ({ verifiche }) => {
 };
 
 // --- §6 Conformità ----------------------------------------------------------
-const CONFORMITY_TONE = { conforme: 'verde', regolarizzabile: 'ambra', non_conforme: 'ambra', non_verificato: 'slate', confermato_utente: 'verde', verifica_tecnica_richiesta: 'ambra' };
+const CONFORMITY_TONE = {
+  conforme: 'verde',
+  dichiarato_perizia: 'verde',
+  regolarizzabile: 'ambra',
+  non_conforme: 'ambra',
+  da_verificare: 'ambra',
+  verifica_tecnica_richiesta: 'ambra',
+  conferma_necessaria: 'ambra',
+  confermato_utente: 'verde',
+  completato: 'verde',
+  da_chiarire: 'slate',
+  non_dichiarato: 'slate',
+  non_determinabile: 'slate',
+  non_verificato: 'slate',
+};
+const SAFE_FINDING_TONES = new Set(['verde', 'ambra', 'blu', 'oro', 'slate', 'rosso']);
+
+const conformityTone = (finding) => (
+  SAFE_FINDING_TONES.has(finding?.tone)
+    ? finding.tone
+    : CONFORMITY_TONE[finding?.status] || 'slate'
+);
 
 const ConformitaSection = ({ conformita, findingsById, confirmSlot }) => {
   if (!conformita || !Array.isArray(conformita.groups) || !conformita.groups.length) return null;
@@ -301,7 +353,7 @@ const ConformitaSection = ({ conformita, findingsById, confirmSlot }) => {
                 <div key={fid} className="rounded-lg border border-zinc-800 bg-zinc-950/70 p-3">
                   <div className="flex items-start justify-between gap-3">
                     <p className="text-sm font-medium text-zinc-100">{f.title}</p>
-                    <StatusChip tone={CONFORMITY_TONE[f.status] || 'slate'}>{f.status_label}</StatusChip>
+                    <StatusChip tone={conformityTone(f)}>{f.status_label}</StatusChip>
                   </div>
                   {f.customer_summary && <p className="mt-1 text-xs leading-5 text-zinc-400">{f.customer_summary}</p>}
                   <div className="mt-1.5 flex flex-wrap gap-x-4 gap-y-1 text-xs text-zinc-500">
@@ -313,6 +365,9 @@ const ConformitaSection = ({ conformita, findingsById, confirmSlot }) => {
                       <Quote className="mt-0.5 h-3 w-3 shrink-0 text-zinc-600" />
                       <p className="text-xs italic text-zinc-400">{f.evidence.excerpt}</p>
                     </div>
+                  )}
+                  {!f.evidence?.excerpt && f.evidence?.note && (
+                    <p className="mt-2 text-xs text-zinc-500">{f.evidence.note}</p>
                   )}
                   <Pages page={f.page} pages={f.pages} />
                   <div className="mt-2">{confirmSlot(f)}</div>
@@ -331,7 +386,7 @@ const FormalitaCard = ({ card, tone }) => (
   <div className="rounded-lg border border-zinc-800 bg-zinc-950/70 p-3">
     <div className="flex items-center justify-between gap-3">
       <p className="text-sm font-medium text-zinc-100">{card.type_label}</p>
-      {tone && <StatusChip tone={tone}>{tone === 'verde' ? 'Cancellata dalla procedura' : 'Da verificare'}</StatusChip>}
+      {tone && <StatusChip tone={tone}>{tone === 'verde' ? (card.cancellation_state === 'already_cancelled' ? 'Già cancellata' : 'Da cancellare a cura della procedura') : 'Da verificare'}</StatusChip>}
     </div>
     {card.statement && <p className="mt-1 text-xs text-zinc-300">{card.statement}</p>}
     {card.note && <p className="mt-1 text-xs text-zinc-500">{card.note}</p>}
@@ -394,7 +449,7 @@ const FontiDecisiveSection = ({ fonti }) => {
                 <p className="text-xs italic leading-5 text-zinc-400">{s.excerpt}</p>
               </div>
             ) : (
-              <p className="mt-1 text-xs text-zinc-500">Estratto da verificare.</p>
+              <p className="mt-1 text-xs text-zinc-500">Estratto decisivo non disponibile</p>
             )}
           </li>
         ))}
@@ -448,12 +503,13 @@ const StatoVerificheSection = ({ stato }) => {
     <SectionShell icon={CheckCircle2} title="Stato delle verifiche" testId="cv2-stato-verifiche">
       <div className="flex flex-wrap items-center gap-3 rounded-lg border border-zinc-800 bg-zinc-950/70 p-4">
         <StatusChip tone="slate">{stato.label}</StatusChip>
-        <span className="text-sm text-zinc-400">
-          {stato.confirmations_done} verifiche completate
-          {stato.confirmations_total > stato.confirmations_done
-            ? ` · ${stato.confirmations_total - stato.confirmations_done} ancora aperte`
-            : ''}
-        </span>
+        <div className="space-y-1 text-sm text-zinc-400">
+          <p>Conferme richieste: {stato.confirmations_open ?? Math.max(0, stato.confirmations_total - stato.confirmations_done)}</p>
+          <p>Verifiche professionali aperte: {stato.professional_checks_open || 0}</p>
+          <p>Informazioni dichiarate dalla perizia: {stato.information_declared || 0}</p>
+          <p>Informazioni confermate: {stato.information_confirmed || 0}</p>
+          <p>Informazioni risolte: {stato.information_resolved || 0}</p>
+        </div>
       </div>
     </SectionShell>
   );

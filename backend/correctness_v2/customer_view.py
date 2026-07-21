@@ -81,6 +81,71 @@ _DECISION_LABELS = {
     _DECISION_NON_LEGGIBILE: "Non leggibile",
 }
 
+# Old cached reports may contain validator diagnostics appended to otherwise
+# source-backed customer text.  These markers describe an internal
+# classification downgrade, not a fact from the appraisal.  Match only the
+# validator's known enum vocabulary so ordinary source phrases such as
+# "area classificata 'AREC 2'" remain untouched.
+_INTERNAL_DIAGNOSTIC_MARKER_RE = re.compile(
+    r"""
+    (?:
+        \bdeclassat[aoei]\s+a\s+['\"]?
+        (?:uncertain|conforming|non_conforming|regularizable|not_regularizable)
+        |
+        (?:\bconformit[aà]\s+['\"][^'\"]+['\"]\s*:\s*)?
+        \bclassificat[aoei]\s+['\"]
+        (?:uncertain|conforming|non_conforming|regularizable|not_regularizable)
+        ['\"]
+        |
+        \bstato\s+impostato\s+a\s+['\"]
+        (?:uncertain|conforming|non_conforming|regularizable|not_regularizable)
+        ['\"]
+        |
+        \brichiesta\s+verifica\s+manuale\b
+    )
+    """,
+    re.IGNORECASE | re.VERBOSE,
+)
+
+# Customer prose must never explain limitations of our implementation.  Match
+# limitation language, not ordinary appraisal vocabulary such as "schema
+# catastale" or an urban classification code.  The regex also covers the
+# explicit English implementation tokens found in some legacy cached rows.
+_INTERNAL_LIMITATION_MARKER_RE = re.compile(
+    r"""
+    (?:
+        \b(?:lo\s+|il\s+|quest[oa]\s+)?schema\s+(?:intern[oa]\s+)?
+        (?:non\s+(?:preved\w*|support\w*|consent\w*)|limit\w*)
+        |
+        \b(?:il\s+)?modello\s+dati\s+non\s+
+        (?:preved\w*|support\w*|consent\w*|rappresent\w*)
+        |
+        \b(?:il\s+)?formato\s+interno\s+non\s+
+        (?:
+            rappresent\w*
+            |
+            (?:preved\w*|support\w*|consent\w*)
+            (?=[^.]{0,100}\b(?:
+                camp\w*\s+(?:separat\w*|dedicat\w*)|attribut\w*|dato|dati|
+                struttur\w*\s+dati|voce\s+distint\w*|sezione\s+dedicat\w*
+            )\b)
+        )
+        |
+        \b(?:limit\w*|vincol\w*)\s+(?:intern\w*\s+)?
+        (?:(?:del|dello|della|di)\s+)?
+        (?:schema|parser|backend(?:[-_\s]?field)?|database(?:[-_\s]?field)?)\b
+        |
+        \b(?:il\s+|lo\s+|un\s+|una\s+)?
+        (?:parser|backend(?:[-_\s]?field)?|database(?:[-_\s]?field)?)\b
+        |
+        \b(?:campo|modello)\s+intern[oa]\b
+        |
+        \bnormalizzazion\w*\s+(?:intern\w*|implementativ\w*)\b
+    )
+    """,
+    re.IGNORECASE | re.VERBOSE,
+)
+
 
 def _norm(text: Any) -> str:
     stripped = "".join(
@@ -280,7 +345,19 @@ def _customer_money_sections(money: Any) -> Dict[str, List[Dict[str, Any]]]:
     out: Dict[str, List[Dict[str, Any]]] = {}
     for key in _CUSTOMER_MONEY_KEYS:
         rows = money.get(key)
-        out[key] = list(rows) if isinstance(rows, list) else []
+        clean_rows = list(rows) if isinstance(rows, list) else []
+        if key == "uncertain_money":
+            # Explicit per-Bene appraisal values belong to the decision model's
+            # composition section, not the legacy "uncertain" bucket whose old
+            # reason exposed an internal schema limitation.
+            clean_rows = [
+                row for row in clean_rows
+                if not (
+                    isinstance(row, dict)
+                    and "valore di stima bene" in _norm(row.get("label"))
+                )
+            ]
+        out[key] = clean_rows
     return out
 
 
@@ -334,6 +411,63 @@ def _customer_money_confirmation(mc: Any) -> Dict[str, Any]:
     return {"message": mc.get("message"), "ambiguities": ambiguities}
 
 
+def _strip_internal_customer_text(value: str) -> str:
+    """Retain source prose before an internal diagnostic/limitation suffix."""
+    markers = [
+        marker
+        for marker in (
+            _INTERNAL_DIAGNOSTIC_MARKER_RE.search(value),
+            _INTERNAL_LIMITATION_MARKER_RE.search(value),
+        )
+        if marker is not None
+    ]
+    if not markers:
+        return value
+    marker = min(markers, key=lambda match: match.start())
+    return value[: marker.start()].rstrip(" \t\r\n;,:\u2013\u2014-")
+
+
+def _customer_content(value: Any) -> Any:
+    """Deep-copy customer content while removing old validator diagnostics.
+
+    Some reports created before the customer projection was hardened appended
+    an internal downgrade explanation to a valid source-backed sentence.  The
+    customer should see the sentence from the appraisal, never the validator's
+    enum or manual-review explanation.  Truncating at the first diagnostic
+    marker is intentionally fail-closed because the validator always appends
+    that material as a suffix.
+    """
+    if isinstance(value, str):
+        return _strip_internal_customer_text(value)
+    if isinstance(value, dict):
+        # Raw English classifier enums are an implementation detail. Customer
+        # cards already carry an Italian status_label and the read-time decision
+        # model derives its status from the unprojected report before this copy.
+        return {
+            key: _customer_content(item)
+            for key, item in value.items()
+            if key != "classification"
+        }
+    if isinstance(value, list):
+        return [_customer_content(item) for item in value]
+    if isinstance(value, tuple):
+        return [_customer_content(item) for item in value]
+    return value
+
+
+def _customer_text_content(value: Any) -> Any:
+    """Recursively scrub implementation prose while preserving field shape."""
+    if isinstance(value, str):
+        return _strip_internal_customer_text(value)
+    if isinstance(value, dict):
+        return {key: _customer_text_content(item) for key, item in value.items()}
+    if isinstance(value, list):
+        return [_customer_text_content(item) for item in value]
+    if isinstance(value, tuple):
+        return [_customer_text_content(item) for item in value]
+    return value
+
+
 def is_customer_safe(report: Optional[Dict[str, Any]], job: Optional[Dict[str, Any]] = None) -> bool:
     """A report is customer-safe only if its status is REPORT_READY /
     LOT_SELECTION_REQUIRED and the job (when supplied) flags it safe."""
@@ -353,6 +487,7 @@ def sanitize_customer_report(
     report: Dict[str, Any],
     job: Optional[Dict[str, Any]] = None,
     confirmations: Sequence[Dict[str, Any]] = (),
+    cached_pages: Sequence[Dict[str, Any]] = (),
 ) -> Dict[str, Any]:
     """Return the customer-safe projection of a full ``customer_report`` dict.
 
@@ -363,6 +498,10 @@ def sanitize_customer_report(
     input dict is never mutated.
     """
     report = report if isinstance(report, dict) else {}
+    if cached_pages:
+        # Ephemeral read-time evidence only.  Raw cached pages are never copied
+        # to the customer projection or persisted back into the artifact.
+        report = {**report, "_cached_input_pages": list(cached_pages)}
     decision = derive_decision(report)
 
     status = str(report.get("report_status") or "")
@@ -372,22 +511,26 @@ def sanitize_customer_report(
         "job_id": report.get("job_id"),
         "report_status": status,
         "report_status_label": _STATUS_LABELS.get(status, "Report"),
-        "title": report.get("title"),
-        "subtitle": report.get("subtitle"),
-        "decision": decision,
-        "case_identity": dict(report.get("case_identity") or {}),
+        "title": _customer_content(report.get("title")),
+        "subtitle": _customer_content(report.get("subtitle")),
+        "decision": _customer_text_content(decision),
+        "case_identity": _customer_content(report.get("case_identity") or {}),
         "lot_structure": _customer_lot_structure(report.get("lot_structure")),
-        "executive_summary": list(report.get("executive_summary") or []),
-        "key_facts": list(report.get("key_facts") or []),
-        "risk_sections": list(report.get("risk_sections") or []),
-        "money_sections": _customer_money_sections(report.get("money_sections")),
-        "beni_sections": list(report.get("beni_sections") or []),
-        "occupancy_section": dict(report.get("occupancy_section") or {}),
-        "compliance_section": list(report.get("compliance_section") or []),
-        "formalities_section": list(report.get("formalities_section") or []),
-        "buyer_checklist": list(report.get("buyer_checklist") or []),
-        "customer_evidence_index": list(report.get("customer_evidence_index") or []),
-        "disclaimer": report.get("disclaimer"),
+        "executive_summary": _customer_content(report.get("executive_summary") or []),
+        "key_facts": _customer_content(report.get("key_facts") or []),
+        "risk_sections": _customer_content(report.get("risk_sections") or []),
+        "money_sections": _customer_content(
+            _customer_money_sections(report.get("money_sections"))
+        ),
+        "beni_sections": _customer_content(report.get("beni_sections") or []),
+        "occupancy_section": _customer_content(report.get("occupancy_section") or {}),
+        "compliance_section": _customer_content(report.get("compliance_section") or []),
+        "formalities_section": _customer_content(report.get("formalities_section") or []),
+        "buyer_checklist": _customer_content(report.get("buyer_checklist") or []),
+        # The legacy evidence index is unvalidated and can contain a conclusion-
+        # evidence mismatch.  Only decision_model.sections.fonti, built by the
+        # fail-closed evidence validator, is customer-visible.
+        "disclaimer": _customer_content(report.get("disclaimer")),
     }
 
     # Read-time customer decision model (§C). Built from the FULL stored report
@@ -402,6 +545,10 @@ def sanitize_customer_report(
         out["money_confirmation"] = _customer_money_confirmation(
             report.get("money_confirmation")
         )
+
+    # Covers derived/optional sections too (notably uncertain-money reasons in
+    # the decision model) without altering their contract shape.
+    out = _customer_text_content(out)
 
     # Defense in depth: guarantee no admin-only key ever slips through, even if
     # the projection above is extended incautiously later.

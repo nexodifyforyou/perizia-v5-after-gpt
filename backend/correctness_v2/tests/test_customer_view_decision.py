@@ -30,16 +30,17 @@ def _full_report(status="REPORT_READY"):
     }
 
 
-# 27. sanitize attaches decision_model; the legacy customer key set is unchanged
-def test_sanitize_attaches_decision_model_and_keeps_legacy_keys():
+# 27. sanitize attaches decision_model; unvalidated legacy evidence is removed
+def test_sanitize_attaches_decision_model_and_keeps_customer_sections():
     report = _full_report()
     out = customer_view.sanitize_customer_report(report, {"safe_to_show_customer": True})
     assert out["decision_model"]["schema_version"] == "cv2.customer_decision.v1"
-    # Every legacy customer key still present (additive change).
+    # Presentable legacy sections remain; raw legacy evidence does not.
     for key in ("decision", "case_identity", "money_sections", "beni_sections",
                 "occupancy_section", "compliance_section", "formalities_section",
-                "buyer_checklist", "customer_evidence_index", "risk_sections", "key_facts"):
+                "buyer_checklist", "risk_sections", "key_facts"):
         assert key in out
+    assert "customer_evidence_index" not in out
 
 
 # 28. non-ready statuses attach only esito + readiness (no findings), flow unchanged

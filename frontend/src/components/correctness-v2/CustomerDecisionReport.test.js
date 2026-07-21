@@ -138,6 +138,28 @@ test('identity rendered once', () => {
   unmount();
 });
 
+test('every Bene is an expandable disclosure panel', () => {
+  const m = model();
+  m.sections.acquisto.beni = [
+    { titolo: 'Bene 1', tipologia: 'Appartamento', pagine: [10] },
+    { titolo: 'Bene 2', tipologia: 'Magazzino', pagine: [11] },
+    { titolo: 'Bene 3', tipologia: 'Garage', pagine: [12] },
+  ];
+  const { container, unmount } = mount(<CustomerDecisionReport report={report(m)} />);
+  const panels = qa(container, '[data-testid^="cv2-bene-"]');
+  expect(panels).toHaveLength(3);
+  panels.forEach((panel) => {
+    expect(panel.tagName).toBe('DETAILS');
+    expect(panel.open).toBe(false);
+    act(() => { panel.querySelector('summary').click(); });
+    expect(panel.open).toBe(true);
+  });
+  expect(container.textContent).toContain('Appartamento');
+  expect(container.textContent).toContain('Magazzino');
+  expect(container.textContent).toContain('Garage');
+  unmount();
+});
+
 // 5. money chain rendered once with a single gold terminal
 test('money chain rendered once with terminal', () => {
   const { container, unmount } = mount(<CustomerDecisionReport report={report(model())} />);
@@ -175,6 +197,37 @@ test('conformity status chips use semantic tones', () => {
   const ambers = qa(conf, '.text-amber-200');
   expect(greens.length).toBeGreaterThan(0);
   expect(ambers.length).toBeGreaterThan(0);
+  unmount();
+});
+
+test('conformity status chips cover declared, open, and indeterminate findings', () => {
+  const m = model();
+  m.sections.conformita = {
+    groups: [{ group: 'Stati', items: ['declared', 'open', 'unknown', 'backend-tone', 'unsafe-tone'] }],
+  };
+  m.findings = [
+    { finding_id: 'declared', section: 'conformita', title: 'Titolarità', status: 'dichiarato_perizia', status_label: 'Dichiarato dalla perizia' },
+    { finding_id: 'open', section: 'conformita', title: 'Impianti', status: 'da_verificare', status_label: 'Da verificare' },
+    { finding_id: 'unknown', section: 'conformita', title: 'Dato', status: 'non_determinabile', status_label: 'Non determinabile dalla sola perizia' },
+    { finding_id: 'backend-tone', section: 'conformita', title: 'Informazione', status: 'nuovo_stato', status_label: 'Informazione dichiarata', tone: 'blu' },
+    { finding_id: 'unsafe-tone', section: 'conformita', title: 'Stato sconosciuto', status: 'nuovo_stato', status_label: 'Stato sconosciuto', tone: 'javascript:alert(1)' },
+  ];
+
+  const { container, unmount } = mount(<CustomerDecisionReport report={report(m)} />);
+  const cards = qa(container, '[data-testid="cv2-conformita"] .rounded-lg');
+  expect(q(cards[0], '.text-emerald-200')).not.toBeNull();
+  expect(q(cards[1], '.text-amber-200')).not.toBeNull();
+  expect(q(cards[2], '.text-zinc-300')).not.toBeNull();
+  expect(q(cards[3], '.text-sky-200')).not.toBeNull();
+  expect(q(cards[4], '.text-zinc-300')).not.toBeNull();
+  unmount();
+});
+
+test('missing decisive source uses the fail-closed customer wording', () => {
+  const { container, unmount } = mount(<CustomerDecisionReport report={report(model())} />);
+  const sources = q(container, '[data-testid="cv2-fonti"]');
+  expect(sources.textContent).toContain('Estratto decisivo non disponibile');
+  expect(sources.textContent).not.toContain('Estratto da verificare');
   unmount();
 });
 

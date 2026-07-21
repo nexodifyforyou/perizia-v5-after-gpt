@@ -473,11 +473,12 @@ async def _analysis_pages_count(analysis_id: str) -> int:
 
 
 def _find_customer_job(analysis_id: str, selected_lot_id: Optional[str] = None):
-    """Latest customer-safe (job_status, customer_report) for an analysis.
+    """Latest customer-safe (job_status, report, enumerated_job_id) tuple.
 
     When ``selected_lot_id`` is given, prefers the most recent REPORT_READY job
     whose report is for exactly that lot, so a selected lot's report never
-    contaminates another lot. Returns (None, None) when nothing safe exists.
+    contaminates another lot. Returns a triple of ``None`` when nothing safe
+    exists.
     """
     best: Optional[tuple] = None
     for jid in artifacts.list_jobs():
@@ -487,6 +488,24 @@ def _find_customer_job(analysis_id: str, selected_lot_id: Optional[str] = None):
         if str(status.get("analysis_id")) != str(analysis_id):
             continue
         report = artifacts.read_json(jid, artifacts.CUSTOMER_REPORT_FILE)
+        if not isinstance(report, dict):
+            continue
+
+        # The directory name selected by list_jobs() is the storage identity.
+        # Embedded identities are useful consistency checks, never path inputs:
+        # a stale/corrupt report must not redirect this read to another job's
+        # cached pages.  Missing legacy fields remain readable, but every
+        # identity that is present must agree with the enumerated directory and
+        # requested analysis.
+        status_job_id = str(status.get("job_id") or "").strip()
+        report_job_id = str(report.get("job_id") or "").strip()
+        report_analysis_id = str(report.get("analysis_id") or "").strip()
+        if status_job_id and status_job_id != str(jid):
+            continue
+        if report_job_id and report_job_id != str(jid):
+            continue
+        if report_analysis_id and report_analysis_id != str(analysis_id):
+            continue
         if not customer_view.is_customer_safe(report, status):
             continue
         if selected_lot_id is not None:
@@ -503,10 +522,10 @@ def _find_customer_job(analysis_id: str, selected_lot_id: Optional[str] = None):
                 continue
         sort_key = str(status.get("updated_at") or status.get("created_at") or "")
         if best is None or sort_key > best[0]:
-            best = (sort_key, status, report)
+            best = (sort_key, status, report, str(jid))
     if best is None:
-        return None, None
-    return best[1], best[2]
+        return None, None, None
+    return best[1], best[2], best[3]
 
 
 async def _confirmations_for(analysis_id: str, user) -> List[Dict[str, Any]]:
@@ -518,6 +537,16 @@ async def _confirmations_for(analysis_id: str, user) -> List[Dict[str, Any]]:
         return []
 
 
+def _cached_input_pages(selected_job_id: Any) -> List[Dict[str, Any]]:
+    """Read cached pages from the already-enumerated job; never write/redirect."""
+    job_id = str(selected_job_id or "").strip()
+    if not job_id:
+        return []
+    payload = artifacts.read_json(job_id, artifacts.INPUT_PAGES_FILE)
+    pages = (payload or {}).get("pages") if isinstance(payload, dict) else None
+    return [p for p in (pages or []) if isinstance(p, dict)]
+
+
 @router.get("/{analysis_id}/correctness-v2/customer-view/latest")
 async def correctness_v2_customer_view(analysis_id: str, request: Request) -> Dict[str, Any]:
     user, _is_admin = await _resolve_customer_access(request, analysis_id)
@@ -525,7 +554,7 @@ async def correctness_v2_customer_view(analysis_id: str, request: Request) -> Di
     raw_lot = request.query_params.get("selected_lot_id")
     selected_lot_id = (str(raw_lot).strip() or None) if raw_lot is not None else None
 
-    status, report = _find_customer_job(analysis_id, selected_lot_id)
+    status, report, selected_job_id = _find_customer_job(analysis_id, selected_lot_id)
     if not report:
         # No safe report (yet). Tell the client whether one is being prepared,
         # so the UI can show the correct customer state (preparing / busy /
@@ -547,7 +576,12 @@ async def correctness_v2_customer_view(analysis_id: str, request: Request) -> Di
         "available": True,
         "selected_lot_id": selected_lot_id,
         "preparing": False,
-        "report": customer_view.sanitize_customer_report(report, status, confirmations),
+        "report": customer_view.sanitize_customer_report(
+            report,
+            status,
+            confirmations,
+            cached_pages=_cached_input_pages(selected_job_id),
+        ),
     }
 
 

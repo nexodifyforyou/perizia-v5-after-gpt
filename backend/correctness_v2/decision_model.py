@@ -21,6 +21,7 @@ See docs/customer_report_decision_workflow_plan.md (§§C–M).
 from __future__ import annotations
 
 import hashlib
+import re
 import unicodedata
 from itertools import combinations
 from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
@@ -88,9 +89,9 @@ _CLASSIFICATION_STATUS = {
     "regularizable": ("regolarizzabile", "Regolarizzabile secondo la perizia", "ambra"),
     "non_conforming": ("non_conforme", "Non conforme secondo la perizia", "ambra"),
     "not_regularizable": ("non_conforme", "Non conforme secondo la perizia", "ambra"),
-    "uncertain": ("non_verificato", "Non verificato o non dichiarato", "slate"),
+    "uncertain": ("da_chiarire", "Da chiarire", "slate"),
 }
-_DEFAULT_STATUS = ("non_verificato", "Non verificato o non dichiarato", "slate")
+_DEFAULT_STATUS = ("non_determinabile", "Non determinabile dalla sola perizia", "slate")
 
 # area token → customer group title
 _AREA_GROUP_LABEL = {
@@ -113,7 +114,7 @@ _CONFORMITY_WHY = {
     "corrispondenza": "La corrispondenza tra stato di fatto, catasto e atto evita contestazioni sull'immobile.",
     "impianto_gas": "Un impianto non a norma richiede adeguamento e certificazione prima dell'uso.",
     "impianto_elettrico": "Un impianto non a norma richiede adeguamento e certificazione prima dell'uso.",
-    "impianti": "Gli impianti non a norma richiedono adeguamento e certificazione prima dell'uso.",
+    "impianti": "L'assenza di alcune dichiarazioni non prova da sola la non conformità: occorre verificare stato, certificabilità ed eventuali adeguamenti.",
     "agibilita": "L'agibilità incide sull'utilizzo e sul valore dell'immobile.",
     "ape": "La certificazione energetica è documentazione richiesta per la vendita.",
 }
@@ -122,7 +123,7 @@ _CONFORMITY_WHY_DEFAULT = "L'aspetto tecnico indicato può richiedere verifiche 
 _READINESS_LABEL = {
     "TECHNICAL_REVIEW_REQUIRED": "Verifica tecnica richiesta",
     "CONFIRMATIONS_REQUIRED": "Conferme necessarie",
-    "READY_FOR_REVIEW": "Verifiche completate",
+    "READY_FOR_REVIEW": "Verifiche professionali aperte",
     "COMPLETE_FOR_EXPORT": "Pronto per l'esportazione",
 }
 
@@ -172,6 +173,10 @@ def _norm(text: Any) -> str:
         if not unicodedata.combining(c)
     )
     return stripped.lower().strip()
+
+
+def _semantic_norm(text: Any) -> str:
+    return re.sub(r"[^a-z0-9]+", " ", _norm(text)).strip()
 
 
 def _as_float(value: Any) -> Optional[float]:
@@ -249,7 +254,11 @@ def _evidence_lookup(report: Dict[str, Any]) -> List[Dict[str, Any]]:
 
 
 def _find_excerpt(
-    evidence: Sequence[Dict[str, Any]], pages: Iterable[int], topic_keywords: Sequence[str]
+    evidence: Sequence[Dict[str, Any]], pages: Iterable[int], topic_keywords: Sequence[str],
+    *, expected_amount: Optional[float] = None, expected_bene: Optional[str] = None,
+    expected_asset: Optional[str] = None,
+    excerpt_keywords: Optional[Sequence[str]] = None,
+    required_fact_keywords: Sequence[str] = (),
 ) -> Optional[Dict[str, Any]]:
     """Return a covered verbatim excerpt on one of ``pages`` whose topic matches.
 
@@ -258,7 +267,19 @@ def _find_excerpt(
     requiring a topic-keyword match.
     """
     page_set = set(_pages(pages))
-    keys = [k for k in topic_keywords if k]
+    keys = [_semantic_norm(k) for k in topic_keywords if _semantic_norm(k)]
+    default_excerpt_keywords: Sequence[str] = topic_keywords
+    if excerpt_keywords is None and expected_bene and any(
+        "valore di stima" in _semantic_norm(k) for k in topic_keywords
+    ):
+        # Component row wording commonly reverses metadata order:
+        # "Bene N° 3 ... Valore di stima" versus topic "Valore ... Bene N° 3".
+        default_excerpt_keywords = ("valore di stima",)
+    excerpt_keys = [
+        _semantic_norm(k) for k in (excerpt_keywords if excerpt_keywords is not None else default_excerpt_keywords)
+        if _semantic_norm(k)
+    ]
+    fact_keys = [_semantic_norm(k) for k in required_fact_keywords if _semantic_norm(k)]
     for entry in evidence:
         if entry.get("coverage_status") != "covered":
             continue
@@ -270,11 +291,67 @@ def _find_excerpt(
             continue
         if page_set and page not in page_set:
             continue
-        topic_l = _norm(entry.get("topic")) + " " + _norm(entry.get("report_section"))
+        # Match the evidence topic itself.  The shared report-section label (for
+        # example "Conformità e documenti tecnici") is deliberately excluded:
+        # it made an APE excerpt eligible for every neighbouring category.
+        topic_l = _semantic_norm(entry.get("topic"))
         if keys and not any(k in topic_l for k in keys):
             continue
-        return {"page": page, "excerpt": str(entry.get("perizia_excerpt")), "verbatim": True}
+        excerpt = str(entry.get("perizia_excerpt"))
+        excerpt_l = _norm(excerpt)
+        excerpt_semantic = _semantic_norm(excerpt)
+        # Metadata says what an index row was intended to prove; the displayed
+        # source span must independently contain the category itself.
+        if excerpt_keys and not any(k in excerpt_semantic for k in excerpt_keys):
+            continue
+        # Some declared conclusions require a decisive fact, not merely the
+        # section heading (for example "completezza" versus "risulta completa").
+        if fact_keys and not any(k in excerpt_semantic for k in fact_keys):
+            continue
+        # A Bene label in metadata is not proof that the displayed source span
+        # belongs to that asset.  Require the target Bene in the excerpt itself;
+        # otherwise fail closed (or let the cached-page resolver recover a
+        # decisive span containing both Bene and amount).
+        if expected_bene and _semantic_norm(expected_bene) not in _semantic_norm(excerpt_l):
+            continue
+        if expected_asset:
+            asset_terms = _component_asset_terms(expected_asset)
+            bene_number = re.search(r"bene\s+n[°ºo.]?\s*(\d+)", expected_bene or "", re.I)
+            row_match = re.search(
+                rf"Bene\s+N[°ºo.]?\s*{bene_number.group(1)}\b([^\n;:]{{0,100}})",
+                excerpt,
+                re.I,
+            ) if bene_number else None
+            declared_zone = _semantic_norm(row_match.group(1) if row_match else "")
+            if not asset_terms or not any(term in declared_zone.split() for term in asset_terms):
+                continue
+        if expected_amount is not None and not _excerpt_contains_amount(excerpt, expected_amount):
+            continue
+        return {"page": page, "excerpt": excerpt, "verbatim": True}
     return None
+
+
+def _excerpt_contains_amount(excerpt: Any, expected: float) -> bool:
+    """Currency/locale-normalized monetary match; fail closed on ambiguity."""
+    for raw in re.findall(r"(?:EUR|€)?\s*(-?\d[\d. ]*(?:,\d{1,2})?)", str(excerpt or ""), re.I):
+        compact = raw.replace(" ", "").replace(".", "").replace(",", ".")
+        try:
+            if abs(float(compact) - float(expected)) < 0.005:
+                return True
+        except ValueError:
+            pass
+    return False
+
+
+def _missing_evidence(pages: Iterable[int]) -> Dict[str, Any]:
+    """Customer-safe fail-closed marker, retaining only a reliable page hint."""
+    pgs = _pages(pages)
+    return {
+        "page": pgs[0] if pgs else None,
+        "excerpt": None,
+        "note": "Estratto decisivo non disponibile",
+        "verbatim": False,
+    }
 
 
 def _canonical_page(evidence_pages: Iterable[int], excerpt: Optional[Dict[str, Any]]) -> Optional[int]:
@@ -413,6 +490,8 @@ def _build_numeri(report: Dict[str, Any], full_money: Dict[str, Any]) -> Optiona
     chain_src = [r for r in (money.get("valuation_chain") or []) if isinstance(r, dict)]
     buyer_src = [r for r in (money.get("buyer_side_costs") or []) if isinstance(r, dict)]
     uncertain_src = [r for r in (money.get("uncertain_money") or []) if isinstance(r, dict)]
+    component_src = [r for r in uncertain_src if _is_component_value(r)]
+    uncertain_src = [r for r in uncertain_src if not _is_component_value(r)]
     auction_src = [r for r in (money.get("auction_terms") or []) if isinstance(r, dict)]
 
     if not (chain_src or buyer_src or uncertain_src):
@@ -420,6 +499,12 @@ def _build_numeri(report: Dict[str, Any], full_money: Dict[str, Any]) -> Optiona
 
     canonical, ambiguous = _reorder_chain(chain_src)
     catena = [_chain_row_view(r) for r in canonical]
+    if component_src and catena:
+        catena[0]["label"] = "Valore di stima prima dei deprezzamenti"
+        for row in reversed(catena):
+            if row.get("kind") == "value":
+                row["label"] = "Valore finale dichiarato"
+                break
     # Mark the terminal value row for gold emphasis.
     last_value_idx = None
     for i, r in enumerate(catena):
@@ -480,9 +565,300 @@ def _build_numeri(report: Dict[str, Any], full_money: Dict[str, Any]) -> Optiona
         out["comparatives_summary"] = comparatives_summary
     if auction:
         out["auction"] = auction
+    if component_src:
+        out["composizione_valore"] = {
+            "title": "Composizione del valore di stima",
+            "items": [_component_value_view(report, r) for r in component_src],
+            "total": sum((_as_float(r.get("amount")) or 0.0) for r in component_src),
+            "total_display": format_eur(sum((_as_float(r.get("amount")) or 0.0) for r in component_src)),
+        }
+    reconciliation = _valuation_reconciliation(report, chain_src, component_src)
+    if reconciliation:
+        out["riconciliazione"] = reconciliation
+        out.setdefault("da_chiarire", []).append({
+            "label": "Calcolo da chiarire",
+            "amount_display": reconciliation["difference_display"],
+            "motivo": reconciliation["explanation"],
+        })
     # Original extracted order preserved for Vista admin (§F rule 1b).
     out["catena_ordine_originale"] = [_chain_row_view(r) for r in chain_src]
     return out
+
+
+_COMPONENT_VALUE_RE = re.compile(r"valore\s+di\s+stima\s+bene\s+n[°ºo.]?\s*(\d+)\s*-?\s*(.*)", re.I)
+
+
+def _is_component_value(row: Dict[str, Any]) -> bool:
+    return bool(_COMPONENT_VALUE_RE.search(str(row.get("label") or ""))) and _as_float(row.get("amount")) is not None
+
+
+def _component_label(row: Dict[str, Any]) -> str:
+    match = _COMPONENT_VALUE_RE.search(str(row.get("label") or ""))
+    return (match.group(2).strip() if match and match.group(2).strip() else f"Bene {match.group(1)}") if match else "Bene"
+
+
+def _component_asset_terms(label: Any) -> Tuple[str, ...]:
+    """Return source-facing aliases for a component's declared asset type.
+
+    A Bene number is not unique enough to recover evidence from legacy cached
+    pages: a malformed table may repeat the same number beside a different asset.
+    Keep a deliberately small, generic alias set and otherwise require one of the
+    meaningful words in the declared component label.
+    """
+    normalized = _semantic_norm(label)
+    alias_groups = (
+        (("garage", "autorimessa", "box"), ("garage", "autorimessa", "box")),
+        (("magazzino", "rustico", "deposito"), ("magazzino", "rustico", "deposito")),
+        (("appartamento", "abitazione", "alloggio"), ("appartamento", "abitazione", "alloggio")),
+    )
+    for triggers, aliases in alias_groups:
+        if any(trigger in normalized.split() for trigger in triggers):
+            return aliases
+    ignored = {"bene", "immobile", "unita", "numero", "lotto", "valore", "stima"}
+    return tuple(
+        word for word in normalized.split()
+        if len(word) >= 4 and word not in ignored and not word.isdigit()
+    )
+
+
+def _component_value_view(report: Dict[str, Any], row: Dict[str, Any]) -> Dict[str, Any]:
+    match = _COMPONENT_VALUE_RE.search(str(row.get("label") or ""))
+    bene = f"Bene N° {match.group(1)}" if match else None
+    asset_label = _component_label(row)
+    amount = _as_float(row.get("amount"))
+    pages = _pages(row.get("evidence_pages"))
+    excerpt = _find_excerpt(
+        _evidence_lookup(report), pages, (_semantic_norm(row.get("label")),),
+        expected_amount=amount, expected_bene=bene, expected_asset=asset_label,
+    )
+    if not excerpt:
+        excerpt = _find_cached_component_excerpt(report, pages, bene, amount, asset_label)
+    return {
+        "label": asset_label, "amount": amount,
+        "amount_display": row.get("amount_display") or format_eur(amount),
+        "pages": pages, "evidence": excerpt or _missing_evidence(pages),
+    }
+
+
+def _find_cached_component_excerpt(
+    report: Dict[str, Any], pages: Iterable[int], bene: Optional[str], amount: Optional[float],
+    expected_asset: Optional[str] = None,
+) -> Optional[Dict[str, Any]]:
+    """Recover a narrow decisive span from already-cached text pages.
+
+    Used only when the old customer evidence index is wrong/missing.  Both the
+    target Bene, declared asset type and normalized amount must occur in the same
+    bounded table span.
+    """
+    asset_terms = _component_asset_terms(expected_asset)
+    if not bene or amount is None or not asset_terms:
+        return None
+    allowed = set(_pages(pages))
+    bene_norm = _semantic_norm(bene)
+    for item in report.get("_cached_input_pages") or []:
+        if not isinstance(item, dict):
+            continue
+        try:
+            page = int(item.get("page_number") or item.get("page"))
+        except (TypeError, ValueError):
+            continue
+        if allowed and page not in allowed:
+            continue
+        text = str(item.get("text") or "")
+        semantic = _semantic_norm(text)
+        start_sem = semantic.find(bene_norm)
+        if start_sem < 0:
+            continue
+        # Work on the original text: locate Bene number/type permissively, then
+        # require the expected amount before the next Bene/table row.
+        number_match = re.search(r"bene\s+n[°ºo.]?\s*(\d+)", bene, re.I)
+        if not number_match:
+            continue
+        pattern = re.compile(rf"Bene\s+N[°ºo.]?\s*{number_match.group(1)}\b", re.I)
+        for match in pattern.finditer(text):
+            tail = text[match.start(): match.start() + 500]
+            next_bene = re.search(r"\n\s*Bene\s+N[°ºo.]?\s*\d+", tail[match.end() - match.start():], re.I)
+            if next_bene:
+                tail = tail[: match.end() - match.start() + next_bene.start()]
+            amount_end = _matching_amount_end(tail, amount)
+            if amount_end is None:
+                continue
+            # End exactly at the decisive amount.  A fixed-length tail can copy
+            # unrelated contact/admin text following an otherwise valid row.
+            compact = " ".join(tail[:amount_end].split())
+            relative_match_end = match.end() - match.start()
+            before_amount = tail[relative_match_end:amount_end]
+            # The asset type must be the row label immediately following the Bene
+            # number (or an explicit Tipologia field), not a later incidental
+            # mention such as "magazzino con accesso dal garage".
+            immediate_label = re.match(
+                r"\s*[-–—:]?\s*([^\n;:]{1,100})", before_amount, re.I
+            )
+            declared_label = re.split(
+                r"\b(?:valore\s+di\s+stima|accesso|ubicat\w*|sito|indirizzo|comune|via)\b",
+                immediate_label.group(1) if immediate_label else "",
+                maxsplit=1,
+                flags=re.I,
+            )[0]
+            explicit_type = re.search(
+                r"\btipologia\s*:?\s*([^\n;:]{1,80})", before_amount, re.I
+            )
+            asset_zone = _semantic_norm(
+                f"{declared_label} {explicit_type.group(1) if explicit_type else ''}"
+            )
+            if not any(term in asset_zone.split() for term in asset_terms):
+                continue
+            identity = report.get("case_identity") or {}
+            allowed_identity = " ".join(str(value or "") for value in (
+                identity.get("address"), identity.get("property_type"), bene, expected_asset,
+                *(
+                    field
+                    for asset in (report.get("beni_sections") or []) if isinstance(asset, dict)
+                    for field in (asset.get("address"), asset.get("property_type"))
+                    if field
+                ),
+            ))
+            if _contains_sensitive_identity(compact, allowed_identity):
+                continue
+            return {"page": page, "excerpt": compact, "verbatim": True, "source": "cached_page"}
+    return None
+
+
+def _matching_amount_end(text: str, expected: float) -> Optional[int]:
+    """Return the end offset of the first locale-normalized expected amount."""
+    pattern = re.compile(r"(?:EUR|€)?\s*(-?\d[\d. ]*(?:,\d{1,2})?)", re.I)
+    for match in pattern.finditer(text or ""):
+        compact = match.group(1).replace(" ", "").replace(".", "").replace(",", ".")
+        try:
+            if abs(float(compact) - float(expected)) < 0.005:
+                return match.end()
+        except ValueError:
+            continue
+    return None
+
+
+_EMAIL_RE = re.compile(r"\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b", re.I)
+_ITALIAN_CF_RE = re.compile(r"\b[A-Z]{6}\d{2}[A-Z]\d{2}[A-Z]\d{3}[A-Z]\b", re.I)
+_CONTACT_MARKER_RE = re.compile(
+    r"\b(?:telefono|tel\.?|cellulare|cell\.?|pec|e-?mail|contatto|codice\s+fiscale|"
+    r"c\.?\s*f\.?|carta\s+(?:d['’]\s*)?identit[aà]|documento\s+(?:d['’]\s*)?identit[aà]|"
+    r"passaport\w*|patente(?:\s+di\s+guida)?|tessera\s+sanitaria|"
+    r"permesso\s+di\s+soggiorno|documento\s+(?:personale|di\s+riconoscimento)|"
+    r"estremi\s+(?:del\s+)?documento|data\s+(?:di\s+)?nascita|"
+    r"luogo\s+(?:di\s+)?nascita|nato\s+(?:a|il)|nata\s+(?:a|il)|"
+    r"nome\s+e\s+cognome|signor[ae]?|sig\.?|"
+    r"esecutato|debitore|intestatario)\b",
+    re.I,
+)
+_PHONE_RE = re.compile(r"(?:\+\s*39\s*)?(?:\d[ .-]*){9,12}")
+_COMMON_GIVEN_NAMES = frozenset({
+    "alessandro", "andrea", "anna", "antonio", "carlo", "chiara", "davide",
+    "elena", "francesca", "francesco", "giovanni", "giulia", "giuseppe",
+    "laura", "luca", "luigi", "marco", "maria", "mario", "matteo", "mauro",
+    "paolo", "pietro", "roberto", "sara", "simone", "stefano", "syed",
+})
+
+
+def _contains_sensitive_identity(text: Any, allowed_identity_text: Any = "") -> bool:
+    value = str(text or "")
+    if _EMAIL_RE.search(value) or _ITALIAN_CF_RE.search(value) or _CONTACT_MARKER_RE.search(value):
+        return True
+    # A bare international/telephone-length sequence is not a property-table
+    # identifier.  Decimal/cadastral values remain below this threshold.
+    if _PHONE_RE.search(value):
+        return True
+    # Catch an unlabelled person name conservatively without rejecting the
+    # report's declared property type/address. Address-labelled spans are also
+    # allowed for legacy reports that lack case_identity.address.
+    proper = list(re.finditer(r"\b[A-ZÀ-Ý][a-zà-ÿ]{2,}\b", value))
+    if any(_norm(match.group(0)) in _COMMON_GIVEN_NAMES for match in proper):
+        return True
+    allowed_words = set(_semantic_norm(allowed_identity_text).split())
+    allowed_words.update({
+        "bene", "garage", "autorimessa", "box", "magazzino", "rustico",
+        "deposito", "appartamento", "abitazione", "alloggio", "comune",
+        "via", "viale", "piazza", "localita", "san", "santa", "santo",
+        "valore", "stima", "foglio", "particella", "subalterno", "categoria",
+        "catasto", "sezione", "mappale",
+    })
+    for address in re.finditer(
+        r"\b(?:comune|via|viale|piazza|localit[aà])\b\s*:?[ -]*"
+        r"(.{0,120}?)(?=\b(?:valore|superficie|consistenza)\b|€|$)",
+        value,
+        re.I,
+    ):
+        allowed_words.update(_semantic_norm(address.group(1)).split())
+    for first, second in zip(proper, proper[1:]):
+        between = value[first.end():second.start()]
+        if not between.isspace():
+            continue
+        if (
+            _norm(first.group(0)) not in allowed_words
+            or _norm(second.group(0)) not in allowed_words
+        ):
+            return True
+    return False
+
+
+def _valuation_reconciliation(report, chain, components):
+    """Reconcile explicit component values, listed percentages and declared final."""
+    if not components:
+        return None
+    component_sum = sum((_as_float(r.get("amount")) or 0.0) for r in components)
+    values = [_as_float(r.get("amount")) for r in chain if r.get("kind") == "value"]
+    values = [v for v in values if v is not None]
+    if len(values) < 2 or not _approx(values[0], component_sum):
+        return None
+    percentages: List[float] = []
+    seen_spans: set = set()
+    for entry in _evidence_lookup(report):
+        text = str(entry.get("perizia_excerpt") or "")
+        if "valore finale" not in _norm(text) and "deprezz" not in _norm(text):
+            continue
+        span_key = _semantic_norm(text)
+        if not span_key or span_key in seen_spans:
+            continue
+        seen_spans.add(span_key)
+        # Attribute a percentage only to a reduction-labelled segment.  This
+        # excludes adjacent VAT, ownership quota and other unrelated percentages.
+        previous_end = 0
+        reduction_context = "deprezz" in _norm(text[:80])
+        for match in re.finditer(r"(\d{1,2}(?:,\d+)?)\s*%", text):
+            segment = _norm(text[previous_end:match.start()])
+            has_reduction_label = any(k in segment for k in (
+                "rischio", "garanzia", "stato d'uso", "manutenzione",
+                "regolarizzazione", "riduzione", "deprezz", "abbattimento", "oneri",
+            ))
+            has_unrelated_label = any(k in segment for k in (
+                "iva", "quota", "proprieta", "interesse", "provvigione",
+            ))
+            if has_reduction_label or (reduction_context and not has_unrelated_label):
+                percentages.append(float(match.group(1).replace(",", ".")))
+                reduction_context = True
+            else:
+                reduction_context = False
+            previous_end = match.end()
+    percentages = percentages[:8]
+    if not percentages:
+        return None
+    pct_sum = sum(percentages)
+    expected = round(component_sum * (1.0 - pct_sum / 100.0), 2)
+    declared = values[-1]
+    difference = round(abs(expected - declared), 2)
+    if difference <= 1.0:
+        return None
+    pct_text = " + ".join(f"{p:g}%" for p in percentages)
+    return {
+        "component_sum": component_sum, "percentage_sum": pct_sum,
+        "expected_final": expected, "declared_final": declared, "difference": difference,
+        "component_sum_display": format_eur(component_sum), "expected_final_display": format_eur(expected),
+        "declared_final_display": format_eur(declared), "difference_display": format_eur(difference),
+        "explanation": (
+            f"I deprezzamenti indicati del {pct_text} porterebbero matematicamente da "
+            f"{format_eur(component_sum)} a {format_eur(expected)}, mentre la perizia dichiara "
+            f"{format_eur(declared)}. La differenza di {format_eur(difference)} non è separatamente spiegata."
+        ),
+    }
 
 
 def _build_money_findings(
@@ -494,10 +870,12 @@ def _build_money_findings(
     for row in money.get("uncertain_money") or []:
         if not isinstance(row, dict):
             continue
+        if _is_component_value(row):
+            continue
         pages = _pages(row.get("evidence_pages"))
         amount = _as_float(row.get("amount"))
         label = str(row.get("label") or "")
-        excerpt = _find_excerpt(evidence, pages, tuple(_norm(label).split()[:2]) + ("importo", "costo"))
+        excerpt = _find_excerpt(evidence, pages, tuple(_norm(label).split()[:2]), expected_amount=amount)
         page = _canonical_page(pages, excerpt)
         fid = _finding_id("numeri", _norm(label) or "importo", lot_id, page, amount)
         findings.append(
@@ -552,12 +930,21 @@ def _build_occupancy(report: Dict[str, Any], evidence: Sequence[Dict[str, Any]])
             cosa_verificare.append(str(risk).strip())
     is_occupied = "occupat" in _norm(status_label)
     if is_occupied and not occ.get("opponibility"):
-        cosa_verificare.insert(
-            0,
-            "Opponibilità del titolo da verificare: la perizia non si esprime espressamente.",
-        )
+        if any(
+            "locazion" in _norm(r)
+            and any(k in _norm(r) for k in (
+                "non indic", "non riport", "non sono riport", "non risult",
+            ))
+            for r in occ.get("risks") or []
+        ):
+            cosa_verificare.insert(0, "Verificare lo stato della liberazione e l’eventuale esistenza di titoli opponibili. La perizia riporta la residenza del nucleo dell’esecutato ma non indica contratti di locazione.")
+        else:
+            cosa_verificare.insert(0, "Opponibilità del titolo da verificare: la perizia non si esprime espressamente.")
     pages = _pages(occ.get("evidence_pages"))
-    excerpt = _find_excerpt(evidence, pages, ("occupa", "contratt", "locazione", "conduttore", "affitt"))
+    excerpt = _find_excerpt(
+        evidence, pages,
+        ("occupa", "contratt", "locazione", "conduttore", "affitt", "residen", "esecutat"),
+    )
     return {
         "stato": status_label,
         "dettaglio": occ.get("title_info"),
@@ -586,11 +973,263 @@ def _build_conformity_findings(
         token = _area_token(area)
         cls = _norm(item.get("classification"))
         status, status_label, tone = _CLASSIFICATION_STATUS.get(cls, _DEFAULT_STATUS)
+        notes_norm = _norm(item.get("notes"))
+        area_norm = _norm(area)
+        ownership_area = any(k in area_norm for k in (
+            "titolarita", "proprieta", "diritti posti in vendita",
+        ))
+        public_housing_constraints = any(k in area_norm for k in (
+            "edilizia residenziale pubblica", "edilizia convenzionata",
+            "alloggio pubblico", "alloggi pubblici",
+        ))
+        if public_housing_constraints:
+            token = "vincoli_edilizia_pubblica"
+        if "ape" in area_norm or "certificazione energetica" in area_norm:
+            token = "ape"
+        if cls == "uncertain":
+            # Negative/qualified statements must win over substring matches such
+            # as "dichiarato" inside "non dichiarato" and "completa" inside
+            # "incompleta".
+            incomplete_documentation = (
+                ("document" in area_norm or "document" in notes_norm)
+                and (
+                    "incompleta" in notes_norm
+                    or re.search(r"\bnon\s+(?:risulta\s+|e\s+|appare\s+)?complet", notes_norm)
+                )
+            )
+            ownership_term = r"(?:diritto\s+di\s+proprieta|proprieta|titolarita)"
+            declaration_term = (
+                r"(?:dichiarat|attestat|accertat|indicat|riportat|provat|"
+                r"dimostrat|documentat)\w*"
+            )
+            declaration_auxiliary = (
+                r"(?:(?:e|era|risulta|risultava|viene|veniva)"
+                r"(?:\s+stat[ao])?\s+)?"
+            )
+            negated_declaration_after = (
+                re.search(
+                    rf"\b{ownership_term}\b.{{0,60}}\bnon\s+"
+                    rf"{declaration_auxiliary}(?P<verb>{declaration_term})\b",
+                    notes_norm,
+                )
+                if ownership_area else None
+            )
+            negated_declaration_before = (
+                re.search(
+                    rf"\bnon\s+{declaration_auxiliary}"
+                    rf"(?P<verb>{declaration_term})\b.{{0,60}}\b{ownership_term}\b",
+                    notes_norm,
+                )
+                if ownership_area else None
+            )
+            negated_ownership_declaration = (
+                negated_declaration_after or negated_declaration_before
+            )
+            negated_declaration_verb = _norm(
+                negated_ownership_declaration.group("verb")
+                if negated_ownership_declaration else ""
+            )
+            ownership_declaration_absent = negated_declaration_verb.startswith(
+                ("dichiarat", "indicat", "riportat")
+            )
+            negated_continuity = (
+                "continuita" in area_norm
+                and (
+                    re.search(r"\bnon\s+(?:sussiste|risulta|e|appare)(?:\s+la)?\s+continuita\b", notes_norm)
+                    or re.search(r"\bcontinuita\b.{0,40}\bnon\s+(?:sussiste|risulta|e|appare)\b", notes_norm)
+                )
+            )
+            negated_ownership = (
+                ownership_area
+                and (
+                    re.search(r"\bnon\s+(?:risulta|sussiste|e|appare)(?:\s+la)?\s+(?:proprieta|titolarita)\b", notes_norm)
+                    or re.search(r"\bnon\s+appart", notes_norm)
+                    or re.search(r"\b(?:proprieta|titolarita)\b.{0,40}\bnon\s+(?:risulta|sussiste|e|appare)\b", notes_norm)
+                )
+            )
+            ownership_needs_documentary_check = (
+                ownership_area
+                and (
+                    re.search(
+                        r"\b(?:proprieta|titolarita)\b.{0,50}"
+                        r"\bda\s+verificare\s+documentalmente\b",
+                        notes_norm,
+                    )
+                    or re.search(
+                        r"\b(?:proprieta|titolarita|diritto\s+di\s+proprieta)\b.{0,50}"
+                        r"\b(?:da\s+verificare|deve\s+essere\s+verificat\w*)\b",
+                        notes_norm,
+                    )
+                )
+            )
+            ownership_not_determinable = (
+                ownership_area
+                and re.search(
+                    r"\b(?:proprieta|titolarita|diritto\s+di\s+proprieta)\b.{0,50}"
+                    r"\bnon\s+determinabil\w*(?:\s+dalla\s+sola\s+perizia)?\b",
+                    notes_norm,
+                )
+            )
+            ownership_uncertain = (
+                ownership_area
+                and re.search(
+                    r"\b(?:proprieta|titolarita|diritto\s+di\s+proprieta)\b.{0,50}"
+                    r"\b(?:incert\w*|dubbi\w*|da\s+chiarire)\b",
+                    notes_norm,
+                )
+            )
+            ownership_explicitly_declared = (
+                ownership_area
+                and not negated_ownership_declaration
+                and (
+                    re.search(
+                        rf"\b{ownership_term}\b.{{0,60}}\b{declaration_term}\b",
+                        notes_norm,
+                    )
+                    or re.search(
+                        rf"\b{declaration_term}\b.{{0,60}}\b{ownership_term}\b",
+                        notes_norm,
+                    )
+                    or re.search(r"\brisult\w*\s+(?:di\s+)?proprieta\b", notes_norm)
+                    or re.search(r"\bben[ei]\s+appartengono\b", notes_norm)
+                )
+            )
+            if (
+                any(k in notes_norm for k in ("non indic", "non dichiar", "non riport"))
+                or ownership_declaration_absent
+            ):
+                status, status_label, tone = "non_dichiarato", "Non dichiarato dalla perizia", "slate"
+            elif incomplete_documentation:
+                status, status_label, tone = "da_chiarire", "Dichiarata incompleta dalla perizia", "ambra"
+            elif ownership_not_determinable:
+                status, status_label, tone = (
+                    "non_determinabile", "Non determinabile dalla sola perizia", "slate"
+                )
+            elif ownership_needs_documentary_check:
+                status, status_label, tone = "da_verificare", "Da verificare documentalmente", "ambra"
+            elif negated_ownership_declaration:
+                status, status_label, tone = "da_verificare", "Da verificare documentalmente", "ambra"
+            elif negated_continuity or negated_ownership or ownership_uncertain:
+                status, status_label, tone = "da_chiarire", "Da chiarire", "ambra"
+            elif ownership_explicitly_declared:
+                status, status_label, tone = "dichiarato_perizia", "Dichiarato dalla perizia", "verde"
+                if re.search(r"\b1\s*/\s*1\b", notes_norm):
+                    status_label = "Proprietà 1/1 dichiarata dalla perizia"
+            elif ownership_area:
+                # An ownership noun alone is not a declaration.  Unknown legacy
+                # wording stays fail-closed instead of being upgraded by the
+                # presence of the word "proprietà".
+                status, status_label, tone = "da_chiarire", "Da chiarire", "slate"
+            elif any(k in notes_norm for k in (
+                "dichiarata", "dichiarato", "attestato", "sussiste", "risulta completa",
+            )):
+                status, status_label, tone = "dichiarato_perizia", "Dichiarato dalla perizia", "verde"
+                if "completezza documentazione" in area_norm and any(
+                    k in notes_norm for k in ("risulta completa", "dichiarata completa", "documentazione completa")
+                ):
+                    status_label = "Dichiarata completa dalla perizia"
+                elif "continuita" in area_norm and any(
+                    k in notes_norm for k in ("sussistenza della continuita", "continuita delle trascrizioni", "continuita nelle trascrizioni")
+                ):
+                    status_label = "Continuità delle trascrizioni dichiarata dalla perizia"
+            elif public_housing_constraints and "non risulta realizzato" in notes_norm:
+                status, status_label, tone = "dichiarato_perizia", "Dichiarato dalla perizia", "verde"
         pages = _pages(item.get("evidence_pages"))
-        group = _AREA_GROUP_LABEL.get(token, str(area or "").strip().capitalize() or "Altro")
-        excerpt = _find_excerpt(evidence, pages, (token, _norm(area), "conform"))
+        if public_housing_constraints:
+            group = "Vincoli di edilizia convenzionata o pubblica"
+        else:
+            group = _AREA_GROUP_LABEL.get(token, str(area or "").strip().capitalize() or "Altro")
+        category_keys = {
+            "ape": ("ape", "certificazione energetica"),
+            "agibilita": ("agibilita", "abitabilita"),
+            "urbanistica": ("urbanistica", "destinazione urbanistica", "pgt"),
+            "impianti": ("impianti", "dichiarazioni di conformita"),
+            "impianto_gas": ("impianto gas", "gas"),
+            "impianto_elettrico": ("impianto elettrico", "elettrico"),
+            "edilizia": (
+                "difformita", "regolarita edilizia", "conformita edilizia",
+                "titolo edilizio", "titolo abilitativo", "sanatoria", "ripristino",
+            ),
+            "catastale": ("catastale", "catastali", "docfa"),
+            "vincoli_edilizia_pubblica": (
+                "edilizia residenziale pubblica", "edilizia convenzionata",
+                "alloggio pubblico", "alloggi pubblici",
+            ),
+        }.get(token, (token, _norm(area)))
+        excerpt_keys = category_keys
+        fact_keys: Tuple[str, ...] = ()
+        if "completezza documentazione" in area_norm:
+            category_keys = ("completezza", "documentazione", "art 567")
+            excerpt_keys = ("documentazione", "art 567")
+            if status_label == "Dichiarata completa dalla perizia":
+                fact_keys = ("risulta completa", "documentazione completa", "dichiarata completa")
+        elif ownership_area:
+            category_keys = ("titolarita", "diritti posti in vendita", "proprieta")
+            excerpt_keys = ("proprieta", "diritto")
+            if status_label == "Proprietà 1/1 dichiarata dalla perizia":
+                fact_keys = ("proprieta 1 1", "diritto di proprieta 1 1")
+        elif "continuita" in area_norm:
+            category_keys = ("continuita", "trascrizioni")
+            excerpt_keys = ("continuita", "trascrizioni")
+            if status_label == "Continuità delle trascrizioni dichiarata dalla perizia":
+                fact_keys = (
+                    "sussistenza della continuita", "continuita nelle trascrizioni",
+                    "continuita delle trascrizioni dichiarata",
+                )
+        elif token == "urbanistica":
+            # A generic section heading does not prove a specific classification
+            # such as AREC 2. Require a distinctive alphanumeric code when one is
+            # explicitly stated in the normalized fact.
+            code = re.search(r"\b([a-z]{2,}\s*\d+[a-z0-9.-]*)\b", notes_norm)
+            if code:
+                fact_keys = (code.group(1),)
+
+        explicit_plant_noncompliance = any(k in notes_norm for k in (
+            "impianto non conforme", "impianto non a norma", "non conformita dell'impianto",
+            "impianti non conformi", "impianti non a norma",
+        ))
+        missing_plant_declarations = (
+            (token == "impianti" or token.startswith("impianto_"))
+            and any(k in notes_norm for k in (
+                "assenza della dichiarazione", "assenza delle dichiarazioni",
+                "non contiene una dichiarazione", "dichiarazioni non disponibili",
+            ))
+            and not explicit_plant_noncompliance
+        )
+        if token == "agibilita" and "non risulta agibile" in notes_norm:
+            status, status_label, tone = "da_verificare", "Da verificare per singolo Bene", "ambra"
+        if missing_plant_declarations:
+            status, status_label, tone = "da_verificare", "Dichiarazioni non disponibili secondo la perizia", "ambra"
+        if (
+            token == "catastale" and cls == "uncertain" and "docfa" in notes_norm
+            and any(k in notes_norm for k in ("difform", "non sussiste corrispondenza"))
+        ):
+            status, status_label, tone = "da_verificare", "Da verificare documentalmente", "ambra"
+        excerpt = _find_excerpt(
+            evidence, pages, category_keys, excerpt_keywords=excerpt_keys,
+            required_fact_keywords=fact_keys,
+        )
+        evidence_view = excerpt or _missing_evidence(pages)
         page = _canonical_page(pages, excerpt)
         amount = _as_float(item.get("cost"))
+        customer_summary = _first_sentence(item.get("notes"))
+        buyer_impact = _CONFORMITY_WHY.get(token, _CONFORMITY_WHY_DEFAULT)
+        if missing_plant_declarations:
+            customer_summary = (
+                "Non risultano disponibili alcune dichiarazioni di conformità degli impianti; "
+                "verificare stato, certificabilità ed eventuali adeguamenti necessari."
+            )
+            buyer_impact = (
+                "L’assenza delle dichiarazioni non prova da sola che gli impianti siano non conformi; "
+                "servono verifiche sullo stato e sulla certificabilità."
+            )
+        elif token == "catastale" and "docfa" in notes_norm and any(
+            k in notes_norm for k in ("redatte", "predispost", "preparat")
+        ):
+            customer_summary = (
+                "Difformità rilevate; aggiornamenti DOCFA predisposti dal perito. "
+                "Verificare l’avvenuta registrazione e la situazione catastale definitiva."
+            )
         fid = _finding_id("conformita", token, lot_id, page, amount)
         blocking = bool(item.get("blocks_saleability")) or status == "non_conforme"
         findings.append(
@@ -605,11 +1244,11 @@ def _build_conformity_findings(
                 "tone": tone,
                 "blocking": blocking,
                 "severity": _SEV_CONFORMITY if status == "conforme" else _SEV_TECH_ACTION,
-                "customer_summary": _first_sentence(item.get("notes")),
-                "buyer_impact": _CONFORMITY_WHY.get(token, _CONFORMITY_WHY_DEFAULT),
+                "customer_summary": customer_summary,
+                "buyer_impact": buyer_impact,
                 "recommended_action": (
                     "Verificare/regolarizzare secondo quanto indicato nella perizia."
-                    if status in ("regolarizzabile", "non_conforme")
+                    if status in ("regolarizzabile", "non_conforme", "da_verificare")
                     else "Nessuna azione richiesta secondo la perizia."
                 ),
                 "amount": amount,
@@ -618,7 +1257,7 @@ def _build_conformity_findings(
                 "timing": item.get("timing"),
                 "pages": pages,
                 "page": page,
-                "evidence": excerpt,
+                "evidence": evidence_view,
             }
         )
     return findings
@@ -639,7 +1278,7 @@ def _build_conformita_section(findings: List[Dict[str, Any]]) -> Optional[Dict[s
 # ---------------------------------------------------------------------------
 # §7 FORMALITÀ E CANCELLAZIONI
 # ---------------------------------------------------------------------------
-_CANCELLED_SENTENCE = "Formalità indicata come cancellata a cura della procedura."
+_CANCELLED_SENTENCE = "Da cancellare a cura della procedura con il decreto di trasferimento."
 _CANCELLED_NOTE = (
     "L'importo iscritto non è un debito da sommare al prezzo, salvo diversa "
     "indicazione espressa nella perizia."
@@ -691,7 +1330,24 @@ def _build_formalita(report: Dict[str, Any], lot_id: Optional[str]) -> Tuple[Opt
             "pages": card["pages"],
         }
         if card["cancelled_by_procedure"] and not card["buyer_burden"]:
-            view["statement"] = _CANCELLED_SENTENCE
+            description_blob = _norm(" ".join(card["details"]))
+            future_or_negated = any(k in description_blob for k in (
+                "da cancell", "a cura della procedura", "con decreto di trasferimento",
+                "non risulta gia cancell", "non risulta cancell",
+            ))
+            explicitly_already = (
+                not future_or_negated
+                and bool(re.search(
+                    r"(?:^gia\s+cancellat|(?:risulta|formalita|e)\s+(?:gia\s+)?cancellat)",
+                    description_blob,
+                ))
+            )
+            if explicitly_already:
+                view["statement"] = "Già cancellata secondo la perizia."
+                view["cancellation_state"] = "already_cancelled"
+            else:
+                view["statement"] = _CANCELLED_SENTENCE
+                view["cancellation_state"] = "to_be_cancelled"
             view["note"] = _CANCELLED_NOTE
             cancellate.append(view)
         elif card["buyer_burden"]:
@@ -737,6 +1393,15 @@ def _build_formalita(report: Dict[str, Any], lot_id: Optional[str]) -> Tuple[Opt
 # ---------------------------------------------------------------------------
 # §5 COSA VERIFICARE — checklist findings (dedup vs compliance/formalita)
 # ---------------------------------------------------------------------------
+def _access_action_title(area: Any, summary: Any) -> str:
+    target = _norm(f"{area} {summary}")
+    if "magazzino" in target or "rustico" in target:
+        return "Verificare il titolo di accesso al magazzino/rustico"
+    if "garage" in target or "autorimessa" in target:
+        return "Verificare il titolo di accesso al garage/autorimessa"
+    return "Verificare il titolo di accesso all’immobile"
+
+
 def _build_verifiche(
     report: Dict[str, Any],
     conformity_findings: List[Dict[str, Any]],
@@ -746,6 +1411,28 @@ def _build_verifiche(
     lot_id: Optional[str],
 ) -> Optional[Dict[str, Any]]:
     items: List[Dict[str, Any]] = []
+
+    # Risks not represented by compliance cards still need an authoritative,
+    # buyer-impact-ranked professional action (access, condition, etc.).
+    for section in report.get("risk_sections") or []:
+        for risk in section.get("items") or []:
+            if not isinstance(risk, dict):
+                continue
+            blob = _norm(f"{risk.get('area')} {risk.get('summary')}")
+            if "access" in blob and any(k in blob for k in ("altra proprieta", "altra proprietà", "terz")):
+                items.append({
+                    "title": _access_action_title(risk.get("area"), risk.get("summary")),
+                    "why": "L’accesso descritto avviene attraverso un immobile di altra proprietà non compreso nella procedura. Verificare servitù, titolo opponibile e futura utilizzabilità dell’accesso.",
+                    "status": "da_verificare", "page": (_pages(risk.get("evidence_pages")) or [None])[0],
+                    "link": "altri", "severity": 0,
+                })
+            elif any(k in blob for k in ("copertura dannegg", "tetto dannegg")):
+                items.append({
+                    "title": "Verificare la copertura danneggiata del magazzino",
+                    "why": "Il danno può incidere sull’utilizzabilità e comportare costi non quantificati.",
+                    "status": "da_verificare", "page": (_pages(risk.get("evidence_pages")) or [None])[0],
+                    "link": "altri", "severity": 5,
+                })
 
     # 1. Occupancy/title first (§E priority). Linked to the occupancy finding by
     #    finding_id so its state is reconciled after a confirmation is applied.
@@ -766,31 +1453,75 @@ def _build_verifiche(
 
     # 2. Chain-excluded ambiguous amounts (informational; not confirmation-driven).
     if numeri and numeri.get("da_chiarire"):
+        reconciliation = numeri.get("riconciliazione")
         items.append(
             {
-                "title": "Chiarire alcuni importi indicati nella perizia",
-                "why": "Alcuni importi non hanno un ruolo chiaro nella catena di valore.",
+                "title": "Calcolo da chiarire" if reconciliation else "Chiarire alcuni importi indicati nella perizia",
+                "why": reconciliation.get("explanation") if reconciliation else "Alcuni importi non hanno un ruolo chiaro nella catena di valore.",
                 "status": "da_verificare",
                 "page": None,
                 "link": "numeri",
-                "severity": _SEV_FINAL_VALUE,
+                "severity": 3,
             }
         )
 
-    # 3. Technical action items (regularizable / non-conforming) — link, don't repeat.
-    for f in conformity_findings:
-        if f["status"] in ("regolarizzabile", "non_conforme"):
-            items.append(
-                {
-                    "title": f"Verificare/regolarizzare: {f['title'].lower()}",
-                    "why": f["buyer_impact"],
-                    "status": "da_verificare",
-                    "page": f.get("page"),
-                    "link": "conformita",
-                    "finding_id": f["finding_id"],
-                    "severity": _SEV_TECH_ACTION,
-                }
+    # 3. Technical actions. Building irregularities and asset-level agibilità
+    # form one buyer decision, while their detailed findings remain distinct.
+    actionable = [
+        f for f in conformity_findings
+        if f["status"] in ("regolarizzabile", "non_conforme", "da_verificare")
+    ]
+    building = next((f for f in actionable if f.get("topic") == "edilizia"), None)
+    agibilita = next((f for f in actionable if f.get("topic") == "agibilita"), None)
+    consumed: set = set()
+    if building or agibilita:
+        anchor = building or agibilita
+        if building and agibilita:
+            title = "Verificare le difformità edilizie e l’agibilità del garage"
+            why = (
+                "Confermare con il Comune modalità, ammissibilità e costi delle regolarizzazioni, "
+                "oltre a possibilità e condizioni di regolarizzazione del garage non agibile."
             )
+        elif building:
+            title = "Verificare le difformità edilizie e i titoli abilitativi"
+            why = building["buyer_impact"]
+        else:
+            title = "Verificare l’agibilità per singolo Bene"
+            why = agibilita["buyer_impact"]
+        items.append({
+            "title": title, "why": why, "status": "da_verificare",
+            "page": anchor.get("page"), "link": "conformita",
+            "finding_id": anchor["finding_id"], "severity": 1,
+        })
+        consumed.update(f["finding_id"] for f in (building, agibilita) if f)
+
+    technical_priority = {
+        "catastale": 4,
+        "impianti": 6,
+        "impianto_gas": 6,
+        "impianto_elettrico": 6,
+        "ape": 7,
+    }
+    technical_title = {
+        "catastale": "Verificare registrazione DOCFA e allineamento catastale definitivo",
+        "impianti": "Verificare dichiarazioni e stato degli impianti",
+        "impianto_gas": "Verificare dichiarazioni e stato dell’impianto gas",
+        "impianto_elettrico": "Verificare dichiarazioni e stato dell’impianto elettrico",
+        "ape": "Verificare la disponibilità dell’APE",
+    }
+    for f in actionable:
+        if f["finding_id"] in consumed:
+            continue
+        topic = f.get("topic")
+        # Unknown technical topics remain visible after the eight principal
+        # buyer-impact checks; they never displace a more material named risk.
+        priority = technical_priority.get(topic, 8)
+        items.append({
+            "title": technical_title.get(topic, f"Verificare/regolarizzare: {f['title'].lower()}"),
+            "why": f["buyer_impact"], "status": "da_verificare",
+            "page": f.get("page"), "link": "conformita",
+            "finding_id": f["finding_id"], "severity": priority,
+        })
 
     # 5. Formalities with unclear treatment.
     for f in formality_findings:
@@ -809,7 +1540,8 @@ def _build_verifiche(
     if not items:
         return None
     items.sort(key=lambda it: it.get("severity", 9))
-    return {"items": items[:8], "total": len(items)}
+    displayed_items = items[:8]
+    return {"items": displayed_items, "total": len(displayed_items)}
 
 
 # Checklist status taxonomy (customer Italian) + which statuses count as OPEN.
@@ -918,12 +1650,94 @@ def _source_priority(topic: str, section: str) -> int:
     return _SEV_CONTEXT
 
 
+def _source_excerpt_supports_topic(
+    report: Dict[str, Any], topic: str, section: str, excerpt: Any
+) -> bool:
+    """Fail closed unless a decisive-source excerpt proves its normalized topic."""
+    text = _semantic_norm(excerpt)
+    topic_norm = _norm(topic)
+    if not text:
+        return False
+
+    matching_item = next((
+        item for item in report.get("compliance_section") or []
+        if isinstance(item, dict) and _semantic_norm(item.get("area")) == _semantic_norm(topic)
+    ), None)
+    notes = _norm((matching_item or {}).get("notes"))
+    if "completezza documentazione" in topic_norm:
+        return (
+            ("documentazione" in text or "art 567" in text)
+            and any(k in text for k in (
+                "risulta completa", "documentazione completa", "dichiarata completa",
+            ))
+        )
+    if "titolarita" in topic_norm:
+        if re.search(r"\b1\s*/\s*1\b", notes):
+            return "proprieta 1 1" in text or "diritto di proprieta 1 1" in text
+        return "proprieta" in text or "diritto" in text
+    if "continuita" in topic_norm:
+        return any(k in text for k in (
+            "sussistenza della continuita", "continuita nelle trascrizioni",
+            "continuita delle trascrizioni dichiarata",
+        ))
+    if any(k in topic_norm for k in (
+        "edilizia residenziale pubblica", "edilizia convenzionata",
+        "alloggio pubblico", "alloggi pubblici",
+    )):
+        return any(k in text for k in (
+            "edilizia residenziale pubblica", "edilizia convenzionata",
+            "alloggio pubblico", "alloggi pubblici",
+        ))
+    if any(k in topic_norm for k in ("urbanistica", "destinazione urbanistica", "pgt")):
+        code = re.search(r"\b([a-z]{2,}\s*\d+[a-z0-9.-]*)\b", notes)
+        if code and _semantic_norm(code.group(1)) not in text:
+            return False
+        return any(k in text for k in ("urbanistica", "destinazione urbanistica", "pgt"))
+    if "ape" in topic_norm or "energetic" in topic_norm:
+        return "ape" in text or "certificat" in text and "energetic" in text
+    if "agibil" in topic_norm or "abitabil" in topic_norm:
+        return "agibil" in text or "abitabil" in text
+    if "impiant" in topic_norm and "gas" in topic_norm:
+        return "gas" in text and ("impiant" in text or "dichiaraz" in text)
+    if "impiant" in topic_norm and "elettric" in topic_norm:
+        return "elettric" in text and ("impiant" in text or "dichiaraz" in text)
+    if "impiant" in topic_norm:
+        return "impiant" in text and any(k in text for k in ("conform", "dichiaraz", "stato"))
+    if any(k in topic_norm for k in ("edilizia", "regolarita edilizia")):
+        return any(k in text for k in (
+            "conformita edilizia", "regolarita edilizia", "difform", "titolo",
+            "sanatori", "ripristin",
+        ))
+    if "vincol" in topic_norm:
+        return any(k in text for k in ("vincol", "demanial", "usi civici"))
+    if "catastal" in topic_norm or "docfa" in topic_norm:
+        return any(k in text for k in ("catastal", "docfa", "corrispondenza"))
+    if any(k in topic_norm for k in ("valore", "prezzo", "stima")):
+        return "valore" in text or "prezzo" in text or "stima" in text
+    if "ipoteca" in topic_norm:
+        return "ipoteca" in text or "capitale" in text
+    if "pignoram" in topic_norm:
+        return "pignoram" in text
+    if "occupa" in topic_norm:
+        return any(k in text for k in ("occupa", "residen", "locazion", "esecutat"))
+
+    words = [w for w in _semantic_norm(topic).split() if len(w) >= 5]
+    return bool(words and any(w in text for w in words[:4]))
+
+
 def _build_sources(report: Dict[str, Any], evidence: Sequence[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
-    # One source per (topic), prune the surface micro-topics into a single line.
+    # One source per topic, but validate every candidate before marking the topic
+    # seen: an early wrong excerpt must not starve a later decisive one.
     primary: List[Dict[str, Any]] = []
-    seen_topics: set = set()
     surface_pages: set = set()
     total = 0
+    component_rows = {
+        _semantic_norm(row.get("label")): row
+        for row in (report.get("money_sections") or {}).get("uncertain_money") or []
+        if isinstance(row, dict) and _is_component_value(row)
+    }
+    grouped: Dict[str, List[Dict[str, Any]]] = {}
+    topic_order: List[str] = []
     for entry in evidence:
         section = str(entry.get("report_section") or "")
         topic = str(entry.get("topic") or "")
@@ -937,21 +1751,66 @@ def _build_sources(report: Dict[str, Any], evidence: Sequence[Dict[str, Any]]) -
         if _norm(topic).startswith("comparativ"):
             continue
         key = _norm(topic)
-        if key in seen_topics:
-            continue
-        seen_topics.add(key)
+        if key not in grouped:
+            grouped[key] = []
+            topic_order.append(key)
+        grouped[key].append(entry)
+
+    for key in topic_order:
+        candidates = grouped[key]
+        first = candidates[0]
+        section = str(first.get("report_section") or "")
+        topic = str(first.get("topic") or "")
         total += 1
         pri = _source_priority(topic, section)
-        excerpt = entry.get("perizia_excerpt") if entry.get("coverage_status") == "covered" else None
-        try:
-            page = int(entry.get("page"))
-        except (TypeError, ValueError):
-            page = None
+        page = next((p for p in (
+            (_pages([entry.get("page")]) or [None])[0] for entry in candidates
+        ) if p is not None), None)
+        excerpt = None
+        component = component_rows.get(_semantic_norm(topic))
+        if component:
+            match = _COMPONENT_VALUE_RE.search(str(component.get("label") or ""))
+            bene = f"Bene N° {match.group(1)}" if match else None
+            amount = _as_float(component.get("amount"))
+            valid = _find_excerpt(
+                candidates, component.get("evidence_pages") or [entry.get("page") for entry in candidates],
+                (_semantic_norm(topic),), expected_amount=amount, expected_bene=bene,
+                expected_asset=_component_label(component),
+            )
+            if valid:
+                excerpt, page = valid["excerpt"], valid["page"]
+            else:
+                recovered = _find_cached_component_excerpt(
+                    report,
+                    component.get("evidence_pages") or [entry.get("page") for entry in candidates],
+                    bene,
+                    amount,
+                    _component_label(component),
+                )
+                excerpt = recovered.get("excerpt") if recovered else None
+                if recovered:
+                    page = recovered.get("page")
+        else:
+            valid_candidates: List[Tuple[int, int, str]] = []
+            for entry in candidates:
+                candidate_excerpt = entry.get("perizia_excerpt") if entry.get("coverage_status") == "covered" else None
+                if not _source_excerpt_supports_topic(report, topic, section, candidate_excerpt):
+                    continue
+                candidate_page = (_pages([entry.get("page")]) or [999])[0]
+                valid_candidates.append((len(str(candidate_excerpt)), candidate_page, str(candidate_excerpt)))
+            if valid_candidates:
+                _, page, excerpt = min(valid_candidates, key=lambda row: (row[0], row[1]))
+        display_topic = topic
+        if (
+            _norm(topic) == "valore di mercato" and excerpt
+            and "valore di stima" in _norm(excerpt) and component_rows
+        ):
+            display_topic = "Valore di stima prima dei deprezzamenti"
         primary.append(
             {
                 "source_id": _finding_id("acquisto", key, None, page, None).replace("acq-", "src-"),
                 "page": page,
-                "title": topic,
+                "title": display_topic,
                 "excerpt": excerpt,
                 "excerpt_status": "covered" if excerpt else "excerpt_missing",
                 "priority": pri,
@@ -996,7 +1855,7 @@ def _attach_confirmation(finding: Dict[str, Any]) -> None:
     options = _CONFIRM_OPTIONS.get(confirm_class)
     if not options:
         return
-    if not finding.get("evidence"):
+    if not (finding.get("evidence") or {}).get("excerpt"):
         # No verbatim excerpt → professional-check line instead of a form.
         finding["professional_check"] = (
             f"Verifica pagina {finding.get('page')} con un professionista"
@@ -1146,9 +2005,17 @@ def _build_readiness(
 
 
 def _build_esito(
-    report_status: str, findings: List[Dict[str, Any]], readiness: Dict[str, Any]
+    report_status: str, findings: List[Dict[str, Any]], readiness: Dict[str, Any],
+    report: Optional[Dict[str, Any]] = None,
+    verifiche: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
+    report = report or {}
+    verifiche = verifiche or {}
     open_confirmations = any(f.get("confirmation") for f in findings)
+    open_checks = [
+        item for item in verifiche.get("items") or []
+        if isinstance(item, dict) and item.get("status") in _OPEN_CHECKLIST_STATUSES
+    ]
     # Red is reserved for a genuinely fail-closed report or a report that a
     # blocking finding pushed into technical review. Interactive safe statuses
     # (lot selection / money confirmation) are amber, never red.
@@ -1156,22 +2023,51 @@ def _build_esito(
         level = "rosso"
     elif report_status != "REPORT_READY":
         level = "ambra"
-    elif not any(_is_actionable(f) for f in findings) and not open_confirmations:
+    elif not any(_is_actionable(f) for f in findings) and not open_confirmations and not open_checks:
         level = "verde"
     else:
         level = "ambra"
 
-    wording = _ESITO_WORDING[level]
+    wording = dict(_ESITO_WORDING[level])
+    has_access_dependency = any(
+        "access" in _norm(f"{item.get('area')} {item.get('summary')}")
+        and "altra proprieta" in _norm(f"{item.get('area')} {item.get('summary')}")
+        for section in report.get("risk_sections") or []
+        for item in section.get("items") or [] if isinstance(item, dict)
+    )
+    if level == "ambra" and has_access_dependency:
+        wording["headline"] = "ATTENZIONE — Verifiche tecniche e legali necessarie prima di procedere"
     drivers: List[Dict[str, Any]] = []
     seen_titles: set = set()
-    for f in sorted(findings, key=lambda x: x.get("severity", 9)):
-        if not (_is_actionable(f) or f.get("status") == "verifica_tecnica_richiesta"):
-            continue
-        title = f.get("title")
+    candidates: List[Dict[str, Any]] = []
+    for item in open_checks:
+        title = item.get("title")
+        candidates.append({
+            "finding_id": item.get("finding_id") or _finding_id(
+                "altri", _norm(title), None, item.get("page"), None
+            ),
+            "title": title,
+            "section": item.get("link") or "verifiche",
+            "severity": item.get("severity", 9),
+        })
+    for finding in findings:
+        if _is_actionable(finding) or finding.get("status") == "verifica_tecnica_richiesta":
+            candidates.append({
+                "finding_id": finding["finding_id"],
+                "title": finding.get("title"),
+                "section": finding["section"],
+                "severity": finding.get("severity", 9),
+            })
+    for candidate in sorted(candidates, key=lambda x: x.get("severity", 9)):
+        title = candidate.get("title")
         if _norm(title) in seen_titles:
             continue
         seen_titles.add(_norm(title))
-        drivers.append({"finding_id": f["finding_id"], "title": title, "section": f["section"]})
+        drivers.append({
+            "finding_id": candidate["finding_id"],
+            "title": title,
+            "section": candidate["section"],
+        })
         if len(drivers) >= 5:
             break
     return {
@@ -1287,13 +2183,46 @@ def build_decision_model(
         sections["verifiche"] = _reconcile_verifiche(sections["verifiche"], findings)
 
     readiness = _build_readiness(report_status, findings, confirmation_views)
+    if sections.get("verifiche"):
+        checklist = sections["verifiche"]
+        readiness["professional_checks_open"] = sum(
+            1 for item in checklist.get("items") or []
+            if item.get("status") in _OPEN_CHECKLIST_STATUSES
+            and item.get("status") != "conferma_necessaria"
+        )
+        # Some authoritative checklist actions (for example a third-party
+        # access dependency) are sourced from risk_sections and intentionally do
+        # not fabricate a conformity finding.  Their open count must still drive
+        # readiness state and its customer label.
+        if (
+            readiness["state"] == "COMPLETE_FOR_EXPORT"
+            and readiness["professional_checks_open"] > 0
+        ):
+            readiness["state"] = "READY_FOR_REVIEW"
+            readiness["label"] = _READINESS_LABEL["READY_FOR_REVIEW"]
+    readiness["confirmations_open"] = max(
+        0, readiness["confirmations_total"] - readiness["confirmations_done"]
+    )
+    readiness["information_declared"] = sum(
+        1 for f in findings if f.get("status") in {"dichiarato_perizia", "conforme"}
+    )
+    readiness["information_confirmed"] = readiness["confirmations_done"]
+    readiness["information_resolved"] = sum(
+        1 for f in findings if f.get("status") in {"completato", "confermato_utente"}
+    )
     sections["stato_verifiche"] = {
         "label": readiness["label"],
         "confirmations_total": readiness["confirmations_total"],
         "confirmations_done": readiness["confirmations_done"],
         "professional_checks_open": readiness["professional_checks_open"],
+        "confirmations_open": readiness["confirmations_open"],
+        "information_declared": readiness["information_declared"],
+        "information_confirmed": readiness["information_confirmed"],
+        "information_resolved": readiness["information_resolved"],
     }
-    esito = _build_esito(report_status, findings, readiness)
+    esito = _build_esito(
+        report_status, findings, readiness, report, sections.get("verifiche")
+    )
 
     return {
         "schema_version": SCHEMA_VERSION,
