@@ -9,11 +9,29 @@ const API_URL = process.env.REACT_APP_BACKEND_URL;
 export const AuthProvider = ({ children }) => {
   const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
+  // The backend is the authority on which login methods work. Default false so
+  // the email option is hidden until the deployment says otherwise — a build
+  // that ships ahead of the backend must not advertise a dead button. Google is
+  // never gated on this: it is configured independently of email OTP.
+  const [emailOtpEnabled, setEmailOtpEnabled] = useState(false);
   const accountState = getAccountState(user);
 
   useEffect(() => {
     checkAuth();
+    loadAuthCapabilities();
   }, []);
+
+  // Fetched per mount and never persisted, so flipping AUTH_EMAIL_ENABLED on
+  // the backend takes effect on the next page load with no cache to bust.
+  const loadAuthCapabilities = async () => {
+    try {
+      const response = await axios.get(`${API_URL}/api/auth/capabilities`);
+      setEmailOtpEnabled(response.data?.email_otp_enabled === true);
+    } catch (error) {
+      // Fail closed on the email option only; Google stays available.
+      setEmailOtpEnabled(false);
+    }
+  };
 
   const checkAuth = async () => {
     try {
@@ -32,6 +50,28 @@ export const AuthProvider = ({ children }) => {
     // REMINDER: DO NOT HARDCODE THE URL, OR ADD ANY FALLBACKS OR REDIRECT URLS, THIS BREAKS THE AUTH
     const redirectUrl = window.location.origin + '/dashboard';
     window.location.href = `${API_URL}/api/auth/google/start?redirect=${encodeURIComponent(redirectUrl)}`;
+  };
+
+  // Passwordless email login. Provider-independent: the backend verifies
+  // ownership of the address itself, so any mailbox works — Microsoft 365,
+  // Aruba, a custom company domain, or Google.
+  const requestEmailCode = async (email) => {
+    const response = await axios.post(
+      `${API_URL}/api/auth/email/request-code`,
+      { email },
+      { withCredentials: true }
+    );
+    return response.data;
+  };
+
+  const verifyEmailCode = async (challengeId, code) => {
+    const response = await axios.post(
+      `${API_URL}/api/auth/email/verify-code`,
+      { challenge_id: challengeId, code },
+      { withCredentials: true }
+    );
+    setUser(response.data.user);
+    return response.data.user;
   };
 
   const exchangeSession = async (sessionId) => {
@@ -77,10 +117,13 @@ export const AuthProvider = ({ children }) => {
       user, 
       featureAccess: accountState.featureAccess,
       accountState,
-      loading, 
-      login, 
-      logout, 
+      loading,
+      emailOtpEnabled,
+      login,
+      logout,
       exchangeSession,
+      requestEmailCode,
+      verifyEmailCode,
       refreshUser,
       setUser 
     }}>

@@ -161,6 +161,50 @@ class FakeCollection:
                 else:
                     doc[key] = doc.get(key, 0) + val
 
+    async def find_one_and_update(
+        self, filt, update, upsert=False, projection=None, return_document=None, sort=None
+    ):
+        """Minimal find_one_and_update: enough for the shared login upsert.
+
+        Supports ``$set``, ``$setOnInsert``, ``$addToSet`` and ``$inc`` with
+        ``upsert``. It cannot model a genuine concurrent race — that guarantee
+        is proven against real Mongo in the auth_email concurrency suite — but it
+        keeps the in-memory suites exercising the same code path.
+        """
+        self.update_calls.append(update)
+        matches = [d for d in self.items if self._match(d, filt)]
+
+        if not matches:
+            if not upsert:
+                return None
+            doc = {}
+            if "$setOnInsert" in update:
+                doc.update(update["$setOnInsert"])
+            if "$set" in update:
+                doc.update(update["$set"])
+            if "$addToSet" in update:
+                for key, val in update["$addToSet"].items():
+                    doc[key] = [val]
+            self.items.append(doc)
+            self.inserted.append(doc)
+            return self._apply_projection(doc, projection)
+
+        doc = matches[0]
+        if "$set" in update:
+            doc.update(update["$set"])
+        if "$addToSet" in update:
+            for key, val in update["$addToSet"].items():
+                existing = doc.get(key)
+                if not isinstance(existing, list):
+                    existing = []
+                if val not in existing:
+                    existing = existing + [val]
+                doc[key] = existing
+        if "$inc" in update:
+            for key, val in update["$inc"].items():
+                doc[key] = doc.get(key, 0) + val
+        return self._apply_projection(doc, projection)
+
     def aggregate(self, pipeline):
         data = list(self.items)
         for stage in pipeline:

@@ -3,6 +3,9 @@ from fastapi.responses import JSONResponse, RedirectResponse, StreamingResponse
 from dotenv import load_dotenv
 from starlette.middleware.cors import CORSMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
+from pymongo import ReturnDocument
+from pymongo.errors import DuplicateKeyError
+from auth_email import identity as auth_identity
 import os
 import asyncio
 import logging
@@ -12556,35 +12559,12 @@ def _google_email_is_verified(value: Any) -> bool:
     return str(value).strip().lower() in {"1", "true", "yes"}
 
 
-async def _get_or_create_authenticated_user(email: str, name: Optional[str], picture: Optional[str]) -> User:
-    email = str(email or "").strip().lower()
-    if not email:
-        raise HTTPException(status_code=401, detail="Email required")
-
-    display_name = str(name or "").strip() or email
-    picture_url = str(picture or "").strip() or None
-
-    existing_user = await db.users.find_one({"email": email}, {"_id": 0})
-    is_master = _is_admin_email(email)
-
-    if existing_user:
-        user_id = existing_user["user_id"]
-        update_data = {"name": display_name, "picture": picture_url}
-        await db.users.update_one(
-            {"user_id": user_id},
-            {"$set": update_data}
-        )
-
-        await _link_pending_beta_membership(email, user_id)
-        updated_user = await db.users.find_one({"user_id": user_id}, {"_id": 0})
-        normalized_user = await _apply_normalized_account_state(updated_user, persist=True)
-        await _ensure_opening_balance_baseline_for_user_doc(normalized_user)
-        return User(**normalized_user)
-
-    user_id = f"user_{uuid.uuid4().hex[:12]}"
+def _build_new_user_insert_doc(normalized_email: str, display_name: str, picture_url: Optional[str]) -> Dict[str, Any]:
+    """The document used when a login is the first one for this email."""
+    is_master = _is_admin_email(normalized_email)
     new_user = User(
-        user_id=user_id,
-        email=email,
+        user_id=f"user_{uuid.uuid4().hex[:12]}",
+        email=normalized_email,
         name=display_name,
         picture=picture_url,
         plan="enterprise" if is_master else "free",
@@ -12599,10 +12579,98 @@ async def _get_or_create_authenticated_user(email: str, name: Optional[str], pic
     )
     user_dict["quota"]["perizia_scans_remaining"] = user_dict["perizia_credits"]["total_available"]
     user_dict["created_at"] = user_dict["created_at"].isoformat()
-    await db.users.insert_one(user_dict)
-    await _link_pending_beta_membership(email, user_id)
-    await _ensure_opening_balance_baseline_for_user_doc(user_dict)
-    return User(**user_dict)
+    user_dict.pop("beta_program", None)  # request-scoped only; never persisted
+    return user_dict
+
+
+async def _get_or_create_authenticated_user(
+    email: str,
+    name: Optional[str],
+    picture: Optional[str],
+    auth_method: Optional[str] = None,
+    email_verified: bool = False,
+) -> User:
+    """Resolve the single account for a verified email, creating it if needed.
+
+    Identity is the normalized email, not the provider: Google and email OTP for
+    the same address resolve to the same ``user_id``, with the login method
+    recorded rather than used to key the account.
+
+    The resolve-or-create is one atomic upsert. It matches on ``normalized_email``
+    OR the historical ``email`` field so that accounts predating the identity
+    migration are found (and back-filled) rather than duplicated. Once the unique
+    ``normalized_email`` index exists, a lost race surfaces as ``DuplicateKeyError``
+    and is resolved by loading the winning document — never by creating a second
+    account. This is why the OTP endpoints refuse to serve without that index.
+    """
+    normalized = auth_identity.normalize_email(email)
+    if not normalized:
+        raise HTTPException(status_code=401, detail="Email required")
+
+    display_name = str(name or "").strip()
+    picture_url = str(picture or "").strip() or None
+    now_iso = datetime.now(timezone.utc).isoformat()
+
+    set_fields: Dict[str, Any] = {
+        "normalized_email": normalized,
+        "email": normalized,
+        "last_login_at": now_iso,
+    }
+    # Only overwrite profile fields the provider actually supplied, so an OTP
+    # login never blanks a name or avatar established through Google.
+    if display_name:
+        set_fields["name"] = display_name
+    if picture_url:
+        set_fields["picture"] = picture_url
+    if auth_method:
+        set_fields["last_login_method"] = auth_method
+    if email_verified:
+        set_fields["email_verified"] = True
+
+    insert_doc = _build_new_user_insert_doc(normalized, display_name or normalized, picture_url)
+    insert_doc.setdefault("email_verified", bool(email_verified))
+    # Mongo rejects an update that writes the same path in both operators, so
+    # $setOnInsert must not repeat anything already present in $set.
+    for key in set_fields:
+        insert_doc.pop(key, None)
+
+    update: Dict[str, Any] = {"$set": set_fields, "$setOnInsert": insert_doc}
+    if auth_method:
+        # $addToSet creates the array when absent, so it must not be seeded in
+        # $setOnInsert as well.
+        update["$addToSet"] = {"auth_methods": auth_method}
+
+    query = {"$or": [{"normalized_email": normalized}, {"email": normalized}]}
+
+    user_doc = None
+    for _attempt in range(2):
+        try:
+            user_doc = await db.users.find_one_and_update(
+                query,
+                update,
+                upsert=True,
+                projection={"_id": 0},
+                return_document=ReturnDocument.AFTER,
+            )
+            break
+        except DuplicateKeyError:
+            # A concurrent first login for the same email won. Load the winner
+            # instead of creating a rival account.
+            user_doc = await db.users.find_one(query, {"_id": 0})
+            if user_doc:
+                break
+
+    if not user_doc:
+        user_doc = await db.users.find_one(query, {"_id": 0})
+    if not user_doc:
+        raise HTTPException(status_code=500, detail="Authentication failed")
+
+    user_id = user_doc["user_id"]
+    await _link_pending_beta_membership(normalized, user_id)
+    refreshed = await db.users.find_one({"user_id": user_id}, {"_id": 0}) or user_doc
+    normalized_user = await _apply_normalized_account_state(refreshed, persist=True)
+    await _ensure_opening_balance_baseline_for_user_doc(normalized_user)
+    return User(**normalized_user)
 
 
 async def _create_local_session_for_user(user: User) -> str:
@@ -12634,8 +12702,21 @@ def _set_session_token_cookie(response: Response, session_token: str) -> None:
     )
 
 
-async def _create_local_login(email: str, name: Optional[str], picture: Optional[str], response: Response) -> Tuple[User, str]:
-    user = await _get_or_create_authenticated_user(email=email, name=name, picture=picture)
+async def _create_local_login(
+    email: str,
+    name: Optional[str],
+    picture: Optional[str],
+    response: Response,
+    auth_method: Optional[str] = None,
+    email_verified: bool = False,
+) -> Tuple[User, str]:
+    user = await _get_or_create_authenticated_user(
+        email=email,
+        name=name,
+        picture=picture,
+        auth_method=auth_method,
+        email_verified=email_verified,
+    )
     session_token = await _create_local_session_for_user(user)
 
     if user.is_master_admin:
@@ -12749,11 +12830,15 @@ async def google_oauth_callback(
         or email
     )
     redirect_response = RedirectResponse(url=redirect_url, status_code=302)
+    # email_verified is asserted above via _google_email_is_verified, so this is
+    # a provider-verified address and may be linked to an existing account.
     await _create_local_login(
         email=email,
         name=display_name,
         picture=userinfo.get("picture"),
         response=redirect_response,
+        auth_method=auth_identity.METHOD_GOOGLE,
+        email_verified=True,
     )
     await db.oauth_states.update_one(
         {"state": state},
@@ -12785,11 +12870,14 @@ async def create_session(request: Request, response: Response):
             logger.error(f"Auth error: {e}")
             raise HTTPException(status_code=500, detail="Authentication failed")
     
+    # Legacy provider: it does not assert email verification, so the address is
+    # not treated as verified and cannot be used to link accounts.
     user, session_token = await _create_local_login(
         email=user_data.get("email"),
         name=user_data.get("name"),
         picture=user_data.get("picture"),
         response=response,
+        auth_method=auth_identity.METHOD_LEGACY,
     )
     
     user_response = _build_user_response(user)
@@ -20985,6 +21073,19 @@ try:
 except Exception as _beta_exc:  # pragma: no cover - defensive startup guard
     logger.warning(f"beta_program router not registered: {_beta_exc}")
 
+# Passwordless email OTP login. The routes are always mounted; the feature flag
+# and the fail-closed preflight decide at request time whether they will serve.
+# Mounting is unconditional so that enabling the feature never requires a code
+# change, and a failure here can never affect Google login.
+try:
+    from auth_email.api import router as auth_email_router
+    from auth_email.api import capabilities_router as auth_capabilities_router
+
+    app.include_router(auth_email_router, prefix="/api")
+    app.include_router(auth_capabilities_router, prefix="/api")
+except Exception as _auth_email_exc:  # pragma: no cover - defensive startup guard
+    logger.warning(f"auth_email router not registered: {_auth_email_exc}")
+
 
 @app.on_event("startup")
 async def _correctness_v2_recover_stale_jobs():
@@ -21048,6 +21149,11 @@ def custom_openapi():
         "/api/auth/session",
         "/api/auth/google/start",
         "/api/auth/google/callback",
+        # Passwordless email OTP: both are pre-authentication by definition.
+        "/api/auth/email/request-code",
+        "/api/auth/email/verify-code",
+        # Capability probe: the login screen calls it before any session exists.
+        "/api/auth/capabilities",
         "/api/webhook/stripe",
     }
 
@@ -21147,6 +21253,21 @@ async def ensure_indexes():
         await _beta_quota.ensure_indexes()
     except Exception as e:
         logger.warning(f"beta_program index creation failed: {e}")
+
+    # Passwordless email auth: challenge + rate-limit indexes, plus the unique
+    # normalized-email identity index. The identity index is created only when no
+    # duplicate group exists; conflicts are reported for manual review and never
+    # merged. OTP fails closed until the index is present, while Google login
+    # continues to work regardless.
+    try:
+        from auth_email import challenges as _auth_email_challenges
+        from auth_email import ratelimit as _auth_email_ratelimit
+
+        await _auth_email_challenges.ensure_indexes()
+        await _auth_email_ratelimit.ensure_indexes()
+        await auth_identity.ensure_unique_index(db)
+    except Exception as e:
+        logger.warning(f"auth_email index creation failed: {e}")
 
     # Additional beta-related indexes on existing collections (compound + status).
     try:
