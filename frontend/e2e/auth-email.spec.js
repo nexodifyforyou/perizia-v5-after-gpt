@@ -58,8 +58,8 @@ test.describe('passwordless email login', () => {
     await openLogin(page);
     await expect(page.getByTestId('login-google-btn')).toBeVisible();
     await expect(page.getByTestId('login-email-btn')).toBeVisible();
-    await expect(page.getByTestId('login-google-btn')).toContainText('Continua con Google');
-    await expect(page.getByTestId('login-email-btn')).toContainText('Continua con email');
+    await expect(page.getByTestId('login-google-btn')).toContainText('Accedi con Google');
+    await expect(page.getByTestId('login-email-btn')).toContainText('Accedi con email');
   });
 
   test('the Google route is still reachable', async ({ request }) => {

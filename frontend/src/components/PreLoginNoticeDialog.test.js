@@ -130,14 +130,14 @@ describe('login options', () => {
     await setup();
     const google = byTestId('login-google-btn');
     expect(google).toBeTruthy();
-    expect(google.textContent).toContain('Continua con Google');
+    expect(google.textContent).toContain('Accedi con Google');
   });
 
   it('offers continue-with-email equally prominently', async () => {
     await setup();
     const email = byTestId('login-email-btn');
     expect(email).toBeTruthy();
-    expect(email.textContent).toContain('Continua con email');
+    expect(email.textContent).toContain('Accedi con email');
   });
 
   it('leaves the existing Google flow unchanged', async () => {
@@ -168,7 +168,7 @@ describe('capability gating', () => {
     mockCapabilities(false);
     await setup();
     expect(byTestId('login-email-btn')).toBeNull();
-    expect(container.textContent).not.toContain('Continua con email');
+    expect(container.textContent).not.toContain('Accedi con email');
   });
 
   it('shows the email option when the backend reports it enabled', async () => {
@@ -183,7 +183,7 @@ describe('capability gating', () => {
     await setup({ onConfirm });
     const google = byTestId('login-google-btn');
     expect(google).toBeTruthy();
-    expect(google.textContent).toContain('Continua con Google');
+    expect(google.textContent).toContain('Accedi con Google');
     await click(google);
     expect(onConfirm).toHaveBeenCalledTimes(1);
   });
@@ -201,14 +201,14 @@ describe('capability gating', () => {
     await setup();
     // The choice step renders normally: a title, Google, and cancel.
     expect(byTestId('auth-error')).toBeNull();
-    expect(container.textContent).toContain('Accesso sicuro');
+    expect(container.textContent).toContain('Accedi a PeriziaScan');
     expect(container.textContent).toContain('Annulla');
   });
 
   it('adapts the description so it never promises email login', async () => {
     mockCapabilities(false);
     await setup();
-    expect(container.textContent).not.toMatch(/indirizzo email aziendale/i);
+    expect(container.textContent).not.toMatch(/vuoi accedere/i);
     expect(container.textContent).toContain('Google');
   });
 

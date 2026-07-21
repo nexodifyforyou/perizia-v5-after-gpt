@@ -171,12 +171,12 @@ const PreLoginNoticeDialog = ({ open, onOpenChange, onConfirm }) => {
                   <Shield className="h-5 w-5" />
                 </div>
                 <DialogTitle className="font-serif text-2xl text-zinc-50">
-                  Accesso sicuro
+                  Accedi a PeriziaScan
                 </DialogTitle>
                 <DialogDescription className="text-sm leading-6 text-zinc-300">
                   {emailLoginAvailable
-                    ? 'Scegli come accedere a PeriziaScan. Puoi usare il tuo account Google oppure qualsiasi indirizzo email aziendale.'
-                    : 'Accedi a PeriziaScan con il tuo account Google.'}
+                    ? 'Scegli come vuoi accedere al tuo account.'
+                    : 'Accedi con il tuo account Google.'}
                 </DialogDescription>
               </DialogHeader>
 
@@ -187,7 +187,7 @@ const PreLoginNoticeDialog = ({ open, onOpenChange, onConfirm }) => {
                   onClick={onConfirm}
                   className="w-full bg-gold text-zinc-950 hover:bg-gold-dim font-semibold gold-glow"
                 >
-                  Continua con Google
+                  Accedi con Google
                 </Button>
                 {emailLoginAvailable && (
                   <Button
@@ -201,7 +201,7 @@ const PreLoginNoticeDialog = ({ open, onOpenChange, onConfirm }) => {
                     className="w-full border-zinc-700 bg-transparent text-zinc-100 hover:bg-zinc-900"
                   >
                     <Mail className="mr-2 h-4 w-4" aria-hidden="true" />
-                    Continua con email
+                    Accedi con email
                   </Button>
                 )}
               </div>

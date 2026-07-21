@@ -42,17 +42,37 @@ if [ "$E2E_DB" = "$PROD_DB" ]; then
 fi
 export DB_NAME="$E2E_DB"
 
+# Each server below is started with `setsid`, so the recorded PID is a
+# process-group leader. Killing the *negative* PID signals the whole group,
+# which reaches the real uvicorn/python even when it was launched behind a
+# subshell. The previous version killed `$!` of a `( ... ) &` subshell — the
+# subshell PID, not the child — and orphaned the backend on every run.
 cleanup() {
+  local pidfile pgid
   for pidfile in "$WORK"/*.pid; do
     [ -f "$pidfile" ] || continue
-    kill "$(cat "$pidfile")" 2>/dev/null || true
+    pgid="$(cat "$pidfile")"
+    if [ -n "$pgid" ]; then
+      kill -TERM -- "-$pgid" 2>/dev/null || true
+    fi
+  done
+  # Give them a beat to exit cleanly, then hard-kill any surviving group.
+  sleep 1
+  for pidfile in "$WORK"/*.pid; do
+    [ -f "$pidfile" ] || continue
+    pgid="$(cat "$pidfile")"
+    if [ -n "$pgid" ]; then
+      kill -KILL -- "-$pgid" 2>/dev/null || true
+    fi
     rm -f "$pidfile"
   done
 }
-trap cleanup EXIT
+trap cleanup EXIT INT TERM
 
 echo "==> SMTP sink on $SMTP_PORT"
-"$ROOT/backend/.venv/bin/python" "$ROOT/e2e/smtp_sink.py" --port "$SMTP_PORT" --out "$MAIL_FILE" \
+# setsid -> the backgrounded process is its own group leader, so $! is the real
+# python PID and `kill -- -$!` in cleanup reaches it.
+setsid "$ROOT/backend/.venv/bin/python" "$ROOT/e2e/smtp_sink.py" --port "$SMTP_PORT" --out "$MAIL_FILE" \
   > "$WORK/smtp.log" 2>&1 &
 echo $! > "$WORK/smtp.pid"
 
@@ -60,22 +80,24 @@ echo $! > "$WORK/smtp.pid"
 # it the browser blocks every cross-origin POST and the specs fail with no
 # request ever reaching the backend.
 echo "==> Backend on $BACKEND_PORT (db=$E2E_DB, AUTH_EMAIL_ENABLED=$AUTH_EMAIL_ENABLED)"
-(
-  cd "$ROOT/backend"
-  AUTH_EMAIL_ENABLED="$AUTH_EMAIL_ENABLED" \
-  AUTH_EMAIL_PROVIDER=sink \
-  AUTH_EMAIL_FROM="Perizia Scan <accesso@auth.nexodify.com>" \
-  AUTH_EMAIL_CODE_PEPPER="e2e-pepper-value-0123456789-0123456789-abcdef" \
-  AUTH_EMAIL_SENDER_DOMAIN_VERIFIED=true \
-  AUTH_EMAIL_RESEND_COOLDOWN_SECONDS=0 \
-  AUTH_EMAIL_MAX_REQUESTS_PER_EMAIL_HOUR=50 \
-  AUTH_EMAIL_MAX_REQUESTS_PER_IP_HOUR=200 \
-  AUTH_EMAIL_SINK_HOST=127.0.0.1 \
-  AUTH_EMAIL_SINK_PORT="$SMTP_PORT" \
-  DB_NAME="$E2E_DB" \
-  FRONTEND_URL="http://127.0.0.1:$FRONTEND_PORT" \
-  .venv/bin/python -m uvicorn server:app --host 127.0.0.1 --port "$BACKEND_PORT"
-) > "$WORK/backend.log" 2>&1 &
+# setsid + exec: the recorded PID is the uvicorn process-group leader, so
+# cleanup's group-kill terminates it instead of orphaning it behind a subshell.
+# Config is passed through the environment to avoid quoting the values here.
+AUTH_EMAIL_ENABLED="$AUTH_EMAIL_ENABLED" \
+AUTH_EMAIL_PROVIDER=sink \
+AUTH_EMAIL_FROM="Perizia Scan <accesso@auth.nexodify.com>" \
+AUTH_EMAIL_CODE_PEPPER="e2e-pepper-value-0123456789-0123456789-abcdef" \
+AUTH_EMAIL_SENDER_DOMAIN_VERIFIED=true \
+AUTH_EMAIL_RESEND_COOLDOWN_SECONDS=0 \
+AUTH_EMAIL_MAX_REQUESTS_PER_EMAIL_HOUR=50 \
+AUTH_EMAIL_MAX_REQUESTS_PER_IP_HOUR=200 \
+AUTH_EMAIL_SINK_HOST=127.0.0.1 \
+AUTH_EMAIL_SINK_PORT="$SMTP_PORT" \
+DB_NAME="$E2E_DB" \
+FRONTEND_URL="http://127.0.0.1:$FRONTEND_PORT" \
+E2E_ROOT="$ROOT" E2E_BACKEND_PORT="$BACKEND_PORT" \
+setsid bash -c 'cd "$E2E_ROOT/backend" && exec .venv/bin/python -m uvicorn server:app --host 127.0.0.1 --port "$E2E_BACKEND_PORT"' \
+  > "$WORK/backend.log" 2>&1 &
 echo $! > "$WORK/backend.pid"
 
 echo -n "    waiting for backend"
@@ -104,7 +126,9 @@ if [ ! -d "$WORK/build" ] || [ "${E2E_REBUILD:-0}" = "1" ]; then
 fi
 
 echo "==> Serving frontend on $FRONTEND_PORT"
-(cd "$WORK/build" && "$ROOT/backend/.venv/bin/python" -m http.server "$FRONTEND_PORT" --bind 127.0.0.1) \
+# setsid + exec so the recorded PID is the http.server group leader (see cleanup).
+E2E_BUILD="$WORK/build" E2E_PY="$ROOT/backend/.venv/bin/python" E2E_FRONTEND_PORT="$FRONTEND_PORT" \
+setsid bash -c 'cd "$E2E_BUILD" && exec "$E2E_PY" -m http.server "$E2E_FRONTEND_PORT" --bind 127.0.0.1' \
   > "$WORK/frontend.log" 2>&1 &
 echo $! > "$WORK/frontend.pid"
 sleep 2

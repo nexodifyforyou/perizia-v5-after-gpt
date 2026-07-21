@@ -54,19 +54,19 @@ test.describe('email login disabled on the backend', () => {
   test('Google login remains visible and the email option is absent', async ({ page }) => {
     await openLogin(page);
     await expect(page.getByTestId('login-google-btn')).toBeVisible();
-    await expect(page.getByTestId('login-google-btn')).toContainText('Continua con Google');
+    await expect(page.getByTestId('login-google-btn')).toContainText('Accedi con Google');
     await expect(page.getByTestId('login-email-btn')).toHaveCount(0);
-    await expect(page.getByText('Continua con email')).toHaveCount(0);
+    await expect(page.getByText('Accedi con email')).toHaveCount(0);
   });
 
   test('no broken or misleading screen is shown', async ({ page }) => {
     await openLogin(page);
     // The dialog renders its normal choice step: title, Google, cancel.
-    await expect(page.getByText('Accesso sicuro')).toBeVisible();
+    await expect(page.getByText('Accedi a PeriziaScan')).toBeVisible();
     await expect(page.getByText('Annulla')).toBeVisible();
     // No error banner, and no copy promising an email option that is not there.
     await expect(page.getByTestId('auth-error')).toHaveCount(0);
-    await expect(page.getByText(/indirizzo email aziendale/i)).toHaveCount(0);
+    await expect(page.getByText(/vuoi accedere/i)).toHaveCount(0);
   });
 
   test('no email-auth request is triggered by opening the login dialog', async ({ page }) => {
