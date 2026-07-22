@@ -185,6 +185,61 @@ def test_contract_adds_projected_auction_term_when_missing():
     )
 
 
+def test_contract_keeps_distinct_equal_amount_projection_rows_end_to_end():
+    ws = analyst.normalize_worksheet(make_worksheet())
+    ws["money"]["regularization_costs"] = None
+    rows = [
+        {"label": "Deprezzamento per vetustà", "amount": 5000, "field": None, "evidence_pages": [4]},
+        {"label": "Costi di regolarizzazione impianto elettrico", "amount": 5000, "field": None, "evidence_pages": [7]},
+    ]
+    built = contract_mod.build_contract(
+        worksheet=ws,
+        validator_report={"validation_status": "VALIDATED", "warnings": [], "checks": {}},
+        analysis_id="an_equal_distinct",
+        job_id="job_equal_distinct",
+        source_pdf_quality_status="OK",
+        shared_summary_rows=rows,
+    )
+
+    projected = [
+        row for row in built["valuation_chain"]
+        if row.get("source") == "shared_summary_projection" and row["amount"] == 5000
+    ]
+    assert {row["label"] for row in projected} == {row["label"] for row in rows}
+    assert len([
+        row for row in built["money_table"]
+        if row.get("source") == "shared_summary_projection" and row["amount"] == 5000
+    ]) == 2
+
+
+def test_contract_merges_repeated_compatible_projection_row_across_pages():
+    ws = analyst.normalize_worksheet(make_worksheet())
+    ws["money"]["regularization_costs"] = None
+    rows = [
+        {"label": "Deprezzamento per vetustà", "amount": 5000, "field": None, "evidence_pages": [4]},
+        {"label": "Deprezzamento per vetustà", "amount": 5000, "field": None, "evidence_pages": [7]},
+    ]
+    built = contract_mod.build_contract(
+        worksheet=ws,
+        validator_report={"validation_status": "VALIDATED", "warnings": [], "checks": {}},
+        analysis_id="an_equal_repeat",
+        job_id="job_equal_repeat",
+        source_pdf_quality_status="OK",
+        shared_summary_rows=rows,
+    )
+
+    projected = [
+        row for row in built["valuation_chain"]
+        if row.get("source") == "shared_summary_projection" and row["amount"] == 5000
+    ]
+    assert len(projected) == 1
+    assert projected[0]["evidence_pages"] == [4, 7]
+    assert len([
+        row for row in built["money_table"]
+        if row.get("source") == "shared_summary_projection" and row["amount"] == 5000
+    ]) == 1
+
+
 def _loader(pages):
     return lambda analysis_id: pages
 

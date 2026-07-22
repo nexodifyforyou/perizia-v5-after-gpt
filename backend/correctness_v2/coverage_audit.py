@@ -942,6 +942,12 @@ def build_coverage_audit(
     lot_report: Optional[Dict[str, Any]] = None,
     lot_index: Optional[Dict[str, Any]] = None,
     money_confirmations: Optional[Dict[str, str]] = None,
+    full_document_pages: Optional[List[Dict[str, Any]]] = None,
+    lot_id: Optional[str] = None,
+    segmentation: Optional[Dict[str, Any]] = None,
+    case_ledger: Optional[Dict[str, Any]] = None,
+    lot_fact_projection_report: Optional[Dict[str, Any]] = None,
+    selected_analysis_pages: Optional[List[int]] = None,
 ) -> Tuple[Dict[str, Any], Dict[str, Any]]:
     """Build (coverage_audit, page_by_page_audit) for a rendered report.
 
@@ -1089,7 +1095,152 @@ def build_coverage_audit(
             "contradicted": sum(1 for f in fact_coverage if f["match_status"] == CONTRADICTED),
         },
     }
+    if full_document_pages is not None:
+        audit["lot_coverage"] = _full_document_lot_metrics(
+            lot_id=str(lot_id or _worksheet_lot_id(worksheet or {})),
+            full_document_pages=full_document_pages,
+            selected_pages=selected_analysis_pages or [
+                p for p in (doc_signals.page_number(page) for page in pages or []) if p is not None
+            ],
+            segmentation=segmentation or {},
+            case_ledger=case_ledger or {},
+            reconciled_worksheet=worksheet or {},
+            customer_report=customer_report or {},
+            projection_report=lot_fact_projection_report or {},
+        )
+        lot_states = [
+            audit["lot_coverage"][key]
+            for key in (
+                "extraction_coverage_state", "report_completeness_state",
+                "evidence_completeness_state", "user_visible_completeness_state",
+            )
+        ]
+        if STATUS_FAIL in lot_states:
+            audit["coverage_status"] = STATUS_FAIL
+        elif STATUS_WARNING in lot_states and audit["coverage_status"] == STATUS_PASS:
+            audit["coverage_status"] = STATUS_WARNING
     return audit, page_audit
+
+
+def _worksheet_lot_id(worksheet: Dict[str, Any]) -> str:
+    lots = worksheet.get("lots") or []
+    if len(lots) == 1 and lots[0].get("lot_id") is not None:
+        return str(lots[0]["lot_id"])
+    raw = (worksheet.get("case_identity") or {}).get("lotto")
+    if raw:
+        from . import lots as lots_mod
+        return str(lots_mod.normalize_lot_token(raw) or raw)
+    return ""
+
+
+def _fact_is_applicable(fact: Dict[str, Any], lot_id: str) -> bool:
+    from . import fact_lineage
+    scope = fact.get("applicability")
+    return scope in {fact_lineage.CASE_GLOBAL, fact_lineage.ALL_LOTS} or (
+        scope in {fact_lineage.LOT_SPECIFIC, fact_lineage.BENE_SPECIFIC, fact_lineage.MULTIPLE_LOTS}
+        and str(lot_id) in {str(x) for x in fact.get("applicability_lot_ids") or []}
+    )
+
+
+def _ledger_fact_present(fact: Dict[str, Any], pool: ReportPool) -> bool:
+    money = fact.get("money") or {}
+    if money.get("amount") is not None:
+        return bool(pool.find_amount(float(money["amount"]), money.get("role")))
+    value = fact.get("value")
+    if fact.get("category") == "occupancy" and isinstance(value, dict):
+        candidates = [value.get("status"), value.get("title_info"), value.get("opponibility")]
+        candidates += list(value.get("registration_dates") or []) + list(value.get("expiry_dates") or [])
+        material = [x for x in candidates if x]
+        return bool(material) and all(pool.find_token_overlap(x, 0.45) or pool.find_text(x) for x in material)
+    if isinstance(value, dict):
+        candidates = [value.get("area"), value.get("description"), value.get("summary"), value.get("classification"), value.get("type"), value.get("label"), value.get("value")]
+        return any(pool.find_token_overlap(x, 0.45) or pool.find_text(x) for x in candidates if x)
+    return bool(pool.find_text(value) or pool.find_token_overlap(value, 0.45))
+
+
+def _state(ratio: float, *, critical_missing: bool = False) -> str:
+    if critical_missing or ratio < 0.60:
+        return STATUS_FAIL
+    if ratio < 0.85:
+        return STATUS_WARNING
+    return STATUS_PASS
+
+
+def _full_document_lot_metrics(
+    *, lot_id: str, full_document_pages: List[Dict[str, Any]], selected_pages: List[int],
+    segmentation: Dict[str, Any], case_ledger: Dict[str, Any],
+    reconciled_worksheet: Dict[str, Any], customer_report: Dict[str, Any],
+    projection_report: Dict[str, Any],
+) -> Dict[str, Any]:
+    """Four independent completeness dimensions against full-document truth."""
+    expected = [fact for fact in case_ledger.get("facts") or [] if _fact_is_applicable(fact, lot_id)]
+    # Legacy/direct callers may not have a ledger: full-document signals remain
+    # an honest expectation source and prevent narrow-page perfect scores.
+    if not expected:
+        expected = [
+            {
+                "fact_id": signal["signal_id"], "category": signal.get("category"),
+                "severity": signal.get("severity"), "value": signal.get("label"),
+                "money": {"amount": signal.get("amount"), "role": signal.get("role")}
+                if signal.get("amount") is not None else None,
+                "evidence_pages": [signal.get("page")],
+            }
+            for signal in doc_signals.extract_page_signals(full_document_pages or [])
+        ]
+    customer_pool = build_report_pool(customer_report)
+    worksheet_pool = build_report_pool(reconciled_worksheet)
+    customer_present = [fact for fact in expected if _ledger_fact_present(fact, customer_pool)]
+    reconciled_present = [
+        fact for fact in expected
+        if _ledger_fact_present(fact, worksheet_pool)
+        or (
+            fact.get("category") in {"money", "surface_cadastral"}
+            and _ledger_fact_present(fact, customer_pool)
+        )
+    ]
+    critical = [fact for fact in expected if fact.get("severity") == SEV_CRITICAL]
+    critical_visible = [fact for fact in critical if _ledger_fact_present(fact, customer_pool)]
+    projected_ids = set(projection_report.get("projected_fact_ids") or [])
+    projected = [fact for fact in expected if fact.get("fact_id") in projected_ids]
+    shared_pages = set(segmentation.get("shared_pages") or [])
+    projected_shared = [fact for fact in projected if set(fact.get("evidence_pages") or []) & shared_pages]
+    expected_count = len(expected)
+    critical_count = len(critical)
+    reconciled_count = len(reconciled_present)
+    visible_count = len(customer_present)
+    critical_recall = 1.0 if not critical_count else len(critical_visible) / critical_count
+    general_recall = 1.0 if not expected_count else visible_count / expected_count
+    evidence_ratio = 1.0 if not reconciled_present else sum(bool(fact.get("evidence_pages")) for fact in reconciled_present) / len(reconciled_present)
+    report_ratio = 1.0 if not expected_count else reconciled_count / expected_count
+    visible_ratio = 1.0 if not reconciled_count else visible_count / reconciled_count
+    critical_reconciled_missing = any(fact not in reconciled_present for fact in critical)
+    dropped_counts: Dict[str, int] = {}
+    for dropped in projection_report.get("dropped_facts") or []:
+        reason = str(dropped.get("reason_code") or "UNKNOWN")
+        dropped_counts[reason] = dropped_counts.get(reason, 0) + 1
+    selected_unique = sorted(set(int(p) for p in selected_pages))
+    total_pages = len(full_document_pages or [])
+    return {
+        "lot_id": lot_id,
+        "total_document_pages": total_pages,
+        "selected_pages": selected_unique,
+        "selected_page_ratio": round(len(selected_unique) / total_pages, 4) if total_pages else 0.0,
+        "expected_material_facts": expected_count,
+        "expected_critical_facts": critical_count,
+        "lot_analysis_facts": max(0, reconciled_count - len(projected)),
+        "projected_facts": len(projected),
+        "reconciled_facts": reconciled_count,
+        "customer_visible_facts": visible_count,
+        "critical_fact_recall": round(critical_recall, 4),
+        "general_fact_recall": round(general_recall, 4),
+        "facts_projected_from_shared_pages": len(projected_shared),
+        "facts_dropped_by_reason": dropped_counts,
+        "unresolved_conflicts": len(projection_report.get("conflicts") or []),
+        "extraction_coverage_state": _state(min(1.0, (max(0, reconciled_count - len(projected)) + len(projected)) / max(1, expected_count)), critical_missing=critical_reconciled_missing),
+        "report_completeness_state": _state(report_ratio, critical_missing=critical_reconciled_missing),
+        "evidence_completeness_state": _state(evidence_ratio),
+        "user_visible_completeness_state": _state(visible_ratio, critical_missing=critical_recall < 1.0),
+    }
 
 
 def _maybe_finalize(fact: Dict[str, Any]) -> Dict[str, Any]:

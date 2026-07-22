@@ -6,6 +6,11 @@ evidence at all — is downgraded to 'uncertain' + manual review instead of
 failing the whole job. Explicitly supported claims are untouched.
 """
 
+import json
+from pathlib import Path
+
+import pytest
+
 from correctness_v2 import validator
 from correctness_v2.analyst import build_messages, normalize_worksheet
 
@@ -66,6 +71,186 @@ def test_gate_downgrades_conforming_on_absent_declaration_only():
 
     assert gate["downgrade_count"] == 1
     assert gated["technical_compliance"][0]["classification"] == "uncertain"
+
+
+@pytest.mark.parametrize("statement", [
+    "La regolarita edilizio-urbanistica dell immobile non risulta rispettata: sono state riscontrate difformita.",
+    "La regolarità urbanistica dell'immobile non è stata verificata.",
+    "La regolarità catastale rispetto allo stato non viene attestata.",
+    "Senza verifica, la regolarità edilizia della costruzione resta indeterminata.",
+])
+def test_gate_never_treats_negated_regolarita_as_affirmative(statement):
+    raw = make_worksheet()
+    raw["technical_compliance"] = [dict(raw["technical_compliance"][0], evidence_pages=[3])]
+    pages = [{"page_number": 3, "text": statement}]
+    gated, gate = validator.apply_compliance_evidence_gate(normalize_worksheet(raw), pages)
+
+    assert gate["downgrade_count"] == 1
+    assert gated["technical_compliance"][0]["classification"] == "uncertain"
+    assert validator._has_positive_compliance_statement(validator._norm(statement)) is False
+
+
+def test_affirmative_regolarita_is_not_cancelled_by_separate_negative_clause():
+    statement = (
+        "La regolarità edilizio-urbanistica dell'immobile risulta rispettata; "
+        "la non regolarità della costruzione per un diverso ambito."
+    )
+    assert validator._has_positive_compliance_statement(validator._norm(statement)) is True
+
+
+def test_affirmative_regolarita_ignores_negation_in_subordinate_clause():
+    statement = (
+        "La regolarità edilizio-urbanistica dell'immobile risulta rispettata, "
+        "sebbene i box auto non siano oggetto di perizia separata."
+    )
+    assert validator._has_positive_compliance_statement(validator._norm(statement)) is True
+
+
+@pytest.mark.parametrize("statement", [
+    "La regolarità edilizio-urbanistica dell'immobile è accertata.",
+    "La regolarità catastale rispetto allo stato risulta rispettata.",
+    (
+        "La regolarità edilizio-urbanistica dell'immobile risulta rispettata, "
+        "sebbene i box auto non siano oggetto di perizia separata."
+    ),
+    (
+        "La regolarità catastale rispetto allo stato risulta rispettata, "
+        "anche se il giardino non è censito separatamente."
+    ),
+    (
+        "La regolarità edilizio-urbanistica dell'immobile risulta rispettata. "
+        "Il giardino non è censito separatamente."
+    ),
+    "Non risultano difformità.",
+    "Non sono presenti abusi.",
+    "L'immobile risulta regolarmente accatastato e conforme alla normativa urbanistica vigente.",
+    (
+        "La regolarità edilizio-urbanistica dell'immobile risulta rispettata per i lotti 1 e 4; "
+        "la non regolarità della costruzione per un diverso ambito."
+    ),
+])
+def test_adversarial_compliance_bank_affirmative(statement):
+    assert validator._has_positive_compliance_statement(validator._norm(statement)) is True
+
+
+@pytest.mark.parametrize("statement", [
+    "La regolarita edilizio-urbanistica dell immobile non risulta rispettata: sono state riscontrate difformita.",
+    "La regolarità urbanistica dell'immobile non è stata verificata.",
+    "La regolarità catastale rispetto allo stato non viene attestata.",
+    "Senza verifica, la regolarità edilizia della costruzione resta indeterminata.",
+    (
+        "La regolarità edilizio-urbanistica dell'immobile risulta dichiarata "
+        "mentre non è stata effettivamente verificata dal tecnico incaricato."
+    ),
+    (
+        "La regolarità edilizio-urbanistica dell'immobile risulta rispettata "
+        "pur non essendo stata controllata di persona."
+    ),
+    (
+        "La regolarità edilizio-urbanistica dell'immobile risulta rispettata "
+        "benché non risulti alcuna documentazione a supporto."
+    ),
+    "La regolarità edilizio-urbanistica dell'immobile risulta dichiarata senza che sia stata verificata.",
+    "Non è stata accertata la regolarità edilizio-urbanistica dell'immobile.",
+    "La regolarità edilizio-urbanistica dell'immobile dovrà essere verificata.",
+    "La regolarità catastale rispetto allo stato sarà da verificare.",
+    (
+        "La regolarità edilizio-urbanistica dell'immobile risulta rispettata, "
+        "sebbene si segnali che, pur essendo stata dichiarata, essa non risulti "
+        "in realtà verificata."
+    ),
+    (
+        "La regolarità edilizio-urbanistica dell'immobile risulta rispettata, "
+        "pur essendo priva di alcuna documentazione a supporto."
+    ),
+    (
+        "La regolarità edilizio-urbanistica dell'immobile risulta dichiarata conforme, "
+        "in assenza di verifica diretta da parte del tecnico."
+    ),
+    "La regolarità edilizio-urbanistica dell'immobile risulta rispettata, pur non essendola mai stata verificata.",
+    (
+        "La regolarità edilizio-urbanistica dell'immobile risulta rispettata. "
+        "Tuttavia si segnala successivamente che tale regolarità non è mai stata "
+        "effettivamente verificata."
+    ),
+    (
+        "La regolarità edilizio-urbanistica dell'immobile risulta rispettata, "
+        "sebbene sia sprovvisto di certificato di agibilità."
+    ),
+    (
+        "La regolarità edilizio-urbanistica dell'immobile risulta rispettata, "
+        "sebbene sia sfornita di documentazione tecnica."
+    ),
+    (
+        "La regolarità edilizio-urbanistica dell'immobile risulta rispettata, "
+        "pur con documentazione incompleta agli atti."
+    ),
+    (
+        "La regolarità edilizio-urbanistica dell'immobile risulta rispettata; "
+        "il certificato non è disponibile agli atti."
+    ),
+    (
+        "La regolarità edilizio-urbanistica dell'immobile risulta rispettata, "
+        "sebbene il tecnico non abbia potuto accedere alle unità per il sopralluogo."
+    ),
+    "La regolarità catastale rispetto allo stato risulta conforme; il certificato non è reperibile.",
+    "La regolarità catastale rispetto allo stato risulta conforme; il certificato non è stato esibito.",
+    "La regolarità catastale rispetto allo stato risulta conforme; il certificato non è stato prodotto.",
+    "La regolarità catastale rispetto allo stato risulta conforme; il certificato non è stato consegnato.",
+    "La regolarità catastale rispetto allo stato risulta conforme, ma non è verificabile.",
+    "La regolarità catastale rispetto allo stato risulta solo parzialmente conforme.",
+    "La regolarità catastale rispetto allo stato risulta solo in parte conforme.",
+    "La regolarità catastale rispetto allo stato risulta quasi conforme.",
+    "La regolarità catastale rispetto allo stato risulta sostanzialmente conforme.",
+    "La regolarità catastale rispetto allo stato risulta in larga parte conforme.",
+    "La regolarità catastale rispetto allo stato risulta in misura parziale conforme.",
+    "La regolarità catastale rispetto allo stato risulta non del tutto conforme.",
+    "La regolarità catastale rispetto allo stato risulta prevalentemente conforme.",
+    "La regolarità catastale rispetto allo stato risulta conforme; risultano allegati mancanti agli atti.",
+    "La regolarità catastale rispetto allo stato risulta conforme; permangono carenze documentali agli atti.",
+    "La regolarità catastale rispetto allo stato risulta conforme salvo una difformità minore nel sottotetto.",
+    "La regolarità catastale rispetto allo stato risulta conforme, fatta eccezione per il locale caldaia.",
+    "La regolarità catastale rispetto allo stato risulta conforme, ad eccezione di una tramezza interna.",
+    "La regolarità catastale rispetto allo stato risulta conforme, eccezion fatta per il sottotetto.",
+    "La regolarità catastale rispetto allo stato risulta conforme, con esclusione di un locale accessorio.",
+    "La regolarità catastale rispetto allo stato risulta conforme, tranne il vano tecnico.",
+    "La regolarità catastale rispetto allo stato risulta conforme, a eccezione di una parete interna.",
+    "La regolarità catastale rispetto allo stato risulta pressoché conforme.",
+    "La regolarità catastale rispetto allo stato risulta tendenzialmente conforme.",
+    "La regolarità catastale rispetto allo stato risulta perlopiù conforme.",
+    "La regolarità catastale rispetto allo stato risulta nel complesso conforme.",
+    "La regolarità catastale rispetto allo stato risulta grosso modo conforme.",
+    # A bare CTU noun phrase has no affirmative predicate and must fail closed.
+    "La regolarità edilizio-urbanistica dell'immobile per i Lotti 1 e 4.",
+])
+def test_adversarial_compliance_bank_not_affirmative(statement):
+    raw = make_worksheet()
+    raw["technical_compliance"] = [dict(raw["technical_compliance"][0], evidence_pages=[3])]
+    pages = [{"page_number": 3, "text": statement}]
+    gated, gate = validator.apply_compliance_evidence_gate(normalize_worksheet(raw), pages)
+
+    assert validator._has_positive_compliance_statement(validator._norm(statement)) is False
+    assert gate["downgrade_count"] == 1
+    assert gated["technical_compliance"][0]["classification"] == "uncertain"
+
+
+def test_beta_fixture_quantifies_topic_blind_disqualifier_tradeoff():
+    fixture_path = (
+        Path(__file__).parent / "fixtures" / "beta_multilot_case_cached_pages_sanitized.json"
+    )
+    pages = json.loads(fixture_path.read_text(encoding="utf-8"))["pages"]
+
+    # The intentionally broad scan flags 3/12 non-compliance pages (safe noise),
+    # but suppresses 0/1 clean affirmative declaration pages in this fixture.
+    disqualified_pages = [
+        page["page_number"]
+        for page in pages
+        if validator._has_compliance_disqualifier(page["text"])
+    ]
+    assert disqualified_pages == [3, 7, 11]
+    compliance_page = next(page for page in pages if page["page_number"] == 2)
+    assert validator._has_compliance_disqualifier(compliance_page["text"]) is False
+    assert validator._has_positive_compliance_statement(compliance_page["text"]) is True
 
 
 def test_gate_keeps_supported_regolare_agibile_claim_without_conforme_word():

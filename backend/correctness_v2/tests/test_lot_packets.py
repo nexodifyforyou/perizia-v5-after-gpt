@@ -123,6 +123,36 @@ def test_build_lot_money_preserves_ambiguous_as_uncertain():
     assert money["needs_manual_review_money"] is True
 
 
+def test_money_label_lot_tag_cannot_override_exclusive_evidence_lot():
+    ws = _money_ws()
+    ws["money"]["deductions"] = [{
+        "label": "Confronto con Lotto 2 - costo proprio",
+        "amount": 4321.0,
+        "evidence_pages": [2],
+    }]
+    seg = lot_packets.segment_pages(MULTI_LOT_PAGES, ["1", "2"])
+    money = lot_packets.build_lot_money(ws, seg)
+
+    assert [row["amount"] for row in money["by_lot"]["1"]["deductions"]] == [4321.0]
+    assert money["by_lot"]["2"]["deductions"] == []
+    row = money["by_lot"]["1"]["deductions"][0]
+    assert row["allocation_conflict"] is True
+    assert row["label_lot_ids"] == ["2"]
+
+
+def test_contract_money_keeps_distinct_equal_amount_deductions():
+    rows = lot_packets.contract_rows_from_lot_money({
+        "deductions": [
+            {"label": "Deprezzamento per vetustà", "amount": 5000, "evidence_pages": [2]},
+            {"label": "Costi di regolarizzazione impianto elettrico", "amount": 5000, "evidence_pages": [2]},
+        ]
+    })
+    assert [(row["label"], row["amount"]) for row in rows] == [
+        ("Deprezzamento per vetustà", 5000),
+        ("Costi di regolarizzazione impianto elettrico", 5000),
+    ]
+
+
 def test_lot_index_money_is_per_lot_not_shared():
     ws = _money_ws()
     rep = lots.build_lot_report(ws, MULTI_LOT_PAGES)

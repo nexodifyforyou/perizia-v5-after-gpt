@@ -53,6 +53,10 @@ _NEGATIVE_TOKENS = [
     "non regolarizzabil",
     "irregolarit",
     "non risulta regolare",
+    "non risulta rispettata",
+    "non e stata verificata",
+    "non viene verificata",
+    "senza verifica",
     "non risulta agibile",
     "non sussiste corrispondenza",
     "non esiste il certificato",
@@ -112,45 +116,138 @@ def _has_negative(text_norm: str) -> bool:
     return any(tok in text_norm for tok in _NEGATIVE_TOKENS)
 
 
-def _has_unnegated_phrase(text_norm: str, phrase: str) -> bool:
-    start = 0
-    while True:
-        idx = text_norm.find(phrase, start)
-        if idx < 0:
-            return False
-        preceding = text_norm[max(0, idx - 16):idx]
-        if "non " not in preceding:
-            return True
-        start = idx + len(phrase)
+_AREA_WORDS = r"(?:edilizi[oa]\s+urbanistic[oa]|urbanistic[oa]|catastale)"
+_REGULARITY_SUBJECT = (
+    rf"la\s+regolarita\s+{_AREA_WORDS}\s+"
+    r"(?:dell\s+immobile|della\s+costruzione|rispetto\s+allo\s+stato)"
+)
+_SMALL_AFFIRMATIVE_GAP = r"(?:[a-z0-9]+\s+){0,3}"
+_AFFIRMATIVE_COMPLIANCE_PATTERNS = (
+    re.compile(
+        rf"\b{_REGULARITY_SUBJECT}\s+(?:risulta|e)\s+"
+        rf"{_SMALL_AFFIRMATIVE_GAP}(?:rispettata|verificata|accertata|conforme)\b"
+    ),
+    re.compile(
+        rf"\bla\s+verifica\s+{_AREA_WORDS}\s+(?:risulta|e)\s+"
+        rf"{_SMALL_AFFIRMATIVE_GAP}(?:conforme|verificata|positiva)\b"
+    ),
+    re.compile(
+        rf"\bla\s+corrispondenza\s+catastale\s+(?:risulta|e)\s+"
+        rf"{_SMALL_AFFIRMATIVE_GAP}conforme\b"
+    ),
+    re.compile(
+        rf"\bl\s+immobile\s+(?:risulta|e)\s+{_SMALL_AFFIRMATIVE_GAP}"
+        r"(?:conforme|regolare|agibile)\b"
+    ),
+    re.compile(
+        rf"\bl\s+impianto(?:\s+\w+){{0,2}}\s+(?:risulta|e)\s+"
+        rf"{_SMALL_AFFIRMATIVE_GAP}conforme\b"
+    ),
+    re.compile(
+        rf"\bla\s+planimetria(?:\s+catastale)?\s+(?:risulta|e)\s+"
+        rf"{_SMALL_AFFIRMATIVE_GAP}conforme\b"
+    ),
+    re.compile(r"\bsussiste\s+corrispondenza\s+catastale\b"),
+    # Checkbox/declaration form used by CTU reports: DICHIARA + the positive
+    # regularity noun phrase. The negative form contains "non regolarita" and
+    # cannot match this closed shape.
+    re.compile(rf"\bdichiara(?:\s+\w+){{0,2}}\s+{_REGULARITY_SUBJECT}\b"),
+)
+_NEGATIVE_FINDING_ABSENCE_PATTERNS = (
+    re.compile(r"\bnon\s+sono\s+state\s+riscontrate\s+incongruenze\b"),
+    re.compile(r"\bnon\s+risultano\s+difformita\b"),
+    re.compile(r"\bnon\s+sono\s+presenti\s+difformita\b"),
+    re.compile(r"\bnon\s+sono\s+presenti\s+abusi\b"),
+)
+_NEGATED_COMPLIANCE_PREDICATE = re.compile(
+    r"\b(?:verific\w*|controll\w*|accert\w*|conform\w*|"
+    r"regolar(?:e|i|izz\w*)|rispett\w*|attest\w*|document\w*|risult\w*|"
+    r"disponibil\w*|reperibil\w*|esibit\w*|prodott\w*|consegnat\w*|"
+    r"acced\w*|sopralluog\w*|ispezion\w*|vision\w*)\b"
+)
+# This list is deliberately topic-blind across the cited evidence text. It can
+# over-suppress a clean compliance declaration when an unrelated sentence says
+# e.g. "in assenza di posto auto", "manca il certificato di garanzia della
+# caldaia", or "privo di cantina". That safe-direction cost is accepted here;
+# topic co-occurrence gating is a follow-up because narrowing this scan risks
+# reopening false customer-facing conformity findings.
+_COMPLIANCE_DISQUALIFIERS = (
+    re.compile(r"\bsenza\b"),
+    re.compile(r"\bpriv[oaie]\s+di\b"),
+    re.compile(r"\bsprovvist[oaie]\s+di\b"),
+    re.compile(r"\bsfornit[oaie]\s+di\b"),
+    re.compile(r"\bin\s+assenza\s+di\b"),
+    re.compile(r"\bcaren(?:te|ti|z[ae])\b"),
+    re.compile(r"\b(?:manca|mancant[ei]|mancanz[ae])\b"),
+    re.compile(r"\bincomplet[oaie]\b"),
+    # Degree-qualified conformity is not a clean affirmative declaration.
+    re.compile(r"\b(?:solo\s+)?parzial(?:e|i|mente)\b"),
+    re.compile(r"\bin\s+parte\b"),
+    re.compile(r"\bquasi\b"),
+    re.compile(r"\bsostanzialmente\b"),
+    re.compile(r"\bin\s+larga\s+parte\b"),
+    re.compile(r"\bin\s+misura\s+parziale\b"),
+    re.compile(r"\bprevalentemente\b"),
+    re.compile(r"\bpressoche\b"),
+    re.compile(r"\btendenzialmente\b"),
+    re.compile(r"\bperlopiu\b"),
+    re.compile(r"\bnel\s+complesso\b"),
+    re.compile(r"\bgrosso\s+modo\b"),
+    # A named exception co-located with "conforme" is partial compliance.
+    re.compile(r"\bsalvo\b"),
+    re.compile(r"\bfatta?\s+eccezione\s+per\b"),
+    re.compile(r"\bad?\s+eccezione\s+di\b"),
+    re.compile(r"\beccezion(?:e)?\s+fatta\s+per\b"),
+    re.compile(r"\bcon\s+esclusione\s+di\b"),
+    re.compile(r"\btranne\b"),
+    re.compile(r"\bda\s+verific(?:are|at[aoei])\b"),
+    re.compile(r"\b(?:dovra|sara)(?:\s+\w+){0,3}\s+verific(?:are|at[aoei])\b"),
+    re.compile(r"\bda\s+riconfermare\b"),
+    re.compile(r"\bin\s+attesa\s+di\b"),
+    re.compile(r"\briserva\b"),
+)
+
+
+def _has_compliance_disqualifier(text_norm: str) -> bool:
+    """Scan all evidence, without fixed lookahead windows, for a hedge."""
+    compact = " ".join(_norm(text_norm).split())
+    lexical = re.sub(r"[^a-z0-9]+", " ", compact).strip()
+    for pattern in _NEGATIVE_FINDING_ABSENCE_PATTERNS:
+        lexical = pattern.sub(" ", lexical)
+    if any(pattern.search(lexical) for pattern in _COMPLIANCE_DISQUALIFIERS):
+        return True
+
+    # Within each hard-delimited statement, any compliance/verification
+    # predicate after "non" disqualifies, regardless of nesting or distance.
+    # This catches long subordinate clauses without allowing negation to bleed
+    # across an unrelated semicolon-delimited CTU declaration.
+    for statement in re.split(r"[.;:]", compact):
+        statement_lexical = re.sub(r"[^a-z0-9]+", " ", statement).strip()
+        for pattern in _NEGATIVE_FINDING_ABSENCE_PATTERNS:
+            statement_lexical = pattern.sub(" ", statement_lexical)
+        for negation in re.finditer(r"\bnon\b", statement_lexical):
+            if _NEGATED_COMPLIANCE_PREDICATE.search(statement_lexical, negation.end()):
+                return True
+    return False
 
 
 def _has_positive_compliance_statement(text_norm: str) -> bool:
-    """Detect explicit positive compliance language without treating
-    "dichiarazione di conformita" as a positive claim by itself.
+    """Require a closed affirmative shape and no whole-evidence hedge.
+
+    Fail-safe asymmetry is intentional: ambiguous evidence is not affirmative.
+    A false manual-review flag is safer than a false customer-facing conformity
+    finding. Topic-shifted negations remain harmless only when they do not use a
+    compliance/verification predicate (for example, an uncensused garden).
     """
-    compact = " ".join(text_norm.split())
-    if re.search(r"\bconform[ei]\b", compact):
-        return True
-    if any(
-        phrase in compact
-        for phrase in (
-            "non sono state riscontrate incongruenze",
-            "non risultano difformita",
-            "non sono presenti difformita",
-            "non sono presenti abusi",
-        )
-    ):
-        return True
-    return any(
-        _has_unnegated_phrase(compact, phrase)
-        for phrase in (
-            "risulta regolare",
-            "risultano regolari",
-            "risulta agibile",
-            "risultano agibili",
-            "sussiste corrispondenza catastale",
-        )
+    lexical = re.sub(r"[^a-z0-9]+", " ", _norm(text_norm)).strip()
+    absence_positive = any(pattern.search(lexical) for pattern in _NEGATIVE_FINDING_ABSENCE_PATTERNS)
+    affirmative_shape = absence_positive or any(
+        pattern.search(lexical) for pattern in _AFFIRMATIVE_COMPLIANCE_PATTERNS
     )
+    if not affirmative_shape:
+        return False
+
+    return not _has_compliance_disqualifier(text_norm)
 
 
 def _has_buyer_burden(text_norm: str) -> bool:

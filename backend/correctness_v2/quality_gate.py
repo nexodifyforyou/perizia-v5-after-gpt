@@ -40,6 +40,12 @@ def run_quality_gate(
     artifacts_saved: Optional[Dict[str, Any]] = None,
     money_confirmations: Optional[Dict[str, str]] = None,
     persist: bool = True,
+    full_document_pages: Optional[List[Dict[str, Any]]] = None,
+    lot_id: Optional[str] = None,
+    segmentation: Optional[Dict[str, Any]] = None,
+    case_ledger: Optional[Dict[str, Any]] = None,
+    lot_fact_projection_report: Optional[Dict[str, Any]] = None,
+    selected_analysis_pages: Optional[List[int]] = None,
 ) -> Dict[str, Any]:
     """Build + persist all quality artifacts; return the gate outcome.
 
@@ -63,6 +69,12 @@ def run_quality_gate(
         lot_report=lot_report,
         lot_index=lot_index,
         money_confirmations=money_confirmations,
+        full_document_pages=full_document_pages,
+        lot_id=lot_id,
+        segmentation=segmentation,
+        case_ledger=case_ledger,
+        lot_fact_projection_report=lot_fact_projection_report,
+        selected_analysis_pages=selected_analysis_pages,
     )
 
     # Second chance for NON-critical page topics the report does not treat:
@@ -82,6 +94,12 @@ def run_quality_gate(
             lot_report=lot_report,
             lot_index=lot_index,
             money_confirmations=money_confirmations,
+            full_document_pages=full_document_pages,
+            lot_id=lot_id,
+            segmentation=segmentation,
+            case_ledger=case_ledger,
+            lot_fact_projection_report=lot_fact_projection_report,
+            selected_analysis_pages=selected_analysis_pages,
         )
 
     quality = quality_mod.build_quality_standard_report(

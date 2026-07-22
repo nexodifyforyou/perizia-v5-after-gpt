@@ -454,17 +454,27 @@ def classify_compliance_scope(
     selected lot when its scope is that lot or clearly global; 'unclear' scope
     must stay an uncertainty, never a conformity claim.
     """
-    page_lot = _page_lot_map(segmentation)
+    # Keep the legacy lot-index shape while sharing the canonical applicability
+    # rules with the projection ledger.
+    from . import fact_lineage
+
+    known_lots = [str(x) for x in segmentation.get("lot_ids") or segmentation.get("lot_pages", {}).keys()]
     out: List[Dict[str, Any]] = []
     for i, item in enumerate(worksheet.get("technical_compliance") or []):
         ev = list(item.get("evidence_pages") or [])
-        target = _assign_lot(ev, page_lot)
-        if target == _GLOBAL:
+        applicability, targets, _basis = fact_lineage._classify_applicability(
+            " ".join(str(item.get(key) or "") for key in ("area", "notes")),
+            ev,
+            segmentation,
+            known_lots,
+            category="compliance",
+        )
+        if applicability in (fact_lineage.CASE_GLOBAL, fact_lineage.ALL_LOTS):
             scope, lot_id = "global", None
-        elif target is None:
-            scope, lot_id = "unclear", None
+        elif applicability in (fact_lineage.LOT_SPECIFIC, fact_lineage.BENE_SPECIFIC) and len(targets) == 1:
+            scope, lot_id = "lot", targets[0]
         else:
-            scope, lot_id = "lot", str(target)
+            scope, lot_id = "unclear", None
         out.append(
             {
                 "path": f"technical_compliance[{i}]",
@@ -540,14 +550,35 @@ def build_lot_money(
     def place_row(section_key: str, label: str, amount: Any, evidence: List[int], reason_prefix: str) -> None:
         if amount is None:
             return
-        target = _assign_lot(evidence, page_lot)
+        explicit_lots = _dedup(_numeric_lot_ids(label))
+        evidence_target = _assign_lot(evidence, page_lot)
+        label_target = explicit_lots[0] if len(explicit_lots) == 1 else None
+        allocation_conflict = bool(
+            label_target
+            and evidence_target not in (None, _GLOBAL)
+            and evidence_target != label_target
+        )
+        # Text tags may disambiguate shared/global evidence, but can never
+        # override another lot's exclusive evidence pages.  Incidental lot
+        # mentions in a label therefore remain attached to their source lot.
+        target = evidence_target if allocation_conflict else (label_target or evidence_target)
         if target is None:
             uncertain.append(
                 _row(label, amount, evidence, kind="uncertain", manual_review=True,
                      reason=f"{reason_prefix}: associazione al lotto non determinabile dall'evidenza.")
             )
             return
-        bucket(target)[section_key].append(_row(label, amount, evidence))
+        extra = {}
+        if allocation_conflict:
+            extra = {
+                "allocation_conflict": True,
+                "label_lot_ids": explicit_lots,
+                "reason": (
+                    f"{reason_prefix}: riferimento testuale al lotto in conflitto "
+                    "con le pagine di evidenza esclusive; prevale l'evidenza."
+                ),
+            }
+        bucket(target)[section_key].append(_row(label, amount, evidence, **extra))
 
     # 1) Model-linked per-lot values (worksheet.lots[]) — these are explicitly tied
     #    to a lot by the analyst, so they go straight to that lot.
@@ -625,6 +656,51 @@ def build_lot_money(
         "uncertain_money": uncertain,
         "needs_manual_review_money": bool(uncertain),
     }
+
+
+def contract_rows_from_lot_money(lot_money: Optional[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Adapt deterministic ``build_lot_money`` output to contract money rows.
+
+    Older code only forwarded ``shared_summary_rows`` and accidentally ignored
+    equally deterministic per-lot scalar/deduction fields already present in the
+    selected-lot context.  This additive adapter keeps the established contract
+    merge channel and does not touch the analyst worksheet.
+    """
+    section = lot_money or {}
+    rows: List[Dict[str, Any]] = [dict(row) for row in section.get("shared_summary_rows") or []]
+    labels = {
+        "market_value": "Valore di mercato",
+        "current_state_value": "Valore nello stato di fatto",
+        "sale_value": "Valore di vendita giudiziaria",
+        "prezzo_base_asta": "Prezzo base d'asta",
+        "offerta_minima": "Offerta minima",
+        "rialzo_minimo": "Rialzo minimo",
+        "cauzione": "Cauzione",
+    }
+    for field, label in labels.items():
+        value = section.get(field)
+        if isinstance(value, dict) and value.get("amount") is not None:
+            rows.append({"label": label, "amount": value["amount"], "field": field, "evidence_pages": list(value.get("evidence_pages") or []), "source": "lot_money_projection"})
+    for row in section.get("deductions") or []:
+        rows.append({"label": row.get("label") or "Deprezzamento/deduzione", "amount": row.get("amount"), "field": None, "evidence_pages": list(row.get("evidence_pages") or []), "source": "lot_money_projection"})
+    deduped: List[Dict[str, Any]] = []
+    for row in rows:
+        if row.get("amount") is None:
+            continue
+        if any(_same_contract_money_row(row, existing) for existing in deduped):
+            continue
+        deduped.append(row)
+    return deduped
+
+
+def _same_contract_money_row(left: Dict[str, Any], right: Dict[str, Any]) -> bool:
+    """Deduplicate the same semantic row, never unrelated equal amounts."""
+    if not _amount_close(left.get("amount"), right.get("amount")):
+        return False
+    left_field, right_field = left.get("field"), right.get("field")
+    if left_field or right_field:
+        return bool(left_field and right_field and left_field == right_field)
+    return lots_mod._norm(left.get("label")) == lots_mod._norm(right.get("label"))
 
 
 def _amount_close(a: Any, b: Any) -> bool:

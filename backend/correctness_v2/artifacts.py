@@ -43,6 +43,7 @@ LOT_REPORT_FILE = "lot_report.json"
 LOT_INDEX_FILE = "lot_index.json"
 PER_LOT_PACKETS_FILE = "per_lot_packets.json"
 SELECTED_LOT_CONTEXT_FILE = "selected_lot_context.json"
+LOT_FACT_PROJECTION_FILE = "lot_fact_projection.json"
 LOT_SELECTION_REQUIRED_FILE = "lot_selection_required.json"
 MONEY_CONFIRMATION_REQUIRED_FILE = "money_confirmation_required.json"
 ANALYZE_ALL_RESULT_FILE = "analyze_all_result.json"
@@ -161,6 +162,10 @@ def save_per_lot_packets(job_id: str, packets: Dict[str, Any]) -> str:
 
 def save_selected_lot_context(job_id: str, context: Dict[str, Any]) -> str:
     return save_json(job_id, SELECTED_LOT_CONTEXT_FILE, context)
+
+
+def save_lot_fact_projection(job_id: str, lot_id: str, report: Dict[str, Any]) -> str:
+    return save_lot_subartifact(job_id, lot_id, LOT_FACT_PROJECTION_FILE, report)
 
 
 def save_lot_selection_required(job_id: str, payload: Dict[str, Any]) -> str:
