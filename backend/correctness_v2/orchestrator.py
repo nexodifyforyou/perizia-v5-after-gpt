@@ -32,8 +32,10 @@ from . import (
     customer_report as customer_report_mod,
     doc_signals as doc_signals_mod,
     feature_flags,
+    fact_lineage as fact_lineage_mod,
     job_status,
     lot_packets as lot_packets_mod,
+    lot_fact_projection as lot_fact_projection_mod,
     lot_runner as lot_runner_mod,
     lots as lots_mod,
     money_confirmation as money_confirmation_mod,
@@ -633,6 +635,13 @@ def _build_single_lot_contract(
     current_stage: Optional[str] = None,
     message: str = STEP2_OK_MESSAGE,
     shared_summary_rows: Optional[List[Dict[str, Any]]] = None,
+    full_document_pages: Optional[List[Dict[str, Any]]] = None,
+    selected_analysis_pages: Optional[List[int]] = None,
+    lot_id: Optional[str] = None,
+    segmentation: Optional[Dict[str, Any]] = None,
+    case_ledger: Optional[Dict[str, Any]] = None,
+    lot_fact_projection_report: Optional[Dict[str, Any]] = None,
+    customer_pages: Optional[List[Dict[str, Any]]] = None,
 ) -> Dict[str, Any]:
     """Validate a single-lot worksheet and build the verified contract (CONTRACT_READY).
 
@@ -692,7 +701,7 @@ def _build_single_lot_contract(
     # Step 3B: deterministic customer report rendered ONLY from the verified
     # contract (no LLM, no PDF). Render failure fails closed — never a half report.
     try:
-        customer_report = customer_report_mod.render_success_report(contract, pages)
+        customer_report = customer_report_mod.render_success_report(contract, customer_pages or pages)
     except Exception as exc:
         return _finish_report_render_failed(
             job_id, analysis_id, exc, artifacts_saved, created_at, admin_only
@@ -715,6 +724,12 @@ def _build_single_lot_contract(
             validator_report=validator_report,
             lot_report=lot_report,
             artifacts_saved=artifacts_saved,
+            full_document_pages=full_document_pages,
+            selected_analysis_pages=selected_analysis_pages,
+            lot_id=lot_id,
+            segmentation=segmentation,
+            case_ledger=case_ledger,
+            lot_fact_projection_report=lot_fact_projection_report,
         )
     except Exception as exc:  # noqa: BLE001 — fail closed on the gate itself
         return _finish_quality_gate_error(
@@ -763,6 +778,25 @@ def _build_single_lot_contract(
     }
     if extra:
         payload_extra.update(extra)
+    lot_coverage = (gate.get("coverage_audit") or {}).get("lot_coverage") or {}
+    if lot_coverage:
+        payload_extra["lot_coverage_metrics"] = {
+            "selected_page_ratio": lot_coverage.get("selected_page_ratio"),
+            "projected_fact_count": lot_coverage.get("projected_facts"),
+            "reconciled_fact_count": lot_coverage.get("reconciled_facts"),
+            "customer_visible_fact_count": lot_coverage.get("customer_visible_facts"),
+            "dropped_by_reason": lot_coverage.get("facts_dropped_by_reason"),
+            "critical_expected": lot_coverage.get("expected_critical_facts"),
+            "critical_present": round(
+                float(lot_coverage.get("critical_fact_recall", 0.0))
+                * int(lot_coverage.get("expected_critical_facts", 0))
+            ),
+            "critical_missing": int(lot_coverage.get("expected_critical_facts", 0)) - round(
+                float(lot_coverage.get("critical_fact_recall", 0.0))
+                * int(lot_coverage.get("expected_critical_facts", 0))
+            ),
+            "completeness_state": lot_coverage.get("user_visible_completeness_state"),
+        }
     payload = job_status.make_status(
         job_id=job_id,
         analysis_id=analysis_id,
@@ -843,14 +877,40 @@ def _run_selected_lot(
             job_id, analysis_id, exc, artifacts_saved, created_at, admin_only
         )
 
+    ledger_segmentation = dict(segmentation)
+    ledger_segmentation["full_document_pages"] = pages
+    ledger_segmentation["shared_summary_projection"] = lot_packets_mod.project_shared_summary_rows(
+        pages, segmentation
+    )
+    case_ledger = fact_lineage_mod.build_case_fact_ledger(worksheet, ledger_segmentation, lot_report)
+    reconciled_worksheet, projection_report = lot_fact_projection_mod.project_and_reconcile(
+        case_ledger=case_ledger,
+        lot_worksheet=result.worksheet,
+        lot_id=str(norm_lot),
+        segmentation=segmentation,
+        all_lot_ids=[str(x) for x in lot_report.get("lot_ids") or []],
+    )
+    verification_numbers = {
+        int(p.get("page_number", index)) for index, p in enumerate(selected_pages, start=1)
+    } | set(projection_report.get("verification_pages_added") or [])
+    verification_pages = [
+        page for index, page in enumerate(pages, start=1)
+        if int(page.get("page_number", index)) in verification_numbers
+    ]
+    customer_pages = lot_fact_projection_mod.customer_safe_projection_pages(
+        pages, selected_pages, projection_report, str(norm_lot)
+    )
     artifacts_saved["selected_lot_worksheet"] = artifacts.save_lot_subartifact(
-        job_id, norm_lot, artifacts.ANALYST_WORKSHEET_FILE, result.worksheet
+        job_id, norm_lot, artifacts.ANALYST_WORKSHEET_FILE, reconciled_worksheet
+    )
+    artifacts_saved["lot_fact_projection"] = artifacts.save_lot_fact_projection(
+        job_id, norm_lot, projection_report
     )
 
-    sub_lot_report = lots_mod.build_lot_report(result.worksheet, selected_pages)
+    sub_lot_report = lots_mod.build_lot_report(reconciled_worksheet, selected_pages)
     # This lot's clearly tagged money rows projected from the excluded shared
     # summary pages (deterministic; other lots' rows never enter this contract).
-    shared_rows = (context.get("lot_money") or {}).get("shared_summary_rows") or []
+    shared_rows = lot_packets_mod.contract_rows_from_lot_money(context.get("lot_money") or {})
     extra = {
         "multi_lot": True,
         "selected_lot": str(norm_lot),
@@ -861,8 +921,8 @@ def _run_selected_lot(
     return _build_single_lot_contract(
         job_id=job_id,
         analysis_id=analysis_id,
-        worksheet=result.worksheet,
-        pages=selected_pages,
+        worksheet=reconciled_worksheet,
+        pages=verification_pages,
         lot_report=sub_lot_report,
         artifacts_saved=artifacts_saved,
         created_at=created_at,
@@ -873,6 +933,13 @@ def _run_selected_lot(
         current_stage=_step3_stage("selected_lot_report_ready"),
         message=STEP3_SELECTED_LOT_MESSAGE,
         shared_summary_rows=shared_rows,
+        full_document_pages=pages,
+        selected_analysis_pages=context.get("analysis_pages", []),
+        lot_id=str(norm_lot),
+        segmentation=segmentation,
+        case_ledger=case_ledger,
+        lot_fact_projection_report=projection_report,
+        customer_pages=customer_pages,
     )
 
 
@@ -994,6 +1061,12 @@ def _run_analyze_all(
     NEEDS_MANUAL_REVIEW listing which lots could not be safely produced.
     """
     lot_ids = list(lot_report.get("lot_ids", []))
+    ledger_segmentation = dict(segmentation)
+    ledger_segmentation["full_document_pages"] = pages
+    ledger_segmentation["shared_summary_projection"] = lot_packets_mod.project_shared_summary_rows(
+        pages, segmentation
+    )
+    case_ledger = fact_lineage_mod.build_case_fact_ledger(worksheet, ledger_segmentation, lot_report)
 
     # Precompute each lot's isolated inputs (pure, deterministic, no I/O) so the
     # independent per-lot analyst OpenAI calls can be issued concurrently below.
@@ -1084,9 +1157,27 @@ def _run_analyze_all(
             per_lot_results.append(entry)
             continue
 
-        artifacts.save_lot_subartifact(
-            job_id, norm_lot, artifacts.ANALYST_WORKSHEET_FILE, result.worksheet
+        reconciled_worksheet, projection_report = lot_fact_projection_mod.project_and_reconcile(
+            case_ledger=case_ledger,
+            lot_worksheet=result.worksheet,
+            lot_id=str(norm_lot),
+            segmentation=segmentation,
+            all_lot_ids=[str(x) for x in lot_ids],
         )
+        verification_numbers = {
+            int(p.get("page_number", index)) for index, p in enumerate(selected_pages, start=1)
+        } | set(projection_report.get("verification_pages_added") or [])
+        verification_pages = [
+            page for index, page in enumerate(pages, start=1)
+            if int(page.get("page_number", index)) in verification_numbers
+        ]
+        customer_pages = lot_fact_projection_mod.customer_safe_projection_pages(
+            pages, selected_pages, projection_report, str(norm_lot)
+        )
+        artifacts.save_lot_subartifact(
+            job_id, norm_lot, artifacts.ANALYST_WORKSHEET_FILE, reconciled_worksheet
+        )
+        artifacts.save_lot_fact_projection(job_id, norm_lot, projection_report)
         # Deterministic valuation-chain completion — the SAME grounding the
         # single-lot / selected-lot path applies (see _build_single_lot_contract):
         # make grounded doc_signals the authority for THIS lot's terminal net
@@ -1097,15 +1188,15 @@ def _run_analyze_all(
         # states multiple grounded terminals); with it, the lot converges to the
         # document's own values. Additive + grounded: already-correct lots untouched.
         grounded_worksheet = contract_mod.complete_valuation_terminals(
-            result.worksheet, selected_pages
+            reconciled_worksheet, verification_pages
         )
         lot_worksheet, gate_report = validator_mod.apply_compliance_evidence_gate(
-            grounded_worksheet, selected_pages
+            grounded_worksheet, verification_pages
         )
         artifacts.save_lot_subartifact(
             job_id, norm_lot, artifacts.COMPLIANCE_GATE_FILE, gate_report
         )
-        validator_report = validator_mod.validate_worksheet(lot_worksheet, selected_pages)
+        validator_report = validator_mod.validate_worksheet(lot_worksheet, verification_pages)
         artifacts.save_lot_subartifact(
             job_id, norm_lot, artifacts.VALIDATOR_REPORT_FILE, validator_report
         )
@@ -1130,10 +1221,10 @@ def _run_analyze_all(
                 job_id=job_id,
                 source_pdf_quality_status=source_quality,
                 lot_report=sub_lot_report,
-                shared_summary_rows=(
-                    (context.get("lot_money") or {}).get("shared_summary_rows") or []
+                shared_summary_rows=lot_packets_mod.contract_rows_from_lot_money(
+                    context.get("lot_money") or {}
                 ),
-                surface_cadastral=doc_signals_mod.extract_surface_cadastral(selected_pages),
+                surface_cadastral=doc_signals_mod.extract_surface_cadastral(verification_pages),
             )
         except Exception as exc:  # noqa: BLE001 - recorded per lot, never blended
             entry.update({"status": JobStatus.FAILED_CONTRACT_BUILD, "reason": str(exc)})
@@ -1147,7 +1238,7 @@ def _run_analyze_all(
         # Step 3B: per-lot customer report, rendered from that lot's contract only.
         try:
             lot_customer_report = customer_report_mod.render_success_report(
-                contract, selected_pages
+                contract, customer_pages
             )
         except Exception as exc:  # noqa: BLE001 - recorded per lot, fail closed
             entry.update(
@@ -1165,13 +1256,19 @@ def _run_analyze_all(
             lot_gate = quality_gate_mod.run_quality_gate(
                 job_id=job_id,
                 analysis_id=analysis_id,
-                pages=selected_pages,
+                pages=verification_pages,
                 worksheet=lot_worksheet,
                 contract=contract,
                 customer_report=lot_customer_report,
                 validator_report=validator_report,
                 lot_report=sub_lot_report,
                 persist=False,
+                full_document_pages=pages,
+                selected_analysis_pages=context.get("analysis_pages", []),
+                lot_id=str(norm_lot),
+                segmentation=segmentation,
+                case_ledger=case_ledger,
+                lot_fact_projection_report=projection_report,
             )
         except Exception as exc:  # noqa: BLE001 — per-lot fail closed
             entry.update({"status": JobStatus.NEEDS_MANUAL_REVIEW, "reason": f"quality gate error: {exc}"})

@@ -157,8 +157,7 @@ def _risk_cards(worksheet: Dict[str, Any]) -> List[Dict[str, Any]]:
             "regularizable": "media",
             "uncertain": "minore",
         }.get(classification, "info")
-        cards.append(
-            {
+        card = {
                 "area": item.get("area"),
                 "severity": severity,
                 "summary": item.get("notes") or f"{item.get('area')}: {classification}",
@@ -170,7 +169,8 @@ def _risk_cards(worksheet: Dict[str, Any]) -> List[Dict[str, Any]]:
                 "source": "technical_compliance",
                 "evidence_pages": list(item.get("evidence_pages", [])),
             }
-        )
+        _copy_projection_metadata(item, card)
+        cards.append(card)
         covered_areas.add(_area_token(item.get("area")))
 
     # Generic risk cards only for areas not already covered by a detailed card.
@@ -179,8 +179,7 @@ def _risk_cards(worksheet: Dict[str, Any]) -> List[Dict[str, Any]]:
         if token in covered_areas:
             continue
         covered_areas.add(token)
-        cards.append(
-            {
+        card = {
                 "area": item.get("area"),
                 "severity": item.get("severity"),
                 "summary": item.get("summary"),
@@ -188,7 +187,8 @@ def _risk_cards(worksheet: Dict[str, Any]) -> List[Dict[str, Any]]:
                 "source": "risk_classification",
                 "evidence_pages": list(item.get("evidence_pages", [])),
             }
-        )
+        _copy_projection_metadata(item, card)
+        cards.append(card)
 
     return cards
 
@@ -648,7 +648,7 @@ def _buyer_action_checklist(worksheet: Dict[str, Any]) -> List[Dict[str, Any]]:
 def _occupancy_view(worksheet: Dict[str, Any]) -> Dict[str, Any]:
     """Full occupancy block: status + lease details + risks (nothing dropped)."""
     oc = worksheet.get("occupancy") or {}
-    return {
+    out = {
         "status": oc.get("status"),
         "title_info": oc.get("title_info"),
         "opponibility": oc.get("opponibility"),
@@ -657,6 +657,15 @@ def _occupancy_view(worksheet: Dict[str, Any]) -> Dict[str, Any]:
         "risks": list(oc.get("risks") or []),
         "evidence_pages": list(oc.get("evidence_pages") or []),
     }
+    _copy_projection_metadata(oc, out)
+    return out
+
+
+def _copy_projection_metadata(source: Dict[str, Any], target: Dict[str, Any]) -> None:
+    """Pass additive lineage keys through without changing the v1 contract."""
+    for key in ("projected", "fact_id", "projection_reason"):
+        if key in source:
+            target[key] = source[key]
 
 
 def _compliance_overview(worksheet: Dict[str, Any]) -> List[Dict[str, Any]]:
@@ -667,8 +676,7 @@ def _compliance_overview(worksheet: Dict[str, Any]) -> List[Dict[str, Any]]:
     """
     out: List[Dict[str, Any]] = []
     for item in worksheet.get("technical_compliance") or []:
-        out.append(
-            {
+        row = {
                 "area": item.get("area"),
                 "classification": item.get("classification"),
                 "classification_label": _classification_it(item.get("classification")),
@@ -678,7 +686,8 @@ def _compliance_overview(worksheet: Dict[str, Any]) -> List[Dict[str, Any]]:
                 "notes": item.get("notes"),
                 "evidence_pages": list(item.get("evidence_pages") or []),
             }
-        )
+        _copy_projection_metadata(item, row)
+        out.append(row)
     return out
 
 
@@ -706,8 +715,7 @@ def _evidence_index(worksheet: Dict[str, Any]) -> Dict[str, List[str]]:
 def _legal_formalities_view(worksheet: Dict[str, Any]) -> List[Dict[str, Any]]:
     out: List[Dict[str, Any]] = []
     for item in worksheet["legal_formalities"]:
-        out.append(
-            {
+        row = {
                 "type": item.get("type"),
                 "description": item.get("description"),
                 "cancelled_by_procedure": bool(item.get("cancelled_by_procedure")),
@@ -715,7 +723,8 @@ def _legal_formalities_view(worksheet: Dict[str, Any]) -> List[Dict[str, Any]]:
                 "amount": item.get("amount"),
                 "evidence_pages": list(item.get("evidence_pages", [])),
             }
-        )
+        _copy_projection_metadata(item, row)
+        out.append(row)
     return out
 
 
@@ -758,6 +767,12 @@ _AUCTION_TERM_FIELDS = {
     "cauzione": "Cauzione",
 }
 
+_VALUATION_ROW_FIELDS = {
+    "market_value": "Valore di mercato",
+    "current_state_value": "Valore nello stato di fatto",
+    "sale_value": "Valore di vendita giudiziaria",
+}
+
 
 def _merge_shared_summary_rows(
     money: Dict[str, Any], shared_summary_rows: List[Dict[str, Any]]
@@ -768,8 +783,9 @@ def _merge_shared_summary_rows(
     lines on shared multi-lot pages that are clearly tagged with THIS lot's id
     (e.g. "LOTTO 1 - PREZZO BASE D'ASTA: € 64.198,00"). They are document text
     read deterministically — not model claims — so they carry their own explicit
-    textual support. A row is only added when no approximately-equal amount is
-    already visible in the same section, so nothing is double-listed.
+    textual support. A row is only added when no amount with the same semantic
+    label is already visible in the same section. Equal amounts with unrelated
+    labels remain distinct costs.
     """
     for row in shared_summary_rows or []:
         amount = row.get("amount")
@@ -787,11 +803,24 @@ def _merge_shared_summary_rows(
             section = money["auction_terms"]
         else:
             section = money["valuation_chain"]
-        already = any(
-            r.get("amount") is not None and _approx_equal(float(r["amount"]), float(amount))
-            for r in section
-        )
-        if already:
+        canonical_label = {
+            **_AUCTION_TERM_FIELDS,
+            **_VALUATION_ROW_FIELDS,
+        }.get(field)
+        existing = next((
+            existing_row for existing_row in section
+            if existing_row.get("amount") is not None
+            and _approx_equal(float(existing_row["amount"]), float(amount))
+            and (
+                _compatible_money_labels(out_row["label"], existing_row.get("label"))
+                or (
+                    canonical_label is not None
+                    and _compatible_money_labels(canonical_label, existing_row.get("label"))
+                )
+            )
+        ), None)
+        if existing is not None:
+            existing["evidence_pages"] = sorted(set(existing.get("evidence_pages") or []) | set(out_row["evidence_pages"]))
             continue
         section.append(out_row)
         money["money_table"].append(out_row)
@@ -834,7 +863,10 @@ def build_contract(
         "needs_manual_review_money": money["needs_manual_review_money"],
         # Raw lot-tagged rows projected from shared multi-lot summary pages
         # (deterministic; this lot only). Kept verbatim for provenance.
-        "shared_summary_money": [dict(r) for r in shared_summary_rows or []],
+        "shared_summary_money": [
+            dict(r) for r in shared_summary_rows or []
+            if r.get("source") == "shared_summary_projection"
+        ],
         "occupancy": _occupancy_view(worksheet),
         "compliance_overview": _compliance_overview(worksheet),
         "surface_cadastral": [dict(f) for f in surface_cadastral or []],

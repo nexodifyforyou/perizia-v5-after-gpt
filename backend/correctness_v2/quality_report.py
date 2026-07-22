@@ -475,7 +475,19 @@ def _compute_scores(
             scores["evidence_traceability"], 40.0 + 60.0 * ev_ratio
         )
 
+    lot_coverage = coverage_audit.get("lot_coverage") or {}
+    if lot_coverage:
+        general = float(lot_coverage.get("general_fact_recall", 0.0))
+        critical = float(lot_coverage.get("critical_fact_recall", 0.0))
+        document_score = round(100.0 * min(general, critical))
+        scores["coverage_completeness"] = min(scores["coverage_completeness"], document_score)
+
     out = {dim: int(max(0, min(100, round(value)))) for dim, value in scores.items()}
+    if lot_coverage:
+        out["document_coverage"] = int(max(0, min(100, round(100 * min(
+            float(lot_coverage.get("general_fact_recall", 0.0)),
+            float(lot_coverage.get("critical_fact_recall", 0.0)),
+        )))))
     out["overall"] = int(round(sum(out[d] for d in _SCORE_DIMENSIONS) / len(_SCORE_DIMENSIONS)))
     return out
 

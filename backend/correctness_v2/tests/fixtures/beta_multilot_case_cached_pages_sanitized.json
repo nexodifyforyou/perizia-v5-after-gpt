@@ -1,0 +1,18 @@
+{
+  "fixture_id": "fixture_beta_multilot_pages_v1",
+  "sanitization": "Fully synthetic text and identifiers; structure and allowed golden amounts only.",
+  "pages": [
+    {"page_number": 1, "text": "Relazione estimativa sintetica. Procedura dimostrativa. Quattro lotti distinti; ogni dato va attribuito secondo la dichiarazione che lo accompagna."},
+    {"page_number": 2, "text": "Quadro comune ai Lotti 1, 2, 3 e 4. La verifica edilizio-urbanistica risulta conforme per tutti i lotti. La corrispondenza catastale risulta conforme per tutti i lotti."},
+    {"page_number": 3, "text": "Riepilogo economico e giuridico dei Lotti 1, 2, 3 e 4.\nLotto 1 - valore di mercato: € 124.000,00\nLotto 1 - valore di vendita giudiziaria: € 108.000,00\nLotto 1 - riduzione prudenziale: € 16.000,00\nLotto 1 - parametro comparativo: € 1.800,00 per m²; superficie commerciale 69,04 mq.\nLotto 2 - valore di vendita: € 82.000,00\nLotto 3 - valore di vendita: € 76.000,00\nLotto 4 - valore di vendita: € 51.000,00\nLotto 1: occupato in forza di locazione registrata, con termine contrattuale esplicito.\nLotto 2: godimento regolato da comodato con termine dichiarato; non è libero.\nIpoteca riferita ai Lotti 1 e 2, cancellata a cura della procedura e non a carico dell'acquirente.\nPignoramento riferito al Lotto 1, cancellato a cura della procedura e non a carico dell'acquirente.\nAnnotazione senza richiamo a un lotto specifico: verifica manuale."},
+    {"page_number": 4, "text": "Lotto 1. Bene 1 abitazione e Bene 2 autorimessa. Ubicazione: Via delle Magnolie 17, Borgo Esempio. Identificativi catastali sintetici: foglio 901, particella 902, subalterno 903. Piena proprietà."},
+    {"page_number": 5, "text": "Lotto 1. La locazione è registrata e opponibile nei limiti indicati; scadenza 31/12/2030. Nessuna difformità esclusiva ulteriore."},
+    {"page_number": 6, "text": "Lotto 2. Bene 3 deposito in Via dei Gelsi 8, Borgo Esempio. Il comodato termina il 30/06/2029; pertanto il bene non è dichiarato libero."},
+    {"page_number": 7, "text": "Lotto 2. Dati tecnici specifici e valore dedicato, senza riferimenti agli altri lotti."},
+    {"page_number": 8, "text": "Lotto 3. Bene 4 laboratorio in Via del Cedro 4, Borgo Esempio. Modesta difformità interna regolarizzabile con pratica ordinaria; non blocca la vendita."},
+    {"page_number": 9, "text": "Lotto 3. L'irregolarità resta minore e sanabile; non è descritta come abuso grave."},
+    {"page_number": 10, "text": "Lotto 4. Bene 5 locale accessorio in Via del Tiglio 2, Borgo Esempio. Piena proprietà e identificazione disponibili."},
+    {"page_number": 11, "text": "Lotto 4. Stato occupativo non determinabile dai documenti disponibili: fatto critico mancante e verifica necessaria."},
+    {"page_number": 12, "text": "Lotto 4. Dati validi di consistenza conservati anche se la relazione individuale resta bloccata."}
+  ]
+}
