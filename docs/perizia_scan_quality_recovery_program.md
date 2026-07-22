@@ -41,8 +41,23 @@ golden assertions, and forensic documentation.
 ## P0 — Correctness of information delivery
 
 ### 1. Lot-fact projection and reconciliation
-- **Status:** IMPLEMENTED + FABLE-APPROVED (7 review cycles, 2026-07-22/23) —
-  awaiting owner review of the pre-commit report; NOT committed
+- **Status:** COMPLETED — DEPLOYED (owner-approved 2026-07-23)
+  - Feature commit: `c4e7cfe9056226a2c36cd6190c9ec504996c1f92`
+  - Merge commit (main): `5f4cb70e664142b6bc41b50b6708c23c6d975303`
+  - Release tag: `correctness-v2-lot-fact-projection-live`
+  - Deployed: 2026-07-23 (backend restarted, local+public health 200,
+    clean startup journal, concurrency 2 unchanged)
+  - Eight-case regression on deployed main: 10 passed, exit 0
+    (Torino, Pistoia, 1859886_C, Orecchiazzi, Cairate, Codogno, Mantova,
+    beta_multilot)
+  - External-beta fixture/replay on deployed main: Lot 1 critical-fact
+    coverage 0.2857 → 1.0000; all 11 facts retained/repaired; 2 false
+    uncertainties removed; 4 genuine conflicts preserved; zero cross-lot
+    leakage; zero paid calls/writes/quota; production collection deltas all zero
+  - Known non-blocking residual risks (safe direction, tracked under task 15):
+    degree/hedging-adverb long tail in the compliance detector; topic-blind
+    disqualifier over-suppression; excerpt continuation edge case; allowlist
+    word-order rigidity
 - **Branch:** `feature-correctness-v2-lot-fact-projection`
 - **Dependency:** none (first branch)
 - **Acceptance criteria:**
