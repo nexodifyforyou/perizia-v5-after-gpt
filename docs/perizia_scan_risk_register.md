@@ -20,7 +20,15 @@ Status: OPEN · MITIGATED (compensating control in place) · CLOSED (fixed + reg
 | R1-04 | S3 | 7 golden cases never exercise the real compliance gate / contract path | OPEN | Programme task 15; extend golden coverage through real gate |
 | R1-05 | S3 | Compliance disqualifier scan topic-blind → over-suppresses (safe direction) | MITIGATED | Fail-safe accepted; topic co-occurrence gating deferred (task 15) |
 
-## Branch 2 — case/lot verdict consistency (IN PROGRESS, branch `feature-correctness-v2-case-verdict-consistency`)
+## Branch 2 — case/lot verdict consistency (DEPLOYED LIVE 2026-08-14, tag `correctness-v2-case-verdict-consistency-live`, main `479ce2a`)
+
+Deployment record: feature `b085c17`, merge `479ce2a` (= final main/origin), Fable **APPROVE** after 4
+adversarial cycles. Backend restarted (PID 756484, NRestarts=0), local+public health 200, Flag-ON proven
+on the live process, concurrency 2. Validation: eight-case 10/exit 0, focused verdict 42, replay
+coverage 1.0 / ceiling==max / selector-gap resolved / zero leakage/enum/keyword/paid/writes, production
+semantic smoke 83 reports differential 0 regressions + 20 contradictions fixed, delta audit all zero.
+
+
 
 Source: `docs/case_verdict_consistency_plan.md` (Fable 5 audit). Verified against production code this cycle.
 

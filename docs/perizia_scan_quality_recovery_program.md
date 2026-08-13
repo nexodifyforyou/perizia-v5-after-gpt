@@ -90,8 +90,19 @@ golden assertions, and forensic documentation.
 - **Deployment gate:** same as task 1.
 
 ### 3. Case/lot verdict consistency
-- **Status:** IMPLEMENTATION COMPLETE — Fable APPROVE (2026-08-14); **AWAITING OWNER PRE-COMMIT
-  REVIEW** (nothing committed/pushed/merged/deployed)
+- **Status:** COMPLETED — **DEPLOYED (owner-approved 2026-08-14)**
+  - Feature commit: `b085c1736292eaddae8f1e25f1d363ea755841ee`
+  - Merge commit (main): `479ce2a9ad52a153964a793f981c1ca83b2b7975` (= final main / origin/main)
+  - Release tag: `correctness-v2-case-verdict-consistency-live`
+  - Deployed: 2026-08-14 (backend restarted PID 756484, NRestarts=0, local+public health 200,
+    clean startup journal, concurrency 2 unchanged, Flag-ON proven on the live process)
+  - Fable verdict: **APPROVE** after 1 audit + 4 adversarial diff-review cycles → 4 Sol repair cycles.
+  - Deployed-main validation: eight-case 10 passed exit 0; focused verdict/consistency 42 passed;
+    offline replay Lot-1 coverage 0.2857→1.0 (all 11 critical facts repaired), ceiling==max(media),
+    selector-report gap resolved, zero cross-lot leakage / raw-enum / keyword-escalation / paid / writes;
+    production semantic smoke over 83 cached reports (differential flag ON vs OFF): 0 regressions, 20
+    cross-band contradictions FIXED, unknown-schema degrades with no 500; production delta audit all
+    zero (0 jobs, 0 regenerations, 0 artifact changes, 0 external calls, 0 credit/quota).
   - Plan: `docs/case_verdict_consistency_plan.md` (Fable), incl. §12 amendments A1–A2.
   - One additive `verdict_model.py` (`cv2.verdict.v1` CanonicalVerdict) derived from Branch 1's
     reconciled facts; `decision`/`esito`/selector/workspace/money become projections of it. Feature
