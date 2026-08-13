@@ -25,7 +25,7 @@ import re
 import unicodedata
 from typing import Any, Dict, List, Optional, Sequence
 
-from . import decision_model
+from . import decision_model, feature_flags, verdict_model
 
 # Report statuses a customer may see. Manual-review / validation-failed / any
 # pipeline-failure status is never surfaced to a customer.
@@ -274,7 +274,35 @@ def _decision_level(report: Dict[str, Any]) -> str:
     return _DECISION_PRONTO
 
 
-def derive_decision(report: Dict[str, Any]) -> Dict[str, Any]:
+def _canonical_decision_drivers(verdict: Dict[str, Any]) -> List[str]:
+    labels = {
+        "OCCUPIED": "immobile occupato",
+        "LEASE_TITLE": "situazione locativa e opponibilità del titolo da verificare",
+        "STRUCTURAL": "condizioni strutturali da verificare",
+        "HAZARDOUS_MATERIALS": "possibile presenza di materiali da verificare",
+        "HABITABILITY": "agibilità/abitabilità da verificare",
+        "CERTIFICATIONS": "certificazioni e conformità tecniche mancanti o da verificare",
+        "REGULARIZATIONS": "regolarizzazioni tecniche o catastali da valutare",
+        "REGULARIZATION_COSTS": "costi di regolarizzazione a carico dell'acquirente da valutare",
+        "UNCERTAIN_MONEY": "importi il cui ruolo non è chiaro, da verificare",
+        "BUYER_COSTS": "costi a carico dell'acquirente da verificare",
+        "MULTI_BENE": "più beni nel lotto con situazioni tecniche differenti",
+    }
+    codes = (verdict.get("display_projections") or {}).get("decision_driver_codes") or []
+    if codes:
+        return [labels[code] for code in codes if code in labels]
+    drivers: List[str] = []
+    for driver in verdict.get("drivers") or []:
+        text = str(driver.get("text") or "").strip()
+        if text and text not in drivers:
+            drivers.append(text)
+    return drivers
+
+
+def derive_decision(
+    report: Dict[str, Any], canonical_verdict: Optional[Dict[str, Any]] = None, *,
+    canonical_enabled: Optional[bool] = None,
+) -> Dict[str, Any]:
     """Executive decision box derived from risks/occupancy/compliance/money.
 
     Returns {level, label, headline, reason, drivers}. Never exposes internal
@@ -282,6 +310,21 @@ def derive_decision(report: Dict[str, Any]) -> Dict[str, Any]:
     """
     # Non-analyzable document (images / not text-extractable): the decision box is
     # the whole customer message — what happened + upload a readable PDF.
+    canonical = None
+    use_canonical = feature_flags.canonical_verdict_enabled()
+    if canonical_enabled is not None:
+        use_canonical = use_canonical and bool(canonical_enabled)
+    stored = report.get("canonical_verdict")
+    if use_canonical and canonical_verdict is None and isinstance(stored, dict):
+        use_canonical = verdict_model.try_validate_verdict(stored) is not None
+    if use_canonical:
+        try:
+            canonical = (
+                verdict_model.validate_verdict(canonical_verdict)
+                if canonical_verdict else verdict_model.build_lot_verdict(report)
+            )
+        except (ValueError, KeyError, TypeError):
+            canonical = None
     if str(report.get("report_status") or "") == "DOCUMENT_NOT_READABLE":
         steps = [str(s) for s in (report.get("next_steps") or []) if str(s).strip()]
         headline = str(
@@ -293,16 +336,24 @@ def derive_decision(report: Dict[str, Any]) -> Dict[str, Any]:
             or (steps[0] if steps else
                 "Caricare un PDF leggibile con testo selezionabile e riprovare.")
         )
-        return {
+        out = {
             "level": _DECISION_NON_LEGGIBILE,
             "label": _DECISION_LABELS[_DECISION_NON_LEGGIBILE],
             "headline": headline,
             "reason": reason,
             "drivers": steps[:5],
         }
+        if canonical is not None:
+            out["canonical_verdict_ref"] = canonical["canonical_ref"]
+            out["canonical_severity"] = canonical["severity"]
+        return out
 
-    level = _decision_level(report)
-    drivers = _decision_drivers(report)
+    if canonical is not None:
+        level = verdict_model.project_to_decision_level(canonical)
+        drivers = _canonical_decision_drivers(canonical)
+    else:
+        level = _decision_level(report)
+        drivers = _decision_drivers(report)
     label = _DECISION_LABELS[level]
 
     if level == _DECISION_ATTENZIONE:
@@ -318,13 +369,17 @@ def derive_decision(report: Dict[str, Any]) -> Dict[str, Any]:
     else:
         reason = "Verificare comunque i punti segnalati nella perizia con un professionista di fiducia."
 
-    return {
+    out = {
         "level": level,
         "label": label,
         "headline": headline,
         "reason": reason,
         "drivers": drivers[:5],
     }
+    if canonical is not None:
+        out["canonical_verdict_ref"] = canonical["canonical_ref"]
+        out["canonical_severity"] = canonical["severity"]
+    return out
 
 
 # ---------------------------------------------------------------------------
@@ -502,7 +557,36 @@ def sanitize_customer_report(
         # Ephemeral read-time evidence only.  Raw cached pages are never copied
         # to the customer projection or persisted back into the artifact.
         report = {**report, "_cached_input_pages": list(cached_pages)}
-    decision = derive_decision(report)
+    use_canonical = feature_flags.canonical_verdict_enabled()
+    stored = report.get("canonical_verdict")
+    if use_canonical and isinstance(stored, dict):
+        use_canonical = verdict_model.try_validate_verdict(stored) is not None
+    resolved_model = None
+    canonical = None
+    if use_canonical:
+        try:
+            resolved_model = decision_model.build_decision_model(
+                report, confirmations, canonical_enabled=True
+            )
+            canonical = verdict_model.refine_for_runtime(
+                verdict_model.build_lot_verdict(report),
+                report_status=str(report.get("report_status") or ""),
+                readiness=resolved_model.get("readiness") or {},
+                open_checks=bool(
+                    ((resolved_model.get("sections") or {}).get("verifiche") or {}).get("items")
+                ),
+            )
+        except (ValueError, KeyError, TypeError):
+            use_canonical = False
+            resolved_model = None
+            canonical = None
+    if not use_canonical:
+        resolved_model = decision_model.build_decision_model(
+            report, confirmations, canonical_enabled=False
+        )
+    decision = derive_decision(
+        report, canonical, canonical_enabled=use_canonical
+    )
 
     status = str(report.get("report_status") or "")
     out: Dict[str, Any] = {
@@ -532,11 +616,13 @@ def sanitize_customer_report(
         # fail-closed evidence validator, is customer-visible.
         "disclaimer": _customer_content(report.get("disclaimer")),
     }
+    if canonical is not None:
+        out["canonical_verdict"] = canonical
 
     # Read-time customer decision model (§C). Built from the FULL stored report
     # (before admin keys are stripped above is irrelevant — the builder reads only
     # customer-safe fields) with user confirmations joined. Pure, no OpenAI.
-    out["decision_model"] = decision_model.build_decision_model(report, confirmations)
+    out["decision_model"] = resolved_model
 
     if status == "LOT_SELECTION_REQUIRED" and report.get("lot_selection"):
         out["lot_selection"] = _customer_lot_selection(report.get("lot_selection"))

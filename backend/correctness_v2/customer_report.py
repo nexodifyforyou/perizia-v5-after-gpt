@@ -25,7 +25,7 @@ import re
 import unicodedata
 from typing import Any, Dict, List, Optional, Tuple
 
-from . import doc_signals, lots as lots_mod
+from . import doc_signals, feature_flags, lots as lots_mod, verdict_model
 
 CUSTOMER_REPORT_SCHEMA_VERSION = "cv2.customer_report.v1"
 
@@ -1507,18 +1507,28 @@ def render_lot_selection_report(
         pages = _pages(lot.get("page_evidence"))
         for p in pages:
             evidence.setdefault(p, []).append(f"lotto {lot_id}")
+        canonical = index_lot.get("canonical_verdict") if feature_flags.canonical_verdict_enabled() else None
+        if canonical is not None:
+            canonical = verdict_model.try_validate_verdict(canonical)
+        fields = (canonical or {}).get("field_verdicts") or {}
+        notes = list(lot.get("notes") or [])
+        confidence = lot.get("confidence")
+        if canonical is None and feature_flags.canonical_verdict_enabled() and lot_index.get("canonical_verdict_mode"):
+            notes.append("Dati preliminari non ancora riconciliati per questo lotto.")
+            confidence = "unconfirmed"
         lots_view.append(
             {
                 "lot_id": lot_id,
                 "label": lot.get("label"),
                 "address": lot.get("address"),
-                "property_type": lot.get("property_type"),
+                "property_type": ((fields.get("typology") or {}).get("value") if canonical else lot.get("property_type")),
                 "ownership_right": lot.get("ownership_right"),
-                "occupancy_summary": lot.get("occupancy_summary"),
+                "occupancy_summary": ((fields.get("occupancy") or {}).get("value") if canonical else lot.get("occupancy_summary")),
                 "money_summary": _lot_money_summary(lot, index_lot),
                 "evidence_pages": pages,
-                "confidence": lot.get("confidence"),
-                "notes": list(lot.get("notes") or []),
+                "confidence": confidence,
+                "notes": notes,
+                **({"canonical_verdict_ref": canonical.get("canonical_ref")} if canonical else {}),
             }
         )
 

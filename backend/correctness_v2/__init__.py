@@ -13,10 +13,11 @@ artifact storage, and a PDF quality blocker. No OpenAI analysis, no Gemini
 narration, no customer report generation here.
 """
 
-from . import feature_flags, schemas, job_status, artifacts, pdf_quality, orchestrator, lots, lot_packets
+from . import feature_flags, schemas, job_status, artifacts, pdf_quality, orchestrator, lots, lot_packets, verdict_model
 
 __all__ = [
     "feature_flags",
+    "verdict_model",
     "schemas",
     "job_status",
     "artifacts",

@@ -15,7 +15,7 @@ from __future__ import annotations
 import unicodedata
 from typing import Any, Dict, List, Optional
 
-from . import doc_signals
+from . import doc_signals, feature_flags, verdict_model
 
 CONTRACT_SCHEMA_VERSION = "cv2.contract.v1"
 
@@ -151,16 +151,21 @@ def _risk_cards(worksheet: Dict[str, Any]) -> List[Dict[str, Any]]:
         classification = item.get("classification")
         if classification in {"conforming"}:
             continue
-        severity = {
-            "non_conforming": "grave",
-            "not_regularizable": "grave",
-            "regularizable": "media",
-            "uncertain": "minore",
-        }.get(classification, "info")
+        if feature_flags.canonical_verdict_enabled():
+            severity = verdict_model.compliance_severity(classification)
+            fallback_summary = f"{item.get('area')}: {_classification_it(classification)}"
+        else:
+            severity = {
+                "non_conforming": "grave",
+                "not_regularizable": "grave",
+                "regularizable": "media",
+                "uncertain": "minore",
+            }.get(classification, "info")
+            fallback_summary = f"{item.get('area')}: {classification}"
         card = {
                 "area": item.get("area"),
                 "severity": severity,
-                "summary": item.get("notes") or f"{item.get('area')}: {classification}",
+                "summary": item.get("notes") or fallback_summary,
                 "regularizable": classification == "regularizable",
                 "classification": classification,
                 "blocks_saleability": bool(item.get("blocks_saleability")),

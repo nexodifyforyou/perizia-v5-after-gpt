@@ -5,7 +5,7 @@ touches the DB, OpenAI or the real /srv artifacts folder. The central contract
 under test: reading workspace state NEVER spawns a job.
 """
 
-from correctness_v2 import artifacts, orchestrator, workspace
+from correctness_v2 import artifacts, customer_view, orchestrator, verdict_model, workspace
 
 
 T0 = "2026-07-16T09:00:00+00:00"
@@ -143,6 +143,45 @@ def test_build_workspace_folds_ready_failed_and_not_analyzed(artifacts_root):
         "failed": 1,
         "not_analyzed": 1,
     }
+
+
+def test_bad_cached_lot_verdict_does_not_break_workspace(artifacts_root):
+    analysis_id = "analysis_ws_bad_verdict"
+    _setup_multi_lot_analysis(analysis_id)
+    artifacts.save_lot_verdict(
+        f"cv2_{analysis_id}_lot1", "1",
+        {"schema_version": "cv2.verdict.v0", "severity": "verde"},
+    )
+
+    ws = workspace.build_workspace(analysis_id)
+
+    assert {lot["lot_id"] for lot in ws["lots"]} == {"1", "2", "3"}
+    assert next(lot for lot in ws["lots"] if lot["lot_id"] == "1")["state"] == workspace.STATE_REPORT_READY
+    assert "canonical_verdict" not in ws
+
+
+def test_workspace_refines_open_formality_before_case_aggregation(artifacts_root):
+    analysis_id = "analysis_ws_formality"
+    job_id = f"cv2_{analysis_id}_lot1"
+    report = _ready_report(analysis_id, job_id, "1")
+    report["formalities_section"] = [{
+        "type": "ipoteca", "description": "Trattamento da chiarire",
+        "cancelled_by_procedure": False, "buyer_burden": False,
+        "evidence_pages": [1],
+    }]
+    canonical = verdict_model.build_lot_verdict(report, lot_id="1")
+    _save_status(
+        job_id, analysis_id, "REPORT_READY", safe=True, selected_lot="1"
+    )
+    artifacts.save_customer_report(job_id, report)
+    artifacts.save_lot_verdict(job_id, "1", canonical)
+
+    live = customer_view.sanitize_customer_report(report)
+    ws = workspace.build_workspace(analysis_id)
+
+    assert live["decision_model"]["esito"]["level"] == "ambra"
+    assert canonical["severity"] == "media"
+    assert ws["canonical_verdict"]["severity"] == "media"
 
 
 # ---------------------------------------------------------------------------

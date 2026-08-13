@@ -34,7 +34,14 @@ import threading
 import time
 from typing import Any, Dict, List, Optional, Tuple
 
-from . import artifacts, customer_view
+from . import (
+    artifacts,
+    customer_report as customer_report_mod,
+    customer_view,
+    decision_model as decision_model_mod,
+    feature_flags,
+    verdict_model,
+)
 from .schemas import JobStatus
 
 # ---------------------------------------------------------------------------
@@ -355,16 +362,21 @@ def build_workspace(analysis_id: str) -> Dict[str, Any]:
         lot_records = {canonical: [rec for recs in by_lot.values() for rec in recs]}
 
     lots_out: List[Dict[str, Any]] = []
+    canonical_lot_verdicts: List[Dict[str, Any]] = []
     for lid in ordered_ids:
         folded = _fold_lot(lot_records.get(lid, []), _is_inflight(analysis_id, lid))
+        canonical = _persisted_lot_verdict(lid, folded)
+        if canonical is not None:
+            canonical_lot_verdicts.append(canonical)
+        fields = (canonical or {}).get("field_verdicts") or {}
         entry = {
             "lot_id": lid,
             "label": meta_by_lot.get(lid, {}).get("label") or f"Lotto {lid}",
             "address": meta_by_lot.get(lid, {}).get("address"),
-            "property_type": meta_by_lot.get(lid, {}).get("property_type"),
+            "property_type": ((fields.get("typology") or {}).get("value") if canonical else meta_by_lot.get(lid, {}).get("property_type")),
             "ownership_right": meta_by_lot.get(lid, {}).get("ownership_right"),
-            "occupancy_summary": meta_by_lot.get(lid, {}).get("occupancy_summary"),
-            "final_value": _final_value_display(analysis_id, lid, folded),
+            "occupancy_summary": ((fields.get("occupancy") or {}).get("value") if canonical else meta_by_lot.get(lid, {}).get("occupancy_summary")),
+            "final_value": _final_value_display(analysis_id, lid, folded, canonical),
             "state": folded["state"],
             "has_safe_report": folded["has_safe_report"],
             "job_running": folded["job_running"],
@@ -372,6 +384,7 @@ def build_workspace(analysis_id: str) -> Dict[str, Any]:
             "latest_report_at": folded["latest_report_at"],
             "report_version": folded["report_version"],
             "actions": folded["actions"],
+            **({"canonical_verdict_ref": canonical.get("canonical_ref")} if canonical else {}),
         }
         lots_out.append(entry)
 
@@ -396,7 +409,7 @@ def build_workspace(analysis_id: str) -> Dict[str, Any]:
     else:
         analysis_state = "SINGLE_LOT"
 
-    return {
+    out = {
         "analysis_id": str(analysis_id),
         "multi_lot": bool(multi_lot or lot_count > 1),
         "lot_count": lot_count,
@@ -404,12 +417,62 @@ def build_workspace(analysis_id: str) -> Dict[str, Any]:
         "summary": summary,
         "lots": lots_out,
     }
+    if feature_flags.canonical_verdict_enabled() and canonical_lot_verdicts:
+        try:
+            out["canonical_verdict"] = verdict_model.build_case_verdict(
+                canonical_lot_verdicts, scope_id=str(analysis_id), all_lot_ids=ordered_ids
+            )
+        except (ValueError, KeyError, TypeError):
+            # Canonical storage is additive. A bad cached lot must not make the
+            # entire legacy Storico workspace unavailable.
+            pass
+    return out
 
 
-def _final_value_display(analysis_id: str, lot_id: str, folded: Dict[str, Any]) -> Optional[str]:
+def _persisted_lot_verdict(lot_id: str, folded: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    if not feature_flags.canonical_verdict_enabled() or not folded.get("has_safe_report"):
+        return None
+    ref = folded.get("safe_ref") or {}
+    safe_lot = str(lot_id).replace("/", "_").replace("..", "_")
+    verdict = artifacts.read_json(
+        str(ref.get("job_id")), os.path.join("lots", safe_lot, artifacts.LOT_VERDICT_FILE)
+    )
+    canonical = verdict_model.try_validate_verdict(verdict)
+    if canonical is None:
+        return None
+    report = artifacts.read_json(
+        str(ref.get("job_id")), str(ref.get("report_filename") or "")
+    )
+    if not isinstance(report, dict):
+        return canonical
+    try:
+        model_input = {**report, "canonical_verdict": canonical}
+        model = decision_model_mod.build_decision_model(
+            model_input, canonical_enabled=True
+        )
+        return verdict_model.refine_for_runtime(
+            canonical,
+            report_status=str(report.get("report_status") or ""),
+            readiness=model.get("readiness") or {},
+            open_checks=bool(
+                ((model.get("sections") or {}).get("verifiche") or {}).get("items")
+            ),
+        )
+    except (ValueError, KeyError, TypeError):
+        return None
+
+
+def _final_value_display(
+    analysis_id: str, lot_id: str, folded: Dict[str, Any],
+    canonical_verdict: Optional[Dict[str, Any]] = None,
+) -> Optional[str]:
     """Best-effort safe judicial/final sale display value for a ready lot."""
     if not folded.get("has_safe_report"):
         return None
+    if canonical_verdict is not None:
+        final_value = (((canonical_verdict.get("field_verdicts") or {}).get("money") or {}).get("final_value") or {})
+        if final_value.get("amount") is not None:
+            return customer_report_mod.format_eur(final_value.get("amount"))
     ref = folded.get("safe_ref") or {}
     report = artifacts.read_json(str(ref.get("job_id")), str(ref.get("report_filename") or ""))
     if not isinstance(report, dict):

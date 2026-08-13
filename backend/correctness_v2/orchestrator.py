@@ -30,6 +30,7 @@ from . import (
     artifacts,
     contract as contract_mod,
     customer_report as customer_report_mod,
+    decision_model as decision_model_mod,
     doc_signals as doc_signals_mod,
     feature_flags,
     fact_lineage as fact_lineage_mod,
@@ -41,6 +42,7 @@ from . import (
     money_confirmation as money_confirmation_mod,
     quality_gate as quality_gate_mod,
     validator as validator_mod,
+    verdict_model as verdict_model_mod,
 )
 from .analyst import AnalystError
 from .pdf_quality import assess_pdf_quality
@@ -549,7 +551,10 @@ def _run_step2(
     # MULTI-LOT: always build the inspectable lot index + per-lot packets. We never
     # blend lots; the document is segmented page-by-page into per-lot contexts.
     segmentation = lot_packets_mod.segment_pages(pages, lot_report.get("lot_ids"))
-    lot_index = lot_packets_mod.build_lot_index(result.worksheet, pages, lot_report, segmentation)
+    lot_index = lot_packets_mod.build_lot_index(
+        result.worksheet, pages, lot_report, segmentation,
+        reconciled_lot_verdicts={} if feature_flags.canonical_verdict_enabled() else None,
+    )
     per_lot_packets = lot_packets_mod.build_per_lot_packets(result.worksheet, pages, lot_report, segmentation)
     artifacts_saved["lot_index"] = artifacts.save_lot_index(job_id, lot_index)
     artifacts_saved["per_lot_packets"] = artifacts.save_per_lot_packets(job_id, per_lot_packets)
@@ -619,6 +624,24 @@ def _step4_stage(name: str) -> str:
 # ---------------------------------------------------------------------------
 # Single-lot contract build (shared by the single-lot and selected-lot paths)
 # ---------------------------------------------------------------------------
+def _refine_canonical_for_report(
+    report: Dict[str, Any], canonical: Dict[str, Any]
+) -> Dict[str, Any]:
+    """Persist the same runtime-refined verdict exposed by decision/esito."""
+    model_input = {**report, "canonical_verdict": canonical}
+    model = decision_model_mod.build_decision_model(
+        model_input, canonical_enabled=True
+    )
+    return verdict_model_mod.refine_for_runtime(
+        canonical,
+        report_status=str(report.get("report_status") or ""),
+        readiness=model.get("readiness") or {},
+        open_checks=bool(
+            ((model.get("sections") or {}).get("verifiche") or {}).get("items")
+        ),
+    )
+
+
 def _build_single_lot_contract(
     *,
     job_id: str,
@@ -642,6 +665,7 @@ def _build_single_lot_contract(
     case_ledger: Optional[Dict[str, Any]] = None,
     lot_fact_projection_report: Optional[Dict[str, Any]] = None,
     customer_pages: Optional[List[Dict[str, Any]]] = None,
+    case_lot_index: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     """Validate a single-lot worksheet and build the verified contract (CONTRACT_READY).
 
@@ -706,6 +730,45 @@ def _build_single_lot_contract(
         return _finish_report_render_failed(
             job_id, analysis_id, exc, artifacts_saved, created_at, admin_only
         )
+    canonical_verdict = None
+    if feature_flags.canonical_verdict_enabled():
+        canonical_lot_id = str(lot_id or next(iter(lot_report.get("lot_ids") or []), "1"))
+        verdict_input = dict(customer_report)
+        if lot_fact_projection_report:
+            verdict_input["lot_fact_projection"] = lot_fact_projection_report
+        canonical_verdict = verdict_model_mod.build_lot_verdict(
+            verdict_input,
+            reconciled_worksheet=worksheet,
+            case_ledger=case_ledger,
+            segmentation=segmentation,
+            lot_report=lot_report,
+            lot_id=canonical_lot_id,
+        )
+        canonical_verdict = _refine_canonical_for_report(
+            customer_report, canonical_verdict
+        )
+        artifacts_saved["lot_verdict"] = artifacts.save_lot_verdict(
+            job_id, canonical_lot_id, canonical_verdict
+        )
+        artifacts.save_lot_fact_ledger(
+            job_id, canonical_lot_id,
+            verdict_model_mod.build_reconciled_fact_ledger(
+                worksheet, canonical_lot_id, segmentation=segmentation, lot_report=lot_report
+            ),
+        )
+        case_verdict = verdict_model_mod.build_case_verdict(
+            [canonical_verdict], scope_id=analysis_id,
+            all_lot_ids=[str(value) for value in (
+                (extra or {}).get("lot_ids") or lot_report.get("lot_ids") or [canonical_lot_id]
+            )],
+            case_global_facts=(case_ledger or {}).get("facts") or [],
+        )
+        artifacts_saved["case_verdict"] = artifacts.save_case_verdict(job_id, case_verdict)
+        if case_lot_index is not None:
+            updated_index = lot_packets_mod.apply_reconciled_verdicts(
+                case_lot_index, {canonical_lot_id: canonical_verdict}
+            )
+            artifacts_saved["lot_index"] = artifacts.save_lot_index(job_id, updated_index)
     artifacts_saved["customer_report"] = artifacts.save_customer_report(
         job_id, customer_report
     )
@@ -750,6 +813,8 @@ def _build_single_lot_contract(
             blocking_issues=(gate.get("quality_report") or {}).get("blocking_issues") or [],
         )
         if mc_payload:
+            if canonical_verdict is not None:
+                customer_report["canonical_verdict"] = canonical_verdict
             return _finish_money_confirmation_required(
                 job_id, analysis_id, gate, mc_payload, customer_report,
                 artifacts_saved, created_at, admin_only,
@@ -758,6 +823,11 @@ def _build_single_lot_contract(
             job_id, analysis_id, gate, artifacts_saved, created_at, admin_only
         )
 
+    if canonical_verdict is not None:
+        gate["customer_report"]["canonical_verdict"] = canonical_verdict
+        artifacts_saved["customer_report"] = artifacts.save_customer_report(
+            job_id, gate["customer_report"]
+        )
     payload_extra = {
         "quality_gate_status": gate["gate_status"],
         "coverage_status": gate["coverage_audit"].get("coverage_status"),
@@ -940,6 +1010,7 @@ def _run_selected_lot(
         case_ledger=case_ledger,
         lot_fact_projection_report=projection_report,
         customer_pages=customer_pages,
+        case_lot_index=lot_index,
     )
 
 
@@ -1130,6 +1201,7 @@ def _run_analyze_all(
     )
 
     per_lot_results: List[Dict[str, Any]] = []
+    reconciled_verdicts: Dict[str, Dict[str, Any]] = {}
     for lot_id in lot_ids:
         prep = prepared[str(lot_id)]
         norm_lot = prep["norm_lot"]
@@ -1250,6 +1322,30 @@ def _run_analyze_all(
             )
             per_lot_results.append(entry)
             continue
+        canonical_verdict = None
+        if feature_flags.canonical_verdict_enabled():
+            verdict_input = dict(lot_customer_report)
+            verdict_input["lot_fact_projection"] = projection_report
+            canonical_verdict = verdict_model_mod.build_lot_verdict(
+                verdict_input,
+                reconciled_worksheet=lot_worksheet,
+                case_ledger=case_ledger,
+                segmentation=segmentation,
+                lot_report=sub_lot_report,
+                lot_id=str(norm_lot),
+            )
+            canonical_verdict = _refine_canonical_for_report(
+                lot_customer_report, canonical_verdict
+            )
+            reconciled_verdicts[str(norm_lot)] = canonical_verdict
+            artifacts.save_lot_verdict(job_id, norm_lot, canonical_verdict)
+            artifacts.save_lot_fact_ledger(
+                job_id, norm_lot,
+                verdict_model_mod.build_reconciled_fact_ledger(
+                    lot_worksheet, str(norm_lot),
+                    segmentation=segmentation, lot_report=sub_lot_report,
+                ),
+            )
         # Per-lot quality gate: a lot's report is only READY if its own coverage
         # audit passes. Gate crash fails closed for that lot.
         try:
@@ -1286,6 +1382,8 @@ def _run_analyze_all(
         artifacts.save_lot_subartifact(
             job_id, norm_lot, artifacts.SCORECARD_FILE, lot_gate["scorecard"]
         )
+        if canonical_verdict is not None:
+            lot_gate["customer_report"]["canonical_verdict"] = canonical_verdict
         report_path = artifacts.save_lot_subartifact(
             job_id, norm_lot, artifacts.CUSTOMER_REPORT_FILE, lot_gate["customer_report"]
         )
@@ -1316,6 +1414,16 @@ def _run_analyze_all(
             }
         )
         per_lot_results.append(entry)
+
+    if feature_flags.canonical_verdict_enabled():
+        case_verdict = verdict_model_mod.build_case_verdict(
+            list(reconciled_verdicts.values()), scope_id=analysis_id,
+            all_lot_ids=[str(value) for value in lot_ids],
+            case_global_facts=case_ledger.get("facts") or [],
+        )
+        artifacts_saved["case_verdict"] = artifacts.save_case_verdict(job_id, case_verdict)
+        lot_index = lot_packets_mod.apply_reconciled_verdicts(lot_index, reconciled_verdicts)
+        artifacts_saved["lot_index"] = artifacts.save_lot_index(job_id, lot_index)
 
     all_ok = bool(per_lot_results) and all(
         e.get("status") == JobStatus.REPORT_READY for e in per_lot_results
@@ -1844,7 +1952,7 @@ def resolve_money_confirmation(
     contract = artifacts.read_json(job_id, artifacts.VERIFIED_CONTRACT_FILE)
     pages_payload = artifacts.read_json(job_id, artifacts.INPUT_PAGES_FILE) or {}
     pages = pages_payload.get("pages") or []
-    worksheet = artifacts.read_json(job_id, artifacts.ANALYST_WORKSHEET_FILE)
+    case_worksheet = artifacts.read_json(job_id, artifacts.ANALYST_WORKSHEET_FILE)
     validator_report = artifacts.read_json(job_id, artifacts.VALIDATOR_REPORT_FILE)
     lot_report = artifacts.read_json(job_id, artifacts.LOT_REPORT_FILE)
     if not isinstance(contract, dict):
@@ -1852,6 +1960,134 @@ def resolve_money_confirmation(
 
     # Deterministic re-render of the closest-guess report from the SAME contract.
     customer_report = customer_report_mod.render_success_report(contract, pages)
+    worksheet = case_worksheet
+    gate_lot_report = lot_report
+    if feature_flags.canonical_verdict_enabled():
+        selected_context = artifacts.read_json(
+            job_id, artifacts.SELECTED_LOT_CONTEXT_FILE
+        ) or {}
+        stored_index = artifacts.read_json(job_id, artifacts.LOT_INDEX_FILE) or {}
+        selected_lot = (
+            selected_context.get("selected_lot_id")
+            or (customer_report.get("lot_structure") or {}).get("selected_lot")
+            or status.get("selected_lot")
+        )
+        lot_ids = [str(value) for value in (lot_report or {}).get("lot_ids") or []]
+        if selected_lot in (None, "") and len(lot_ids) == 1:
+            selected_lot = lot_ids[0]
+        if selected_lot not in (None, ""):
+            selected_lot = str(selected_lot)
+            safe_lot = selected_lot.replace("/", "_").replace("..", "_")
+            selected_worksheet = artifacts.read_json(
+                job_id, os.path.join("lots", safe_lot, artifacts.ANALYST_WORKSHEET_FILE)
+            )
+            if isinstance(selected_worksheet, dict):
+                worksheet = selected_worksheet
+        if selected_lot not in (None, "") and isinstance(worksheet, dict):
+            try:
+                indexed_lot_pages = {
+                    str(row.get("lot_id")): list(row.get("segmentation_pages") or [])
+                    for row in stored_index.get("lots") or []
+                    if row.get("lot_id") not in (None, "")
+                }
+                if selected_lot not in (None, "") and not indexed_lot_pages.get(str(selected_lot)):
+                    indexed_lot_pages[str(selected_lot)] = list(
+                        selected_context.get("lot_specific_pages")
+                        or selected_context.get("analysis_pages") or []
+                    )
+                global_pages = list(
+                    stored_index.get("global_pages")
+                    or selected_context.get("global_pages") or []
+                )
+                shared_pages = list(
+                    stored_index.get("shared_pages")
+                    or selected_context.get("excluded_shared_pages") or []
+                )
+                page_assignments = [
+                    {"page": page, "method": "global", "assigned_lot": None}
+                    for page in global_pages
+                ] + [
+                    {"page": page, "method": "shared", "assigned_lot": None}
+                    for page in shared_pages
+                ] + [
+                    {"page": page, "method": "explicit", "assigned_lot": lot_key}
+                    for lot_key, lot_pages in indexed_lot_pages.items()
+                    for page in lot_pages
+                    if page not in global_pages and page not in shared_pages
+                ]
+                segmentation = {
+                    "lot_ids": lot_ids,
+                    "lot_pages": indexed_lot_pages,
+                    "global_pages": global_pages,
+                    "shared_pages": shared_pages,
+                    "page_assignments": page_assignments,
+                }
+                ledger_segmentation = dict(segmentation)
+                ledger_segmentation["full_document_pages"] = pages
+                ledger_segmentation["shared_summary_projection"] = (
+                    lot_packets_mod.project_shared_summary_rows(pages, segmentation)
+                )
+                case_ledger = (
+                    fact_lineage_mod.build_case_fact_ledger(
+                        case_worksheet, ledger_segmentation, lot_report
+                    )
+                    if isinstance(case_worksheet, dict) and isinstance(lot_report, dict)
+                    else None
+                )
+                selected_numbers = set(
+                    selected_context.get("analysis_pages")
+                    or indexed_lot_pages.get(str(selected_lot), [])
+                    or [page.get("page_number", index) for index, page in enumerate(pages, 1)]
+                )
+                selected_pages = [
+                    page for index, page in enumerate(pages, 1)
+                    if page.get("page_number", index) in selected_numbers
+                ]
+                gate_lot_report = lots_mod.build_lot_report(
+                    worksheet, selected_pages or pages
+                )
+                projection_report = (
+                    artifacts.read_json(
+                        job_id,
+                        os.path.join(
+                            "lots", safe_lot, artifacts.LOT_FACT_PROJECTION_FILE
+                        ),
+                    )
+                    if selected_lot not in (None, "") else None
+                )
+                verdict_input = dict(customer_report)
+                if isinstance(projection_report, dict):
+                    verdict_input["lot_fact_projection"] = projection_report
+                canonical = verdict_model_mod.build_lot_verdict(
+                    verdict_input,
+                    reconciled_worksheet=worksheet,
+                    case_ledger=case_ledger,
+                    segmentation=segmentation,
+                    lot_report=gate_lot_report,
+                    lot_id=str(selected_lot or next(iter(lot_ids), "1")),
+                )
+                canonical = _refine_canonical_for_report(customer_report, canonical)
+                customer_report["canonical_verdict"] = canonical
+                if selected_lot not in (None, ""):
+                    artifacts.save_lot_verdict(job_id, str(selected_lot), canonical)
+                    if isinstance(lot_report, dict):
+                        case_verdict = verdict_model_mod.build_case_verdict(
+                            [canonical], scope_id=analysis_id,
+                            all_lot_ids=lot_ids or [str(selected_lot)],
+                            case_global_facts=(case_ledger or {}).get("facts") or [],
+                        )
+                        artifacts.save_case_verdict(job_id, case_verdict)
+                    if stored_index.get("lots"):
+                        artifacts.save_lot_index(
+                            job_id,
+                            lot_packets_mod.apply_reconciled_verdicts(
+                                stored_index, {str(selected_lot): canonical}
+                            ),
+                        )
+            except (ValueError, KeyError, TypeError):
+                # A stale canonical artifact never blocks paid-free resolution;
+                # the verified legacy report remains the fallback.
+                customer_report.pop("canonical_verdict", None)
     artifacts_saved = dict(status.get("artifacts_saved") or {})
 
     gate = quality_gate_mod.run_quality_gate(
@@ -1862,7 +2098,7 @@ def resolve_money_confirmation(
         contract=contract,
         customer_report=customer_report,
         validator_report=validator_report,
-        lot_report=lot_report,
+        lot_report=gate_lot_report,
         artifacts_saved=artifacts_saved,
         money_confirmations=confirmations,
     )
@@ -1871,6 +2107,14 @@ def resolve_money_confirmation(
         # The answers did not clear the block: still not customer-safe.
         return _finish_quality_gate_failed(
             job_id, analysis_id, gate, artifacts_saved, created_at, admin_only
+        )
+
+    if customer_report.get("canonical_verdict") is not None:
+        gate["customer_report"]["canonical_verdict"] = customer_report[
+            "canonical_verdict"
+        ]
+        artifacts_saved["customer_report"] = artifacts.save_customer_report(
+            job_id, gate["customer_report"]
         )
 
     quality = gate.get("quality_report") or {}
