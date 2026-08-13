@@ -44,6 +44,9 @@ LOT_INDEX_FILE = "lot_index.json"
 PER_LOT_PACKETS_FILE = "per_lot_packets.json"
 SELECTED_LOT_CONTEXT_FILE = "selected_lot_context.json"
 LOT_FACT_PROJECTION_FILE = "lot_fact_projection.json"
+LOT_VERDICT_FILE = "canonical_verdict.json"
+CASE_VERDICT_FILE = "case_verdict.json"
+FACT_LEDGER_FILE = "fact_ledger.json"
 LOT_SELECTION_REQUIRED_FILE = "lot_selection_required.json"
 MONEY_CONFIRMATION_REQUIRED_FILE = "money_confirmation_required.json"
 ANALYZE_ALL_RESULT_FILE = "analyze_all_result.json"
@@ -166,6 +169,18 @@ def save_selected_lot_context(job_id: str, context: Dict[str, Any]) -> str:
 
 def save_lot_fact_projection(job_id: str, lot_id: str, report: Dict[str, Any]) -> str:
     return save_lot_subartifact(job_id, lot_id, LOT_FACT_PROJECTION_FILE, report)
+
+
+def save_lot_verdict(job_id: str, lot_id: str, verdict: Dict[str, Any]) -> str:
+    return save_lot_subartifact(job_id, lot_id, LOT_VERDICT_FILE, verdict)
+
+
+def save_case_verdict(job_id: str, verdict: Dict[str, Any]) -> str:
+    return save_json(job_id, CASE_VERDICT_FILE, verdict)
+
+
+def save_lot_fact_ledger(job_id: str, lot_id: str, ledger: Dict[str, Any]) -> str:
+    return save_lot_subartifact(job_id, lot_id, FACT_LEDGER_FILE, ledger)
 
 
 def save_lot_selection_required(job_id: str, payload: Dict[str, Any]) -> str:

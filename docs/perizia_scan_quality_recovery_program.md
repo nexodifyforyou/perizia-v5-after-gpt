@@ -90,13 +90,27 @@ golden assertions, and forensic documentation.
 - **Deployment gate:** same as task 1.
 
 ### 3. Case/lot verdict consistency
-- **Status:** NOT STARTED
+- **Status:** IMPLEMENTATION COMPLETE — Fable APPROVE (2026-08-14); **AWAITING OWNER PRE-COMMIT
+  REVIEW** (nothing committed/pushed/merged/deployed)
+  - Plan: `docs/case_verdict_consistency_plan.md` (Fable), incl. §12 amendments A1–A2.
+  - One additive `verdict_model.py` (`cv2.verdict.v1` CanonicalVerdict) derived from Branch 1's
+    reconciled facts; `decision`/`esito`/selector/workspace/money become projections of it. Feature
+    flag `CORRECTNESS_V2_CANONICAL_VERDICT_ENABLED` (default ON); flag-OFF == byte-for-byte pre-branch
+    (proven by base golden tests under flag off).
+  - Review: 1 Fable audit + 4 adversarial diff-review cycles → 4 Sol repair cycles. All findings
+    resolved and independently reproduced by Fable (schema-500 blocker; raw-vs-live esito; multi-lot
+    money-confirmation provenance; the CASE_GLOBAL severe-suppression class closed across three
+    successive routes — positional key, formality `"other"` token, cross-ledger fact_id collision;
+    priority-derivation nit). §4.4 keyword-escalation carried as owner-signed-off DT-01 (flag-OFF only).
+  - Verified: Correctness V2 584 · eight-case 10/exit 0 · full backend 1667 pass / 7 known-stale / 7
+    skip · offline replay coverage 1.0, ceiling==max, zero leakage/enum-leak/keyword-escalation/paid/
+    writes · `fact_lineage.py`/`lot_fact_projection.py` untouched · concurrency 2.
 - **Branch:** `feature-correctness-v2-case-verdict-consistency`
 - **Dependency:** task 1 (fact lineage + reconciliation)
 - **Acceptance criteria:** case-level verdicts and lot-level verdicts derived from the
   same reconciled fact base; no contradictory case-vs-lot statements; taxonomy tests.
 - **Regression risk:** medium.
-- **Deployment gate:** Fable review + owner approval.
+- **Deployment gate:** Fable review (PASSED) + owner pre-commit review (PENDING) before any commit/deploy.
 
 ### 4. Partial lot reports
 - **Status:** NOT STARTED

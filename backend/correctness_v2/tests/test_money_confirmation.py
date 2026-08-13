@@ -15,6 +15,8 @@ Covers the whole feature, mirroring the LOT_SELECTION_REQUIRED flow:
 All fixtures are generic/synthetic — nothing branches on a real city.
 """
 
+import copy
+
 from correctness_v2 import (
     analyst,
     artifacts,
@@ -222,8 +224,11 @@ def _build_swapped_conflict():
     return worksheet, vr, lot_report, contract, report
 
 
-def _persist_paused_job(job_id, worksheet, vr, lot_report, contract, gate, payload):
-    artifacts.save_input_pages(job_id, GENERIC_PERIZIA_PAGES)
+def _persist_paused_job(
+    job_id, worksheet, vr, lot_report, contract, gate, payload,
+    pages=GENERIC_PERIZIA_PAGES,
+):
+    artifacts.save_input_pages(job_id, pages)
     artifacts.save_analyst_worksheet(job_id, worksheet)
     artifacts.save_validator_report(job_id, vr)
     artifacts.save_lot_report(job_id, lot_report)
@@ -264,6 +269,138 @@ def test_orchestrator_pause_then_resolve_produces_report_ready(artifacts_root):
     assert result["money_confirmations"] == answers
     final = artifacts.read_json("job_r", artifacts.CUSTOMER_REPORT_FILE)
     assert final["report_status"] == "REPORT_READY"
+
+
+def test_multilot_resolution_reattaches_provenanced_selected_lot_verdict(artifacts_root):
+    worksheet, vr, lot_report, contract, report = _build_swapped_conflict()
+    pages = copy.deepcopy(GENERIC_PERIZIA_PAGES)
+    pages[0]["text"] = pages[0]["text"].replace(
+        "libero da persone e cose", "occupato dal debitore"
+    )
+    worksheet["occupancy"].update({
+        "status": "Occupato", "title_info": "Occupato dal debitore",
+    })
+    lot_report = lots_mod.build_lot_report(worksheet, pages)
+    contract = contract_mod.build_contract(
+        worksheet=worksheet, validator_report=vr, analysis_id="an_r",
+        job_id="job_multi", source_pdf_quality_status="PDF_QUALITY_OK",
+        lot_report=lot_report,
+        surface_cadastral=doc_signals.extract_surface_cadastral(pages),
+    )
+    report = customer_report_mod.render_success_report(contract, pages)
+    gate = quality_gate.run_quality_gate(
+        job_id="job_multi", analysis_id="an_r", pages=pages,
+        worksheet=worksheet, contract=contract, customer_report=report,
+        validator_report=vr, lot_report=lot_report, persist=False,
+    )
+    payload = mc.build_money_confirmation(
+        analysis_id="an_r", job_id="job_multi",
+        coverage_audit=gate["coverage_audit"],
+        blocking_issues=gate["quality_report"]["blocking_issues"],
+    )
+    _persist_paused_job(
+        "job_multi", worksheet, vr, lot_report, contract, gate, payload, pages
+    )
+
+    case_worksheet = copy.deepcopy(worksheet)
+    case_worksheet["case_identity"]["lotto"] = "Lotti 1 e 2"
+    case_worksheet["lots"] = [
+        {
+            "lot_id": "1", "label": "Lotto 1",
+            "property_type": worksheet["case_identity"]["property_type"],
+            "occupancy_status": worksheet["occupancy"]["status"],
+            "evidence_pages": [1],
+        },
+        {
+            "lot_id": "2", "label": "Lotto 2",
+            "property_type": "Deposito", "occupancy_status": None,
+            "evidence_pages": [2],
+        },
+    ]
+    case_lot_report = copy.deepcopy(lot_report)
+    case_lot_report.update({
+        "multi_lot": True, "lot_count": 2, "lot_ids": ["1", "2"],
+        "lots": case_worksheet["lots"],
+    })
+    artifacts.save_analyst_worksheet("job_multi", case_worksheet)
+    artifacts.save_lot_report("job_multi", case_lot_report)
+    artifacts.save_selected_lot_context("job_multi", {
+        "schema_version": "cv2.selected_lot_context.v1",
+        "selected_lot_id": "1", "analysis_pages": [1, 2],
+    })
+    artifacts.save_lot_subartifact(
+        "job_multi", "1", artifacts.ANALYST_WORKSHEET_FILE, worksheet
+    )
+
+    answers = {
+        ambiguity["ambiguity_id"]: ambiguity["options"][1]["option_id"]
+        for ambiguity in payload["ambiguities"]
+    }
+    result = orchestrator.resolve_money_confirmation("job_multi", answers)
+    final = artifacts.read_json("job_multi", artifacts.CUSTOMER_REPORT_FILE)
+    canonical = final["canonical_verdict"]
+
+    assert result["status"] == JobStatus.REPORT_READY
+    assert canonical["field_verdicts"]["occupancy"]["value"] != "UNKNOWN"
+    leaves = [
+        canonical["field_verdicts"]["typology"],
+        canonical["field_verdicts"]["occupancy"],
+        *canonical["field_verdicts"]["compliance"],
+        *canonical["field_verdicts"]["formalities"],
+        canonical["field_verdicts"]["money"]["final_value"],
+    ]
+    assert all(leaf.get("source_fact_id") for leaf in leaves)
+
+
+def test_missing_selected_lot_context_does_not_build_mislabeled_verdict(
+    artifacts_root, monkeypatch,
+):
+    worksheet, vr, lot_report, contract, report = _build_swapped_conflict()
+    gate = quality_gate.run_quality_gate(
+        job_id="job_no_lot", analysis_id="an_r", pages=GENERIC_PERIZIA_PAGES,
+        worksheet=worksheet, contract=contract, customer_report=report,
+        validator_report=vr, lot_report=lot_report, persist=False,
+    )
+    payload = mc.build_money_confirmation(
+        analysis_id="an_r", job_id="job_no_lot",
+        coverage_audit=gate["coverage_audit"],
+        blocking_issues=gate["quality_report"]["blocking_issues"],
+    )
+    contract = copy.deepcopy(contract)
+    contract["lot_summary"]["selected_lot"] = None
+    unresolved_case_report = copy.deepcopy(lot_report)
+    unresolved_case_report.update({
+        "multi_lot": True, "lot_count": 2, "lot_ids": ["1", "2"],
+    })
+    _persist_paused_job(
+        "job_no_lot", worksheet, vr, unresolved_case_report, contract, gate, payload
+    )
+
+    captured = {}
+
+    def _pass_gate_without_persisting(**kwargs):
+        captured["customer_report"] = copy.deepcopy(kwargs["customer_report"])
+        return {
+            "gate_status": quality_gate.GATE_PASS,
+            "customer_report": copy.deepcopy(kwargs["customer_report"]),
+            "quality_report": {}, "coverage_audit": {},
+        }
+
+    monkeypatch.setattr(
+        orchestrator.quality_gate_mod, "run_quality_gate", _pass_gate_without_persisting
+    )
+    answers = {
+        ambiguity["ambiguity_id"]: ambiguity["options"][1]["option_id"]
+        for ambiguity in payload["ambiguities"]
+    }
+    result = orchestrator.resolve_money_confirmation("job_no_lot", answers)
+
+    assert result["status"] == JobStatus.REPORT_READY
+    assert captured["customer_report"]["lot_structure"]["selected_lot"] is None
+    assert "canonical_verdict" not in captured["customer_report"]
+    assert artifacts.read_json(
+        "job_no_lot", artifacts.CASE_VERDICT_FILE
+    ) is None
 
 
 def test_resolve_with_document_role_stays_manual_review(artifacts_root):

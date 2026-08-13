@@ -26,6 +26,7 @@ FLAG_SHADOW_MODE = "CORRECTNESS_V2_SHADOW_MODE"
 FLAG_NO_OLD_FALLBACK = "CORRECTNESS_V2_NO_OLD_FALLBACK"
 FLAG_JOB_MODE = "CORRECTNESS_JOB_MODE"
 FLAG_MAX_RUNTIME_SECONDS = "CORRECTNESS_MAX_RUNTIME_SECONDS"
+FLAG_CANONICAL_VERDICT = "CORRECTNESS_V2_CANONICAL_VERDICT_ENABLED"
 
 _TRUE_TOKENS = {"1", "true", "yes", "on", "y", "t"}
 _FALSE_TOKENS = {"0", "false", "no", "off", "n", "f", ""}
@@ -103,6 +104,11 @@ def max_runtime_seconds() -> int:
     return value if value >= 0 else 0
 
 
+def canonical_verdict_enabled() -> bool:
+    """Unified Branch 2 verdict; ON by default, independently rollbackable."""
+    return _env_bool(FLAG_CANONICAL_VERDICT, True)
+
+
 def snapshot() -> dict:
     """Return the current resolved flag values (handy for diagnostics/artifacts)."""
     return {
@@ -113,6 +119,7 @@ def snapshot() -> dict:
         FLAG_NO_OLD_FALLBACK: no_old_fallback(),
         FLAG_JOB_MODE: job_mode(),
         FLAG_MAX_RUNTIME_SECONDS: max_runtime_seconds(),
+        FLAG_CANONICAL_VERDICT: canonical_verdict_enabled(),
     }
 
 

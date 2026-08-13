@@ -27,6 +27,7 @@ from itertools import combinations
 from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
 
 from .contract import _area_token  # canonical compliance/risk area tokenizer (reused)
+from . import feature_flags, verdict_model
 
 SCHEMA_VERSION = "cv2.customer_decision.v1"
 
@@ -47,13 +48,13 @@ _SECTION_CODE = {
 }
 
 # Priority classes (§E rule 7) → severity int (lower = more important).
-_SEV_FINAL_VALUE = 1
-_SEV_OCCUPANCY = 2
-_SEV_TECH_ACTION = 3
-_SEV_BUYER_COST = 4
-_SEV_UNCERTAIN = 5
-_SEV_CONFORMITY = 6
-_SEV_CONTEXT = 7
+_SEV_FINAL_VALUE = verdict_model.priority_from_severity("grave", 1)
+_SEV_OCCUPANCY = verdict_model.priority_from_severity("grave", 2)
+_SEV_TECH_ACTION = verdict_model.priority_from_severity("media", 0)
+_SEV_BUYER_COST = verdict_model.priority_from_severity("media", 1)
+_SEV_UNCERTAIN = verdict_model.priority_from_severity("minore", 0)
+_SEV_CONFORMITY = verdict_model.priority_from_severity("info", 0)
+_SEV_CONTEXT = verdict_model.priority_from_severity("info", 1)
 
 # ---------------------------------------------------------------------------
 # Fixed Italian string tables (never free text; never internal codes)
@@ -1424,14 +1425,14 @@ def _build_verifiche(
                     "title": _access_action_title(risk.get("area"), risk.get("summary")),
                     "why": "L’accesso descritto avviene attraverso un immobile di altra proprietà non compreso nella procedura. Verificare servitù, titolo opponibile e futura utilizzabilità dell’accesso.",
                     "status": "da_verificare", "page": (_pages(risk.get("evidence_pages")) or [None])[0],
-                    "link": "altri", "severity": 0,
+                    "link": "altri", "severity": verdict_model.priority_from_severity("grave", 0),
                 })
             elif any(k in blob for k in ("copertura dannegg", "tetto dannegg")):
                 items.append({
                     "title": "Verificare la copertura danneggiata del magazzino",
                     "why": "Il danno può incidere sull’utilizzabilità e comportare costi non quantificati.",
                     "status": "da_verificare", "page": (_pages(risk.get("evidence_pages")) or [None])[0],
-                    "link": "altri", "severity": 5,
+                    "link": "altri", "severity": verdict_model.priority_from_severity("minore", 0),
                 })
 
     # 1. Occupancy/title first (§E priority). Linked to the occupancy finding by
@@ -1461,7 +1462,7 @@ def _build_verifiche(
                 "status": "da_verificare",
                 "page": None,
                 "link": "numeri",
-                "severity": 3,
+                "severity": verdict_model.priority_from_severity("media", 0),
             }
         )
 
@@ -1491,7 +1492,7 @@ def _build_verifiche(
         items.append({
             "title": title, "why": why, "status": "da_verificare",
             "page": anchor.get("page"), "link": "conformita",
-            "finding_id": anchor["finding_id"], "severity": 1,
+            "finding_id": anchor["finding_id"], "severity": verdict_model.priority_from_severity("grave", 1),
         })
         consumed.update(f["finding_id"] for f in (building, agibilita) if f)
 
@@ -2008,6 +2009,7 @@ def _build_esito(
     report_status: str, findings: List[Dict[str, Any]], readiness: Dict[str, Any],
     report: Optional[Dict[str, Any]] = None,
     verifiche: Optional[Dict[str, Any]] = None,
+    canonical_verdict: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     report = report or {}
     verifiche = verifiche or {}
@@ -2019,7 +2021,9 @@ def _build_esito(
     # Red is reserved for a genuinely fail-closed report or a report that a
     # blocking finding pushed into technical review. Interactive safe statuses
     # (lot selection / money confirmation) are amber, never red.
-    if readiness["state"] == "TECHNICAL_REVIEW_REQUIRED":
+    if feature_flags.canonical_verdict_enabled() and canonical_verdict is not None:
+        level = verdict_model.project_to_esito_level(canonical_verdict)
+    elif readiness["state"] == "TECHNICAL_REVIEW_REQUIRED":
         level = "rosso"
     elif report_status != "REPORT_READY":
         level = "ambra"
@@ -2070,19 +2074,24 @@ def _build_esito(
         })
         if len(drivers) >= 5:
             break
-    return {
+    out = {
         "level": level,
         "headline": wording["headline"],
         "sentence": wording["sentence"],
         "drivers": drivers,
     }
+    if canonical_verdict is not None:
+        out["canonical_verdict_ref"] = canonical_verdict["canonical_ref"]
+        out["canonical_severity"] = canonical_verdict["severity"]
+    return out
 
 
 # ---------------------------------------------------------------------------
 # Public entry point
 # ---------------------------------------------------------------------------
 def build_decision_model(
-    report: Dict[str, Any], confirmations: Sequence[Dict[str, Any]] = ()
+    report: Dict[str, Any], confirmations: Sequence[Dict[str, Any]] = (), *,
+    canonical_enabled: Optional[bool] = None,
 ) -> Dict[str, Any]:
     """Build the customer decision model from a stored ``customer_report`` dict.
 
@@ -2097,6 +2106,20 @@ def build_decision_model(
     lot_id = str(lot_struct.get("selected_lot")) if lot_struct.get("selected_lot") not in (None, "") else None
     evidence = _evidence_lookup(report)
     full_money = report.get("money_sections") or {}
+    use_canonical = feature_flags.canonical_verdict_enabled()
+    if canonical_enabled is not None:
+        use_canonical = use_canonical and bool(canonical_enabled)
+    stored = report.get("canonical_verdict")
+    if use_canonical and isinstance(stored, dict):
+        use_canonical = verdict_model.try_validate_verdict(stored) is not None
+    base_verdict = None
+    if use_canonical:
+        try:
+            base_verdict = verdict_model.build_lot_verdict(report)
+        except (ValueError, KeyError, TypeError):
+            # Stored/untrusted canonical data is optional. Its legacy report is
+            # still readable and retains the pre-branch esito computation.
+            use_canonical = False
 
     sections: Dict[str, Any] = {}
     findings: List[Dict[str, Any]] = []
@@ -2220,11 +2243,20 @@ def build_decision_model(
         "information_confirmed": readiness["information_confirmed"],
         "information_resolved": readiness["information_resolved"],
     }
+    canonical_verdict = None
+    if base_verdict is not None:
+        canonical_verdict = verdict_model.refine_for_runtime(
+            base_verdict,
+            report_status=report_status,
+            readiness=readiness,
+            open_checks=bool((sections.get("verifiche") or {}).get("items")),
+        )
     esito = _build_esito(
-        report_status, findings, readiness, report, sections.get("verifiche")
+        report_status, findings, readiness, report, sections.get("verifiche"),
+        canonical_verdict,
     )
 
-    return {
+    out = {
         "schema_version": SCHEMA_VERSION,
         "analysis_id": report.get("analysis_id"),
         "job_id": report.get("job_id"),
@@ -2236,3 +2268,4 @@ def build_decision_model(
         "findings": findings,
         "confirmations": confirmation_views,
     }
+    return out

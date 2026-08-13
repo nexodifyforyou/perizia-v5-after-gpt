@@ -15,6 +15,7 @@ def clear_flags(monkeypatch):
         feature_flags.FLAG_NO_OLD_FALLBACK,
         feature_flags.FLAG_JOB_MODE,
         feature_flags.FLAG_MAX_RUNTIME_SECONDS,
+        feature_flags.FLAG_CANONICAL_VERDICT,
     ]:
         monkeypatch.delenv(name, raising=False)
     yield
@@ -27,6 +28,12 @@ def test_safe_defaults():
     assert feature_flags.no_old_fallback() is True
     assert feature_flags.job_mode() == "async"
     assert feature_flags.max_runtime_seconds() == 0
+    assert feature_flags.canonical_verdict_enabled() is True
+
+
+def test_canonical_verdict_has_independent_rollback_switch(monkeypatch):
+    monkeypatch.setenv(feature_flags.FLAG_CANONICAL_VERDICT, "false")
+    assert feature_flags.canonical_verdict_enabled() is False
 
 
 def test_auto_start_default_off():
@@ -85,3 +92,4 @@ def test_snapshot_shape():
     snap = feature_flags.snapshot()
     assert snap[feature_flags.FLAG_ENABLED] is False
     assert snap[feature_flags.FLAG_JOB_MODE] == "async"
+    assert snap[feature_flags.FLAG_CANONICAL_VERDICT] is True

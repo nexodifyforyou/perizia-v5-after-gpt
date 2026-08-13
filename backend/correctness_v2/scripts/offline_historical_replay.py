@@ -19,7 +19,7 @@ from unittest.mock import patch
 
 from correctness_v2 import (
     contract, customer_report, doc_signals, fact_lineage, lot_fact_projection,
-    lot_packets, lots, validator,
+    lot_packets, lots, validator, verdict_model,
 )
 
 DEFAULT_OUTPUT = Path("/tmp/claude-1001/-srv-perizia-app/e6150250-d2d4-4ec9-b906-5b769c331a69/scratchpad/replay")
@@ -39,6 +39,7 @@ def _discover_historical(bundle: Path, lot_id: str):
     ).stdout.splitlines()
     case_job: Optional[Path] = None
     selected_lot_job: Optional[Path] = None
+    lot_worksheets: Dict[str, Dict[str, Any]] = {}
     for raw in listing:
         path = Path(raw)
         status = _sudo_json(path / "job_status.json")
@@ -51,6 +52,17 @@ def _discover_historical(bundle: Path, lot_id: str):
             continue
         if str(context.get("selected_lot_id")) == lot_id:
             selected_lot_job = path
+        context_lot = str(context.get("selected_lot_id") or "")
+        if context_lot:
+            try:
+                lot_worksheets[context_lot] = _sudo_json(
+                    path / "lots" / context_lot / "analyst_worksheet.json"
+                )
+            except subprocess.CalledProcessError:
+                try:
+                    lot_worksheets[context_lot] = _sudo_json(path / "analyst_worksheet.json")
+                except subprocess.CalledProcessError:
+                    pass
     if case_job is None or selected_lot_job is None:
         raise RuntimeError("historical case-level or selected-lot artifacts not found")
     pages_payload = _sudo_json(case_job / "input_pages.json")
@@ -60,6 +72,7 @@ def _discover_historical(bundle: Path, lot_id: str):
         pages_payload.get("pages") or pages_payload,
         _sudo_json(case_job / "lot_report.json"),
         _sudo_json(selected_lot_job / "customer_report.json"),
+        lot_worksheets,
     )
 
 
@@ -67,11 +80,46 @@ def _fixture_inputs(fixture_root: Path, lot_id: str):
     case = json.loads((fixture_root / "beta_multilot_case_sanitized.json").read_text(encoding="utf-8"))
     pages = json.loads((fixture_root / "beta_multilot_case_cached_pages_sanitized.json").read_text(encoding="utf-8"))["pages"]
     report = lots.build_lot_report(case["case_worksheet"], pages)
-    return case["case_worksheet"], case["lot_worksheets"][lot_id], pages, report, case["stored_customer_reports"][f"historical_lot_{lot_id}"]
+    return (
+        case["case_worksheet"], case["lot_worksheets"][lot_id], pages, report,
+        case["stored_customer_reports"][f"historical_lot_{lot_id}"],
+        case["lot_worksheets"],
+    )
+
+
+def _verdict_report(worksheet: Dict[str, Any], lot_id: str) -> Dict[str, Any]:
+    """Renderer-shaped adapter for offline verdict acceptance; no new facts."""
+    return {
+        "analysis_id": "offline_replay", "report_status": "REPORT_READY",
+        "case_identity": dict(worksheet.get("case_identity") or {}),
+        "lot_structure": {"selected_lot": str(lot_id)},
+        "occupancy_section": dict(worksheet.get("occupancy") or {}),
+        "compliance_section": [dict(row) for row in worksheet.get("technical_compliance") or []],
+        "formalities_section": [dict(row) for row in worksheet.get("legal_formalities") or []],
+        "risk_sections": [{"items": [dict(row) for row in worksheet.get("risk_classification") or []]}],
+        "money_sections": {"valuation_chain": [], "buyer_side_costs": [], "uncertain_money": []},
+    }
 
 
 def _text(payload: Any) -> str:
     return json.dumps(payload, ensure_ascii=False).lower()
+
+
+def _rendered_summaries(payload: Any) -> List[str]:
+    """Collect customer narration only, excluding internal structured enums."""
+    summaries: List[str] = []
+    if isinstance(payload, dict):
+        for key, value in payload.items():
+            if key in {"summary", "headline", "sentence", "reason", "notes"}:
+                if isinstance(value, str):
+                    summaries.append(value)
+                elif isinstance(value, list):
+                    summaries.extend(str(item) for item in value if isinstance(item, str))
+            summaries.extend(_rendered_summaries(value))
+    elif isinstance(payload, list):
+        for value in payload:
+            summaries.extend(_rendered_summaries(value))
+    return summaries
 
 
 def _amount_present(payload: Any, amount: float) -> bool:
@@ -123,12 +171,12 @@ def run_replay(
     expectations = expectations_document["replay_expectations"]
     lot_id = str(expectations["lot_id"])
     if fixture_root is not None:
-        case_ws, lot_ws, pages, lot_report, historical = _fixture_inputs(fixture_root, lot_id)
+        case_ws, lot_ws, pages, lot_report, historical, lot_worksheets = _fixture_inputs(fixture_root, lot_id)
         source = "sanitized_fixture"
     else:
         if bundle is None:
             raise ValueError("bundle is required for historical replay")
-        case_ws, lot_ws, pages, lot_report, historical = _discover_historical(bundle, lot_id)
+        case_ws, lot_ws, pages, lot_report, historical, lot_worksheets = _discover_historical(bundle, lot_id)
         source = "preserved_historical_artifacts"
 
     network_calls: List[str] = []
@@ -181,6 +229,38 @@ def run_replay(
             pages, selected, projection, lot_id
         )
         repaired = customer_report.render_success_report(report_contract, customer_pages)
+        target_verdict = verdict_model.build_lot_verdict(
+            repaired, reconciled_worksheet=reconciled, case_ledger=ledger,
+            segmentation=segmentation, lot_report=sub_report, lot_id=lot_id,
+        )
+
+        lot_verdicts: List[Dict[str, Any]] = []
+        for candidate_id in [str(value) for value in lot_report.get("lot_ids") or []]:
+            source_ws = lot_worksheets.get(candidate_id)
+            if not isinstance(source_ws, dict):
+                continue
+            reconciled_candidate, candidate_projection = lot_fact_projection.project_and_reconcile(
+                case_ledger=ledger, lot_worksheet=source_ws, lot_id=candidate_id,
+                segmentation=segmentation,
+                all_lot_ids=[str(value) for value in lot_report.get("lot_ids") or []],
+            )
+            candidate_report = _verdict_report(reconciled_candidate, candidate_id)
+            candidate_report["lot_fact_projection"] = candidate_projection
+            lot_verdicts.append(verdict_model.build_lot_verdict(
+                candidate_report, reconciled_worksheet=reconciled_candidate,
+                case_ledger=ledger, segmentation=segmentation,
+                lot_report=lots.build_lot_report(reconciled_candidate, None),
+                lot_id=candidate_id,
+            ))
+        if lot_id not in {str(verdict.get("scope_id")) for verdict in lot_verdicts}:
+            lot_verdicts.append(target_verdict)
+        case_verdict = verdict_model.build_case_verdict(
+            lot_verdicts, scope_id="offline_replay",
+            all_lot_ids=[str(value) for value in lot_report.get("lot_ids") or []],
+        )
+        raw_index = lot_packets.build_lot_index(case_ws, pages, lot_report, segmentation)
+        canonical_index = lot_packets.apply_reconciled_verdicts(raw_index, {lot_id: target_verdict})
+        target_index = next(row for row in canonical_index["lots"] if str(row.get("lot_id")) == lot_id)
 
     before = _fact_checks(historical, expectations)
     after = _fact_checks(repaired, expectations)
@@ -221,7 +301,34 @@ def run_replay(
         "database_writes": len(database_writes),
         "paid_calls": 0,
         "quota_or_credit_consumption": 0,
+        "selector_report_gap_resolved": (
+            target_index.get("property_type") == target_verdict["field_verdicts"]["typology"]["value"]
+            and target_index.get("occupancy_summary") == target_verdict["field_verdicts"]["occupancy"]["value"]
+        ),
+        "case_severity": case_verdict["severity"],
+        "max_lot_severity": max(
+            (verdict["severity"] for verdict in lot_verdicts),
+            key=lambda severity: verdict_model.SEVERITY_ORDER[severity],
+        ),
+        "case_ceiling_matches_max": False,
+        "raw_enum_leaks": sum(
+            token in _text(_rendered_summaries(repaired))
+            for token in ("non_conforming", "regularizable", "not_regularizable")
+        ),
+        "unsupported_keyword_escalations": sum(
+            verdict["severity"] == "grave"
+            and not any(
+                row.get("classification") in {"non_conforming", "not_regularizable"}
+                or row.get("severity") == "grave" or row.get("blocks_saleability")
+                for row in (
+                    list((lot_worksheets.get(str(verdict.get("scope_id"))) or {}).get("technical_compliance") or [])
+                    + list((lot_worksheets.get(str(verdict.get("scope_id"))) or {}).get("risk_classification") or [])
+                )
+            )
+            for verdict in lot_verdicts
+        ),
     }
+    result["case_ceiling_matches_max"] = result["case_severity"] == result["max_lot_severity"]
     required_after = [row["fact"] for row in result["matrix"] if not row["repaired_now"]]
     if required_after:
         raise AssertionError(f"offline replay acceptance failed for: {required_after}")
@@ -229,6 +336,10 @@ def run_replay(
         raise AssertionError("offline replay critical-fact coverage is below 100%")
     if result["cross_lot_leakage"] or result["hallucinated_fact_ids"]:
         raise AssertionError("offline replay introduced leakage or a non-source fact")
+    if not result["selector_report_gap_resolved"] or not result["case_ceiling_matches_max"]:
+        raise AssertionError("offline replay case/lot verdict consistency failed")
+    if result["raw_enum_leaks"] or result["unsupported_keyword_escalations"]:
+        raise AssertionError("offline replay introduced raw enum or unsupported escalation")
     if any(result[key] for key in ("network_calls", "database_writes", "paid_calls", "quota_or_credit_consumption")):
         raise AssertionError("offline replay exercised a forbidden external path")
     output_dir.mkdir(parents=True, exist_ok=True)

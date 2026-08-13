@@ -18,7 +18,7 @@ from pathlib import Path
 
 import pytest
 
-from correctness_v2 import customer_view, decision_model, lot_packets
+from correctness_v2 import customer_view, decision_model, lot_packets, verdict_model
 
 
 MANTOVA_FIXTURE = (
@@ -81,6 +81,18 @@ def _model(report):
     )["decision_model"]
 
 
+def _assert_canonical_consistency(report):
+    customer = customer_view.sanitize_customer_report(
+        report, {"safe_to_show_customer": True}
+    )
+    assert verdict_model.same_canonical_source(
+        customer["decision"], customer["decision_model"]["esito"]
+    )
+    assert not verdict_model.cross_band_contradiction(
+        customer["decision"]["level"], customer["decision_model"]["esito"]["level"]
+    )
+
+
 def test_01_torino_valuation_chain_and_buyer_economics():
     """Torino: both arithmetic steps survive and no auction base is invented."""
     money = _empty_money()
@@ -134,6 +146,7 @@ def test_01_torino_valuation_chain_and_buyer_economics():
     assert "costi_cancellazione" not in formalita
     assert formalita["cancellate"][0]["cancellation_state"] == "to_be_cancelled"
     assert "non è un debito da sommare" in formalita["cancellate"][0]["note"]
+    _assert_canonical_consistency(report)
 
 
 def test_02_pistoia_selected_lot_isolation():
@@ -157,6 +170,7 @@ def test_02_pistoia_selected_lot_isolation():
     assert [page["page_number"] for page in selected] == [1, 6, 7]
     assert "333.000,00" in selected_text and "33.300,00" in selected_text
     assert "111.000,00" not in selected_text and "222.000,00" not in selected_text
+    _assert_canonical_consistency(_report("Pistoia"))
 
 
 def test_03_1859886_c_preserves_exactly_four_beni():
@@ -185,6 +199,7 @@ def test_03_1859886_c_preserves_exactly_four_beni():
     assert customer["lot_structure"]["bene_count"] == 4
     assert len(customer["beni_sections"]) == 4
     assert len(customer["decision_model"]["sections"]["acquisto"]["beni"]) == 4
+    _assert_canonical_consistency(report)
 
 
 @pytest.mark.parametrize(
@@ -207,6 +222,7 @@ def test_04_05_fail_closed_cases_remain_unavailable(case_name, status):
     assert model["findings"] == []
     assert list(model["sections"]) == ["stato_verifiche"]
     assert model["readiness"]["state"] == "TECHNICAL_REVIEW_REQUIRED"
+    _assert_canonical_consistency(report)
 
 
 def test_06_codogno_six_real_lot_alternatives_without_lotto_00():
@@ -266,6 +282,7 @@ def test_06_codogno_six_real_lot_alternatives_without_lotto_00():
     assert [lot["lot_id"] for lot in selector_lots] == ["1", "2", "3", "4", "5", "6"]
     assert all(len(lot["money_summary"]) == 1 for lot in selector_lots)
     assert "Lotto 00" not in json.dumps(customer["lot_selection"], ensure_ascii=False)
+    _assert_canonical_consistency(report)
 
 
 def test_07_mantova_grounding_priority_and_reconciliation_contract():
@@ -416,3 +433,7 @@ def test_07_mantova_grounding_priority_and_reconciliation_contract():
         assert forbidden not in customer_blob
     assert "@gmail.com" not in customer_blob
     assert "_cached_input_pages" not in customer
+    assert verdict_model.same_canonical_source(customer["decision"], model["esito"])
+    assert not verdict_model.cross_band_contradiction(
+        customer["decision"]["level"], model["esito"]["level"]
+    )

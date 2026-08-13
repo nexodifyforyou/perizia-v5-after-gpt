@@ -28,10 +28,12 @@ normal and are tracked per lot, never treated as separate lots.
 
 from __future__ import annotations
 
+import copy
 import re
 from typing import Any, Dict, List, Optional
 
 from . import lots as lots_mod
+from . import feature_flags, verdict_model
 
 LOT_INDEX_SCHEMA_VERSION = "cv2.lot_index.v1"
 PER_LOT_PACKETS_SCHEMA_VERSION = "cv2.per_lot_packets.v1"
@@ -148,13 +150,14 @@ def segment_pages(
             lot_pages.setdefault(str(lid), [])
 
     ordered_ids = sorted(lot_pages.keys(), key=lambda s: int(s) if s.isdigit() else 1_000_000)
-    return {
+    out = {
         "page_assignments": page_assignments,
         "lot_pages": {lid: sorted(lot_pages[lid]) for lid in ordered_ids},
         "global_pages": sorted(global_pages),
         "shared_pages": sorted(set(shared_pages)),
         "lot_ids": [str(x) for x in seen_lot_ids],
     }
+    return out
 
 
 def _dedup(seq: List[str]) -> List[str]:
@@ -378,10 +381,11 @@ def project_shared_summary_rows(
                     }
                     add(uncertain, (lots_mod._norm(label), round(amount, 2)), row, num)
 
-    return {
+    out = {
         "projected": {lid: list(rows.values()) for lid, rows in sorted(projected.items())},
         "uncertain": list(uncertain.values()),
     }
+    return out
 
 
 # ---------------------------------------------------------------------------
@@ -715,6 +719,7 @@ def build_lot_index(
     pages: Optional[List[Dict[str, Any]]],
     lot_report: Dict[str, Any],
     segmentation: Optional[Dict[str, Any]] = None,
+    reconciled_lot_verdicts: Optional[Dict[str, Dict[str, Any]]] = None,
 ) -> Dict[str, Any]:
     """Build ``lot_index.json``: a per-lot summary with evidence and confidence.
 
@@ -751,15 +756,24 @@ def build_lot_index(
         if not ws_lot:
             notes.append("Nessuna voce strutturata 'lots[]' dall'analista per questo lotto.")
 
+        canonical = None
+        if feature_flags.canonical_verdict_enabled():
+            candidate = (reconciled_lot_verdicts or {}).get(str(lid))
+            if candidate is not None:
+                canonical = verdict_model.try_validate_verdict(candidate)
+        fields = (canonical or {}).get("field_verdicts") or {}
+        canonical_typology = (fields.get("typology") or {}).get("value")
+        canonical_occupancy = (fields.get("occupancy") or {}).get("value")
+
         lots_out.append(
             {
                 "lot_id": str(lid),
                 "lot_number": str(lid),
                 "label": ws_lot.get("label"),
                 "address": ws_lot.get("address"),
-                "property_type": ws_lot.get("property_type"),
+                "property_type": canonical_typology if canonical else ws_lot.get("property_type"),
                 "ownership_right": ws_lot.get("ownership_right"),
-                "occupancy_summary": _occupancy_summary(ws_lot),
+                "occupancy_summary": canonical_occupancy if canonical else _occupancy_summary(ws_lot),
                 # STRICT per-lot money: a dedicated section per lot (never shared).
                 "money": lot_money["by_lot"].get(str(lid), _empty_lot_money()),
                 # Legacy flat list kept for back-compat (model-linked + tagged rows).
@@ -769,10 +783,11 @@ def build_lot_index(
                 "segmentation_pages": seg_pages,
                 "confidence": confidence,
                 "notes": notes,
+                **({"canonical_verdict": canonical} if canonical else {}),
             }
         )
 
-    return {
+    out = {
         "schema_version": LOT_INDEX_SCHEMA_VERSION,
         "multi_lot": bool(lot_report.get("multi_lot")),
         "lot_count": lot_report.get("lot_count", len(lots_out)),
@@ -789,6 +804,31 @@ def build_lot_index(
         "uncertain_money": lot_money["uncertain_money"],
         "needs_manual_review_money": lot_money["needs_manual_review_money"],
     }
+    if reconciled_lot_verdicts is not None:
+        out["canonical_verdict_mode"] = True
+    return out
+
+
+def apply_reconciled_verdicts(
+    lot_index: Dict[str, Any], verdicts: Dict[str, Dict[str, Any]]
+) -> Dict[str, Any]:
+    """Add reconciled verdict metadata without rebuilding/reselecting lot pages."""
+    out = copy.deepcopy(lot_index)
+    out["canonical_verdict_mode"] = True
+    for row in out.get("lots") or []:
+        verdict = verdicts.get(str(row.get("lot_id")))
+        if verdict is None:
+            continue
+        canonical = verdict_model.try_validate_verdict(verdict)
+        if canonical is None:
+            # One stale/corrupt lot must not prevent the remaining selector
+            # rows from rendering through their legacy snapshots.
+            continue
+        fields = canonical.get("field_verdicts") or {}
+        row["property_type"] = (fields.get("typology") or {}).get("value")
+        row["occupancy_summary"] = (fields.get("occupancy") or {}).get("value")
+        row["canonical_verdict"] = copy.deepcopy(canonical)
+    return out
 
 
 def build_per_lot_packets(

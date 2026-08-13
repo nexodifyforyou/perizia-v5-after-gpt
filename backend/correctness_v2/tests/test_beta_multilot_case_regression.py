@@ -1,4 +1,4 @@
-from correctness_v2 import coverage_audit, validator
+from correctness_v2 import coverage_audit, customer_view, validator, verdict_model
 
 from .beta_fixture import build_lot, prepare
 
@@ -22,6 +22,11 @@ def test_beta_multilot_lot_1_repaired_customer_report():
     assert all(item["cancelled_by_procedure"] and not item["buyer_burden"] for item in report["formalities_section"])
     assert built["projection"]["conflicts"] == []
     assert not any("lotto 2" in str(value).lower() or "lotto 3" in str(value).lower() or "lotto 4" in str(value).lower() for value in report.values())
+    customer = customer_view.sanitize_customer_report(report, {"safe_to_show_customer": True})
+    assert verdict_model.same_canonical_source(customer["decision"], customer["decision_model"]["esito"])
+    assert not verdict_model.cross_band_contradiction(
+        customer["decision"]["level"], customer["decision_model"]["esito"]["level"]
+    )
 
 
 def test_beta_multilot_historical_vs_repaired_coverage_contract():
