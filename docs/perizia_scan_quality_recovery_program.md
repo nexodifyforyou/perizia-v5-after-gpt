@@ -124,14 +124,36 @@ golden assertions, and forensic documentation.
 - **Deployment gate:** Fable review (PASSED) + owner pre-commit review (PENDING) before any commit/deploy.
 
 ### 4. Partial lot reports
-- **Status:** NOT STARTED
-- **Branch:** `feature-correctness-v2-partial-lot-reports`
-- **Dependency:** tasks 1, 3
-- **Acceptance criteria:** a quality-gate-blocked lot yields an explicit partial report
-  with valid facts and a clear "incomplete" status instead of nothing; blocked-lot
-  facts from the beta fixture (Lot 4) surface correctly.
-- **Regression risk:** medium (gate semantics).
-- **Deployment gate:** Fable review + owner approval.
+- **Status:** COMPLETED — **DEPLOYED + ENABLED (owner-approved 2026-08-14)**
+  - Feature commit: `273a629d91dde4847bfd52ca39d46ff4ce77abae`
+  - Merge commit: `3cb6f8bb72a74917f1f261c234cd62f9596592c3` (dormant-ready)
+  - R3-02 follow-up merge (final main): `2bc9ce353a013b07f3caaaa133140dfc5b941176`
+  - Tags: `correctness-v2-partial-lot-reports-ready` (dormant deploy) → `3cb6f8b`;
+    `correctness-v2-partial-lot-reports-live` (enabled) → final main
+  - Deployed dormant (partial flag OFF) 2026-08-14, then R3-02 deployed, then
+    `CORRECTNESS_V2_PARTIAL_LOT_REPORTS_ENABLED=true` set in `backend/.env`; backend restarted
+    (PID 793760, NRestarts=0, health 200 local+public, clean startup, concurrency 2, canonical=ON,
+    partial=ON proven via server.py load_dotenv resolution).
+  - Fable verdict: **APPROVE** (1 red-team + 1 repair + 1 confirmation cycle; all 12 mandated attacks
+    defended; CanonicalVerdict authoritative, disclosure state separate; `verdict_model.py` untouched).
+  - Design: new additive `partial_report.py` — 3-state disclosure {FULL / PARTIAL / BLOCKED},
+    strict omission-only allow-list {CRITICAL_FACT_MISSING, MISSING_IMPORTANT_MONEY}, unknown/
+    fabrication/contradiction/scope codes → REPORT_BLOCKED (fail-closed). Preserves all reliable
+    facts, exposes the unresolved field (category/scope/reason/evidence/professional-verification),
+    never fabricates a substitute, never increases readiness or downgrades severity. Applied at both
+    suppression paths. Owner-approved fixed-safe deterministic `why_unresolved` wording (with the
+    structured unresolved fields exposed separately). Feature-flagged
+    `CORRECTNESS_V2_PARTIAL_LOT_REPORTS_ENABLED`.
+  - Deployed validation: eight-case 10/exit 0 (partial ON and OFF), Branch-1+2 regression 65,
+    Branch-3 partial 48, Correctness V2 634, full backend 1726 pass/7 known-stale/7 skip, replay
+    coverage 1.0. Production partial smoke (read-only, flag ON, 83 cached reports): 0 disclosure
+    changes / 0 became-partial / 0 fabrication / 0 severity-change / 0 raises — enabling is a safe
+    no-op for existing customers (all cached blocked reports fail closed; only NEW eligible analyses
+    produce partials). Production delta audit: artifact tree byte-identical, 0 jobs/writes/regen/
+    external-calls. Eligible→PARTIAL transition + hard-block behavior proven on the beta Lot-4
+    specimen (offline replay, flag ON, 19 assertions) + 10-code full-block matrix.
+  - Invariants recorded: **unknown/new gate codes fail closed to REPORT_BLOCKED**; fixed-safe
+    `why_unresolved` with structured unresolved fields exposed separately (owner decision 2026-08-14).
 
 ### 5. PDF retention with consent and TTL
 - **Status:** NOT STARTED
@@ -252,12 +274,10 @@ golden assertions, and forensic documentation.
 
 1. `feature-correctness-v2-lot-fact-projection` — DEPLOYED
 2. `feature-correctness-v2-case-verdict-consistency` — DEPLOYED
-3. `feature-correctness-v2-partial-lot-reports` ← **current** (Fable APPROVE, pre-commit review)
-4. `fix-canonical-verdict-persistence-all-lots` — small follow-up (risk R3-02): repair the two
-   pre-existing Branch-2 singleton `build_case_verdict` sister sites (`_build_single_lot_contract`,
-   `resolve_money_confirmation`) with the all-known-lots merge invariant; Fable review required.
-   Scheduled AFTER Branch 3 deploy, BEFORE PDF retention.
-5. `feature-pdf-retention-consent`
+3. `feature-correctness-v2-partial-lot-reports` — DEPLOYED + ENABLED
+4. `fix-canonical-verdict-persistence-all-lots` — DEPLOYED (R3-02: both Branch-2 singleton
+   `build_case_verdict` sister sites repaired with the all-known-lots merge invariant; Fable APPROVE)
+5. `feature-pdf-retention-consent` ← **next** (Fable planning)
 6. `feature-correctness-v2-report-clarity`
 7. `feature-beta-feedback-in-product`
 8. `feature-processing-lineage-observability`
