@@ -30,6 +30,7 @@ from correctness_v2 import (
     orchestrator,
     quality_gate,
     validator as validator_mod,
+    verdict_model,
 )
 from correctness_v2.schemas import JobStatus
 
@@ -350,6 +351,109 @@ def test_multilot_resolution_reattaches_provenanced_selected_lot_verdict(artifac
         canonical["field_verdicts"]["money"]["final_value"],
     ]
     assert all(leaf.get("source_fact_id") for leaf in leaves)
+
+
+def test_r302_02_three_lot_money_confirmation_preserves_sister_verdicts(
+    artifacts_root,
+):
+    worksheet, vr, lot_report, contract, report = _build_swapped_conflict()
+    gate = quality_gate.run_quality_gate(
+        job_id="job_r302_money", analysis_id="an_r", pages=GENERIC_PERIZIA_PAGES,
+        worksheet=worksheet, contract=contract, customer_report=report,
+        validator_report=vr, lot_report=lot_report, persist=False,
+    )
+    payload = mc.build_money_confirmation(
+        analysis_id="an_r", job_id="job_r302_money",
+        coverage_audit=gate["coverage_audit"],
+        blocking_issues=gate["quality_report"]["blocking_issues"],
+    )
+    _persist_paused_job(
+        "job_r302_money", worksheet, vr, lot_report, contract, gate, payload
+    )
+
+    case_worksheet = copy.deepcopy(worksheet)
+    case_worksheet["case_identity"]["lotto"] = "Lotti 1, 2 e 3"
+    case_worksheet["lots"] = [
+        {
+            "lot_id": lot_id, "label": f"Lotto {lot_id}",
+            "property_type": property_type,
+            "occupancy_status": worksheet["occupancy"]["status"],
+            "evidence_pages": [1, 2],
+        }
+        for lot_id, property_type in (
+            ("1", "Abitazione Lotto 1"),
+            ("2", "Vecchio Deposito Lotto 2"),
+            ("3", "Autorimessa Lotto 3"),
+        )
+    ]
+    case_lot_report = copy.deepcopy(lot_report)
+    case_lot_report.update({
+        "multi_lot": True,
+        "lot_count": 3,
+        "lot_ids": ["1", "2", "3"],
+        "lots": case_worksheet["lots"],
+    })
+    artifacts.save_analyst_worksheet("job_r302_money", case_worksheet)
+    artifacts.save_lot_report("job_r302_money", case_lot_report)
+    artifacts.save_selected_lot_context("job_r302_money", {
+        "schema_version": "cv2.selected_lot_context.v1",
+        "selected_lot_id": "2",
+        "analysis_pages": [1, 2],
+    })
+    artifacts.save_lot_subartifact(
+        "job_r302_money", "2", artifacts.ANALYST_WORKSHEET_FILE, worksheet
+    )
+    artifacts.save_lot_index("job_r302_money", {
+        "multi_lot": True,
+        "lots": [
+            {"lot_id": lot_id, "segmentation_pages": [1, 2]}
+            for lot_id in ("1", "2", "3")
+        ],
+    })
+
+    old_verdicts = {}
+    for lot_id, property_type in (
+        ("1", "Abitazione Lotto 1"),
+        ("2", "Vecchio Deposito Lotto 2"),
+        ("3", "Autorimessa Lotto 3"),
+    ):
+        lot_report_input = copy.deepcopy(report)
+        lot_report_input["case_identity"]["property_type"] = property_type
+        lot_report_input["lot_structure"]["selected_lot"] = lot_id
+        verdict = orchestrator.verdict_model_mod.build_lot_verdict(
+            lot_report_input, lot_id=lot_id
+        )
+        if lot_id == "3":
+            verdict["severity"] = "grave"
+            verdict["severity_label_it"] = verdict_model.SEVERITY_LABELS_IT["grave"]
+        old_verdicts[lot_id] = verdict
+        artifacts.save_lot_verdict("job_r302_money", lot_id, verdict)
+    original_case = verdict_model.build_case_verdict(
+        list(old_verdicts.values()),
+        scope_id="an_r",
+        all_lot_ids=["1", "2", "3"],
+    )
+    artifacts.save_case_verdict("job_r302_money", original_case)
+    original_per_lot = copy.deepcopy(original_case["field_verdicts"]["per_lot"])
+
+    answers = {
+        ambiguity["ambiguity_id"]: ambiguity["options"][1]["option_id"]
+        for ambiguity in payload["ambiguities"]
+    }
+    result = orchestrator.resolve_money_confirmation("job_r302_money", answers)
+    repaired = artifacts.read_json("job_r302_money", artifacts.CASE_VERDICT_FILE)
+    fresh_lot_2 = artifacts.read_json(
+        "job_r302_money", "lots/2/canonical_verdict.json"
+    )
+    repaired_per_lot = repaired["field_verdicts"]["per_lot"]
+
+    assert result["status"] == JobStatus.REPORT_READY
+    assert repaired_per_lot["1"] == original_per_lot["1"]
+    assert repaired_per_lot["3"] == original_per_lot["3"]
+    assert repaired_per_lot["2"] == fresh_lot_2["field_verdicts"]
+    assert repaired_per_lot["2"] != original_per_lot["2"]
+    assert list(repaired_per_lot) == ["1", "2", "3"]
+    assert repaired["severity"] == "grave"
 
 
 def test_missing_selected_lot_context_does_not_build_mislabeled_verdict(
