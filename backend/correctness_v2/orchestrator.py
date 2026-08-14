@@ -757,11 +757,20 @@ def _build_single_lot_contract(
                 worksheet, canonical_lot_id, segmentation=segmentation, lot_report=lot_report
             ),
         )
+        known_lot_ids = [str(value) for value in (
+            (extra or {}).get("lot_ids") or lot_report.get("lot_ids") or [canonical_lot_id]
+        )]
+        existing_case = artifacts.read_json(job_id, artifacts.CASE_VERDICT_FILE) or {}
+        case_lot_verdicts, all_lot_ids = _reconstruct_case_lot_verdicts(
+            job_id=job_id,
+            current_lot_id=canonical_lot_id,
+            current_verdict=canonical_verdict,
+            existing_case=existing_case,
+            known_lot_ids=known_lot_ids,
+        )
         case_verdict = verdict_model_mod.build_case_verdict(
-            [canonical_verdict], scope_id=analysis_id,
-            all_lot_ids=[str(value) for value in (
-                (extra or {}).get("lot_ids") or lot_report.get("lot_ids") or [canonical_lot_id]
-            )],
+            case_lot_verdicts, scope_id=analysis_id,
+            all_lot_ids=all_lot_ids,
             case_global_facts=(case_ledger or {}).get("facts") or [],
         )
         artifacts_saved["case_verdict"] = artifacts.save_case_verdict(job_id, case_verdict)
@@ -2074,7 +2083,7 @@ def _finish_partial_report_available(
 
 def _reconstruct_case_lot_verdicts(
     *, job_id: str, current_lot_id: str, current_verdict: Dict[str, Any],
-    existing_case: Dict[str, Any],
+    existing_case: Dict[str, Any], known_lot_ids: Optional[List[str]] = None,
 ) -> tuple[List[Dict[str, Any]], List[str]]:
     """Reuse every persisted lot verdict before replacing a case aggregate.
 
@@ -2086,6 +2095,10 @@ def _reconstruct_case_lot_verdicts(
         (existing_case.get("field_verdicts") or {}).get("per_lot") or {}
     )
     all_lot_ids = [str(value) for value in existing_per_lot.keys()]
+    for value in known_lot_ids or []:
+        candidate_lot_id = str(value)
+        if candidate_lot_id not in all_lot_ids:
+            all_lot_ids.append(candidate_lot_id)
     current_lot_id = str(current_lot_id)
     if current_lot_id not in all_lot_ids:
         all_lot_ids.append(current_lot_id)
@@ -2341,9 +2354,21 @@ def resolve_money_confirmation(
                 if selected_lot not in (None, ""):
                     artifacts.save_lot_verdict(job_id, str(selected_lot), canonical)
                     if isinstance(lot_report, dict):
+                        existing_case = artifacts.read_json(
+                            job_id, artifacts.CASE_VERDICT_FILE
+                        ) or {}
+                        case_lot_verdicts, all_lot_ids = (
+                            _reconstruct_case_lot_verdicts(
+                                job_id=job_id,
+                                current_lot_id=str(selected_lot),
+                                current_verdict=canonical,
+                                existing_case=existing_case,
+                                known_lot_ids=lot_ids or [str(selected_lot)],
+                            )
+                        )
                         case_verdict = verdict_model_mod.build_case_verdict(
-                            [canonical], scope_id=analysis_id,
-                            all_lot_ids=lot_ids or [str(selected_lot)],
+                            case_lot_verdicts, scope_id=analysis_id,
+                            all_lot_ids=all_lot_ids,
                             case_global_facts=(case_ledger or {}).get("facts") or [],
                         )
                         artifacts.save_case_verdict(job_id, case_verdict)
