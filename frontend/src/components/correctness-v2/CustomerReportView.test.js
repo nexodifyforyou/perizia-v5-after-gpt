@@ -54,6 +54,27 @@ const sanitizedReport = {
   disclaimer: 'Documento informativo, non sostituisce la perizia.',
 };
 
+const partialReport = {
+  ...sanitizedReport,
+  report_status: 'PARTIAL_REPORT_AVAILABLE',
+  report_status_label: 'Report parziale — verifica richiesta',
+  disclosure_state: 'PARTIAL_REPORT_AVAILABLE',
+  partial_status: {
+    message: 'Il report non è completo né pronto: verificare gli elementi indicati con un professionista.',
+    full_readiness: false,
+    professional_verification_required: true,
+    unresolved_fields: [{
+      field_label: 'Dato economico',
+      reason_label: 'Importo essenziale non risolto dalla documentazione disponibile',
+      source_pages: [3],
+      evidence_available: true,
+      readiness_effect_label: 'Report non pronto: verifica tecnica richiesta',
+      professional_verification_required: true,
+      monetary_role_label: 'Prezzo base',
+    }],
+  },
+};
+
 const lotSelectionReport = {
   schema_version: 'cv2.customer_report.v1',
   analysis_id: 'analysis_generic',
@@ -193,6 +214,21 @@ describe('CustomerReportView', () => {
     expect(text()).toContain('Già incluso nel valore finale');
     expect(container.querySelector('[data-testid="cv2-customer-evidence"]').textContent).toContain('immobile conforme al PRGC');
     expect(text()).toContain('Documento informativo');
+  });
+
+  test('partial report keeps the report body and shows unresolved fields separately', async () => {
+    getCorrectnessV2CustomerView.mockResolvedValue({ data: { available: true, report: partialReport } });
+    await render();
+
+    const banner = container.querySelector('[data-testid="cv2-partial-report-banner"]');
+    expect(banner).toBeTruthy();
+    expect(banner.textContent).toContain('Report parziale — verifica professionale richiesta');
+    expect(banner.textContent).toContain('Dato economico');
+    expect(banner.textContent).toContain('Prezzo base');
+    expect(banner.textContent).toContain('p. 3');
+    expect(container.querySelector('[data-testid="cv2-customer-money"]').textContent).toContain('EUR 38.110,20');
+    expect(text()).not.toContain('MISSING_IMPORTANT_MONEY');
+    expect(text()).not.toContain('TECHNICAL_REVIEW_REQUIRED');
   });
 
   test('never renders admin/debug internals in the customer view', async () => {

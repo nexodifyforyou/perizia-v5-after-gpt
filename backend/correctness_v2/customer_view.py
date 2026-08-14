@@ -25,7 +25,7 @@ import re
 import unicodedata
 from typing import Any, Dict, List, Optional, Sequence
 
-from . import decision_model, feature_flags, verdict_model
+from . import decision_model, feature_flags, partial_report, verdict_model
 
 # Report statuses a customer may see. Manual-review / validation-failed / any
 # pipeline-failure status is never surfaced to a customer.
@@ -35,6 +35,7 @@ CUSTOMER_SAFE_STATUSES = frozenset(
         "LOT_SELECTION_REQUIRED",
         "MONEY_CONFIRMATION_REQUIRED",
         "DOCUMENT_NOT_READABLE",
+        "PARTIAL_REPORT_AVAILABLE",
     }
 )
 
@@ -67,6 +68,7 @@ _STATUS_LABELS = {
     "LOT_SELECTION_REQUIRED": "Selezione del lotto richiesta",
     "MONEY_CONFIRMATION_REQUIRED": "Conferma importi richiesta",
     "DOCUMENT_NOT_READABLE": "Perizia non leggibile",
+    "PARTIAL_REPORT_AVAILABLE": "Report parziale — verifica richiesta",
 }
 
 _DECISION_ATTENZIONE = "attenzione"
@@ -530,6 +532,25 @@ def is_customer_safe(report: Optional[Dict[str, Any]], job: Optional[Dict[str, A
         return False
     if str(report.get("report_status")) not in CUSTOMER_SAFE_STATUSES:
         return False
+    if (
+        str(report.get("report_status")) == "PARTIAL_REPORT_AVAILABLE"
+        and not feature_flags.partial_lot_reports_enabled()
+    ):
+        return False
+    if str(report.get("report_status")) == "PARTIAL_REPORT_AVAILABLE":
+        partial = report.get("partial_status")
+        unresolved = partial.get("unresolved_fields") if isinstance(partial, dict) else None
+        if (
+            not isinstance(unresolved, list)
+            or not unresolved
+            or any(not isinstance(item, dict) for item in unresolved)
+            or partial.get("full_readiness") is not False
+            or partial.get("professional_verification_required") is not True
+            or verdict_model.try_validate_verdict(
+                report.get("canonical_verdict")
+            ) is None
+        ):
+            return False
     if isinstance(job, dict) and job.get("safe_to_show_customer") is False:
         # Explicit false from the pipeline is authoritative; missing key (older
         # artifacts) falls back to the status check above.
@@ -568,8 +589,14 @@ def sanitize_customer_report(
             resolved_model = decision_model.build_decision_model(
                 report, confirmations, canonical_enabled=True
             )
+            canonical_input = (
+                stored
+                if str(report.get("report_status")) == "PARTIAL_REPORT_AVAILABLE"
+                and isinstance(stored, dict)
+                else verdict_model.build_lot_verdict(report)
+            )
             canonical = verdict_model.refine_for_runtime(
-                verdict_model.build_lot_verdict(report),
+                canonical_input,
                 report_status=str(report.get("report_status") or ""),
                 readiness=resolved_model.get("readiness") or {},
                 open_checks=bool(
@@ -616,6 +643,12 @@ def sanitize_customer_report(
         # fail-closed evidence validator, is customer-visible.
         "disclaimer": _customer_content(report.get("disclaimer")),
     }
+    if feature_flags.partial_lot_reports_enabled():
+        out["disclosure_state"] = (
+            partial_report.PARTIAL_REPORT_AVAILABLE
+            if status == "PARTIAL_REPORT_AVAILABLE"
+            else partial_report.FULL_REPORT_AVAILABLE
+        )
     if canonical is not None:
         out["canonical_verdict"] = canonical
 
@@ -631,6 +664,17 @@ def sanitize_customer_report(
         out["money_confirmation"] = _customer_money_confirmation(
             report.get("money_confirmation")
         )
+
+    if status == "PARTIAL_REPORT_AVAILABLE" and report.get("partial_status"):
+        partial = report.get("partial_status") or {}
+        out["partial_status"] = {
+            "message": partial.get("message"),
+            "full_readiness": False,
+            "professional_verification_required": True,
+            "unresolved_fields": partial_report.customer_unresolved_fields(
+                partial.get("unresolved_fields") or []
+            ),
+        }
 
     # Covers derived/optional sections too (notably uncertain-money reasons in
     # the decision model) without altering their contract shape.

@@ -26,6 +26,7 @@ import {
 //   REPORT_READY                -> "Apri report" (stored report, zero new job)
 //   RUNNING                     -> "Report in preparazione" (poll, no dup start)
 //   MONEY_CONFIRMATION_REQUIRED -> "Vedi verifica richiesta" (resume the prompt)
+//   PARTIAL_REPORT_AVAILABLE    -> "Apri report parziale" (verified content + unresolved fields)
 //   VERIFICATION_REQUIRED       -> "Vedi verifica richiesta" (+ explicit retry)
 //   FAILED                      -> "Analisi non completata" + explicit retry
 //   NOT_ANALYZED                -> "Genera report lotto" (explicit POST)
@@ -51,6 +52,11 @@ const LOT_STATE_META = {
   },
   MONEY_CONFIRMATION_REQUIRED: {
     label: 'Conferma richiesta',
+    badge: 'border-amber-500/40 bg-amber-500/10 text-amber-200',
+    dot: 'bg-amber-400',
+  },
+  PARTIAL_REPORT_AVAILABLE: {
+    label: 'Report parziale — verifica richiesta',
     badge: 'border-amber-500/40 bg-amber-500/10 text-amber-200',
     dot: 'bg-amber-400',
   },
@@ -85,6 +91,7 @@ export const buildLotSummaryLine = (summary) => {
   push(summary.ready, 'pronto', 'pronti');
   push(summary.preparing, 'in preparazione', 'in preparazione');
   push(summary.confirmation_required, 'conferma richiesta', 'conferme richieste');
+  push(summary.partial, 'report parziale', 'report parziali');
   push(summary.verification_required, 'da verificare', 'da verificare');
   push(summary.failed, 'non completato', 'non completati');
   push(summary.not_analyzed, 'non analizzato', 'non analizzati');
@@ -360,7 +367,7 @@ const LotCard = ({ lot, onOpenLot, onRequestGenerate, justStarted }) => {
       )}
 
       <div className="mt-4 flex flex-wrap items-center gap-3 pt-1">
-        {state === 'REPORT_READY' && (
+        {(state === 'REPORT_READY' || state === 'PARTIAL_REPORT_AVAILABLE') && (
           <>
             <Button
               type="button"
@@ -368,7 +375,7 @@ const LotCard = ({ lot, onOpenLot, onRequestGenerate, justStarted }) => {
               onClick={openLot}
               className="bg-gold text-zinc-950 hover:bg-gold-dim"
             >
-              Apri report
+              {state === 'PARTIAL_REPORT_AVAILABLE' ? 'Apri report parziale' : 'Apri report'}
             </Button>
             {can('rerun') && (
               <button

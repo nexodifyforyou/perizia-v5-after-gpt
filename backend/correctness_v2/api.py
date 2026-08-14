@@ -507,7 +507,21 @@ def _find_customer_job(analysis_id: str, selected_lot_id: Optional[str] = None):
         if report_analysis_id and report_analysis_id != str(analysis_id):
             continue
         if not customer_view.is_customer_safe(report, status):
-            continue
+            report_lot = str(
+                ((report.get("lot_structure") or {}).get("selected_lot") or "1")
+            )
+            projected = workspace._stored_partial_projection(  # pure structured replay
+                status, artifacts.CUSTOMER_REPORT_FILE, report_lot
+            )
+            if projected is None:
+                continue
+            report = projected["report"]
+            status = {
+                **status,
+                "status": JobStatus.PARTIAL_REPORT_AVAILABLE,
+                "safe_to_show_customer": True,
+                "disclosure_state": "PARTIAL_REPORT_AVAILABLE",
+            }
         if selected_lot_id is not None:
             lot = (report.get("lot_structure") or {})
             # A paused MONEY_CONFIRMATION_REQUIRED report is customer-safe and
@@ -516,6 +530,7 @@ def _find_customer_job(analysis_id: str, selected_lot_id: Optional[str] = None):
             if str(report.get("report_status")) not in (
                 "REPORT_READY",
                 "MONEY_CONFIRMATION_REQUIRED",
+                "PARTIAL_REPORT_AVAILABLE",
             ):
                 continue
             if str(lot.get("selected_lot")) != str(selected_lot_id):
@@ -524,6 +539,15 @@ def _find_customer_job(analysis_id: str, selected_lot_id: Optional[str] = None):
         if best is None or sort_key > best[0]:
             best = (sort_key, status, report, str(jid))
     if best is None:
+        if (
+            selected_lot_id is not None
+            and feature_flags.partial_lot_reports_enabled()
+        ):
+            lot_status, lot_report = workspace.find_lot_safe_report(
+                analysis_id, selected_lot_id
+            )
+            if isinstance(lot_status, dict) and isinstance(lot_report, dict):
+                return lot_status, lot_report, str(lot_status.get("job_id") or "")
         return None, None, None
     return best[1], best[2], best[3]
 
@@ -572,6 +596,11 @@ async def correctness_v2_customer_view(analysis_id: str, request: Request) -> Di
             "reason_code": _public_unavailable_reason(analysis_id, bool(preparing)),
         }
     confirmations = await _confirmations_for(analysis_id, user)
+    report_filename = str((status or {}).get("_customer_report_filename") or "")
+    cached_pages = (
+        [] if report_filename.startswith("lots/")
+        else _cached_input_pages(selected_job_id)
+    )
     return {
         "available": True,
         "selected_lot_id": selected_lot_id,
@@ -580,7 +609,7 @@ async def correctness_v2_customer_view(analysis_id: str, request: Request) -> Di
             report,
             status,
             confirmations,
-            cached_pages=_cached_input_pages(selected_job_id),
+            cached_pages=cached_pages,
         ),
     }
 

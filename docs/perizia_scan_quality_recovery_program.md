@@ -250,13 +250,17 @@ golden assertions, and forensic documentation.
 
 ## Execution order (one branch at a time)
 
-1. `feature-correctness-v2-lot-fact-projection` ← **current**
-2. `feature-correctness-v2-case-verdict-consistency`
-3. `feature-correctness-v2-partial-lot-reports`
-4. `feature-pdf-retention-consent`
-5. `feature-correctness-v2-report-clarity`
-6. `feature-beta-feedback-in-product`
-7. `feature-processing-lineage-observability`
+1. `feature-correctness-v2-lot-fact-projection` — DEPLOYED
+2. `feature-correctness-v2-case-verdict-consistency` — DEPLOYED
+3. `feature-correctness-v2-partial-lot-reports` ← **current** (Fable APPROVE, pre-commit review)
+4. `fix-canonical-verdict-persistence-all-lots` — small follow-up (risk R3-02): repair the two
+   pre-existing Branch-2 singleton `build_case_verdict` sister sites (`_build_single_lot_contract`,
+   `resolve_money_confirmation`) with the all-known-lots merge invariant; Fable review required.
+   Scheduled AFTER Branch 3 deploy, BEFORE PDF retention.
+5. `feature-pdf-retention-consent`
+6. `feature-correctness-v2-report-clarity`
+7. `feature-beta-feedback-in-product`
+8. `feature-processing-lineage-observability`
 
 Per-branch protocol: Fable 5 audit + implementation plan → Sol implements → Sol runs
 focused + full regressions → Fable 5 independent diff review → Sol repairs → pre-commit

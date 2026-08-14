@@ -40,6 +40,7 @@ from . import (
     customer_view,
     decision_model as decision_model_mod,
     feature_flags,
+    partial_report,
     verdict_model,
 )
 from .schemas import JobStatus
@@ -50,6 +51,7 @@ from .schemas import JobStatus
 STATE_REPORT_READY = "REPORT_READY"
 STATE_RUNNING = "RUNNING"
 STATE_MONEY_CONFIRMATION_REQUIRED = "MONEY_CONFIRMATION_REQUIRED"
+STATE_PARTIAL_REPORT_AVAILABLE = "PARTIAL_REPORT_AVAILABLE"
 STATE_VERIFICATION_REQUIRED = "VERIFICATION_REQUIRED"
 STATE_FAILED = "FAILED"
 STATE_NOT_ANALYZED = "NOT_ANALYZED"
@@ -95,7 +97,10 @@ _VERIFICATION_STATUSES = frozenset(
 )
 
 # Statuses that carry a customer-safe report the workspace may surface.
-_SAFE_STATES = frozenset({STATE_REPORT_READY, STATE_MONEY_CONFIRMATION_REQUIRED})
+_SAFE_STATES = frozenset({
+    STATE_REPORT_READY, STATE_MONEY_CONFIRMATION_REQUIRED,
+    STATE_PARTIAL_REPORT_AVAILABLE,
+})
 
 # In-flight generation registry: (analysis_id, lot_id) -> epoch spawned. A marker
 # older than this many seconds is treated as stale (the spawning request/thread is
@@ -117,6 +122,12 @@ def _state_from_status(status_value: Any) -> str:
         return STATE_REPORT_READY
     if s == JobStatus.MONEY_CONFIRMATION_REQUIRED:
         return STATE_MONEY_CONFIRMATION_REQUIRED
+    if s == JobStatus.PARTIAL_REPORT_AVAILABLE:
+        return (
+            STATE_PARTIAL_REPORT_AVAILABLE
+            if feature_flags.partial_lot_reports_enabled()
+            else STATE_VERIFICATION_REQUIRED
+        )
     if s in _VERIFICATION_STATUSES:
         return STATE_VERIFICATION_REQUIRED
     # Every other terminal status (FAILED_*, JOB_STALLED, CANCELLED, ...): failed.
@@ -127,6 +138,75 @@ def _lot_report_filename(lot_id: str) -> str:
     """analyze_all per-lot customer report path, mirroring save_lot_subartifact."""
     safe_lot = str(lot_id).replace("/", "_").replace("..", "_")
     return os.path.join("lots", safe_lot, artifacts.CUSTOMER_REPORT_FILE)
+
+
+def _stored_partial_projection(
+    status: Dict[str, Any], report_filename: str, lot_id: str
+) -> Optional[Dict[str, Any]]:
+    """Pure read-time replay from structured artifacts; never persists."""
+    if not feature_flags.partial_lot_reports_enabled():
+        return None
+    job_id = str(status.get("job_id") or "")
+    analysis_id = str(status.get("analysis_id") or "")
+    if not job_id or not report_filename:
+        return None
+    report = artifacts.read_json(job_id, report_filename)
+    if not isinstance(report, dict):
+        return None
+    if report.get("job_id") not in (None, "", job_id):
+        return None
+    if report.get("analysis_id") not in (None, "", analysis_id):
+        return None
+    report_lot = ((report.get("lot_structure") or {}).get("selected_lot"))
+    if report_lot not in (None, "", str(lot_id)):
+        return None
+
+    directory = os.path.dirname(report_filename)
+    quality_name = os.path.join(directory, artifacts.QUALITY_REPORT_FILE) if directory else artifacts.QUALITY_REPORT_FILE
+    audit_name = os.path.join(directory, artifacts.COVERAGE_AUDIT_FILE) if directory else artifacts.COVERAGE_AUDIT_FILE
+    safe_lot = str(lot_id).replace("/", "_").replace("..", "_")
+    canonical_name = os.path.join("lots", safe_lot, artifacts.LOT_VERDICT_FILE)
+    quality = artifacts.read_json(job_id, quality_name)
+    audit = artifacts.read_json(job_id, audit_name)
+    canonical = artifacts.read_json(job_id, canonical_name)
+    if not all(isinstance(value, dict) for value in (quality, audit, canonical)):
+        return None
+    for structured in (quality, audit):
+        if structured.get("job_id") not in (None, "", job_id):
+            return None
+        if structured.get("analysis_id") not in (None, "", analysis_id):
+            return None
+    if str(canonical.get("scope_id") or "") not in ("", str(lot_id)):
+        return None
+    gate_status = (
+        "FAIL"
+        if quality.get("overall_quality_status") == "FAIL"
+        or audit.get("coverage_status") == "FAIL"
+        else ""
+    )
+    return partial_report.build_partial_projection(
+        report=report,
+        canonical_verdict=canonical,
+        quality_report=quality,
+        coverage_audit=audit,
+        gate_status=gate_status,
+        lot_id=str(lot_id),
+    )
+
+
+def _partial_for_folded(
+    lot_id: str, folded: Dict[str, Any]
+) -> Optional[Dict[str, Any]]:
+    if folded.get("state") != STATE_PARTIAL_REPORT_AVAILABLE:
+        return None
+    ref = folded.get("safe_ref") or {}
+    job_id = str(ref.get("job_id") or "")
+    status = artifacts.read_job_status(job_id)
+    if not isinstance(status, dict):
+        return None
+    return _stored_partial_projection(
+        status, str(ref.get("report_filename") or ""), str(lot_id)
+    )
 
 
 def _sort_key(status: Dict[str, Any]) -> str:
@@ -212,7 +292,18 @@ def _records_for_job(status: Dict[str, Any]) -> List[_Record]:
             if not lid:
                 continue
             state = _state_from_status(entry.get("status"))
-            fname = _lot_report_filename(lid) if state in _SAFE_STATES else None
+            fname = _lot_report_filename(lid)
+            if state not in _SAFE_STATES and _stored_partial_projection(
+                status, fname, lid
+            ) is not None:
+                state = STATE_PARTIAL_REPORT_AVAILABLE
+            fname = fname if (
+                state in _SAFE_STATES
+                or (
+                    feature_flags.partial_lot_reports_enabled()
+                    and entry.get("customer_report_path")
+                )
+            ) else None
             records.append(_Record(lid, state, jid, fname, updated_at, str(entry.get("status") or "")))
         return records
 
@@ -220,7 +311,17 @@ def _records_for_job(status: Dict[str, Any]) -> List[_Record]:
     selected = status.get("selected_lot")
     if selected not in (None, "", []):
         state = _state_from_status(raw)
-        fname = artifacts.CUSTOMER_REPORT_FILE if state in _SAFE_STATES else None
+        if state not in _SAFE_STATES and _stored_partial_projection(
+            status, artifacts.CUSTOMER_REPORT_FILE, str(selected)
+        ) is not None:
+            state = STATE_PARTIAL_REPORT_AVAILABLE
+        fname = artifacts.CUSTOMER_REPORT_FILE if (
+            state in _SAFE_STATES
+            or (
+                feature_flags.partial_lot_reports_enabled()
+                and status.get("customer_report_generated")
+            )
+        ) else None
         records.append(_Record(str(selected), state, jid, fname, updated_at, raw))
         return records
 
@@ -240,7 +341,14 @@ def _records_for_job(status: Dict[str, Any]) -> List[_Record]:
         if sel not in (None, "", []):
             single_lot = str(sel)
     state = _state_from_status(raw)
-    fname = artifacts.CUSTOMER_REPORT_FILE if state in _SAFE_STATES else None
+    if state not in _SAFE_STATES and _stored_partial_projection(
+        status, artifacts.CUSTOMER_REPORT_FILE, single_lot or SINGLE_LOT_ID
+    ) is not None:
+        state = STATE_PARTIAL_REPORT_AVAILABLE
+    fname = artifacts.CUSTOMER_REPORT_FILE if (
+        state in _SAFE_STATES
+        or (feature_flags.partial_lot_reports_enabled() and isinstance(report, dict))
+    ) else None
     records.append(_Record(single_lot, state, jid, fname, updated_at, raw))
     return records
 
@@ -291,6 +399,10 @@ def _fold_lot(records: List[_Record], inflight: bool) -> Dict[str, Any]:
         "latest_attempt_at": latest_any.updated_at if latest_any else None,
         "report_version": len([r for r in records if r.state in _SAFE_STATES]),
         "safe_ref": safe_ref,
+        **({"latest_ref": (
+            {"job_id": latest_any.job_id, "report_filename": latest_any.report_filename}
+            if latest_any is not None and latest_any.report_filename else None
+        )} if feature_flags.partial_lot_reports_enabled() else {}),
         "actions": _actions_for(display, has_safe),
     }
 
@@ -366,15 +478,21 @@ def build_workspace(analysis_id: str) -> Dict[str, Any]:
     for lid in ordered_ids:
         folded = _fold_lot(lot_records.get(lid, []), _is_inflight(analysis_id, lid))
         canonical = _persisted_lot_verdict(lid, folded)
+        partial_projection = _partial_for_folded(lid, folded)
+        reconciled_report = (
+            _persisted_lot_report(lid, folded, partial_projection)
+            if feature_flags.partial_lot_reports_enabled() else None
+        )
         if canonical is not None:
             canonical_lot_verdicts.append(canonical)
         fields = (canonical or {}).get("field_verdicts") or {}
+        identity = (reconciled_report or {}).get("case_identity") or {}
         entry = {
             "lot_id": lid,
             "label": meta_by_lot.get(lid, {}).get("label") or f"Lotto {lid}",
-            "address": meta_by_lot.get(lid, {}).get("address"),
-            "property_type": ((fields.get("typology") or {}).get("value") if canonical else meta_by_lot.get(lid, {}).get("property_type")),
-            "ownership_right": meta_by_lot.get(lid, {}).get("ownership_right"),
+            "address": identity.get("address") or meta_by_lot.get(lid, {}).get("address"),
+            "property_type": ((fields.get("typology") or {}).get("value") if canonical else identity.get("property_type") or meta_by_lot.get(lid, {}).get("property_type")),
+            "ownership_right": identity.get("ownership_right") or meta_by_lot.get(lid, {}).get("ownership_right"),
             "occupancy_summary": ((fields.get("occupancy") or {}).get("value") if canonical else meta_by_lot.get(lid, {}).get("occupancy_summary")),
             "final_value": _final_value_display(analysis_id, lid, folded, canonical),
             "state": folded["state"],
@@ -385,6 +503,24 @@ def build_workspace(analysis_id: str) -> Dict[str, Any]:
             "report_version": folded["report_version"],
             "actions": folded["actions"],
             **({"canonical_verdict_ref": canonical.get("canonical_ref")} if canonical else {}),
+            **({
+                "disclosure_state": (
+                    partial_report.PARTIAL_REPORT_AVAILABLE
+                    if folded["state"] == STATE_PARTIAL_REPORT_AVAILABLE
+                    else partial_report.FULL_REPORT_AVAILABLE
+                    if folded["has_safe_report"]
+                    else partial_report.REPORT_BLOCKED
+                )
+            } if feature_flags.partial_lot_reports_enabled() else {}),
+            **({
+                "partial_status": {
+                    "full_readiness": False,
+                    "professional_verification_required": True,
+                    "unresolved_fields": partial_report.customer_unresolved_fields(
+                        ((partial_projection.get("report") or {}).get("partial_status") or {}).get("unresolved_fields") or []
+                    ),
+                }
+            } if partial_projection else {}),
         }
         lots_out.append(entry)
 
@@ -403,6 +539,10 @@ def build_workspace(analysis_id: str) -> Dict[str, Any]:
         "failed": sum(1 for L in lots_out if L["state"] == STATE_FAILED),
         "not_analyzed": sum(1 for L in lots_out if L["state"] == STATE_NOT_ANALYZED),
     }
+    if feature_flags.partial_lot_reports_enabled():
+        summary["partial"] = sum(
+            1 for L in lots_out if L["state"] == STATE_PARTIAL_REPORT_AVAILABLE
+        )
 
     if multi_lot or lot_count > 1:
         analysis_state = "LOT_OVERVIEW"
@@ -430,9 +570,20 @@ def build_workspace(analysis_id: str) -> Dict[str, Any]:
 
 
 def _persisted_lot_verdict(lot_id: str, folded: Dict[str, Any]) -> Optional[Dict[str, Any]]:
-    if not feature_flags.canonical_verdict_enabled() or not folded.get("has_safe_report"):
+    if (
+        not feature_flags.canonical_verdict_enabled()
+        or (
+            not feature_flags.partial_lot_reports_enabled()
+            and not folded.get("has_safe_report")
+        )
+    ):
         return None
-    ref = folded.get("safe_ref") or {}
+    ref = folded.get("safe_ref") or folded.get("latest_ref") or {}
+    if not ref:
+        return None
+    partial_projection = _partial_for_folded(lot_id, folded)
+    if partial_projection is not None:
+        return partial_projection.get("canonical_verdict")
     safe_lot = str(lot_id).replace("/", "_").replace("..", "_")
     verdict = artifacts.read_json(
         str(ref.get("job_id")), os.path.join("lots", safe_lot, artifacts.LOT_VERDICT_FILE)
@@ -447,12 +598,16 @@ def _persisted_lot_verdict(lot_id: str, folded: Dict[str, Any]) -> Optional[Dict
         return canonical
     try:
         model_input = {**report, "canonical_verdict": canonical}
+        report_status = str(report.get("report_status") or "")
+        if not folded.get("has_safe_report"):
+            report_status = JobStatus.NEEDS_MANUAL_REVIEW
+            model_input["report_status"] = report_status
         model = decision_model_mod.build_decision_model(
             model_input, canonical_enabled=True
         )
         return verdict_model.refine_for_runtime(
             canonical,
-            report_status=str(report.get("report_status") or ""),
+            report_status=report_status,
             readiness=model.get("readiness") or {},
             open_checks=bool(
                 ((model.get("sections") or {}).get("verifiche") or {}).get("items")
@@ -460,6 +615,25 @@ def _persisted_lot_verdict(lot_id: str, folded: Dict[str, Any]) -> Optional[Dict
         )
     except (ValueError, KeyError, TypeError):
         return None
+
+
+def _persisted_lot_report(
+    lot_id: str, folded: Dict[str, Any],
+    partial_projection: Optional[Dict[str, Any]] = None,
+) -> Optional[Dict[str, Any]]:
+    """Read reconciled render metadata for safe or content-bearing blocked lots."""
+    if partial_projection is not None:
+        return partial_projection.get("report")
+    ref = folded.get("safe_ref") or folded.get("latest_ref") or {}
+    report = artifacts.read_json(
+        str(ref.get("job_id") or ""), str(ref.get("report_filename") or "")
+    )
+    if not isinstance(report, dict):
+        return None
+    selected = ((report.get("lot_structure") or {}).get("selected_lot"))
+    if selected not in (None, "", str(lot_id)):
+        return None
+    return report
 
 
 def _final_value_display(
@@ -506,10 +680,31 @@ def find_lot_safe_report(
             if not _lot_matches(rec.lot_id, lot_id, single_lot):
                 continue
             report = artifacts.read_json(rec.job_id, rec.report_filename or artifacts.CUSTOMER_REPORT_FILE)
-            if not customer_view.is_customer_safe(report, status):
+            if rec.state == STATE_PARTIAL_REPORT_AVAILABLE:
+                projected = _stored_partial_projection(
+                    status, rec.report_filename or artifacts.CUSTOMER_REPORT_FILE,
+                    str(rec.lot_id or lot_id),
+                )
+                if projected is None:
+                    continue
+                report = projected["report"]
+                effective_status = {
+                    **status,
+                    "status": JobStatus.PARTIAL_REPORT_AVAILABLE,
+                    "safe_to_show_customer": True,
+                    "disclosure_state": partial_report.PARTIAL_REPORT_AVAILABLE,
+                }
+            else:
+                effective_status = status
+            if feature_flags.partial_lot_reports_enabled():
+                effective_status = {
+                    **effective_status,
+                    "_customer_report_filename": rec.report_filename,
+                }
+            if not customer_view.is_customer_safe(report, effective_status):
                 continue
             if best is None or rec.updated_at >= best[0]:
-                best = (rec.updated_at, status, report)
+                best = (rec.updated_at, effective_status, report)
     if best is None:
         return None, None
     return best[1], best[2]

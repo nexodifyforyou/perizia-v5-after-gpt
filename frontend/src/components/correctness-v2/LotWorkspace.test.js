@@ -132,6 +132,7 @@ describe('LotWorkspace helpers', () => {
       verification_required: 1, failed: 0, not_analyzed: 1,
     })).toBe('6 lotti · 4 pronti · 1 da verificare · 1 non analizzato');
     expect(buildLotSummaryLine({ lot_count: 1, ready: 1 })).toBe('1 lotto · 1 pronto');
+    expect(buildLotSummaryLine({ lot_count: 1, partial: 1 })).toBe('1 lotto · 1 report parziale');
     expect(buildLotSummaryLine(null)).toBe('');
     expect(buildLotSummaryLine({ lot_count: 0 })).toBe('');
   });
@@ -276,6 +277,34 @@ describe('LotWorkspace', () => {
 
     await click('cv2-lot-generate-confirm');
     expect(generateCorrectnessV2Lot).toHaveBeenCalledWith('analysis_ws', '6', false);
+  });
+
+  test('PARTIAL_REPORT_AVAILABLE opens the preserved report with an amber label', async () => {
+    const onOpenLot = jest.fn();
+    const workspace = {
+      ...workspaceFixture,
+      summary: { lot_count: 1, partial: 1 },
+      lots: [{
+        lot_id: '4', label: 'Lotto 4', state: 'PARTIAL_REPORT_AVAILABLE',
+        disclosure_state: 'PARTIAL_REPORT_AVAILABLE', has_safe_report: true,
+        job_running: false, last_attempt_failed: false,
+        actions: ['open_report', 'rerun'],
+      }],
+    };
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    root = createRoot(container);
+    await act(async () => {
+      root.render(
+        <LotWorkspace analysisId="analysis_ws" state={makeState(workspace)} onOpenLot={onOpenLot} />
+      );
+    });
+    await flush();
+
+    expect(text()).toContain('Report parziale — verifica richiesta');
+    expect(byTestId('cv2-lot-open-4').textContent).toContain('Apri report parziale');
+    await click('cv2-lot-open-4');
+    expect(onOpenLot).toHaveBeenCalledWith('4');
   });
 
   test('prior safe report survives a failed rerun: notice + open-safe-report action', async () => {
