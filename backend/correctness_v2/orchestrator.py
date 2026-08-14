@@ -40,6 +40,7 @@ from . import (
     lot_runner as lot_runner_mod,
     lots as lots_mod,
     money_confirmation as money_confirmation_mod,
+    partial_report as partial_report_mod,
     quality_gate as quality_gate_mod,
     validator as validator_mod,
     verdict_model as verdict_model_mod,
@@ -846,6 +847,10 @@ def _build_single_lot_contract(
         "report_status": customer_report.get("report_status"),
         "customer_report_schema_version": customer_report.get("schema_version"),
     }
+    if feature_flags.partial_lot_reports_enabled():
+        payload_extra.update(
+            partial_report_mod.full_disclosure_accounting(gate["gate_status"])
+        )
     if extra:
         payload_extra.update(extra)
     lot_coverage = (gate.get("coverage_audit") or {}).get("lot_coverage") or {}
@@ -1388,6 +1393,48 @@ def _run_analyze_all(
             job_id, norm_lot, artifacts.CUSTOMER_REPORT_FILE, lot_gate["customer_report"]
         )
         if lot_gate["gate_status"] == quality_gate_mod.GATE_FAIL:
+            classification = None
+            if feature_flags.partial_lot_reports_enabled():
+                classification = partial_report_mod.classify_partial_eligibility(
+                    gate_status=lot_gate["gate_status"],
+                    quality_report=lot_gate["quality_report"],
+                    coverage_audit=lot_gate["coverage_audit"],
+                    report=lot_gate["customer_report"], lot_id=str(norm_lot),
+                )
+            projection = None
+            if canonical_verdict is not None:
+                projection = partial_report_mod.build_partial_projection(
+                    report=lot_gate["customer_report"],
+                    canonical_verdict=canonical_verdict,
+                    quality_report=lot_gate["quality_report"],
+                    coverage_audit=lot_gate["coverage_audit"],
+                    gate_status=lot_gate["gate_status"],
+                    lot_id=str(norm_lot),
+                )
+            if projection is not None:
+                canonical_verdict = projection["canonical_verdict"]
+                reconciled_verdicts[str(norm_lot)] = canonical_verdict
+                artifacts.save_lot_verdict(job_id, norm_lot, canonical_verdict)
+                report_path = artifacts.save_lot_subartifact(
+                    job_id, norm_lot, artifacts.CUSTOMER_REPORT_FILE,
+                    projection["report"],
+                )
+                accounting = projection["decision"]["accounting"]
+                entry.update({
+                    "status": JobStatus.PARTIAL_REPORT_AVAILABLE,
+                    "reason": "quality_gate_failed_partial_disclosure",
+                    "quality_gate_status": quality_gate_mod.GATE_FAIL,
+                    "disclosure_state": partial_report_mod.PARTIAL_REPORT_AVAILABLE,
+                    "original_blocking_codes": accounting["original_blocking_codes"],
+                    "partial_eligible_codes": accounting["partial_eligible_codes"],
+                    "hard_blocking_codes": accounting["hard_blocking_codes"],
+                    "unresolved_field_count": accounting["unresolved_field_count"],
+                    "critical_unresolved_count": accounting["critical_unresolved_count"],
+                    "contract_path": path,
+                    "customer_report_path": report_path,
+                })
+                per_lot_results.append(entry)
+                continue
             entry.update(
                 {
                     "status": JobStatus.NEEDS_MANUAL_REVIEW,
@@ -1401,6 +1448,10 @@ def _run_analyze_all(
                     ),
                     "contract_path": path,
                     "customer_report_path": report_path,
+                    **({
+                        **classification["accounting"],
+                        "disclosure_state": partial_report_mod.REPORT_BLOCKED,
+                    } if classification is not None else {}),
                 }
             )
             per_lot_results.append(entry)
@@ -1413,6 +1464,12 @@ def _run_analyze_all(
                 "customer_report_path": report_path,
             }
         )
+        if feature_flags.partial_lot_reports_enabled():
+            entry.update(
+                partial_report_mod.full_disclosure_accounting(
+                    lot_gate["gate_status"]
+                )
+            )
         per_lot_results.append(entry)
 
     if feature_flags.canonical_verdict_enabled():
@@ -1448,6 +1505,11 @@ def _run_analyze_all(
         "per_lot_results": per_lot_results,
         "concurrency": concurrency_meta,
     }
+    if feature_flags.partial_lot_reports_enabled():
+        aggregate["partial_lot_count"] = sum(
+            1 for entry in per_lot_results
+            if entry.get("status") == JobStatus.PARTIAL_REPORT_AVAILABLE
+        )
     artifacts_saved["analyze_all_result"] = artifacts.save_analyze_all_result(job_id, aggregate)
 
     status = JobStatus.REPORT_READY if all_ok else JobStatus.NEEDS_MANUAL_REVIEW
@@ -1466,6 +1528,52 @@ def _run_analyze_all(
         "concurrency": concurrency_meta,
         "degraded_to_serial": concurrency_meta["degraded_to_serial"],
     }
+    if feature_flags.partial_lot_reports_enabled():
+        partial_count = aggregate["partial_lot_count"]
+        hard_block_present = any(
+            entry.get("status") not in {
+                JobStatus.REPORT_READY,
+                JobStatus.PARTIAL_REPORT_AVAILABLE,
+            }
+            for entry in per_lot_results
+        )
+        original_codes = sorted({
+            code
+            for entry in per_lot_results
+            for code in entry.get("original_blocking_codes", [])
+        })
+        eligible_codes = sorted({
+            code
+            for entry in per_lot_results
+            for code in entry.get("partial_eligible_codes", [])
+        })
+        hard_codes = sorted({
+            code
+            for entry in per_lot_results
+            for code in entry.get("hard_blocking_codes", [])
+        })
+        extra.update({
+            "gate_outcome": "PASS" if all_ok else "FAIL",
+            "original_blocking_codes": original_codes,
+            "partial_eligible_codes": eligible_codes,
+            "hard_blocking_codes": hard_codes,
+            "disclosure_state": (
+                partial_report_mod.FULL_REPORT_AVAILABLE
+                if all_ok
+                else partial_report_mod.PARTIAL_REPORT_AVAILABLE
+                if partial_count and not hard_block_present
+                else partial_report_mod.REPORT_BLOCKED
+            ),
+            "unresolved_field_count": sum(
+                int(entry.get("unresolved_field_count") or 0)
+                for entry in per_lot_results
+            ),
+            "critical_unresolved_count": sum(
+                int(entry.get("critical_unresolved_count") or 0)
+                for entry in per_lot_results
+            ),
+            "partial_lot_count": partial_count,
+        })
     common = dict(
         job_id=job_id,
         analysis_id=analysis_id,
@@ -1809,6 +1917,35 @@ def _finish_quality_gate_failed(
     """
     quality = gate.get("quality_report") or {}
     audit = gate.get("coverage_audit") or {}
+    report = gate.get("customer_report") or {}
+    lot_id = str(((report.get("lot_structure") or {}).get("selected_lot") or "1"))
+    projection = None
+    if feature_flags.partial_lot_reports_enabled():
+        safe_lot = lot_id.replace("/", "_").replace("..", "_")
+        canonical = report.get("canonical_verdict")
+        if not isinstance(canonical, dict):
+            canonical = artifacts.read_json(
+                job_id, os.path.join("lots", safe_lot, artifacts.LOT_VERDICT_FILE)
+            )
+        projection = partial_report_mod.build_partial_projection(
+            report=report,
+            canonical_verdict=canonical if isinstance(canonical, dict) else {},
+            quality_report=quality,
+            coverage_audit=audit,
+            gate_status=gate.get("gate_status"),
+            lot_id=lot_id,
+        )
+    if projection is not None:
+        return _finish_partial_report_available(
+            job_id, analysis_id, gate, projection, lot_id,
+            artifacts_saved, created_at, admin_only,
+        )
+    classification = None
+    if feature_flags.partial_lot_reports_enabled():
+        classification = partial_report_mod.classify_partial_eligibility(
+            gate_status=gate.get("gate_status"), quality_report=quality,
+            coverage_audit=audit, report=report, lot_id=lot_id,
+        )
     blocking = quality.get("blocking_issues") or []
     codes = sorted({b.get("code") for b in blocking if b.get("code")})
     reason_human = (
@@ -1859,10 +1996,143 @@ def _finish_quality_gate_failed(
             "blocking_codes": codes,
             "report_status": JobStatus.NEEDS_MANUAL_REVIEW,
             "contract_generated": True,
+            **({
+                **classification["accounting"],
+                "disclosure_state": partial_report_mod.REPORT_BLOCKED,
+            } if classification is not None else {}),
         },
     )
     _save_job_status(job_id, payload)
     return payload
+
+
+def _finish_partial_report_available(
+    job_id: str,
+    analysis_id: str,
+    gate: Dict[str, Any],
+    projection: Dict[str, Any],
+    lot_id: str,
+    artifacts_saved: Dict[str, Any],
+    created_at: str,
+    admin_only: bool,
+) -> Dict[str, Any]:
+    """Expose omission-only content while retaining blocked readiness."""
+    report = projection["report"]
+    canonical = projection["canonical_verdict"]
+    decision = projection["decision"]
+    accounting = decision["accounting"]
+    artifacts_saved["customer_report"] = artifacts.save_customer_report(job_id, report)
+    artifacts_saved["lot_verdict"] = artifacts.save_lot_verdict(job_id, lot_id, canonical)
+
+    existing_case = artifacts.read_json(job_id, artifacts.CASE_VERDICT_FILE) or {}
+    lot_verdicts, all_lot_ids = _reconstruct_case_lot_verdicts(
+        job_id=job_id,
+        current_lot_id=lot_id,
+        current_verdict=canonical,
+        existing_case=existing_case,
+    )
+    case_verdict = verdict_model_mod.build_case_verdict(
+        lot_verdicts, scope_id=analysis_id, all_lot_ids=all_lot_ids
+    )
+    artifacts_saved["case_verdict"] = artifacts.save_case_verdict(job_id, case_verdict)
+
+    payload = job_status.make_status(
+        job_id=job_id,
+        analysis_id=analysis_id,
+        status=JobStatus.PARTIAL_REPORT_AVAILABLE,
+        current_stage=_step4_stage("partial_report_available"),
+        admin_only=admin_only,
+        customer_report_generated=True,
+        safe_to_show_customer=True,
+        reason_code="REPORT_QUALITY_GATE_FAILED",
+        reason_human=(
+            "Il controllo qualità mantiene il report non pronto: sono disponibili "
+            "solo i contenuti verificati, con gli elementi irrisolti in evidenza."
+        ),
+        troubleshoot_message=(
+            "Completare una verifica professionale degli elementi irrisolti prima "
+            "di assumere decisioni sul lotto."
+        ),
+        next_steps=[
+            "Verificare gli elementi irrisolti indicati nel report.",
+            "Richiedere conferma documentale a un professionista.",
+        ],
+        artifacts_saved=artifacts_saved,
+        created_at=created_at,
+        extra={
+            **accounting,
+            "quality_status": (gate.get("quality_report") or {}).get("overall_quality_status"),
+            "coverage_status": (gate.get("coverage_audit") or {}).get("coverage_status"),
+            "customer_readiness": "NOT_READY",
+            "report_status": JobStatus.PARTIAL_REPORT_AVAILABLE,
+            "contract_generated": True,
+        },
+    )
+    _save_job_status(job_id, payload)
+    return payload
+
+
+def _reconstruct_case_lot_verdicts(
+    *, job_id: str, current_lot_id: str, current_verdict: Dict[str, Any],
+    existing_case: Dict[str, Any],
+) -> tuple[List[Dict[str, Any]], List[str]]:
+    """Reuse every persisted lot verdict before replacing a case aggregate.
+
+    This performs artifact reads only. A legacy case entry is wrapped as a
+    conservative pseudo-verdict only when its per-lot artifact is unavailable;
+    no report, fact, applicability, or verdict is regenerated.
+    """
+    existing_per_lot = (
+        (existing_case.get("field_verdicts") or {}).get("per_lot") or {}
+    )
+    all_lot_ids = [str(value) for value in existing_per_lot.keys()]
+    current_lot_id = str(current_lot_id)
+    if current_lot_id not in all_lot_ids:
+        all_lot_ids.append(current_lot_id)
+
+    case_severity = str(existing_case.get("severity") or "")
+    if case_severity not in verdict_model_mod.SEVERITY_ORDER:
+        case_severity = "grave"
+    verdicts: List[Dict[str, Any]] = []
+    for candidate_lot_id in all_lot_ids:
+        if candidate_lot_id == current_lot_id:
+            verdicts.append(current_verdict)
+            continue
+        safe_lot = candidate_lot_id.replace("/", "_").replace("..", "_")
+        persisted = artifacts.read_json(
+            job_id,
+            os.path.join("lots", safe_lot, artifacts.LOT_VERDICT_FILE),
+        )
+        validated = verdict_model_mod.try_validate_verdict(persisted)
+        if (
+            validated is not None
+            and validated.get("scope") == "lot"
+            and str(validated.get("scope_id")) == candidate_lot_id
+        ):
+            verdicts.append(validated)
+            continue
+
+        fields = existing_per_lot.get(candidate_lot_id)
+        required = {"typology", "occupancy", "compliance", "formalities", "money"}
+        if (
+            not isinstance(fields, dict)
+            or fields.get("status") == "UNKNOWN"
+            or not required.issubset(fields)
+            or not isinstance(fields.get("typology"), dict)
+            or not isinstance(fields.get("occupancy"), dict)
+        ):
+            continue
+        pseudo = {
+            "schema_version": verdict_model_mod.SCHEMA_VERSION,
+            "scope": "lot",
+            "scope_id": candidate_lot_id,
+            "severity": case_severity,
+            "field_verdicts": fields,
+        }
+        validated_pseudo = verdict_model_mod.try_validate_verdict(pseudo)
+        if validated_pseudo is not None:
+            verdicts.append(validated_pseudo)
+    return verdicts, all_lot_ids
 
 
 def _finish_money_confirmation_required(
@@ -2139,6 +2409,10 @@ def resolve_money_confirmation(
             # Traceable record of the human-in-the-loop resolution.
             "money_confirmation_resolved": True,
             "money_confirmations": confirmations,
+            **(
+                partial_report_mod.full_disclosure_accounting(gate["gate_status"])
+                if feature_flags.partial_lot_reports_enabled() else {}
+            ),
         },
     )
     _save_job_status(job_id, payload)

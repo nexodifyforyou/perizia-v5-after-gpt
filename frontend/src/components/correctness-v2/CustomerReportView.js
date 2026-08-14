@@ -90,6 +90,36 @@ const PageRefs = ({ pages, className = '' }) => {
   return <span className={`font-mono text-[11px] text-gold/80 ${className}`}>{label}</span>;
 };
 
+const CustomerPartialReportBanner = ({ partialStatus }) => {
+  const unresolved = Array.isArray(partialStatus?.unresolved_fields)
+    ? partialStatus.unresolved_fields
+    : [];
+  return (
+    <section data-testid="cv2-partial-report-banner" className="rounded-lg border border-amber-400/30 bg-amber-500/5 p-4">
+      <div className="flex items-start gap-3">
+        <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-300" />
+        <div className="min-w-0 space-y-3">
+          <div>
+            <p className="font-medium text-amber-100">Report parziale — verifica professionale richiesta</p>
+            <p className="mt-1 text-sm leading-6 text-zinc-300">
+              {compactText(partialStatus?.message) || 'Il report non è completo né pronto.'}
+            </p>
+          </div>
+          {unresolved.map((item, index) => (
+            <div key={`${item?.field_label || 'dato'}-${index}`} className="rounded-md border border-amber-400/20 bg-zinc-950/40 p-3 text-sm">
+              <p className="font-medium text-zinc-100">{compactText(item?.field_label) || 'Dato essenziale'}</p>
+              <p className="mt-1 text-zinc-300">{compactText(item?.reason_label)}</p>
+              {item?.monetary_role_label && <p className="mt-1 text-zinc-400">{compactText(item.monetary_role_label)}</p>}
+              <PageRefs pages={item?.source_pages} className="mt-2 inline-block" />
+              <p className="mt-2 text-xs text-amber-200">Verificare con un professionista prima di procedere.</p>
+            </div>
+          ))}
+        </div>
+      </div>
+    </section>
+  );
+};
+
 // Section shell: icon chip + title + optional hint, consistent spacing.
 const Section = ({ icon: Icon, title, hint, children, testId }) => (
   <section data-testid={testId} className="space-y-3">
@@ -1435,6 +1465,9 @@ const CustomerReportView = ({ analysisId, state: externalState, backLabel }) => 
         />
       ) : (
         <>
+          {report?.report_status === 'PARTIAL_REPORT_AVAILABLE' && (
+            <CustomerPartialReportBanner partialStatus={report.partial_status} />
+          )}
           {isMoneyConfirmation && (
             <CustomerMoneyConfirmation
               confirmation={report.money_confirmation}
@@ -1470,6 +1503,7 @@ export {
   CustomerLotSelector,
   CustomerMoneyConfirmation,
   CustomerDocumentNotReadable,
+  CustomerPartialReportBanner,
   V2CustomerReportFallback,
   buildEvidencePreview,
   shortExcerpt,

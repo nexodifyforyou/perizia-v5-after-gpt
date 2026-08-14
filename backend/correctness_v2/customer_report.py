@@ -1467,6 +1467,33 @@ def render_money_confirmation_report(
     return report
 
 
+def render_partial_report(
+    base_report: Dict[str, Any], unresolved_fields: List[Dict[str, Any]],
+    disclosure_accounting: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    """Overlay explicit unresolved fields without changing any report fact."""
+    report = dict(base_report or {})
+    report["report_status"] = "PARTIAL_REPORT_AVAILABLE"
+    report["disclosure_state"] = "PARTIAL_REPORT_AVAILABLE"
+    report["title"] = "Report parziale disponibile"
+    report["subtitle"] = (
+        "I dati verificati restano disponibili; gli elementi non risolti "
+        "richiedono una verifica professionale prima di procedere."
+    )
+    report["partial_status"] = {
+        "message": (
+            "Il report non è completo né pronto: verificare gli elementi "
+            "indicati con un professionista."
+        ),
+        "full_readiness": False,
+        "professional_verification_required": True,
+        "unresolved_fields": [dict(item) for item in unresolved_fields or []],
+    }
+    if disclosure_accounting:
+        report["disclosure_accounting"] = dict(disclosure_accounting)
+    return report
+
+
 def render_lot_selection_report(
     selection: Dict[str, Any], lot_index: Optional[Dict[str, Any]] = None
 ) -> Dict[str, Any]:

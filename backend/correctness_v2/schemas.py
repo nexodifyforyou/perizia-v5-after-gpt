@@ -44,6 +44,9 @@ class JobStatus:
     # customer to confirm which interpretation is correct; the confirmed answer is
     # then used as ground truth to produce the final clean report.
     MONEY_CONFIRMATION_REQUIRED = "MONEY_CONFIRMATION_REQUIRED"
+    # A quality-blocked report whose only unresolved criticals are genuine,
+    # explicitly disclosed omissions. Disclosure only: never a risk severity.
+    PARTIAL_REPORT_AVAILABLE = "PARTIAL_REPORT_AVAILABLE"
     CONTRACT_READY = "CONTRACT_READY"
     # Customer-facing report rendered from the verified contract (step 3 renderer).
     REPORT_READY = "REPORT_READY"
@@ -66,6 +69,7 @@ ALL_STATUSES: List[str] = [
     JobStatus.NEEDS_MANUAL_REVIEW,
     JobStatus.LOT_SELECTION_REQUIRED,
     JobStatus.MONEY_CONFIRMATION_REQUIRED,
+    JobStatus.PARTIAL_REPORT_AVAILABLE,
     JobStatus.CONTRACT_READY,
     JobStatus.REPORT_READY,
     JobStatus.FAILED_NARRATION_USED_DETERMINISTIC_TEXT,
@@ -108,6 +112,7 @@ TERMINAL_STATUSES: List[str] = [
     JobStatus.NEEDS_MANUAL_REVIEW,
     JobStatus.LOT_SELECTION_REQUIRED,
     JobStatus.MONEY_CONFIRMATION_REQUIRED,
+    JobStatus.PARTIAL_REPORT_AVAILABLE,
     JobStatus.CONTRACT_READY,
     JobStatus.REPORT_READY,
     JobStatus.FAILED_NARRATION_USED_DETERMINISTIC_TEXT,

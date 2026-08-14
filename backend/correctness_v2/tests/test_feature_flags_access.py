@@ -16,6 +16,7 @@ def clear_flags(monkeypatch):
         feature_flags.FLAG_JOB_MODE,
         feature_flags.FLAG_MAX_RUNTIME_SECONDS,
         feature_flags.FLAG_CANONICAL_VERDICT,
+        feature_flags.FLAG_PARTIAL_LOT_REPORTS,
     ]:
         monkeypatch.delenv(name, raising=False)
     yield
@@ -29,11 +30,19 @@ def test_safe_defaults():
     assert feature_flags.job_mode() == "async"
     assert feature_flags.max_runtime_seconds() == 0
     assert feature_flags.canonical_verdict_enabled() is True
+    assert feature_flags.partial_lot_reports_enabled() is False
 
 
 def test_canonical_verdict_has_independent_rollback_switch(monkeypatch):
     monkeypatch.setenv(feature_flags.FLAG_CANONICAL_VERDICT, "false")
     assert feature_flags.canonical_verdict_enabled() is False
+
+
+def test_partial_reports_require_both_flags(monkeypatch):
+    monkeypatch.setenv(feature_flags.FLAG_PARTIAL_LOT_REPORTS, "true")
+    assert feature_flags.partial_lot_reports_enabled() is True
+    monkeypatch.setenv(feature_flags.FLAG_CANONICAL_VERDICT, "false")
+    assert feature_flags.partial_lot_reports_enabled() is False
 
 
 def test_auto_start_default_off():
@@ -93,3 +102,9 @@ def test_snapshot_shape():
     assert snap[feature_flags.FLAG_ENABLED] is False
     assert snap[feature_flags.FLAG_JOB_MODE] == "async"
     assert snap[feature_flags.FLAG_CANONICAL_VERDICT] is True
+    assert feature_flags.FLAG_PARTIAL_LOT_REPORTS not in snap
+
+
+def test_snapshot_adds_partial_flag_only_when_enabled(monkeypatch):
+    monkeypatch.setenv(feature_flags.FLAG_PARTIAL_LOT_REPORTS, "true")
+    assert feature_flags.snapshot()[feature_flags.FLAG_PARTIAL_LOT_REPORTS] is True

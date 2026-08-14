@@ -98,3 +98,10 @@ in the Branch 2 red-team (finding #5).
   soaked in production and rollback is no longer needed; tracked as future cleanup.
 
 _Register updated as Branch 2 review cycles close each item; final states recorded in the pre-commit report._
+
+## Branch 3 — partial lot reports (pre-commit repair cycle 1, 2026-08-14)
+
+| ID | Sev | Risk | Status | Control / note |
+|----|-----|------|--------|----------------|
+| R3-01 | S2 | Branch-3 partial path built `case_verdict.json` with `build_case_verdict([current_lot], all_lot_ids=...)`, silently turning untouched lots into `UNKNOWN` | CLOSED | Branch-3 `_finish_partial_report_available` now reconstructs the complete input set from persisted `lots/<id>/canonical_verdict.json` via `_reconstruct_case_lot_verdicts`, with the existing case entry as a conservative fallback; regression-locked by the 3-lot corruption test. |
+| R3-02 | **S1 (owner priority: HIGH)** | **Pre-existing (deployed Branch-2) data-integrity defect:** the SAME singleton-list pattern at `_build_single_lot_contract` (`orchestrator.py:760`, single-lot success path) and `resolve_money_confirmation` (`orchestrator.py:2344`) can persist a `case_verdict.json` that downgrades unrelated, untouched lots to `UNKNOWN`. | **OPEN** | Owner decision 2026-08-14: real data-integrity defect, DO NOT close/forget. NOT repaired in Branch 3 (scope discipline). Contained today only because customer/Storico workspace recomputes the case verdict fresh from each per-lot artifact rather than reading `case_verdict.json` back. **Dedicated follow-up branch `fix-canonical-verdict-persistence-all-lots` (scheduled AFTER Branch 3 deploy, BEFORE `feature-pdf-retention-consent`):** repair both sister paths with the same all-known-lots merge invariant (reuse the extracted `_reconstruct_case_lot_verdicts` helper), never build a case verdict from a singleton when other persisted lot verdicts exist, preserve all known per-lot verdicts, add regression tests for both paths, prove no customer/Branch-1/Branch-2 semantic regression, Fable review required. |

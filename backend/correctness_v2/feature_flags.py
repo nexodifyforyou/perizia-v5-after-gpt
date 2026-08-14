@@ -27,6 +27,7 @@ FLAG_NO_OLD_FALLBACK = "CORRECTNESS_V2_NO_OLD_FALLBACK"
 FLAG_JOB_MODE = "CORRECTNESS_JOB_MODE"
 FLAG_MAX_RUNTIME_SECONDS = "CORRECTNESS_MAX_RUNTIME_SECONDS"
 FLAG_CANONICAL_VERDICT = "CORRECTNESS_V2_CANONICAL_VERDICT_ENABLED"
+FLAG_PARTIAL_LOT_REPORTS = "CORRECTNESS_V2_PARTIAL_LOT_REPORTS_ENABLED"
 
 _TRUE_TOKENS = {"1", "true", "yes", "on", "y", "t"}
 _FALSE_TOKENS = {"0", "false", "no", "off", "n", "f", ""}
@@ -109,9 +110,14 @@ def canonical_verdict_enabled() -> bool:
     return _env_bool(FLAG_CANONICAL_VERDICT, True)
 
 
+def partial_lot_reports_enabled() -> bool:
+    """Branch 3 disclosure projection; OFF unless CanonicalVerdict is enabled."""
+    return canonical_verdict_enabled() and _env_bool(FLAG_PARTIAL_LOT_REPORTS, False)
+
+
 def snapshot() -> dict:
     """Return the current resolved flag values (handy for diagnostics/artifacts)."""
-    return {
+    values = {
         FLAG_ENABLED: is_enabled(),
         FLAG_ADMIN_ONLY: is_admin_only(),
         FLAG_AUTO_START: auto_start_enabled(),
@@ -121,6 +127,11 @@ def snapshot() -> dict:
         FLAG_MAX_RUNTIME_SECONDS: max_runtime_seconds(),
         FLAG_CANONICAL_VERDICT: canonical_verdict_enabled(),
     }
+    # Preserve the pre-Branch-3 artifact shape byte-for-byte while rollback is
+    # active. The new diagnostic key exists only when the behavior is enabled.
+    if partial_lot_reports_enabled():
+        values[FLAG_PARTIAL_LOT_REPORTS] = True
+    return values
 
 
 def access_block_reason(is_admin: Optional[bool]) -> Optional[str]:
