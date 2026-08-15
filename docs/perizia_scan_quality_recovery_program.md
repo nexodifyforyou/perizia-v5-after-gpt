@@ -156,14 +156,35 @@ golden assertions, and forensic documentation.
     `why_unresolved` with structured unresolved fields exposed separately (owner decision 2026-08-14).
 
 ### 5. PDF retention with consent and TTL
-- **Status:** NOT STARTED
+- **Status:** COMPLETED — **DEPLOYED DORMANT (owner-approved 2026-08-14/15); retention flag OFF**
+  - Feature commit: `98036334c1c941614f96550c6e81ba2299dd86b6`
+  - Merge commit (final main): `8f0d3e1010cc2fce5cf3431ef7b4c33082623f88`
+  - Release tag: `correctness-v2-pdf-retention-ready` (NOT `-live` — feature disabled)
+  - Deployed dormant 2026-08-15 (backend PID 885233, NRestarts=0, health 200 local+public, clean
+    startup, concurrency 2, canonical=ON, partial=ON, **pdf_retention=OFF** proven on live process).
+  - Fable verdict: **APPROVE** (1 red-team+repair cycle; 2 MAJOR fixed — upload-retention timeout +
+    unguarded erasure lookup; 2 MINOR deferred → risk register). Independent orchestrator verification
+    of all fixes + a security review (no HIGH/MEDIUM findings).
+  - New additive `backend/pdf_retention/` package (~1492 LOC) + `deploy/` systemd units (created, NOT
+    enabled). AES-256-GCM envelope encryption (per-object DEK wrapped by versioned KEK, owner+analysis
+    bound as AAD), opaque root-owned storage outside web/artifact roots, server-side ownership on every
+    access, versioned consent + withdrawal-deletes-bytes, delete cascades, crash-safe create/delete
+    state machines + reconciliation (standalone Mongo), standalone TTL cleanup + systemd timer,
+    path-traversal/symlink defenses, ops-only (non-web) owner diagnostic access with audit. Also
+    hardens R3-05 (test artifact-root guard + feature-flag pinning). Branch 1/2/3 core untouched.
+  - Feature flag `CORRECTNESS_V2_PDF_RETENTION_ENABLED` (default OFF; flag-OFF == today byte-for-byte).
+  - Dormant validation: eight-case 10/exit 0 (partial ON+OFF), Branch-1+2 regression 65, Branch-3
+    partial 48, full backend 1765 pass/7 known-stale/7 skip; **0 retained PDFs, 0 retention Mongo rows
+    (both collections empty), 0 artifact writes, 0 jobs, 0 paid/model/credit/quota** — no customer-
+    visible change. Encryption + no-plaintext-at-rest + path-traversal-rejection independently verified.
+  - **NOT enabled** (owner gate): needs production encryption key(s) in the secret store, root-owned
+    `/srv/perizia/private` (0700), systemd timer install+enable, and owner/legal (GDPR consent-copy)
+    sign-off before `CORRECTNESS_V2_PDF_RETENTION_ENABLED=true`.
 - **Branch:** `feature-pdf-retention-consent`
-- **Dependency:** none (parallel-safe, but executed after task 4 per programme order)
-- **Acceptance criteria:** original uploads retained under explicit consent with TTL;
-  checksum + lineage metadata; deletion policy documented; no silent loss of the
-  source document for future forensics.
-- **Regression risk:** low-medium (upload path).
-- **Deployment gate:** Fable review + owner approval; GDPR wording review.
+- **Regression risk:** low-medium (upload path) — mitigated: retention failure/timeout/flag-off can
+  never fail, delay, or change the analysis (timeout-bounded, additive, flag-gated).
+- **Deployment gate:** Fable review (PASSED) + owner approval (PASSED for dormant) + GDPR wording review
+  (PENDING, required before enablement).
 
 ## P1 — Experience and observability
 
@@ -277,8 +298,8 @@ golden assertions, and forensic documentation.
 3. `feature-correctness-v2-partial-lot-reports` — DEPLOYED + ENABLED
 4. `fix-canonical-verdict-persistence-all-lots` — DEPLOYED (R3-02: both Branch-2 singleton
    `build_case_verdict` sister sites repaired with the all-known-lots merge invariant; Fable APPROVE)
-5. `feature-pdf-retention-consent` ← **next** (Fable planning)
-6. `feature-correctness-v2-report-clarity`
+5. `feature-pdf-retention-consent` — DEPLOYED DORMANT (flag OFF; enablement gated on keys/root/timer/GDPR sign-off)
+6. `feature-correctness-v2-report-clarity` ← **next** (Fable planning; addresses the 2nd external-beta complaint — report hard to understand)
 7. `feature-beta-feedback-in-product`
 8. `feature-processing-lineage-observability`
 
