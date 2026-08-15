@@ -20,6 +20,7 @@ import argparse
 import json
 import os
 import sys
+import tempfile
 from pathlib import Path
 
 
@@ -48,9 +49,15 @@ def main() -> int:
         or (job_dir.parent.parent / "replays")
     )
     out_dir = Path(args.out) if args.out else out_root / (job_dir.name + "_replay")
+    production_jobs = Path("/srv/perizia/app/_correctness_v2/jobs").resolve()
+    resolved_out = out_dir.resolve()
+    if resolved_out == production_jobs or production_jobs in resolved_out.parents:
+        raise RuntimeError("R3-05: replay output cannot use the production artifact jobs root")
     out_dir.mkdir(parents=True, exist_ok=True)
-    # Route artifact writes into the replay folder, never the live one.
-    os.environ["CORRECTNESS_V2_ARTIFACTS_ROOT"] = str(out_dir)
+    # R3-05: even accidental artifact writes are forced into unique scratch.
+    os.environ["CORRECTNESS_V2_ARTIFACTS_ROOT"] = tempfile.mkdtemp(
+        prefix="perizia_replay_quality_artifacts_"
+    )
 
     from correctness_v2 import (  # noqa: E402 (after env override)
         contract as contract_mod,

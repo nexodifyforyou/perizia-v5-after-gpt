@@ -26,9 +26,27 @@ guarantee the *default* is never production.
 
 import os
 import pathlib
+import tempfile
 
 import pytest
 from dotenv import dotenv_values
+
+# Pin feature flags before any test can import ``server``.  ``server`` loads
+# backend/.env without overriding existing values, so this keeps the suite
+# independent from mutable production rollout configuration.  Tests that need
+# another state use function-scoped ``monkeypatch.setenv``.
+TEST_FEATURE_FLAG_DEFAULTS = {
+    "CORRECTNESS_V2_CANONICAL_VERDICT_ENABLED": "true",
+    "CORRECTNESS_V2_PARTIAL_LOT_REPORTS_ENABLED": "false",
+    "CORRECTNESS_V2_PDF_RETENTION_ENABLED": "false",
+}
+
+
+def _pin_test_feature_flags():
+    os.environ.update(TEST_FEATURE_FLAG_DEFAULTS)
+
+
+_pin_test_feature_flags()
 
 _BACKEND_DIR = pathlib.Path(__file__).resolve().parent
 _ENV_FILE = _BACKEND_DIR / ".env"
@@ -39,6 +57,25 @@ PRODUCTION_DB_NAME = (_ENV.get("DB_NAME") or "").strip()
 PRODUCTION_MONGO_URL = (_ENV.get("MONGO_URL") or "").strip()
 
 TEST_DB_NAME = f"test_pytest_{PRODUCTION_DB_NAME or 'perizia'}"
+
+# R3-05: force every backend pytest process onto a unique scratch artifact
+# root before application modules can import correctness_v2.artifacts.
+PRODUCTION_ARTIFACT_JOBS_ROOT = pathlib.Path("/srv/perizia/app/_correctness_v2/jobs")
+TEST_ARTIFACT_ROOT = pathlib.Path(tempfile.mkdtemp(prefix="perizia_pytest_artifacts_"))
+os.environ["PERIZIA_PYTEST_ACTIVE"] = "1"
+os.environ["CORRECTNESS_V2_ARTIFACTS_ROOT"] = str(TEST_ARTIFACT_ROOT)
+
+
+def assert_not_production_artifacts(root):
+    resolved = pathlib.Path(root).resolve()
+    resolved_jobs = (resolved / "jobs").resolve()
+    if resolved == PRODUCTION_ARTIFACT_JOBS_ROOT or resolved_jobs == PRODUCTION_ARTIFACT_JOBS_ROOT:
+        raise RuntimeError(
+            "REFUSING TO RUN: tests resolved Correctness V2 artifacts to the production jobs root"
+        )
+
+
+assert_not_production_artifacts(os.environ["CORRECTNESS_V2_ARTIFACTS_ROOT"])
 
 
 def assert_not_production(db_name, mongo_url=None):
@@ -108,7 +145,9 @@ def _no_real_telemetry_writes():
 
 def pytest_sessionstart(session):
     """Final guard: the effective runtime config must not be production."""
+    _pin_test_feature_flags()
     assert_not_production(os.environ.get("DB_NAME"), os.environ.get("MONGO_URL"))
+    assert_not_production_artifacts(os.environ.get("CORRECTNESS_V2_ARTIFACTS_ROOT"))
 
 
 def pytest_sessionfinish(session, exitstatus):

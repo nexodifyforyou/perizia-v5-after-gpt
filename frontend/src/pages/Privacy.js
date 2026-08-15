@@ -16,7 +16,7 @@ const sections = [
   },
   {
     title: '4. Conservazione e accesso',
-    text: 'Le modalita di conservazione e accesso ai dati dipendono dall’operativita del servizio e dalle configurazioni applicate nel tempo. Eventuali dettagli piu specifici possono essere aggiornati in futuro nei canali ufficiali della piattaforma.'
+    text: 'Il PDF originale non viene conservato salvo consenso specifico, facoltativo e separato per la singola analisi. Se l’opzione è disponibile e viene selezionata, la copia originale è cifrata, usata soltanto per finalità diagnostiche, collegata all’account e all’analisi, ed eliminata automaticamente entro il periodo indicato al momento del consenso. Il servizio resta utilizzabile senza prestare questo consenso.'
   },
   {
     title: '5. Sicurezza',
@@ -28,7 +28,7 @@ const sections = [
   },
   {
     title: 'Richieste di cancellazione',
-    text: 'Se elimini un documento dal portale o richiedi la cancellazione dei tuoi dati, PeriziaScan gestisce la rimozione secondo le procedure operative del servizio. L’effettiva eliminazione tecnica puo richiedere tempi di propagazione e puo dipendere da vincoli operativi, di sicurezza o di continuita del servizio. Per richieste specifiche sulla cancellazione dei documenti caricati, puoi contattarci a nexodifyforyou@gmail.com.'
+    text: 'Puoi revocare in qualsiasi momento il consenso alla conservazione diagnostica dalla pagina Profilo: la copia cifrata viene eliminata immediatamente e non attende la scadenza automatica. Anche l’eliminazione della singola analisi o di tutto lo storico elimina la relativa copia conservata. In caso di errore tecnico, il sistema non dichiara conclusa la cancellazione e mantiene uno stato sicuro da ritentare. Per richieste ulteriori puoi contattarci a nexodifyforyou@gmail.com.'
   },
   {
     title: '7. Aggiornamenti dell’informativa',

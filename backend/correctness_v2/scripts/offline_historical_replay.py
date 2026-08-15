@@ -10,8 +10,10 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import socket
 import subprocess
+import tempfile
 from contextlib import ExitStack
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -167,6 +169,13 @@ def run_replay(
     fixture_root: Optional[Path] = None,
     expectations_path: Path = DEFAULT_EXPECTATIONS,
 ) -> Dict[str, Any]:
+    production_jobs = Path("/srv/perizia/app/_correctness_v2/jobs").resolve()
+    resolved_output = output_dir.resolve()
+    if resolved_output == production_jobs or production_jobs in resolved_output.parents:
+        raise RuntimeError("R3-05: offline replay output cannot use the production artifact jobs root")
+    os.environ["CORRECTNESS_V2_ARTIFACTS_ROOT"] = tempfile.mkdtemp(
+        prefix="perizia_offline_replay_artifacts_"
+    )
     expectations_document = json.loads(expectations_path.read_text(encoding="utf-8"))
     expectations = expectations_document["replay_expectations"]
     lot_id = str(expectations["lot_id"])

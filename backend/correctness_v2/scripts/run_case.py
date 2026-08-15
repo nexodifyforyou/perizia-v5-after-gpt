@@ -21,6 +21,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import tempfile
 import re
 import sys
 from pathlib import Path
@@ -171,8 +172,14 @@ def main() -> int:
     out_dir = Path(args.out or (Path(os.environ.get(
         "CORRECTNESS_V2_REPLAY_ROOT",
         "/tmp/claude-1001/-srv-perizia-app/d7d2a1fa-ddcc-417e-a62a-6afbd5658f5b/scratchpad/runs")) / label))
+    production_jobs = Path("/srv/perizia/app/_correctness_v2/jobs").resolve()
+    resolved_out = out_dir.resolve()
+    if resolved_out == production_jobs or production_jobs in resolved_out.parents:
+        raise RuntimeError("R3-05: offline harness output cannot use the production artifact jobs root")
     out_dir.mkdir(parents=True, exist_ok=True)
-    os.environ.setdefault("CORRECTNESS_V2_ARTIFACTS_ROOT", str(out_dir / "_jobs"))
+    os.environ["CORRECTNESS_V2_ARTIFACTS_ROOT"] = tempfile.mkdtemp(
+        prefix="perizia_run_case_artifacts_"
+    )
 
     results = []
     base = _run(args.analysis_id, label)

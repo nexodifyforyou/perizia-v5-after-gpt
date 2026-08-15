@@ -27,6 +27,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 _DEFAULT_ROOT = "/srv/perizia/app/_correctness_v2"
+_PRODUCTION_JOBS_ROOT = Path("/srv/perizia/app/_correctness_v2/jobs")
 
 JOB_STATUS_FILE = "job_status.json"
 INPUT_PAGES_FILE = "input_pages.json"
@@ -74,6 +75,24 @@ def jobs_root() -> Path:
     return artifacts_root() / "jobs"
 
 
+def _assert_test_root_is_isolated(path: Optional[Path] = None) -> None:
+    """Hard R3-05 guard, evaluated before every test artifact write."""
+    if os.environ.get("PERIZIA_PYTEST_ACTIVE") != "1":
+        return
+    configured = artifacts_root().resolve()
+    configured_jobs = (configured / "jobs").resolve()
+    candidate = path.resolve() if path is not None else configured_jobs
+    if (
+        configured == _PRODUCTION_JOBS_ROOT
+        or configured_jobs == _PRODUCTION_JOBS_ROOT
+        or candidate == _PRODUCTION_JOBS_ROOT
+        or _PRODUCTION_JOBS_ROOT in candidate.parents
+    ):
+        raise RuntimeError(
+            "REFUSING TEST WRITE: Correctness V2 artifact path resolves inside the production jobs root"
+        )
+
+
 def job_dir(job_id: str) -> Path:
     return jobs_root() / str(job_id)
 
@@ -81,12 +100,14 @@ def job_dir(job_id: str) -> Path:
 def ensure_job_dir(job_id: str) -> Path:
     """Create (if needed) and return the job folder."""
     path = job_dir(job_id)
+    _assert_test_root_is_isolated(path)
     path.mkdir(parents=True, exist_ok=True)
     return path
 
 
 def _write_json(path: Path, data: Any) -> None:
     """Write JSON safely (temp file + replace)."""
+    _assert_test_root_is_isolated(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_suffix(path.suffix + ".tmp")
     with open(tmp, "w", encoding="utf-8") as f:

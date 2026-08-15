@@ -1,0 +1,20 @@
+[Unit]
+Description=PeriziaScan encrypted PDF retention TTL cleanup
+After=mongod.service
+
+[Service]
+Type=oneshot
+User=root
+Group=root
+UMask=0077
+WorkingDirectory=/srv/perizia/app/backend
+EnvironmentFile=/etc/periziascan/pdf_retention.env
+ExecStart=/srv/perizia/app/backend/.venv/bin/python -m pdf_retention.scripts.pdf_retention_cleanup
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=strict
+ReadWritePaths=/srv/perizia/private/pdf_retention
+
+[Install]
+WantedBy=multi-user.target

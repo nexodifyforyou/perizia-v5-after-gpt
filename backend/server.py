@@ -1,4 +1,4 @@
-from fastapi import FastAPI, APIRouter, HTTPException, Request, UploadFile, File, Depends, Response
+from fastapi import FastAPI, APIRouter, HTTPException, Request, UploadFile, File, Form, Depends, Response
 from fastapi.responses import JSONResponse, RedirectResponse, StreamingResponse
 from dotenv import load_dotenv
 from starlette.middleware.cors import CORSMiddleware
@@ -124,6 +124,10 @@ BETA_PARTNER_NAMES: Dict[str, str] = {}
 DOC_AI_TIMEOUT_SECONDS = int(os.environ.get('DOC_AI_TIMEOUT_SECONDS', '30'))
 LLM_TIMEOUT_SECONDS = int(os.environ.get('LLM_TIMEOUT_SECONDS', '45'))
 PIPELINE_TIMEOUT_SECONDS = int(os.environ.get('PIPELINE_TIMEOUT_SECONDS', '120'))
+# Independent of PIPELINE_TIMEOUT_SECONDS: bounds the best-effort, opt-in PDF
+# retention attempt so a stalled disk/Mongo write for that subsystem can never
+# hang or materially delay the customer's analysis response.
+PDF_RETENTION_TIMEOUT_SECONDS = int(os.environ.get('PDF_RETENTION_TIMEOUT_SECONDS', '10'))
 LLM_SUMMARY_TIMEOUT_SECONDS = int(os.environ.get('LLM_SUMMARY_TIMEOUT_SECONDS', '8'))
 PDF_TEXT_MIN_PAGE_CHARS = int(os.environ.get("PDF_TEXT_MIN_PAGE_CHARS", "40"))
 PDF_TEXT_MIN_COVERAGE_RATIO = float(os.environ.get("PDF_TEXT_MIN_COVERAGE_RATIO", "0.6"))
@@ -1128,6 +1132,14 @@ def _normalize_account_state(user_doc: Dict[str, Any]) -> Dict[str, Any]:
         "can_use_assistant": is_master_admin,
         "can_use_image_forensics": is_master_admin,
     }
+    try:
+        from pdf_retention import config as _pdf_retention_config
+
+        if _pdf_retention_config.is_enabled():
+            feature_access["pdf_retention_offer_enabled"] = True
+            feature_access["pdf_retention_days"] = _pdf_retention_config.retention_days()
+    except Exception:
+        pass
 
     return {
         "is_master_admin": is_master_admin,
@@ -1323,12 +1335,16 @@ async def require_beta_or_admin(request: Request) -> User:
     raise HTTPException(status_code=403, detail="Forbidden")
 
 
-def _feature_access_flags(user: Optional[User]) -> Dict[str, bool]:
+def _feature_access_flags(user: Optional[User]) -> Dict[str, Any]:
     normalized = _normalize_account_state(user.model_dump() if user else {})
-    return {
+    flags: Dict[str, Any] = {
         "can_use_assistant": normalized["feature_access"]["can_use_assistant"],
         "can_use_image_forensics": normalized["feature_access"]["can_use_image_forensics"],
     }
+    if normalized["feature_access"].get("pdf_retention_offer_enabled"):
+        flags["pdf_retention_offer_enabled"] = True
+        flags["pdf_retention_days"] = normalized["feature_access"].get("pdf_retention_days")
+    return flags
 
 
 def _require_feature_access(user: User, feature_label_it: str, access_flag: str) -> None:
@@ -16390,11 +16406,15 @@ SUMMARY_BUNDLE_JSON:
 
 
 @api_router.post("/analysis/perizia")
-async def analyze_perizia(request: Request, file: UploadFile = File(...)):
+async def analyze_perizia(
+    request: Request,
+    file: UploadFile = File(...),
+    retain_original_consent: bool = Form(False),
+):
     """Analyze uploaded perizia PDF"""
     user = await require_auth(request)
     request_id = f"req_{uuid.uuid4().hex[:12]}"
-    logger.info(f"[{request_id}] perizia_upload_start user={user.user_id} file={file.filename}")
+    logger.info(f"[{request_id}] perizia_upload_start user={user.user_id}")
 
     # IDs minted up-front, before any other check: analysis_id is the beta
     # quota ledger's authoritative idempotency key from the very first line of
@@ -17034,8 +17054,38 @@ async def analyze_perizia(request: Request, file: UploadFile = File(...)):
             beta_slot_granted=beta_slot_exempt,
         )
 
+    pdf_retention_result: Dict[str, Any] = {"attempted": False, "retained": False}
+    if not offline_qa:
+        try:
+            from pdf_retention.ingest import retain_if_consented
+
+            pdf_retention_result = await asyncio.wait_for(
+                retain_if_consented(
+                    analysis_id=analysis_id,
+                    user_id=user.user_id,
+                    contents=contents,
+                    input_sha256=input_sha256,
+                    consent_requested=retain_original_consent,
+                ),
+                timeout=PDF_RETENTION_TIMEOUT_SECONDS,
+            )
+        except asyncio.TimeoutError:
+            pdf_retention_result = {
+                "attempted": bool(retain_original_consent),
+                "retained": False,
+                "failure_code": "RETENTION_TIMEOUT",
+            }
+            logger.warning("pdf_retention upload hook timed out code=RETENTION_TIMEOUT")
+        except Exception:
+            pdf_retention_result = {
+                "attempted": bool(retain_original_consent),
+                "retained": False,
+                "failure_code": "RETENTION_INTERNAL_FAILED",
+            }
+            logger.warning("pdf_retention upload hook failed code=RETENTION_INTERNAL_FAILED")
+
     logger.info(f"[{request_id}] respond_ok analysis_id={analysis_id}")
-    return {
+    response_payload = {
         "ok": True,
         "analysis_id": analysis.analysis_id,
         "case_id": case_id,
@@ -17047,6 +17097,9 @@ async def analyze_perizia(request: Request, file: UploadFile = File(...)):
         "beta_quota_consumed_without_report": beta_quota_consumed_without_report,
         "result": result
     }
+    if pdf_retention_result.get("attempted"):
+        response_payload["pdf_retention"] = pdf_retention_result
+    return response_payload
 
 # ===================
 # PDF REPORT DOWNLOAD
@@ -20281,11 +20334,32 @@ async def delete_perizia_analysis(analysis_id: str, request: Request):
     """Delete a single perizia analysis"""
     user = await require_auth(request)
     
+    owned = await db.perizia_analyses.find_one({
+        "analysis_id": analysis_id,
+        "user_id": user.user_id
+    }, {"_id": 1})
+    if not owned:
+        raise HTTPException(status_code=404, detail="Analisi non trovata / Analysis not found")
+
+    from pdf_retention.erasure import erase_for_analysis
+
+    retention_delete = await erase_for_analysis(
+        analysis_id,
+        user_id=user.user_id,
+        reason="ANALYSIS_DELETED",
+        actor_type="CUSTOMER",
+        actor_user_id=user.user_id,
+    )
+    if not retention_delete.get("deleted"):
+        raise HTTPException(
+            status_code=503,
+            detail={"code": "PDF_RETENTION_DELETE_FAILED", "retry": True},
+        )
+
     result = await db.perizia_analyses.delete_one({
         "analysis_id": analysis_id,
         "user_id": user.user_id
     })
-    
     if result.deleted_count == 0:
         raise HTTPException(status_code=404, detail="Analisi non trovata / Analysis not found")
     
@@ -20329,6 +20403,17 @@ async def delete_all_history(request: Request):
     """Delete all user's history (perizia, images, assistant)"""
     user = await require_auth(request)
     
+    from pdf_retention.erasure import erase_all_for_user
+
+    retention_delete = await erase_all_for_user(
+        user.user_id, reason="HISTORY_DELETED", actor_type="CUSTOMER"
+    )
+    if not retention_delete.get("deleted"):
+        raise HTTPException(
+            status_code=503,
+            detail={"code": "PDF_RETENTION_DELETE_FAILED", "retry": True},
+        )
+
     # Delete all perizia analyses
     perizia_result = await db.perizia_analyses.delete_many({"user_id": user.user_id})
     
@@ -21086,6 +21171,15 @@ try:
 except Exception as _auth_email_exc:  # pragma: no cover - defensive startup guard
     logger.warning(f"auth_email router not registered: {_auth_email_exc}")
 
+# Metadata and withdrawal only: original PDF bytes are never web-served and
+# there is deliberately no owner/admin diagnostic web route.
+try:
+    from pdf_retention.api import router as pdf_retention_router
+
+    app.include_router(pdf_retention_router, prefix="/api")
+except Exception:  # pragma: no cover - defensive startup guard
+    logger.warning("pdf_retention router not registered")
+
 
 @app.on_event("startup")
 async def _correctness_v2_recover_stale_jobs():
@@ -21268,6 +21362,15 @@ async def ensure_indexes():
         await auth_identity.ensure_unique_index(db)
     except Exception as e:
         logger.warning(f"auth_email index creation failed: {e}")
+
+    try:
+        from pdf_retention import config as _pdf_retention_config
+        from pdf_retention import store as _pdf_retention_store
+
+        if _pdf_retention_config.is_enabled():
+            await _pdf_retention_store.ensure_indexes()
+    except Exception:
+        logger.warning("pdf_retention index creation skipped")
 
     # Additional beta-related indexes on existing collections (compound + status).
     try:
