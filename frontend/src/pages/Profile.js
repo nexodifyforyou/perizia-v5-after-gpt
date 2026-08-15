@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { Sidebar } from './Dashboard';
@@ -10,10 +10,47 @@ import {
   Shield,
   LogOut
 } from 'lucide-react';
+import { Trash2 } from 'lucide-react';
+import { deleteRetainedPdf, getRetainedPdfs } from '../lib/api/perizia';
+import { toast } from 'sonner';
 
 const Profile = () => {
   const { user, logout, accountState } = useAuth();
   const navigate = useNavigate();
+  const [retainedPdfs, setRetainedPdfs] = useState([]);
+  const [deletingAnalysisId, setDeletingAnalysisId] = useState(null);
+  const retentionAvailable = Boolean(
+    user?.account?.feature_access?.pdf_retention_offer_enabled
+    || user?.feature_access?.pdf_retention_offer_enabled
+  );
+
+  useEffect(() => {
+    if (!retentionAvailable) return undefined;
+    let active = true;
+    getRetainedPdfs()
+      .then((response) => {
+        if (active) setRetainedPdfs(response.data?.retained_pdfs || []);
+      })
+      .catch(() => {
+        if (active) setRetainedPdfs([]);
+      });
+    return () => {
+      active = false;
+    };
+  }, [retentionAvailable]);
+
+  const handleDeleteRetainedPdf = async (analysisId) => {
+    setDeletingAnalysisId(analysisId);
+    try {
+      await deleteRetainedPdf(analysisId);
+      setRetainedPdfs((rows) => rows.filter((row) => row.analysis_id !== analysisId));
+      toast.success('PDF originale conservato eliminato e consenso revocato.');
+    } catch (_error) {
+      toast.error('Eliminazione non completata. Riprova: il sistema non dichiarerà eliminati dati ancora presenti.');
+    } finally {
+      setDeletingAnalysisId(null);
+    }
+  };
 
   const handleLogout = async () => {
     await logout();
@@ -139,6 +176,41 @@ const Profile = () => {
               </div>
             </div>
           </div>
+
+          {retentionAvailable && (
+            <div className="mt-6 rounded-xl border border-zinc-800 bg-zinc-900 p-6">
+              <h3 className="text-lg font-semibold text-zinc-100">PDF diagnostici conservati</h3>
+              <p className="mt-2 text-sm text-zinc-500">
+                La conservazione è facoltativa, cifrata e limitata nel tempo. Puoi revocare
+                il consenso eliminando subito la copia associata a una singola analisi.
+              </p>
+              {retainedPdfs.length === 0 ? (
+                <p className="mt-4 text-sm text-zinc-400">Nessun PDF originale conservato.</p>
+              ) : (
+                <div className="mt-4 space-y-3">
+                  {retainedPdfs.map((row) => (
+                    <div key={row.analysis_id} className="flex flex-col gap-3 rounded-lg bg-zinc-950 p-4 sm:flex-row sm:items-center sm:justify-between">
+                      <div>
+                        <p className="font-mono text-xs text-zinc-300">{row.analysis_id}</p>
+                        <p className="mt-1 text-xs text-zinc-500">
+                          Eliminazione automatica entro {new Date(row.expires_at).toLocaleDateString('it-IT')}
+                        </p>
+                      </div>
+                      <Button
+                        onClick={() => handleDeleteRetainedPdf(row.analysis_id)}
+                        disabled={deletingAnalysisId === row.analysis_id}
+                        variant="outline"
+                        className="border-red-500/30 text-red-400 hover:bg-red-500/10"
+                      >
+                        <Trash2 className="mr-2 h-4 w-4" />
+                        {deletingAnalysisId === row.analysis_id ? 'Eliminazione…' : 'Revoca ed elimina'}
+                      </Button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
         </div>
       </main>
     </div>

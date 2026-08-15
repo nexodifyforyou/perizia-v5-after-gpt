@@ -4,6 +4,20 @@ const API_URL = process.env.REACT_APP_BACKEND_URL;
 
 const correctnessV2Base = (analysisId) => `${API_URL}/api/analysis/perizia/${analysisId}/correctness-v2`;
 
+export const getRetainedPdfs = (requestConfig = {}) => {
+  return axios.get(`${API_URL}/api/pdf-retention`, {
+    withCredentials: true,
+    ...requestConfig,
+  });
+};
+
+export const deleteRetainedPdf = (analysisId, requestConfig = {}) => {
+  return axios.delete(`${API_URL}/api/analysis/perizia/${analysisId}/retained-pdf`, {
+    withCredentials: true,
+    ...requestConfig,
+  });
+};
+
 export const startCorrectnessV2 = (analysisId, options = {}, requestConfig = {}) => {
   const body = {};
   if (options.selected_lot_id) body.selected_lot_id = String(options.selected_lot_id);

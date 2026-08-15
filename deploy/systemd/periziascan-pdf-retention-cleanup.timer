@@ -1,0 +1,11 @@
+[Unit]
+Description=Run PeriziaScan encrypted PDF retention cleanup hourly
+
+[Timer]
+OnCalendar=hourly
+Persistent=true
+RandomizedDelaySec=300
+Unit=periziascan-pdf-retention-cleanup.service
+
+[Install]
+WantedBy=timers.target

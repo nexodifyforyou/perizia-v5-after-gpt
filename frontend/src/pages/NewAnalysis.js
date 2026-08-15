@@ -133,6 +133,7 @@ const NewAnalysis = () => {
   const [elapsedSec, setElapsedSec] = useState(0);
   const [awaitingResponse, setAwaitingResponse] = useState(false);
   const [error, setError] = useState(null);
+  const [retainOriginalConsent, setRetainOriginalConsent] = useState(false);
   const elapsedIntervalRef = useRef(null);
   const stageIntervalRef = useRef(null);
 
@@ -228,6 +229,9 @@ const NewAnalysis = () => {
     
     const formData = new FormData();
     formData.append('file', file);
+    if (retainOriginalConsent) {
+      formData.append('retain_original_consent', 'true');
+    }
     const startTime = Date.now();
     
     try {
@@ -265,6 +269,9 @@ const NewAnalysis = () => {
       setAwaitingResponse(false);
       if (response.data?.beta_quota_consumed_without_report) {
         toast.info(BETA_CONSUMED_WITHOUT_REPORT_MESSAGE_IT);
+      }
+      if (response.data?.pdf_retention?.retained === false) {
+        toast.warning('Analisi completata, ma la copia diagnostica cifrata non è stata conservata.');
       }
       await refreshUser();
       setCurrentStage(STAGE_INDEX.FINALIZE);
@@ -411,9 +418,39 @@ const NewAnalysis = () => {
                     </div>
                   </div>
                 ) : (
-                  <div className="flex flex-col justify-center gap-3 sm:flex-row sm:gap-4">
+                  <div className="space-y-4">
+                    {(user?.account?.feature_access?.pdf_retention_offer_enabled
+                      || user?.feature_access?.pdf_retention_offer_enabled) && (
+                      <label className="mx-auto flex max-w-xl cursor-pointer items-start gap-3 rounded-lg border border-zinc-700 bg-zinc-900/70 p-4 text-left">
+                        <input
+                          type="checkbox"
+                          checked={retainOriginalConsent}
+                          onChange={(event) => setRetainOriginalConsent(event.target.checked)}
+                          className="mt-1 h-4 w-4 accent-amber-400"
+                          data-testid="pdf-retention-consent"
+                        />
+                        <span>
+                          <span className="block text-sm font-medium text-zinc-200">
+                            Acconsento alla conservazione diagnostica del PDF originale
+                          </span>
+                          <span className="mt-1 block text-xs leading-relaxed text-zinc-500">
+                            Facoltativo: il PDF sarà cifrato e conservato per un massimo di{' '}
+                            {user?.account?.feature_access?.pdf_retention_days
+                              || user?.feature_access?.pdf_retention_days
+                              || 30}{' '}
+                            giorni esclusivamente per diagnosticare problemi di questa analisi.
+                            Puoi revocare il consenso ed eliminarlo in qualsiasi momento. L’analisi
+                            è disponibile anche senza questo consenso.
+                          </span>
+                        </span>
+                      </label>
+                    )}
+                    <div className="flex flex-col justify-center gap-3 sm:flex-row sm:gap-4">
                     <Button
-                      onClick={() => setFile(null)}
+                      onClick={() => {
+                        setFile(null);
+                        setRetainOriginalConsent(false);
+                      }}
                       variant="outline"
                       className="border-zinc-700 text-zinc-400 hover:bg-zinc-800"
                     >
@@ -426,6 +463,7 @@ const NewAnalysis = () => {
                     >
                       Avvia Analisi
                     </Button>
+                    </div>
                   </div>
                 )}
               </div>
