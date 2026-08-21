@@ -28,6 +28,7 @@ FLAG_JOB_MODE = "CORRECTNESS_JOB_MODE"
 FLAG_MAX_RUNTIME_SECONDS = "CORRECTNESS_MAX_RUNTIME_SECONDS"
 FLAG_CANONICAL_VERDICT = "CORRECTNESS_V2_CANONICAL_VERDICT_ENABLED"
 FLAG_PARTIAL_LOT_REPORTS = "CORRECTNESS_V2_PARTIAL_LOT_REPORTS_ENABLED"
+FLAG_REPORT_CLARITY = "CORRECTNESS_V2_REPORT_CLARITY_ENABLED"
 
 _TRUE_TOKENS = {"1", "true", "yes", "on", "y", "t"}
 _FALSE_TOKENS = {"0", "false", "no", "off", "n", "f", ""}
@@ -115,6 +116,17 @@ def partial_lot_reports_enabled() -> bool:
     return canonical_verdict_enabled() and _env_bool(FLAG_PARTIAL_LOT_REPORTS, False)
 
 
+def report_clarity_enabled() -> bool:
+    """Report-clarity IA + Italian-first bilingual presentation branch.
+
+    OFF by default. When OFF the customer surface is byte-for-byte identical to
+    today (no broadened PARTIAL section gate, no conflict projection, no
+    bilingual/translate path, no Gemini). Requires CanonicalVerdict because the
+    conflict/incerto projection reads authoritative ``canonical_verdict`` fields.
+    """
+    return canonical_verdict_enabled() and _env_bool(FLAG_REPORT_CLARITY, False)
+
+
 def snapshot() -> dict:
     """Return the current resolved flag values (handy for diagnostics/artifacts)."""
     values = {
@@ -131,6 +143,10 @@ def snapshot() -> dict:
     # active. The new diagnostic key exists only when the behavior is enabled.
     if partial_lot_reports_enabled():
         values[FLAG_PARTIAL_LOT_REPORTS] = True
+    # Preserve the pre-clarity artifact shape byte-for-byte while the flag is
+    # off. The diagnostic key exists only when the behavior is enabled.
+    if report_clarity_enabled():
+        values[FLAG_REPORT_CLARITY] = True
     return values
 
 

@@ -94,6 +94,52 @@ _CLASSIFICATION_STATUS = {
 }
 _DEFAULT_STATUS = ("non_determinabile", "Non determinabile dalla sola perizia", "slate")
 
+# --- Report-clarity conflict/incerto projection (flag-gated) -----------------
+# Internal reason codes (verdict_model / lot_fact_projection) are NEVER shown to
+# the customer. They are mapped through this fixed Italian label table only.
+_CONFLICT_REASON_LABELS_IT = {
+    "CONFLICT_REQUIRES_REVIEW": "Le fonti della perizia riportano valori discordanti: è necessaria una verifica.",
+    "POSSIBLE_CROSS_LOT_LEAKAGE": "Possibile sovrapposizione di dati tra lotti diversi: da verificare a quale lotto si riferisce il dato.",
+}
+_CONFLICT_REASON_DEFAULT_IT = "Elemento discordante tra le fonti della perizia: da verificare."
+
+# Presentation-only conflict-floor summary (owner decision, Fable finding #3):
+# shown INSTEAD of an unconditional green summary when the report is not blocked
+# but the authoritative CanonicalVerdict carries conflicts. Deterministic (never
+# Gemini); its English lives in the static bilingual glossary.
+_CLARITY_CONFLICT_FLOOR_IT = (
+    "Nessun blocco automatico rilevato, ma sono presenti informazioni in conflitto da verificare."
+)
+
+# Internal field path → fixed Italian topic label.
+_CONFLICT_PATH_LABELS_IT = {
+    "drivers": "Elemento segnalato dalla perizia",
+    "occupancy": "Stato di occupazione",
+    "typology": "Tipologia dell'immobile",
+    "money.final_value": "Valore finale della perizia",
+    "money": "Dato economico",
+    "compliance": "Conformità tecnica",
+    "formalities": "Formalità",
+}
+_CONFLICT_PATH_DEFAULT_IT = "Elemento della perizia"
+
+# Scalar field_verdicts leaves projected as INCERTO when undetermined. Each entry
+# maps the leaf key to its fixed Italian topic label + a customer explanation.
+_INCERTO_LEAF_LABELS_IT = {
+    "occupancy": (
+        "Stato di occupazione",
+        "La perizia non consente di determinare con certezza lo stato di occupazione dell'immobile.",
+    ),
+    "typology": (
+        "Tipologia dell'immobile",
+        "La tipologia dell'immobile non è determinabile con certezza dalla sola perizia.",
+    ),
+    "money.final_value": (
+        "Valore finale della perizia",
+        "Il valore finale non è determinabile con certezza dalla sola perizia.",
+    ),
+}
+
 # area token → customer group title
 _AREA_GROUP_LABEL = {
     "edilizia": "Edilizia",
@@ -2087,6 +2133,128 @@ def _build_esito(
 
 
 # ---------------------------------------------------------------------------
+# Report-clarity: conflict + incerto projection (flag-gated, additive)
+# ---------------------------------------------------------------------------
+_SEV_CONFLICT = verdict_model.priority_from_severity("grave", 0)
+_SEV_INCERTO = verdict_model.priority_from_severity("minore", 0)
+
+
+def _build_conflicts(
+    report: Dict[str, Any],
+    canonical_verdict: Optional[Dict[str, Any]],
+    lot_id: Optional[str],
+    existing_topics: Optional[set] = None,
+) -> List[Dict[str, Any]]:
+    """Project authoritative ``canonical_verdict`` contradictions/undetermined
+    leaves into presentation findings. Reads ONLY fields already computed by
+    ``verdict_model``; never re-derives severity, never invents a fact.
+
+    * ``conflicts[]`` rows -> ``in_conflitto`` findings (P3).
+    * scalar ``field_verdicts`` leaves that are low-confidence / ``UNKNOWN`` ->
+      ``non_determinabile`` (INCERTO) findings.
+
+    Fail-closed: any malformed input yields ``[]`` and never raises into the
+    caller. Internal reason codes / field paths are ALWAYS mapped through the
+    fixed Italian label tables above — a raw enum can never reach rendered text.
+    """
+    if not isinstance(canonical_verdict, dict):
+        return []
+    existing_topics = existing_topics or set()
+    findings: List[Dict[str, Any]] = []
+    try:
+        # 1. IN CONFLITTO — case-vs-lot / cross-lot contradictions.
+        seen_conflict: set = set()
+        for row in canonical_verdict.get("conflicts") or []:
+            if not isinstance(row, dict):
+                continue
+            path = str(row.get("path") or "")
+            reason_code = str(row.get("reason_code") or "")
+            topic_label = _CONFLICT_PATH_LABELS_IT.get(path, _CONFLICT_PATH_DEFAULT_IT)
+            reason_it = _CONFLICT_REASON_LABELS_IT.get(reason_code, _CONFLICT_REASON_DEFAULT_IT)
+            dedupe_key = (path, reason_code)
+            if dedupe_key in seen_conflict:
+                continue
+            seen_conflict.add(dedupe_key)
+            fid = _finding_id("conflitti", f"conflict:{path}:{reason_code}", lot_id, None, None)
+            findings.append({
+                "finding_id": fid,
+                "section": "conflitti",
+                "topic": path or "conflitto",
+                "title": topic_label,
+                "status": "in_conflitto",
+                "status_label": "In conflitto tra le fonti",
+                "tone": "ambra",
+                "severity": _SEV_CONFLICT,
+                "customer_summary": reason_it,
+                "buyer_impact": "Un dato discordante va chiarito con un professionista prima di procedere.",
+                "recommended_action": None,
+                "amount": None,
+                "amount_display": None,
+                "pages": [],
+                "page": None,
+                "evidence": None,
+                "blocking": False,
+                "confirm_class": None,
+            })
+
+        # 2. INCERTO — undetermined scalar field_verdicts leaves.
+        field_verdicts = canonical_verdict.get("field_verdicts")
+        if isinstance(field_verdicts, dict):
+            leaves: List[Tuple[str, Any]] = []
+            for key in ("occupancy", "typology"):
+                leaves.append((key, field_verdicts.get(key)))
+            money = field_verdicts.get("money")
+            if isinstance(money, dict):
+                leaves.append(("money.final_value", money.get("final_value")))
+            for leaf_key, leaf in leaves:
+                if not isinstance(leaf, dict):
+                    continue
+                if leaf_key in existing_topics:
+                    continue
+                value = leaf.get("value")
+                confidence = str(leaf.get("confidence") or "").lower()
+                undetermined = (
+                    confidence == "low"
+                    or (leaf_key == "occupancy" and str(value).upper() == "UNKNOWN")
+                )
+                if not undetermined:
+                    continue
+                label, explanation = _INCERTO_LEAF_LABELS_IT[leaf_key]
+                fid = _finding_id("conflitti", f"incerto:{leaf_key}", lot_id, None, None)
+                findings.append({
+                    "finding_id": fid,
+                    "section": "conflitti",
+                    "topic": leaf_key,
+                    "title": label,
+                    "status": "non_determinabile",
+                    "status_label": "Non determinabile dalla sola perizia",
+                    "tone": "slate",
+                    "severity": _SEV_INCERTO,
+                    "customer_summary": explanation,
+                    "buyer_impact": "Un dato non determinabile richiede una verifica prima di procedere.",
+                    "recommended_action": None,
+                    "amount": None,
+                    "amount_display": None,
+                    "pages": [],
+                    "page": None,
+                    "evidence": None,
+                    "blocking": False,
+                    "confirm_class": None,
+                })
+    except (ValueError, KeyError, TypeError, AttributeError):
+        # Fail closed: an unusable/malformed verdict must never break the report.
+        return []
+    return findings
+
+
+def _build_conflitti_section(conflict_findings: List[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+    """Group conflict/incerto findings into a structured section (finding_id refs)."""
+    if not conflict_findings:
+        return None
+    return {"items": [f["finding_id"] for f in conflict_findings]}
+
+
+# ---------------------------------------------------------------------------
 # Public entry point
 # ---------------------------------------------------------------------------
 def build_decision_model(
@@ -2123,9 +2291,19 @@ def build_decision_model(
 
     sections: Dict[str, Any] = {}
     findings: List[Dict[str, Any]] = []
+    conflict_findings: List[Dict[str, Any]] = []
 
     # Fail-closed / non-ready statuses: attach only esito + readiness, no findings.
-    if report_status == "REPORT_READY":
+    # Report-clarity (flag-gated) additionally builds the full section set for a
+    # PARTIAL_REPORT_AVAILABLE report. This runs the SAME deterministic builders
+    # against already-certified data (Branch 3's partial overlay never touches an
+    # already-resolved section); readiness/esito are NOT touched below and stay
+    # fail-closed (TECHNICAL_REVIEW_REQUIRED / red-amber) for partial reports.
+    clarity_enabled = feature_flags.report_clarity_enabled()
+    build_sections = report_status == "REPORT_READY" or (
+        clarity_enabled and report_status == "PARTIAL_REPORT_AVAILABLE"
+    )
+    if build_sections:
         acquisto = _build_acquisto(report, lot_id)
         if acquisto:
             sections["acquisto"] = acquisto
@@ -2186,6 +2364,17 @@ def build_decision_model(
         if fonti:
             sections["fonti"] = fonti
 
+        # Report-clarity (flag-gated): surface authoritative CanonicalVerdict
+        # contradictions / undetermined leaves as IN CONFLITTO / INCERTO findings
+        # (P3). These are appended AFTER the standard findings so they never alter
+        # confirmation eligibility, readiness, or esito (their statuses are
+        # non-actionable and carry no confirmation panel).
+        if clarity_enabled:
+            existing_topics = {f.get("topic") for f in findings}
+            conflict_findings = _build_conflicts(
+                report, base_verdict, lot_id, existing_topics
+            )
+
         # Confirmation eligibility (before joining user answers).
         eligible_count = 0
         for f in sorted(findings, key=lambda x: x.get("severity", 9)):
@@ -2194,6 +2383,14 @@ def build_decision_model(
             _attach_confirmation(f)
             if f.get("confirmation"):
                 eligible_count += 1
+
+        # Append conflict/incerto findings AFTER confirmation eligibility so they
+        # never receive a confirmation panel and never affect readiness/esito.
+        if conflict_findings:
+            findings.extend(conflict_findings)
+            conflitti = _build_conflitti_section(conflict_findings)
+            if conflitti:
+                sections["conflitti"] = conflitti
 
     # Join user confirmations (also for non-ready → empty since no findings).
     confirmation_views = _apply_confirmations(findings, confirmations)
@@ -2268,4 +2465,25 @@ def build_decision_model(
         "findings": findings,
         "confirmations": confirmation_views,
     }
+    # Presentation hint ONLY (never read by any severity/status/readiness/
+    # disclosure computation). Present only when the flag is on, so the flag-OFF
+    # payload stays byte-for-byte identical to today. The frontend keys its
+    # additive clarity IA (hero, critical/secondary split, six-state labels,
+    # bilingual, conflicts) off this marker.
+    if clarity_enabled:
+        out["clarity_enabled"] = True
+        # Presentation-only conflict floor (owner decision, Fable finding #3):
+        # a non-blocked report whose authoritative CanonicalVerdict carries one or
+        # more conflicts must never display an unconditional green "no blocking
+        # issues" summary. Clamp the DISPLAYED tone to >= amber and provide a
+        # deterministic qualified message. esito.level / readiness / severity /
+        # CanonicalVerdict are NOT changed — display hint only; the IN CONFLITTO
+        # cards remain visible and authoritative.
+        if (
+            isinstance(canonical_verdict, dict)
+            and (canonical_verdict.get("conflicts") or [])
+            and esito.get("level") == "verde"
+        ):
+            esito["clarity_conflict_floor"] = True
+            esito["clarity_summary_it"] = _CLARITY_CONFLICT_FLOOR_IT
     return out

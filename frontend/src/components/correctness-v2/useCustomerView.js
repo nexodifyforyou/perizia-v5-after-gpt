@@ -3,6 +3,7 @@ import {
   getCorrectnessV2CustomerView,
   submitCorrectnessV2MoneyConfirmation,
   submitCorrectnessV2FindingConfirmation,
+  getCorrectnessV2Translation,
 } from '../../lib/api/perizia';
 
 // Single source of truth for the sanitized Correctness V2 customer report.
@@ -65,6 +66,10 @@ export const useCorrectnessV2CustomerView = (
   // Focused finding-confirmation submission state (decision-model findings).
   const [confirmingFinding, setConfirmingFinding] = useState(false);
   const [findingConfirmError, setFindingConfirmError] = useState('');
+  // Lazily-fetched English translations (progressive enhancement). Never blocks
+  // or alters the Italian report; a failure just leaves this empty.
+  const [translations, setTranslations] = useState(null);
+  const translatedJobRef = useRef(null);
   const mountedRef = useRef(false);
   const pollCountRef = useRef(0);
   // Bumped by reload() to re-run the initial fetch (customer retry action).
@@ -141,6 +146,29 @@ export const useCorrectnessV2CustomerView = (
   const available = Boolean(payload && payload.available && payload.report);
   const isLotSelection = report?.report_status === 'LOT_SELECTION_REQUIRED';
   const isMoneyConfirmation = report?.report_status === 'MONEY_CONFIRMATION_REQUIRED';
+
+  // Progressive-enhancement English: fetched ONCE per job AFTER the Italian
+  // report is available, only when the backend signals report-clarity is on
+  // (decision_model.clarity_enabled). Side-effect-free, quota-exempt, fail-soft:
+  // any error simply leaves the Italian report as-is.
+  const jobId = report?.job_id || null;
+  const clarityOn = Boolean(report?.decision_model?.clarity_enabled);
+  useEffect(() => {
+    if (!active || !available || !jobId || !clarityOn) return undefined;
+    if (translatedJobRef.current === jobId) return undefined;
+    translatedJobRef.current = jobId;
+    const controller = new AbortController();
+    getCorrectnessV2Translation(analysisId, jobId, { signal: controller.signal })
+      .then((response) => {
+        if (!mountedRef.current) return;
+        const data = response.data;
+        if (data?.available && Array.isArray(data.translations)) {
+          setTranslations(data.translations);
+        }
+      })
+      .catch(() => { /* fail-soft: Italian report is unaffected */ });
+    return () => controller.abort();
+  }, [active, available, analysisId, jobId, clarityOn]);
 
   // Submit the customer's answers {ambiguity_id: option_id}; on success the
   // server returns the finalized report, which we swap in directly.
@@ -227,6 +255,7 @@ export const useCorrectnessV2CustomerView = (
     reload,
     payload,
     report,
+    translations,
     available,
     preparing,
     isLotSelection,

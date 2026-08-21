@@ -54,6 +54,11 @@ ANALYZE_ALL_RESULT_FILE = "analyze_all_result.json"
 COMPLIANCE_GATE_FILE = "compliance_gate_report.json"
 # Step 3B artifact: the deterministic customer-facing report.
 CUSTOMER_REPORT_FILE = "customer_report.json"
+# Report-clarity bilingual translation cache. Owner-scoped: stored in the job
+# directory alongside customer_report.json and only ever reachable through the
+# same owner-gated customer-view endpoints. Presentation metadata only — never
+# part of CanonicalVerdict, never a global/public lookup table.
+TRANSLATION_CACHE_FILE = "clarity_translation_cache.json"
 # Quality gate artifacts (no-silent-omissions coverage + quality certificate).
 COVERAGE_AUDIT_FILE = "coverage_audit.json"
 PAGE_AUDIT_FILE = "page_by_page_audit.json"
@@ -226,6 +231,16 @@ def save_customer_report(job_id: str, report: Dict[str, Any]) -> str:
 
 def save_coverage_audit(job_id: str, audit: Dict[str, Any]) -> str:
     return save_json(job_id, COVERAGE_AUDIT_FILE, audit)
+
+
+def save_translation_cache(job_id: str, cache: Dict[str, Any]) -> str:
+    """Persist the owner-scoped bilingual translation cache for a job."""
+    return save_json(job_id, TRANSLATION_CACHE_FILE, cache)
+
+
+def read_translation_cache(job_id: str) -> Optional[Dict[str, Any]]:
+    """Read the owner-scoped translation cache, or ``None`` when absent."""
+    return read_json(job_id, TRANSLATION_CACHE_FILE)
 
 
 def save_page_audit(job_id: str, audit: Dict[str, Any]) -> str:

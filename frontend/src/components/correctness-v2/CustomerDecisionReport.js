@@ -1,10 +1,48 @@
 import React, { useMemo, useState } from 'react';
 import {
-  Building2, CheckCircle2, ClipboardList, Coins, FileText, Info,
-  KeyRound, Quote, ScrollText, ShieldCheck,
+  AlertTriangle, Building2, CheckCircle2, ClipboardList, Coins, FileText, FileX,
+  HelpCircle, Info, KeyRound, Quote, Scale, ScrollText, Search, ShieldCheck, Wrench,
 } from 'lucide-react';
 import { pagesText, StatusChip } from './shared';
 import { ConfirmationDialog } from './ConfirmationDialog';
+import { ClarityProvider, useClarity, EnUnder, Bi } from './i18nClarity';
+
+// Six-state vocabulary (§3.2): each status token → its own label + icon + tone.
+// Color is presentation only and never changes meaning; no two distinct states
+// share BOTH the same label and the same icon. This is a static dictionary keyed
+// off a server-computed `status` token — the frontend classifies nothing.
+const SIX_STATE = {
+  dichiarato_perizia: { tone: 'verde', icon: CheckCircle2, label: 'Dichiarato dalla perizia' },
+  conforme: { tone: 'verde', icon: ShieldCheck, label: 'Conforme secondo la perizia' },
+  confermato_utente: { tone: 'verde', icon: CheckCircle2, label: "Confermato dall'utente" },
+  completato: { tone: 'verde', icon: CheckCircle2, label: 'Completato' },
+  regolarizzabile: { tone: 'ambra', icon: Wrench, label: 'Regolarizzabile secondo la perizia' },
+  non_conforme: { tone: 'ambra', icon: AlertTriangle, label: 'Non conforme secondo la perizia' },
+  da_verificare: { tone: 'ambra', icon: Search, label: 'Da verificare' },
+  da_chiarire: { tone: 'ambra', icon: HelpCircle, label: 'Da chiarire' },
+  conferma_necessaria: { tone: 'ambra', icon: HelpCircle, label: 'Conferma necessaria' },
+  verifica_tecnica_richiesta: { tone: 'ambra', icon: AlertTriangle, label: 'Verifica tecnica richiesta' },
+  in_conflitto: { tone: 'ambra', icon: Scale, label: 'In conflitto tra le fonti' },
+  non_dichiarato: { tone: 'slate', icon: FileX, label: 'Non dichiarato' },
+  non_determinabile: { tone: 'slate', icon: HelpCircle, label: 'Non determinabile dalla sola perizia' },
+  non_verificato: { tone: 'slate', icon: HelpCircle, label: 'Non determinabile dalla sola perizia' },
+};
+
+// Bilingual status chip: icon + Italian label (primary) + muted English under it.
+const SixStateChip = ({ status, label, testId }) => {
+  const meta = SIX_STATE[status] || { tone: 'slate', icon: HelpCircle };
+  const text = label || meta.label || 'Da verificare';
+  const Icon = meta.icon;
+  return (
+    <span data-testid={testId} className="inline-flex flex-col items-end gap-0.5">
+      <span className="inline-flex items-center gap-1">
+        {Icon ? <Icon className="h-3.5 w-3.5 shrink-0 opacity-80" /> : null}
+        <StatusChip tone={meta.tone}>{text}</StatusChip>
+      </span>
+      <EnUnder it={text} />
+    </span>
+  );
+};
 
 // ---------------------------------------------------------------------------
 // Customer DECISION report — renders ONLY from `report.decision_model`.
@@ -28,13 +66,64 @@ const ESITO_ACCENT = {
 
 const SectionShell = ({ icon: Icon, title, children, testId }) => (
   <section data-testid={testId} className="space-y-3">
-    <h3 className="flex items-center gap-2 text-sm font-semibold uppercase tracking-wide text-zinc-400">
-      {Icon ? <Icon className="h-4 w-4 text-zinc-500" /> : null}
-      {title}
-    </h3>
+    <div>
+      <h3 className="flex items-center gap-2 text-sm font-semibold uppercase tracking-wide text-zinc-400">
+        {Icon ? <Icon className="h-4 w-4 text-zinc-500" /> : null}
+        {title}
+      </h3>
+      <EnUnder it={title} className="uppercase tracking-wide" />
+    </div>
     {children}
   </section>
 );
+
+// --- §Q1–Q3 Hero: what am I buying / the numbers / the verdict --------------
+// Additive: recombines three fields already rendered below (identity one-liner,
+// terminal value row, esito headline/chip). It computes NOTHING — pure lookup.
+const HeroSummary = ({ model }) => {
+  const { clarity } = useClarity();
+  if (!clarity || !model) return null;
+  const esito = model.esito || {};
+  const sections = model.sections || {};
+  const id = (sections.acquisto || {}).identity || {};
+  const identityLine = [id.tipologia, id.indirizzo].filter(Boolean).join(' — ');
+  const catena = (sections.numeri || {}).catena || [];
+  const terminal = catena.find((r) => r.terminal) || null;
+  // Presentation-only conflict floor (Fable #3): display clamp only; esito.level unchanged.
+  const floor = Boolean(esito.clarity_conflict_floor);
+  const displayLevel = floor ? 'ambra' : esito.level;
+  const accent = ESITO_ACCENT[displayLevel] || ESITO_ACCENT.ambra;
+  if (!identityLine && !terminal && !esito.headline) return null;
+  return (
+    <section data-testid="cv2-hero" className={`rounded-xl border p-4 sm:p-5 ${accent}`}>
+      {esito.headline && (
+        <div className="mb-2">
+          <StatusChip tone={ESITO_TONE[displayLevel] || 'ambra'}>
+            {displayLevel === 'verde' ? 'Nessun elemento bloccante' : displayLevel === 'rosso' ? 'Verifica tecnica' : 'Verifiche necessarie'}
+          </StatusChip>
+        </div>
+      )}
+      {identityLine && (
+        <div className="text-sm text-zinc-200">
+          <Bi it={identityLine} as="div" />
+        </div>
+      )}
+      {terminal && (
+        <div className="mt-2 flex items-baseline justify-between gap-3">
+          <span className="text-xs uppercase tracking-wide text-zinc-500">
+            <Bi it={terminal.label} />
+          </span>
+          <span className="text-lg font-semibold tabular-nums text-gold">{terminal.amount_display}</span>
+        </div>
+      )}
+      {esito.headline && (
+        <p className="mt-2 text-base font-serif font-bold leading-snug text-zinc-100">
+          <Bi it={floor ? esito.clarity_summary_it : esito.headline} as="span" />
+        </p>
+      )}
+    </section>
+  );
+};
 
 const Pages = ({ pages, page }) => {
   const text = page ? `p. ${page}` : pagesText(pages);
@@ -45,14 +134,33 @@ const Pages = ({ pages, page }) => {
 // --- §1 Esito operativo -----------------------------------------------------
 const EsitoOperativoCard = ({ esito }) => {
   if (!esito) return null;
-  const accent = ESITO_ACCENT[esito.level] || ESITO_ACCENT.ambra;
+  // Presentation-only conflict floor (owner decision, Fable finding #3): clamp
+  // the DISPLAYED tone/message only. esito.level itself is never mutated.
+  const floor = Boolean(esito.clarity_conflict_floor);
+  const displayLevel = floor ? 'ambra' : esito.level;
+  const accent = ESITO_ACCENT[displayLevel] || ESITO_ACCENT.ambra;
   return (
     <section data-testid="cv2-esito" className={`rounded-xl border p-4 sm:p-5 ${accent}`}>
-      <StatusChip tone={ESITO_TONE[esito.level] || 'ambra'} testId="cv2-esito-chip">
-        {esito.level === 'verde' ? 'Nessun elemento bloccante' : esito.level === 'rosso' ? 'Verifica tecnica' : 'Verifiche necessarie'}
+      <StatusChip tone={ESITO_TONE[displayLevel] || 'ambra'} testId="cv2-esito-chip">
+        {displayLevel === 'verde' ? 'Nessun elemento bloccante' : displayLevel === 'rosso' ? 'Verifica tecnica' : 'Verifiche necessarie'}
       </StatusChip>
-      <h2 className="mt-2 text-xl font-serif font-bold leading-snug text-zinc-100">{esito.headline}</h2>
-      {esito.sentence && <p className="mt-1.5 text-sm leading-6 text-zinc-300">{esito.sentence}</p>}
+      {floor ? (
+        <div data-testid="cv2-conflict-floor">
+          <h2 className="mt-2 text-xl font-serif font-bold leading-snug text-zinc-100">{esito.clarity_summary_it}</h2>
+          <EnUnder it={esito.clarity_summary_it} />
+        </div>
+      ) : (
+        <>
+          <h2 className="mt-2 text-xl font-serif font-bold leading-snug text-zinc-100">{esito.headline}</h2>
+          <EnUnder it={esito.headline} />
+        </>
+      )}
+      {esito.sentence && !floor && (
+        <p className="mt-1.5 text-sm leading-6 text-zinc-300">
+          {esito.sentence}
+          <EnUnder it={esito.sentence} />
+        </p>
+      )}
       {Array.isArray(esito.drivers) && esito.drivers.length > 0 && (
         <ul data-testid="cv2-esito-drivers" className="mt-3 space-y-1.5">
           {esito.drivers.map((d) => (
@@ -150,27 +258,27 @@ const NumeriPrincipali = ({ numeri, moneyFindings, confirmSlot }) => {
 
       {numeri.composizione_valore && (
         <div className="rounded-lg border border-zinc-800 bg-zinc-950/50 p-3" data-testid="cv2-value-composition">
-          <p className="text-xs uppercase tracking-wide text-zinc-500">{numeri.composizione_valore.title}</p>
+          <p className="text-xs uppercase tracking-wide text-zinc-500">{numeri.composizione_valore.title}<EnUnder it={numeri.composizione_valore.title} className="uppercase tracking-wide" /></p>
           {(numeri.composizione_valore.items || []).map((item, i) => (
             <div key={`${item.label}-${i}`} className="mt-1.5 text-sm">
               <div className="flex items-center justify-between gap-3">
                 <span className="text-zinc-300">{item.label}</span><span className="tabular-nums text-zinc-100">{item.amount_display}</span>
               </div>
               {item.evidence?.excerpt
-                ? <p className="mt-1 text-xs italic text-zinc-500">{item.evidence.excerpt}</p>
-                : item.evidence?.note && <p className="mt-1 text-xs text-zinc-500">{item.evidence.note}</p>}
+                ? <p className="mt-1 text-xs italic text-zinc-500">{item.evidence.excerpt}<EnUnder it={item.evidence.excerpt} /></p>
+                : item.evidence?.note && <p className="mt-1 text-xs text-zinc-500">{item.evidence.note}<EnUnder it={item.evidence.note} /></p>}
               <Pages page={item.evidence?.page} pages={item.pages} />
             </div>
           ))}
           <div className="mt-2 flex items-center justify-between border-t border-zinc-800 pt-2 text-sm font-medium">
-            <span className="text-zinc-200">Totale</span><span className="tabular-nums text-zinc-100">{numeri.composizione_valore.total_display}</span>
+            <span className="text-zinc-200">Totale<EnUnder it="Totale" /></span><span className="tabular-nums text-zinc-100">{numeri.composizione_valore.total_display}</span>
           </div>
         </div>
       )}
 
       {Array.isArray(numeri.costi_potenziali) && numeri.costi_potenziali.length > 0 && (
         <div className="space-y-2" data-testid="cv2-costi">
-          <p className="text-xs uppercase tracking-wide text-zinc-500">Costi potenzialmente a carico dell'acquirente</p>
+          <p className="text-xs uppercase tracking-wide text-zinc-500">Costi potenzialmente a carico dell'acquirente<EnUnder it="Costi potenzialmente a carico dell'acquirente" className="uppercase tracking-wide" /></p>
           {numeri.costi_potenziali.map((c, i) => (
             <div key={`${c.label}-${i}`} className="rounded-lg border border-zinc-800 bg-zinc-950/50 p-3">
               <div className="flex items-center justify-between gap-3">
@@ -178,7 +286,7 @@ const NumeriPrincipali = ({ numeri, moneyFindings, confirmSlot }) => {
                 <span className="text-sm tabular-nums text-zinc-300">{c.amount_display}</span>
               </div>
               {c.included_in_valuation && (
-                <p className="mt-1 text-xs text-zinc-500" data-testid="cv2-included-note">{c.nota}</p>
+                <p className="mt-1 text-xs text-zinc-500" data-testid="cv2-included-note">{c.nota}<EnUnder it={c.nota} /></p>
               )}
             </div>
           ))}
@@ -187,7 +295,7 @@ const NumeriPrincipali = ({ numeri, moneyFindings, confirmSlot }) => {
 
       {Array.isArray(numeri.scenari) && numeri.scenari.length > 0 && (
         <div className="rounded-lg border border-sky-500/20 bg-sky-500/5 p-3" data-testid="cv2-scenari">
-          <p className="text-xs uppercase tracking-wide text-sky-300">Scenari alternativi indicati dalla perizia</p>
+          <p className="text-xs uppercase tracking-wide text-sky-300">Scenari alternativi indicati dalla perizia<EnUnder it="Scenari alternativi indicati dalla perizia" className="uppercase tracking-wide" /></p>
           {numeri.scenari.map((s, i) => (
             <div key={i} className="mt-1.5 flex items-center justify-between gap-3 text-sm text-zinc-300">
               <span>{s.label}</span><span className="tabular-nums">{s.amount_display}</span>
@@ -199,14 +307,14 @@ const NumeriPrincipali = ({ numeri, moneyFindings, confirmSlot }) => {
       {((Array.isArray(moneyFindings) && moneyFindings.length > 0)
         || (Array.isArray(numeri.da_chiarire) && numeri.da_chiarire.length > 0)) && (
         <div className="space-y-2" data-testid="cv2-da-chiarire">
-          <p className="text-xs uppercase tracking-wide text-zinc-500">Importi da chiarire</p>
+          <p className="text-xs uppercase tracking-wide text-zinc-500">Importi da chiarire<EnUnder it="Importi da chiarire" className="uppercase tracking-wide" /></p>
           {(moneyFindings || []).map((f) => (
             <div key={f.finding_id} className="rounded-lg border border-zinc-800 bg-zinc-950/50 p-3">
               <div className="flex items-center justify-between gap-3">
                 <span className="text-sm text-zinc-200">{f.title}</span>
                 <span className="text-sm tabular-nums text-zinc-300">{f.amount_display}</span>
               </div>
-              {f.customer_summary && <p className="mt-1 text-xs text-zinc-500">{f.customer_summary}</p>}
+              {f.customer_summary && <p className="mt-1 text-xs text-zinc-500">{f.customer_summary}<EnUnder it={f.customer_summary} /></p>}
               <div className="mt-2">{confirmSlot(f)}</div>
             </div>
           ))}
@@ -216,7 +324,7 @@ const NumeriPrincipali = ({ numeri, moneyFindings, confirmSlot }) => {
                 <span className="text-sm text-zinc-200">{r.label}</span>
                 <span className="text-sm tabular-nums text-zinc-300">{r.amount_display}</span>
               </div>
-              {r.motivo && <p className="mt-1 text-xs text-zinc-500">{r.motivo}</p>}
+              {r.motivo && <p className="mt-1 text-xs text-zinc-500">{r.motivo}<EnUnder it={r.motivo} /></p>}
             </div>
           ))}
         </div>
@@ -225,10 +333,10 @@ const NumeriPrincipali = ({ numeri, moneyFindings, confirmSlot }) => {
       {numeri.auction && (
         <div className="rounded-lg border border-zinc-800 bg-zinc-950/50 p-3" data-testid="cv2-auction">
           <div className="flex items-center justify-between gap-3">
-            <span className="text-sm text-zinc-200">{numeri.auction.label || "Prezzo base d'asta"}</span>
+            <span className="text-sm text-zinc-200">{numeri.auction.label || "Prezzo base d'asta"}<EnUnder it={numeri.auction.label || "Prezzo base d'asta"} /></span>
             <span className="text-sm tabular-nums text-zinc-100">{numeri.auction.amount_display}</span>
           </div>
-          {numeri.auction.nota && <p className="mt-1 text-xs text-zinc-500">{numeri.auction.nota}</p>}
+          {numeri.auction.nota && <p className="mt-1 text-xs text-zinc-500">{numeri.auction.nota}<EnUnder it={numeri.auction.nota} /></p>}
         </div>
       )}
 
@@ -249,22 +357,22 @@ const OccupazioneSection = ({ occupazione, finding, confirmSlot }) => {
     <SectionShell icon={KeyRound} title="Stato di occupazione" testId="cv2-occupazione">
       <div className="space-y-2 rounded-lg border border-zinc-800 bg-zinc-950/70 p-4">
         <div>
-          <p className="text-xs uppercase tracking-wide text-zinc-500">Stato</p>
-          <p className="text-sm text-zinc-100">{occupazione.stato}</p>
+          <p className="text-xs uppercase tracking-wide text-zinc-500">Stato<EnUnder it="Stato" className="uppercase tracking-wide" /></p>
+          <p className="text-sm text-zinc-100">{occupazione.stato}<EnUnder it={occupazione.stato} /></p>
         </div>
-        {occupazione.dettaglio && <p className="text-sm leading-6 text-zinc-300">{occupazione.dettaglio}</p>}
+        {occupazione.dettaglio && <p className="text-sm leading-6 text-zinc-300">{occupazione.dettaglio}<EnUnder it={occupazione.dettaglio} /></p>}
         {occupazione.perche_conta && (
           <div>
-            <p className="text-xs uppercase tracking-wide text-zinc-500">Perché conta</p>
-            <p className="text-sm text-zinc-300">{occupazione.perche_conta}</p>
+            <p className="text-xs uppercase tracking-wide text-zinc-500">Perché conta<EnUnder it="Perché conta" className="uppercase tracking-wide" /></p>
+            <p className="text-sm text-zinc-300">{occupazione.perche_conta}<EnUnder it={occupazione.perche_conta} /></p>
           </div>
         )}
         {Array.isArray(occupazione.cosa_verificare) && occupazione.cosa_verificare.length > 0 && (
           <div>
-            <p className="text-xs uppercase tracking-wide text-zinc-500">Cosa verificare</p>
+            <p className="text-xs uppercase tracking-wide text-zinc-500">Cosa verificare<EnUnder it="Cosa verificare" className="uppercase tracking-wide" /></p>
             <ul className="mt-1 space-y-1">
               {occupazione.cosa_verificare.map((c, i) => (
-                <li key={i} className="text-sm text-zinc-300">• {c}</li>
+                <li key={i} className="text-sm text-zinc-300">• {c}<EnUnder it={c} /></li>
               ))}
             </ul>
           </div>
@@ -293,24 +401,82 @@ const CHECK_STATUS_TONE = {
   completato: 'verde',
 };
 
+// CRITICAL predicate (§3.3): a pure partition of the existing items array by
+// existing fields — CRITICAL is `blocking === true` OR `severity < 3` (the grave
+// band). No new severity is computed; nothing is dropped, only regrouped.
+const isCriticalCheck = (it) => Boolean(it && (it.blocking === true || (typeof it.severity === 'number' && it.severity < 3)));
+
+const VerificaItem = ({ it }) => (
+  <li data-finding={it.finding_id} className="rounded-lg border border-zinc-800 bg-zinc-950/70 p-3">
+    <div className="flex items-start justify-between gap-3">
+      <div className="min-w-0">
+        <p className="text-sm font-medium text-zinc-100">{it.title}</p>
+        <EnUnder it={it.title} />
+      </div>
+      <StatusChip tone={CHECK_STATUS_TONE[it.status] || 'ambra'}>
+        {it.status_label || CHECK_STATUS_LABEL[it.status] || 'Da verificare'}
+      </StatusChip>
+    </div>
+    {it.why && (
+      <p className="mt-1 text-xs text-zinc-400">
+        {it.why}
+        <EnUnder it={it.why} />
+      </p>
+    )}
+    <Pages page={it.page} />
+  </li>
+);
+
 const VerificheSection = ({ verifiche }) => {
+  const { clarity } = useClarity();
   if (!verifiche || !Array.isArray(verifiche.items) || !verifiche.items.length) return null;
+  // Flag-off: today's single flat list.
+  if (!clarity) {
+    return (
+      <SectionShell icon={ClipboardList} title="Cosa verificare prima di procedere" testId="cv2-verifiche">
+        <ul className="space-y-2">
+          {verifiche.items.map((it, i) => (
+            <li key={it.finding_id || i} data-finding={it.finding_id} className="rounded-lg border border-zinc-800 bg-zinc-950/70 p-3">
+              <div className="flex items-start justify-between gap-3">
+                <p className="text-sm font-medium text-zinc-100">{it.title}</p>
+                <StatusChip tone={CHECK_STATUS_TONE[it.status] || 'ambra'}>
+                  {it.status_label || CHECK_STATUS_LABEL[it.status] || 'Da verificare'}
+                </StatusChip>
+              </div>
+              {it.why && <p className="mt-1 text-xs text-zinc-400">{it.why}</p>}
+              <Pages page={it.page} />
+            </li>
+          ))}
+        </ul>
+      </SectionShell>
+    );
+  }
+  const critical = verifiche.items.filter(isCriticalCheck);
+  const secondary = verifiche.items.filter((it) => !isCriticalCheck(it));
   return (
     <SectionShell icon={ClipboardList} title="Cosa verificare prima di procedere" testId="cv2-verifiche">
-      <ul className="space-y-2">
-        {verifiche.items.map((it, i) => (
-          <li key={it.finding_id || i} data-finding={it.finding_id} className="rounded-lg border border-zinc-800 bg-zinc-950/70 p-3">
-            <div className="flex items-start justify-between gap-3">
-              <p className="text-sm font-medium text-zinc-100">{it.title}</p>
-              <StatusChip tone={CHECK_STATUS_TONE[it.status] || 'ambra'}>
-                {it.status_label || CHECK_STATUS_LABEL[it.status] || 'Da verificare'}
-              </StatusChip>
-            </div>
-            {it.why && <p className="mt-1 text-xs text-zinc-400">{it.why}</p>}
-            <Pages page={it.page} />
-          </li>
-        ))}
-      </ul>
+      {critical.length > 0 && (
+        <div className="space-y-2" data-testid="cv2-verifiche-critical">
+          <p className="text-xs font-semibold uppercase tracking-wide text-amber-300">
+            Verifiche essenziali prima di procedere
+            <EnUnder it="Verifiche essenziali prima di procedere" className="uppercase tracking-wide" />
+          </p>
+          <ul className="space-y-2">
+            {critical.map((it, i) => <VerificaItem key={it.finding_id || `c-${i}`} it={it} />)}
+          </ul>
+        </div>
+      )}
+      {secondary.length > 0 && (
+        <details className="rounded-lg border border-zinc-800 bg-zinc-950/50 p-3" data-testid="cv2-verifiche-secondary" open={critical.length === 0}>
+          <summary className="cursor-pointer select-none text-xs font-semibold uppercase tracking-wide text-zinc-400">
+            Altre verifiche ({secondary.length})
+            <EnUnder it="Altre verifiche" className="uppercase tracking-wide" />
+          </summary>
+          <ul className="mt-2 space-y-2">
+            {secondary.map((it, i) => <VerificaItem key={it.finding_id || `s-${i}`} it={it} />)}
+          </ul>
+        </details>
+      )}
     </SectionShell>
   );
 };
@@ -340,6 +506,7 @@ const conformityTone = (finding) => (
 );
 
 const ConformitaSection = ({ conformita, findingsById, confirmSlot }) => {
+  const { clarity } = useClarity();
   if (!conformita || !Array.isArray(conformita.groups) || !conformita.groups.length) return null;
   return (
     <SectionShell icon={ShieldCheck} title="Conformità e documenti tecnici" testId="cv2-conformita">
@@ -352,10 +519,20 @@ const ConformitaSection = ({ conformita, findingsById, confirmSlot }) => {
               return (
                 <div key={fid} className="rounded-lg border border-zinc-800 bg-zinc-950/70 p-3">
                   <div className="flex items-start justify-between gap-3">
-                    <p className="text-sm font-medium text-zinc-100">{f.title}</p>
-                    <StatusChip tone={conformityTone(f)}>{f.status_label}</StatusChip>
+                    <div className="min-w-0">
+                      <p className="text-sm font-medium text-zinc-100">{f.title}</p>
+                      <EnUnder it={f.title} />
+                    </div>
+                    {clarity
+                      ? <SixStateChip status={f.status} label={f.status_label} />
+                      : <StatusChip tone={conformityTone(f)}>{f.status_label}</StatusChip>}
                   </div>
-                  {f.customer_summary && <p className="mt-1 text-xs leading-5 text-zinc-400">{f.customer_summary}</p>}
+                  {f.customer_summary && (
+                    <p className="mt-1 text-xs leading-5 text-zinc-400">
+                      {f.customer_summary}
+                      <EnUnder it={f.customer_summary} />
+                    </p>
+                  )}
                   <div className="mt-1.5 flex flex-wrap gap-x-4 gap-y-1 text-xs text-zinc-500">
                     {f.amount_display && <span>Costo: {f.amount_display}</span>}
                     {f.timing && <span>Tempistica: {f.timing}</span>}
@@ -384,15 +561,15 @@ const ConformitaSection = ({ conformita, findingsById, confirmSlot }) => {
 // --- §7 Formalità -----------------------------------------------------------
 const FormalitaCard = ({ card, tone }) => (
   <div className="rounded-lg border border-zinc-800 bg-zinc-950/70 p-3">
-    <div className="flex items-center justify-between gap-3">
-      <p className="text-sm font-medium text-zinc-100">{card.type_label}</p>
+    <div className="flex items-start justify-between gap-3">
+      <p className="text-sm font-medium text-zinc-100">{card.type_label}<EnUnder it={card.type_label} /></p>
       {tone && <StatusChip tone={tone}>{tone === 'verde' ? (card.cancellation_state === 'already_cancelled' ? 'Già cancellata' : 'Da cancellare a cura della procedura') : 'Da verificare'}</StatusChip>}
     </div>
-    {card.statement && <p className="mt-1 text-xs text-zinc-300">{card.statement}</p>}
-    {card.note && <p className="mt-1 text-xs text-zinc-500">{card.note}</p>}
+    {card.statement && <p className="mt-1 text-xs text-zinc-300">{card.statement}<EnUnder it={card.statement} /></p>}
+    {card.note && <p className="mt-1 text-xs text-zinc-500">{card.note}<EnUnder it={card.note} /></p>}
     {card.amount_display && (
       <details className="mt-1.5">
-        <summary className="cursor-pointer text-xs text-zinc-500">Importo iscritto</summary>
+        <summary className="cursor-pointer text-xs text-zinc-500">Importo iscritto<EnUnder it="Importo iscritto" /></summary>
         <p className="mt-1 text-xs text-zinc-400">{card.amount_display}{card.amount_note ? ` — ${card.amount_note}` : ''}</p>
       </details>
     )}
@@ -420,9 +597,43 @@ const AltriSection = ({ altri }) => {
       <ul className="space-y-2">
         {altri.items.map((it, i) => (
           <li key={i} className="rounded-lg border border-zinc-800 bg-zinc-950/70 p-3">
-            <p className="text-sm font-medium text-zinc-100">{it.title}</p>
-            <p className="mt-1 text-xs text-zinc-400">{it.summary}</p>
+            <p className="text-sm font-medium text-zinc-100">{it.title}<EnUnder it={it.title} /></p>
+            <p className="mt-1 text-xs text-zinc-400">{it.summary}<EnUnder it={it.summary} /></p>
             <Pages pages={it.pages} />
+          </li>
+        ))}
+      </ul>
+    </SectionShell>
+  );
+};
+
+// --- §Incertezze e conflitti (IN CONFLITTO / INCERTO) -----------------------
+// Renders the server-projected conflict/incerto findings (P3). The frontend
+// classifies nothing: it reads the `status` token and maps it via SIX_STATE.
+const ConflittiSection = ({ conflitti, findingsById }) => {
+  const { clarity } = useClarity();
+  if (!clarity || !conflitti || !Array.isArray(conflitti.items) || !conflitti.items.length) return null;
+  const items = conflitti.items.map((fid) => findingsById[fid]).filter(Boolean);
+  if (!items.length) return null;
+  return (
+    <SectionShell icon={Scale} title="Incertezze e conflitti" testId="cv2-conflitti">
+      <ul className="space-y-2">
+        {items.map((f) => (
+          <li key={f.finding_id} data-finding={f.finding_id} data-status={f.status} className="rounded-lg border border-zinc-800 bg-zinc-950/70 p-3">
+            <div className="flex items-start justify-between gap-3">
+              <div className="min-w-0">
+                <p className="text-sm font-medium text-zinc-100">{f.title}</p>
+                <EnUnder it={f.title} />
+              </div>
+              <SixStateChip status={f.status} label={f.status_label} />
+            </div>
+            {f.customer_summary && (
+              <p className="mt-1 text-xs leading-5 text-zinc-400">
+                {f.customer_summary}
+                <EnUnder it={f.customer_summary} />
+              </p>
+            )}
+            <Pages page={f.page} pages={f.pages} />
           </li>
         ))}
       </ul>
@@ -441,15 +652,15 @@ const FontiDecisiveSection = ({ fonti }) => {
         {fonti.primary.map((s) => (
           <li key={s.source_id} className="rounded-lg border border-zinc-800 bg-zinc-950/70 p-3">
             <p className="text-sm font-medium text-zinc-100">
-              {s.page ? `p. ${s.page} — ` : ''}{s.title}
+              {s.page ? `p. ${s.page} — ` : ''}{s.title}<EnUnder it={s.title} />
             </p>
             {s.excerpt ? (
               <div className="mt-1.5 flex items-start gap-2">
                 <Quote className="mt-0.5 h-3 w-3 shrink-0 text-zinc-600" />
-                <p className="text-xs italic leading-5 text-zinc-400">{s.excerpt}</p>
+                <p className="text-xs italic leading-5 text-zinc-400">{s.excerpt}<EnUnder it={s.excerpt} /></p>
               </div>
             ) : (
-              <p className="mt-1 text-xs text-zinc-500">Estratto decisivo non disponibile</p>
+              <p className="mt-1 text-xs text-zinc-500">Estratto decisivo non disponibile<EnUnder it="Estratto decisivo non disponibile" /></p>
             )}
           </li>
         ))}
@@ -518,6 +729,7 @@ const StatoVerificheSection = ({ stato }) => {
 // --- Root -------------------------------------------------------------------
 const CustomerDecisionReport = ({
   report, onSubmitConfirmation, confirmingFinding = false, findingConfirmError = '',
+  translations = null,
 }) => {
   const model = report?.decision_model;
   const [openConfirmId, setOpenConfirmId] = useState(null);
@@ -576,19 +788,23 @@ const CustomerDecisionReport = ({
   const moneyFindings = (model.findings || []).filter((f) => f.confirm_class === 'money_role');
 
   return (
-    <div data-testid="cv2-decision-report" className="space-y-8">
-      <EsitoOperativoCard esito={model.esito} />
-      <AcquistoSection acquisto={sections.acquisto} />
-      <NumeriPrincipali numeri={sections.numeri} moneyFindings={moneyFindings} confirmSlot={confirmSlot} />
-      <OccupazioneSection occupazione={sections.occupazione} finding={occFinding} confirmSlot={confirmSlot} />
-      <VerificheSection verifiche={sections.verifiche} />
-      <ConformitaSection conformita={sections.conformita} findingsById={findingsById} confirmSlot={confirmSlot} />
-      <FormalitaSection formalita={sections.formalita} />
-      <AltriSection altri={sections.altri} />
-      <FontiDecisiveSection fonti={sections.fonti} />
-      <ConfermeSection conferme={sections.conferme} />
-      <StatoVerificheSection stato={sections.stato_verifiche} />
-    </div>
+    <ClarityProvider clarity={Boolean(model.clarity_enabled)} translations={translations}>
+      <div data-testid="cv2-decision-report" className="space-y-8">
+        <HeroSummary model={model} />
+        <EsitoOperativoCard esito={model.esito} />
+        <AcquistoSection acquisto={sections.acquisto} />
+        <NumeriPrincipali numeri={sections.numeri} moneyFindings={moneyFindings} confirmSlot={confirmSlot} />
+        <OccupazioneSection occupazione={sections.occupazione} finding={occFinding} confirmSlot={confirmSlot} />
+        <VerificheSection verifiche={sections.verifiche} />
+        <ConflittiSection conflitti={sections.conflitti} findingsById={findingsById} />
+        <ConformitaSection conformita={sections.conformita} findingsById={findingsById} confirmSlot={confirmSlot} />
+        <FormalitaSection formalita={sections.formalita} />
+        <AltriSection altri={sections.altri} />
+        <FontiDecisiveSection fonti={sections.fonti} />
+        <ConfermeSection conferme={sections.conferme} />
+        <StatoVerificheSection stato={sections.stato_verifiche} />
+      </div>
+    </ClarityProvider>
   );
 };
 
@@ -597,4 +813,5 @@ export {
   CustomerDecisionReport, EsitoOperativoCard, AcquistoSection, NumeriPrincipali,
   OccupazioneSection, VerificheSection, ConformitaSection, FormalitaSection,
   AltriSection, FontiDecisiveSection, ConfermeSection, StatoVerificheSection,
+  HeroSummary, ConflittiSection, SixStateChip, SIX_STATE, isCriticalCheck,
 };

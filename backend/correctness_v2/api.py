@@ -31,6 +31,7 @@ from . import (
     feature_flags,
     job_status,
     openai_client,
+    translation,
     user_confirmations,
     workspace,
 )
@@ -717,6 +718,73 @@ async def correctness_v2_confirmations(analysis_id: str, request: Request) -> Di
             }
             for c in confirmations
         ],
+    }
+
+
+@router.post("/{analysis_id}/correctness-v2/customer-view/translate")
+async def correctness_v2_translate(analysis_id: str, request: Request) -> Dict[str, Any]:
+    """Owner-scoped lazy English translation of an already-rendered report (§12).
+
+    Same auth + ownership gate as the report (``_resolve_customer_access``).
+    QUOTA-EXEMPT: never routes through credit/beta/quota accounting. Fail-soft:
+    any Gemini failure returns whatever resolved statically/from cache and the
+    Italian report is unaffected. Flag-gated: returns an empty set (today's
+    behaviour) when report-clarity is disabled.
+    """
+    user, _is_admin = await _resolve_customer_access(request, analysis_id)
+
+    empty = {
+        "available": False,
+        "language": translation.TARGET_LANGUAGE,
+        "translations": [],
+    }
+    # Flag OFF → no translate path, no Gemini. Byte-for-byte today.
+    if not feature_flags.report_clarity_enabled():
+        return {**empty, "reason_code": "REPORT_CLARITY_DISABLED"}
+
+    try:
+        body = await request.json()
+    except Exception:
+        body = None
+    job_id = str((body or {}).get("job_id") or "").strip() if isinstance(body, dict) else ""
+    if not job_id:
+        raise HTTPException(
+            status_code=400,
+            detail={"reason_code": "INVALID_BODY", "reason_human": "job_id mancante."},
+        )
+
+    status = artifacts.read_job_status(job_id)
+    if not isinstance(status, dict) or str(status.get("analysis_id")) != str(analysis_id):
+        raise HTTPException(status_code=404, detail="Job not found")
+    report = artifacts.read_json(job_id, artifacts.CUSTOMER_REPORT_FILE)
+    if not customer_view.is_customer_safe(report, status):
+        # Fail-soft: never break the Italian report for a translation request.
+        return {**empty, "reason_code": "REPORT_NOT_AVAILABLE"}
+
+    confirmations = await _confirmations_for(analysis_id, user)
+    sanitized = customer_view.sanitize_customer_report(report, status, confirmations)
+    sources = translation.collect_dynamic_strings(
+        sanitized.get("decision_model"), sanitized.get("partial_status")
+    )
+
+    cache = artifacts.read_translation_cache(job_id)
+    translations, updated_cache, stats = await translation.translate_texts(
+        sources, translator=translation.default_gemini_translator, cache=cache,
+    )
+    # Persist only when a NEW Gemini translation was produced (avoid write churn
+    # and keep identical (source, version) requests from re-calling Gemini).
+    if stats.get("gemini"):
+        try:
+            artifacts.save_translation_cache(job_id, updated_cache)
+        except Exception:  # pragma: no cover - a cache write hiccup is harmless
+            logger.exception("Failed to persist translation cache for %s", job_id)
+
+    return {
+        "available": True,
+        "language": translation.TARGET_LANGUAGE,
+        "glossary_prompt_version": translation.GLOSSARY_PROMPT_VERSION,
+        "translations": translations,
+        "stats": stats,
     }
 
 
