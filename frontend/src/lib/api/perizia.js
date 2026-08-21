@@ -127,6 +127,17 @@ export const submitCorrectnessV2FindingConfirmation = (
   );
 };
 
+// Report-clarity bilingual translation (owner-scoped, quota-exempt). Fetched
+// LAZILY after the Italian report renders — progressive enhancement only. The
+// Italian report is unaffected by any failure here.
+export const getCorrectnessV2Translation = (analysisId, jobId, requestConfig = {}) => {
+  return axios.post(
+    `${correctnessV2Base(analysisId)}/customer-view/translate`,
+    { job_id: jobId },
+    { withCredentials: true, ...requestConfig }
+  );
+};
+
 // Owner's own confirmations for an analysis (customer projection only).
 export const getCorrectnessV2Confirmations = (analysisId, requestConfig = {}) => {
   return axios.get(`${correctnessV2Base(analysisId)}/customer-view/confirmations`, {

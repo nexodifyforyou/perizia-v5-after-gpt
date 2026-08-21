@@ -1169,10 +1169,11 @@ async def _call_gemini_narrator_llm(
     model: str,
     prompt: str,
     timeout_seconds: float,
+    system_instruction: str = _GEMINI_NARRATOR_SYSTEM_PROMPT,
 ) -> str:
     endpoint = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
     payload = {
-        "systemInstruction": {"parts": [{"text": _GEMINI_NARRATOR_SYSTEM_PROMPT}]},
+        "systemInstruction": {"parts": [{"text": system_instruction or _GEMINI_NARRATOR_SYSTEM_PROMPT}]},
         "contents": [{"role": "user", "parts": [{"text": prompt}]}],
         "generationConfig": {
             "temperature": 0.2,

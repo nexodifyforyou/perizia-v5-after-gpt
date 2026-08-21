@@ -1281,9 +1281,28 @@ const V2CustomerReportFallback = ({ report }) => (
   </>
 );
 
+// Route to the decision renderer when the payload carries a populated
+// decision_model — for a finalized report (REPORT_READY, as today) and, under
+// report-clarity, for a PARTIAL_REPORT_AVAILABLE report whose sections the
+// backend has now populated. The frontend keys off payload shape, never an env
+// flag: when clarity is off the partial payload has no populated sections and
+// this falls back exactly as today. Interactive prompts (money confirmation /
+// lot selection) still render the informative fallback body, never a verdict.
+const shouldUseDecisionReport = (report) => {
+  const dm = report?.decision_model;
+  if (!dm) return false;
+  const status = report?.report_status;
+  if (status === 'REPORT_READY') return true;
+  if (status === 'PARTIAL_REPORT_AVAILABLE') {
+    const keys = Object.keys(dm.sections || {});
+    return keys.some((k) => k !== 'stato_verifiche');
+  }
+  return false;
+};
+
 const CustomerReportBody = ({
   report, onBackToLots, showBack, backLabel,
-  onSubmitConfirmation, confirmingFinding, findingConfirmError,
+  onSubmitConfirmation, confirmingFinding, findingConfirmError, translations,
 }) => (
   <article data-testid="cv2-customer-report" className="space-y-8 rounded-xl border border-zinc-800 bg-gradient-to-b from-zinc-900 to-zinc-950/70 p-4 sm:p-6">
     <header className="space-y-3">
@@ -1294,15 +1313,13 @@ const CustomerReportBody = ({
       </div>
     </header>
 
-    {report?.decision_model && report?.report_status === 'REPORT_READY' ? (
-      // The decision workflow is the surface for a finalized report only.
-      // Interactive states (money-confirmation) render the informative V2
-      // customer body, never a decision verdict.
+    {shouldUseDecisionReport(report) ? (
       <CustomerDecisionReport
         report={report}
         onSubmitConfirmation={onSubmitConfirmation}
         confirmingFinding={confirmingFinding}
         findingConfirmError={findingConfirmError}
+        translations={translations}
       />
     ) : (
       <V2CustomerReportFallback report={report} />
@@ -1329,7 +1346,7 @@ const CustomerReportView = ({ analysisId, state: externalState, backLabel }) => 
   const internalState = useCorrectnessV2CustomerView(analysisId, { enabled: !externalState });
   const state = externalState || internalState;
   const {
-    loading, error, payload, report, preparing,
+    loading, error, payload, report, preparing, translations,
     isLotSelection, lotUnavailable, selectedLotId, selectLot, backToLots,
     isMoneyConfirmation, submitMoneyConfirmation, confirmingMoney, moneyConfirmError,
     submitFindingConfirmation, confirmingFinding, findingConfirmError,
@@ -1484,6 +1501,7 @@ const CustomerReportView = ({ analysisId, state: externalState, backLabel }) => 
             onSubmitConfirmation={submitFindingConfirmation}
             confirmingFinding={confirmingFinding}
             findingConfirmError={findingConfirmError}
+            translations={translations}
           />
         </>
       )}
