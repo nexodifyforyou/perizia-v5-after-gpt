@@ -189,13 +189,32 @@ golden assertions, and forensic documentation.
 ## P1 — Experience and observability
 
 ### 6. Unified report summary and information architecture
-- **Status:** NOT STARTED
+- **Status:** COMPLETED — **DEPLOYED + ENABLED (owner-approved 2026-08-21)**
+  - Feature commit: `c848513dc77ac2d2e0743154a7e7ba37a40dd45e`
+  - Merge commit (final main): `1bf780007fa36beb0c0e2c7d3df2b810f6e6d3cb`
+  - Tags: `correctness-v2-report-clarity-ready` (dormant) → `1bf7800`;
+    `correctness-v2-report-clarity-bilingual-live` (enabled) → final main
+  - Deployed dormant then `CORRECTNESS_V2_REPORT_CLARITY_ENABLED=true` set in `backend/.env`;
+    backend PID 1399506, NRestarts=0, health 200 local+public, report_clarity=ON proven on live process,
+    canonical=ON/partial=ON/pdf_retention=OFF/concurrency=2.
+  - Fable verdict: **APPROVE** (1 audit + 1 revalidation + 1 red-team + 2 focused confirmations; 4 MAJOR
+    found+fixed). Model routing: Opus 5 (one impl pass) + Opus 4.8 (mechanical/#3/repairs); no Sol.
+  - Delivered: PARTIAL routed into the decision-oriented report (kills the "wall of Da verificare");
+    six distinct states; critical/secondary split; dedup by finding-id; one financial renderer; canonical
+    conflicts rendered; **presentation-only amber floor** when authoritative conflicts coexist with a green
+    esito (esito/severity/readiness byte-identical). **Italian-first bilingual**: English under Italian,
+    lazy-translated via the reused `narrator` Gemini client (translation-only, ownership-scoped cache,
+    quota-exempt, fail-soft to Italian). Flag default OFF (flag-OFF == today). English never feeds
+    semantics; Branch 1/2/3 core + PDF retention untouched.
+  - Live validation: dormant parity (eight-case 10, Branch-1+2 65, Branch-3 partial 48, all deltas zero);
+    ONE real Gemini smoke (fidelity: amounts/dates/negation/future-cancellation-tense preserved) + cache
+    reuse (2nd call 0 additional); semantic delta audit all zero (esito/readiness/CanonicalVerdict
+    unchanged flag ON vs OFF); 0 jobs/writes/regeneration/credit/quota.
 - **Branch:** `feature-correctness-v2-report-clarity`
-- **Dependency:** tasks 1, 3, 4
-- **Acceptance criteria:** immediate "what matters" summary; clear hierarchy; reduced
-  fragmentation; populated content never reads as empty; mobile-acceptable.
-- **Regression risk:** medium (frontend-wide).
-- **Deployment gate:** Fable review + owner approval + visual smoke.
+- **Regression risk:** medium (frontend-wide) — mitigated: flag-gated, re-derivation-free, English-can't-
+  feed-semantics, deterministic tests + real-provider smoke.
+- **Deployment gate:** Fable review (PASSED) + owner approval (PASSED) + live validation (PASSED);
+  pixel-level visual/mobile browser spot-check recommended to owner.
 
 ### 7. Structured in-product beta feedback
 - **Status:** NOT STARTED
