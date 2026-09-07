@@ -100,9 +100,28 @@ def _accounting(
     }
 
 
-def full_disclosure_accounting(gate_status: Any) -> Dict[str, Any]:
-    """Return the safe, empty blocking-code ledger for a clean disclosure."""
-    return _accounting(
+def full_disclosure_accounting(
+    gate_status: Any, coverage_status: Any = None
+) -> Dict[str, Any]:
+    """Safe, empty blocking-code ledger for a non-blocked disclosure.
+
+    The full report content is available (no hard block, no critical omission),
+    so ``disclosure_state`` stays FULL_REPORT_AVAILABLE. When the gate is a
+    WARNING driven by NON-critical coverage incompleteness, a structured
+    ``coverage_incomplete`` marker is added to the disclosure accounting.
+
+    NOTE (scope, per Fable focused review 2026-09-07): this marker is currently
+    ADMIN/telemetry-only — it lands in ``job_status.extra``/``payload_extra`` and
+    is not yet read by the customer payload or frontend. The customer is already
+    kept off a clean-green pass by pre-existing PASS_WITH_WARNINGS machinery
+    (``decision.level == "pronto_con_avvertenze"`` + report-clarity verification
+    items), not by this marker. Surfacing ``coverage_incomplete_reason`` into the
+    customer payload is an owner-gated follow-up (see risk register). This is a
+    non-hard signal (never a blocking code) and never grants or withholds
+    disclosure — it only annotates a report already shown with visible warnings
+    (READY_WITH_WARNINGS).
+    """
+    accounting = _accounting(
         gate_status=str(gate_status or ""),
         codes=[],
         eligible=[],
@@ -110,6 +129,13 @@ def full_disclosure_accounting(gate_status: Any) -> Dict[str, Any]:
         disclosure_state=FULL_REPORT_AVAILABLE,
         unresolved=[],
     )
+    if str(coverage_status or "") == "WARNING":
+        accounting["coverage_incomplete"] = True
+        accounting["coverage_incomplete_reason"] = (
+            "Copertura non critica incompleta: il report è disponibile con "
+            "verifiche aperte da controllare (nessuna omissione critica)."
+        )
+    return accounting
 
 
 def classify_partial_eligibility(

@@ -858,7 +858,10 @@ def _build_single_lot_contract(
     }
     if feature_flags.partial_lot_reports_enabled():
         payload_extra.update(
-            partial_report_mod.full_disclosure_accounting(gate["gate_status"])
+            partial_report_mod.full_disclosure_accounting(
+                gate["gate_status"],
+                gate["coverage_audit"].get("coverage_status"),
+            )
         )
     if extra:
         payload_extra.update(extra)
@@ -1476,7 +1479,8 @@ def _run_analyze_all(
         if feature_flags.partial_lot_reports_enabled():
             entry.update(
                 partial_report_mod.full_disclosure_accounting(
-                    lot_gate["gate_status"]
+                    lot_gate["gate_status"],
+                    lot_gate["coverage_audit"].get("coverage_status"),
                 )
             )
         per_lot_results.append(entry)
@@ -2435,7 +2439,10 @@ def resolve_money_confirmation(
             "money_confirmation_resolved": True,
             "money_confirmations": confirmations,
             **(
-                partial_report_mod.full_disclosure_accounting(gate["gate_status"])
+                partial_report_mod.full_disclosure_accounting(
+                    gate["gate_status"],
+                    gate["coverage_audit"].get("coverage_status"),
+                )
                 if feature_flags.partial_lot_reports_enabled() else {}
             ),
         },

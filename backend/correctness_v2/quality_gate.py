@@ -132,11 +132,25 @@ def run_quality_gate(
         )
         saved["customer_report"] = artifacts.save_customer_report(job_id, report)
 
-    if quality.get("overall_quality_status") == "FAIL" or audit.get("coverage_status") == GATE_FAIL:
+    # GATE_FAIL is driven by STRUCTURED safety facts, never an aggregate ratio
+    # alone. A non-critical coverage degradation now surfaces as coverage_status
+    # WARNING (see coverage_audit._state) -> GATE_WARNING. coverage_status FAIL
+    # is reserved for a genuine critical coverage failure and must therefore
+    # always be explainable. If a coverage FAIL ever arrives with no structured
+    # reason (empty coverage_failure_reasons, no critical omissions, no blocking
+    # issue) that is an INVARIANT VIOLATION: we fail CLOSED (keep GATE_FAIL, so
+    # partial_report stays REPORT_BLOCKED) and emit a safe diagnostic marker so
+    # the over-block is observable rather than mysterious — never auto-passed.
+    coverage_status = audit.get("coverage_status")
+    if coverage_status == GATE_FAIL and not _coverage_fail_is_explained(audit, quality):
+        audit["coverage_status_diagnostic"] = "COVERAGE_FAIL_WITHOUT_STRUCTURED_REASON"
+        _log_coverage_invariant_violation(job_id, analysis_id, audit)
+
+    if quality.get("overall_quality_status") == "FAIL" or coverage_status == GATE_FAIL:
         gate_status = GATE_FAIL
-    elif quality.get("overall_quality_status") == "PASS_WITH_WARNINGS" or audit.get(
-        "coverage_status"
-    ) == GATE_WARNING:
+    elif quality.get("overall_quality_status") == "PASS_WITH_WARNINGS" or (
+        coverage_status == GATE_WARNING
+    ):
         gate_status = GATE_WARNING
     else:
         gate_status = GATE_PASS
@@ -149,6 +163,43 @@ def run_quality_gate(
         "scorecard": scorecard,
         "customer_report": report,
     }
+
+
+def _coverage_fail_is_explained(
+    audit: Dict[str, Any], quality: Dict[str, Any]
+) -> bool:
+    """True when a FAIL coverage_status carries a structured critical reason.
+
+    A coverage FAIL is legitimate only if it is accompanied by a structured
+    critical omission, a producer-recorded coverage-failure reason, or a
+    blocking issue in the quality report. Anything else is an invariant
+    violation (an aggregate ratio masquerading as a hard block).
+    """
+    if audit.get("coverage_failure_reasons"):
+        return True
+    if audit.get("critical_omissions"):
+        return True
+    if quality.get("blocking_issues"):
+        return True
+    return False
+
+
+def _log_coverage_invariant_violation(
+    job_id: str, analysis_id: str, audit: Dict[str, Any]
+) -> None:
+    """Emit a safe, non-fatal diagnostic (no appraisal prose / values / pages)."""
+    try:
+        import logging
+
+        logging.getLogger("correctness_v2.quality_gate").error(
+            "COVERAGE_FAIL_WITHOUT_STRUCTURED_REASON job=%s analysis=%s "
+            "critical_omissions=%s coverage_failure_reasons=%s",
+            job_id, analysis_id,
+            len(audit.get("critical_omissions") or []),
+            len(audit.get("coverage_failure_reasons") or []),
+        )
+    except Exception:  # noqa: BLE001 — diagnostics must never break the gate
+        pass
 
 
 def _augment_manual_review(

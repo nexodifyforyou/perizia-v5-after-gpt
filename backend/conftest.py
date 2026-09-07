@@ -39,6 +39,10 @@ TEST_FEATURE_FLAG_DEFAULTS = {
     "CORRECTNESS_V2_CANONICAL_VERDICT_ENABLED": "true",
     "CORRECTNESS_V2_PARTIAL_LOT_REPORTS_ENABLED": "false",
     "CORRECTNESS_V2_PDF_RETENTION_ENABLED": "false",
+    # Pin report-clarity OFF for the suite default so a production backend/.env
+    # value (enabled in prod) can never leak in via load_dotenv and change
+    # decision_model output; report-clarity tests opt in explicitly.
+    "CORRECTNESS_V2_REPORT_CLARITY_ENABLED": "false",
 }
 
 
