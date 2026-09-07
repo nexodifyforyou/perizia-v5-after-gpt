@@ -1119,6 +1119,10 @@ def build_coverage_audit(
             audit["coverage_status"] = STATUS_FAIL
         elif STATUS_WARNING in lot_states and audit["coverage_status"] == STATUS_PASS:
             audit["coverage_status"] = STATUS_WARNING
+    # Structural explainability: a FAIL coverage_status must always carry a
+    # concrete critical reason (never an aggregate ratio alone). This is the
+    # producer-side guarantee behind the REPORT_BLOCKED invariant.
+    audit["coverage_failure_reasons"] = _coverage_failure_reasons(audit)
     return audit, page_audit
 
 
@@ -1159,11 +1163,65 @@ def _ledger_fact_present(fact: Dict[str, Any], pool: ReportPool) -> bool:
 
 
 def _state(ratio: float, *, critical_missing: bool = False) -> str:
-    if critical_missing or ratio < 0.60:
+    """Completeness state for a covered-ratio dimension.
+
+    STATUS_FAIL is reserved for a GENUINE critical coverage failure — a critical
+    fact/omission actually missing (``critical_missing``). A merely depressed
+    covered-ratio caused by NON-critical/subordinate/detail incompleteness
+    (detail money rows whose conclusive value is already present, intermediate
+    or component amounts) is an INCOMPLETE signal (STATUS_WARNING), never a hard
+    FAIL. This keeps an aggregate ratio alone from producing an unexplained hard
+    block downstream: coverage FAIL always carries a structured critical reason.
+    """
+    if critical_missing:
         return STATUS_FAIL
     if ratio < 0.85:
         return STATUS_WARNING
     return STATUS_PASS
+
+
+# Structured reason codes explaining WHY coverage_status became FAIL. An
+# aggregate ratio/status may never create an unexplained hard block: whenever
+# coverage_status == STATUS_FAIL exactly one of these structured reasons is
+# recorded on the audit (asserted by the coverage invariant tests).
+COVERAGE_FAIL_CRITICAL_OMISSION = "CRITICAL_OMISSION"
+COVERAGE_FAIL_CRITICAL_COVERAGE = "CRITICAL_COVERAGE_INCOMPLETE"
+
+_LOT_STATE_KEYS = (
+    "extraction_coverage_state", "report_completeness_state",
+    "evidence_completeness_state", "user_visible_completeness_state",
+)
+
+
+def _coverage_failure_reasons(audit: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """Explain a FAIL coverage_status with structured, page-free reasons.
+
+    Returns [] when coverage_status is not FAIL. When it is FAIL the list is
+    guaranteed non-empty (invariant): either a critical omission exists, or a
+    lot-coverage dimension failed on a genuinely-missing critical fact.
+    """
+    reasons: List[Dict[str, Any]] = []
+    if audit.get("coverage_status") != STATUS_FAIL:
+        return reasons
+    critical = audit.get("critical_omissions") or []
+    if critical:
+        reasons.append({
+            "code": COVERAGE_FAIL_CRITICAL_OMISSION,
+            "count": len(critical),
+            "detail": "Omissione critica di un fatto materiale rilevato nel documento.",
+        })
+    lot_cov = audit.get("lot_coverage") or {}
+    for key in _LOT_STATE_KEYS:
+        if lot_cov.get(key) == STATUS_FAIL:
+            reasons.append({
+                "code": COVERAGE_FAIL_CRITICAL_COVERAGE,
+                "dimension": key,
+                "detail": (
+                    "Un fatto critico atteso dal documento non risulta presente: "
+                    "copertura critica incompleta."
+                ),
+            })
+    return reasons
 
 
 def _full_document_lot_metrics(
